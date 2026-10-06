@@ -7,6 +7,23 @@ This repo starts from CopilotKit's official
 [`claude-sdk-typescript` starter](https://github.com/CopilotKit/CopilotKit/tree/main/examples/integrations/claude-sdk-typescript)
 (MIT, see `LICENSE`), with the Slack/Teams channel host and showcase Docker files removed.
 
+## Workspace layout
+
+The UI is an IDE-style workspace, heading toward a personal knowledge container:
+
+- **Left:** an icon rail (Files, Skills, Uploads, Artifacts, Chats) and its panel. Drop files
+  onto the panel to upload them.
+- **Middle:** tabs that preview or edit the open file (Markdown, CSV, images, plain text), plus
+  the shared todo board.
+- **Right:** the Claude chat. Claude gets the open file and your selection as context, and
+  frontend tools (`listWorkspaceFiles`, `readWorkspaceFile`, `writeWorkspaceFile`,
+  `openWorkspaceFile`, `openTaskBoard`) to work with files. Files it writes are badged
+  "Written by Claude".
+
+Panes resize by dragging and collapse from the title bar; below 1024px one pane shows at a
+time. Files live in the browser (localStorage) for now, in `src/components/workspace/store.tsx`,
+until the backend design decides where they belong.
+
 ---
 
 ## About the starter
@@ -112,10 +129,12 @@ To capture a new screen, add a step to `e2e/preview.spec.ts` that calls `shot(pa
 ```
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                       # Main page (chat + todos canvas + threads drawer)
+│   │   ├── page.tsx                       # Main page: the three-pane workspace
 │   │   ├── layout.tsx                     # CopilotKit v2 provider + A2UI catalog
 │   │   └── api/copilotkit/[[...slug]]/     # CopilotKit runtime route (HttpAgent → :8000)
-│   ├── components/                        # Canvas, generative UI, chat, UI primitives
+│   ├── components/
+│   │   ├── workspace/                     # Sidebar, editor, chat pane, file store, agent tools
+│   │   └── …                              # Todo canvas, generative UI, UI primitives
 │   └── hooks/                             # Example suggestions + generative-UI examples
 ├── e2e/                                   # Playwright UI preview + mock agent for CI
 └── agent/                                 # TypeScript Claude agent (AG-UI on port 8000)

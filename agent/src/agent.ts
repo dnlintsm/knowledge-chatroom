@@ -32,8 +32,12 @@ const SYSTEM_PROMPT = [
   "- Flights: call search_flights to show flight cards.",
   "- Dashboards: call generate_a2ui to build a rich dashboard UI; it renders itself.",
   "- Charts: call query_data first, then render with the chart component.",
-  "- Todos: the todo board is shared state under `todos`; call ag_ui_update_state",
-  "  with the COMPLETE list to add or change todos.",
+  "- Todos: the todo board is shared state under `todos`; call openTaskBoard, then",
+  "  ag_ui_update_state with the COMPLETE list to add or change todos.",
+  "- Workspace: the user works on files beside the chat. The open file and their",
+  "  selection arrive as context. Use listWorkspaceFiles / readWorkspaceFile to look",
+  "  around and writeWorkspaceFile (full content) to create or edit files; new",
+  "  generated documents go under artifacts/. Say what you changed in one line.",
 ].join("\n");
 
 // The Claude Agent SDK exposes custom tools through an in-process MCP server

@@ -18,39 +18,70 @@ async function openHome(page: Page) {
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible();
 }
 
-test("chat and app walkthrough", async ({ page }) => {
-  await openHome(page);
-  await shot(page, "01-chat-welcome");
+// Long timeouts leave room for a real Claude reply when ANTHROPIC_API_KEY is set.
+const reply = { timeout: 90_000 };
 
-  await page.getByTestId("copilot-chat-textarea").fill("Hello! What can you do?");
-  await shot(page, "02-chat-typing");
+async function send(page: Page, text: string) {
+  await page.getByTestId("copilot-chat-textarea").fill(text);
   await page.getByTestId("copilot-send-button").click();
+  await expect(page.getByText(text)).toBeVisible();
+}
 
-  await expect(page.getByText("Hello! What can you do?")).toBeVisible();
-  // The suggestion chips hide while a run streams and come back once it ends,
-  // so they mark the reply as complete. Long timeouts leave room for a real
-  // Claude reply when ANTHROPIC_API_KEY is set.
-  const reply = { timeout: 90_000 };
+test("workspace walkthrough", async ({ page }) => {
+  await openHome(page);
+  await expect(page.getByTestId("file-preview")).toContainText("Welcome to Knowledge Chatroom");
+  await shot(page, "01-workspace");
+
+  // Selecting text in the preview shows up as chat context.
+  await page.getByTestId("file-preview").getByText("This is your personal knowledge container.").selectText();
+  await page.getByTestId("file-preview").dispatchEvent("mouseup");
+  await expect(page.getByTestId("chat-context")).toContainText("selected chars");
+
+  await send(page, "Summarize this file and save it under artifacts/");
+  // The suggestion chips hide while a run streams and come back once it ends.
   await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
-  await shot(page, "03-chat-reply");
+  await shot(page, "02-claude-writes-artifact");
 
-  await page.getByRole("button", { name: "App", exact: true }).click();
+  await page.getByRole("treeitem", { name: /reading-list\.md/ }).click();
+  await expect(page.getByTestId("file-preview").locator("table")).toBeVisible();
+  await shot(page, "03-markdown-preview");
+
+  await page.getByRole("button", { name: "edit", exact: true }).click();
+  await expect(page.getByTestId("file-editor")).toBeVisible();
+  await shot(page, "04-edit-mode");
+
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  await page.getByRole("treeitem", { name: /summarize/ }).click();
+  await shot(page, "05-skills");
+
+  await page.getByRole("button", { name: "Task board" }).click();
   await expect(page.getByRole("button", { name: "Add a task" })).toBeVisible();
-  await shot(page, "04-app-mode");
-
   await page.getByRole("button", { name: "Add a task" }).click();
-  await shot(page, "05-app-add-task");
+  await shot(page, "06-task-board");
+
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await shot(page, "07-chats-list");
+
+  await page.getByRole("button", { name: "Hide chat" }).click();
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await shot(page, "08-focus-mode");
 });
 
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
-  await shot(page, "06-dark-mode");
+  await shot(page, "09-dark-mode");
 });
 
 test("mobile layout", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await openHome(page);
-  await shot(page, "07-mobile");
+  await page.goto("/");
+  await expect(page.getByTestId("file-preview")).toBeVisible();
+  await shot(page, "10-mobile-editor");
+  await page.getByRole("button", { name: "Files" }).last().click();
+  await shot(page, "11-mobile-files");
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await shot(page, "12-mobile-chat");
 });
