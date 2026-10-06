@@ -5,6 +5,7 @@ import { Bot, Eye, ListTodo, Pencil, X } from "lucide-react";
 import { Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
+import { parseCsv } from "./csv";
 import { FileIcon } from "./file-icon";
 import { useWorkspace } from "./store";
 import { extension, fileName, isMarkdown, isTextFile, TASKS_TAB, type WorkspaceFile } from "./types";
@@ -204,7 +205,7 @@ function Markdown({ text }: { text: string }) {
 }
 
 function CsvTable({ text }: { text: string }) {
-  const rows = text.trim().split(/\r?\n/).map((line) => line.split(","));
+  const rows = parseCsv(text);
   const [head, ...body] = rows;
   return (
     <table className="w-full border-collapse text-sm">
@@ -221,7 +222,7 @@ function CsvTable({ text }: { text: string }) {
         {body.map((row, r) => (
           <tr key={r}>
             {row.map((cell, i) => (
-              <td key={i} className="border-b border-[var(--border)] px-3 py-2">
+              <td key={i} className="whitespace-pre-line border-b border-[var(--border)] px-3 py-2">
                 {cell}
               </td>
             ))}

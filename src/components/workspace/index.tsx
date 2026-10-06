@@ -27,7 +27,7 @@ type MobilePane = "files" | "editor" | "chat";
  */
 export function Workspace() {
   useWorkspaceAgent();
-  const { active } = useWorkspace();
+  const { openCount } = useWorkspace();
   const [view, setView] = useState<SidebarView>("files");
   const [layout, setLayout] = useState(DEFAULTS);
   const [mobilePane, setMobilePane] = useState<MobilePane>("editor");
@@ -45,15 +45,10 @@ export function Workspace() {
     } catch {}
   }, [layout]);
 
-  // On phones, opening a file from the list should show it.
-  const firstActive = useRef(true);
+  // On phones, opening a file (even the one already open) should show it.
   useEffect(() => {
-    if (firstActive.current) {
-      firstActive.current = false;
-      return;
-    }
-    if (active) setMobilePane("editor");
-  }, [active]);
+    if (openCount > 0) setMobilePane("editor");
+  }, [openCount]);
 
   const selectView = (next: SidebarView) => {
     setLayout((l) => ({ ...l, sideOpen: !(l.sideOpen && view === next) }));

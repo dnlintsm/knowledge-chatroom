@@ -41,6 +41,8 @@ interface WorkspaceValue {
   active: TabId | null;
   activeFile: WorkspaceFile | null;
   selection: string;
+  /** Bumps on every open(), even of the already-active tab. */
+  openCount: number;
   getFile: (path: string) => WorkspaceFile | undefined;
   open: (tab: TabId) => void;
   close: (tab: TabId) => void;
@@ -67,6 +69,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     active: DEFAULT_OPEN,
   });
   const [selection, setSelection] = useState("");
+  const [openCount, setOpenCount] = useState(0);
   const loaded = useRef(false);
 
   // Restore after mount so server and client render the same seed first.
@@ -94,8 +97,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.files],
   );
 
+  // A selection belongs to the file it was made in; drop it whenever the active
+  // tab changes (open, close, or delete), so it never pairs with another file.
+  useEffect(() => setSelection(""), [state.active]);
+
   const open = useCallback((tab: TabId) => {
-    setSelection("");
+    setOpenCount((n) => n + 1);
     setState((s) => ({
       ...s,
       tabs: s.tabs.includes(tab) ? s.tabs : [...s.tabs, tab],
@@ -155,6 +162,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       ...state,
       activeFile,
       selection,
+      openCount,
       getFile,
       open,
       close,
@@ -162,7 +170,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       remove,
       setSelection,
     };
-  }, [state, selection, getFile, open, close, write, remove]);
+  }, [state, selection, openCount, getFile, open, close, write, remove]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

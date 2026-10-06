@@ -68,6 +68,19 @@ test("workspace walkthrough", async ({ page }) => {
   await shot(page, "08-focus-mode");
 });
 
+test("selection is dropped when its file closes", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("treeitem", { name: /reading-list\.md/ }).click();
+  const preview = page.getByTestId("file-preview");
+  await preview.getByRole("heading", { name: "Reading list" }).selectText();
+  await preview.dispatchEvent("mouseup");
+  const context = page.getByTestId("chat-context");
+  await expect(context).toContainText("selected chars");
+  await page.getByRole("tab", { name: /reading-list\.md/ }).getByRole("button", { name: "Close tab" }).click();
+  await expect(preview).toContainText("Welcome to Knowledge Chatroom");
+  await expect(context).not.toContainText("selected chars");
+});
+
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
@@ -81,6 +94,9 @@ test("mobile layout", async ({ page }) => {
   await shot(page, "10-mobile-editor");
   await page.getByRole("button", { name: "Files" }).last().click();
   await shot(page, "11-mobile-files");
+  // Tapping the file that is already open still switches to the editor.
+  await page.getByRole("treeitem", { name: /welcome\.md/ }).click();
+  await expect(page.getByTestId("file-preview")).toBeVisible();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await shot(page, "12-mobile-chat");
