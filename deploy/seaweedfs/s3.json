@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "knowledge",
+      "credentials": [
+        { "accessKey": "knowledge", "secretKey": "knowledge-secret" }
+      ],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

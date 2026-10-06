@@ -86,6 +86,30 @@ agent updates through the adapter's built-in `ag_ui_update_state` tool.
 - `npm run typecheck` — type-check the frontend and the agent
 - `npm run test:preview` — capture UI preview screenshots and videos with Playwright (see below)
 
+## File storage
+
+Workspace files can live in Postgres + an S3-compatible object store instead of
+the browser (plan and next steps: issue #4). It is optional; without
+`DATABASE_URL` the app runs as before.
+
+```bash
+docker compose up -d   # Postgres + SeaweedFS (self-hosted S3)
+# copy the "Workspace file storage" values from .env.example into .env
+npm run dev
+```
+
+- **Postgres** holds the file tree, every version of every file, and who wrote it
+  (`agent/src/storage/migrations`). Migrations run when the agent starts.
+- **Object store** holds the bytes, keyed by their sha256, so identical content is
+  stored once and old versions stay readable. Any S3-compatible store works:
+  SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
+- **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
+  `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
+  (request body = bytes) and deletes one, and `?versions` returns its history.
+  There is no login yet, so keep the agent port private.
+- **Tests**: `cd agent && npm test` with `TEST_DATABASE_URL` and the `S3_*` vars set
+  (see `agent/src/storage/storage.test.ts`); CI runs them on every PR that touches `agent/`.
+
 ## UI previews on pull requests
 
 Every PR runs `.github/workflows/ui-preview.yml`: it builds the app, walks the key screens with

@@ -1,0 +1,41 @@
+# Storage for the workspace: Postgres (metadata, versions, later search via
+# pgvector) and SeaweedFS as a self-hosted S3-compatible object store.
+#
+#   docker compose up -d
+#
+# then set the DATABASE_URL / S3_* values from .env.example and run `npm run dev`.
+# To use managed services instead (RDS/Neon, AWS S3, R2, B2), skip this file and
+# point the same env vars at them.
+#
+# The S3 credentials below are local development defaults; change them in
+# deploy/seaweedfs/s3.json and .env before exposing anything.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: knowledge
+      POSTGRES_PASSWORD: knowledge
+      POSTGRES_DB: knowledge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowledge -d knowledge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  s3:
+    image: chrislusf/seaweedfs:latest
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0
+    ports:
+      - "8333:8333"
+    volumes:
+      - s3-data:/data
+      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+volumes:
+  postgres-data:
+  s3-data:
