@@ -84,6 +84,28 @@ agent updates through the adapter's built-in `ag_ui_update_state` tool.
 - `npm start` — start the production server
 - `npm run install:agent` — (re)install the agent's dependencies
 - `npm run typecheck` — type-check the frontend and the agent
+- `npm run test:preview` — capture UI preview screenshots and videos with Playwright (see below)
+
+## UI previews on pull requests
+
+Every PR runs `.github/workflows/ui-preview.yml`: it builds the app, walks the key screens with
+Playwright (`e2e/preview.spec.ts`), and posts a sticky PR comment with a walkthrough GIF and
+screenshots, so reviewers can see the UI without running it locally. Full-size `.webm` videos
+and the Playwright HTML report are attached to the workflow run as an artifact. Comment images
+live on the `ui-previews` branch and are removed when the PR closes.
+
+The preview doesn't need an Anthropic key: without the `ANTHROPIC_API_KEY` repository secret, a
+canned AG-UI server (`e2e/mock-agent.mjs`) stands in for the agent. Add the secret to preview
+against real Claude instead.
+
+To run it locally (first time: `npx playwright install chromium`):
+
+```bash
+npm run test:preview          # reuses `npm run dev` if it's already running, else starts the UI + mock agent
+open preview/screenshots      # screenshots; videos are under test-results/
+```
+
+To capture a new screen, add a step to `e2e/preview.spec.ts` that calls `shot(page, "NN-name")`.
 
 ## Project structure
 
@@ -95,6 +117,7 @@ agent updates through the adapter's built-in `ag_ui_update_state` tool.
 │   │   └── api/copilotkit/[[...slug]]/     # CopilotKit runtime route (HttpAgent → :8000)
 │   ├── components/                        # Canvas, generative UI, chat, UI primitives
 │   └── hooks/                             # Example suggestions + generative-UI examples
+├── e2e/                                   # Playwright UI preview + mock agent for CI
 └── agent/                                 # TypeScript Claude agent (AG-UI on port 8000)
     ├── package.json                       # Agent dependencies
     ├── src/
