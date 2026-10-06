@@ -3,6 +3,8 @@
  *
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `GET /health` reports status. Runs on port 8000.
+ * When DATABASE_URL is set it also serves the workspace file API under
+ * `/files` (see src/storage/http.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -15,17 +17,42 @@ import type { RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 
 import { adapter } from "./agent";
+import { initStorage, type Storage } from "./storage";
+import { storageConfigFromEnv } from "./storage/config";
+import { createFilesHandler } from "./storage/http";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
+// Storage is optional and starts in the background; until it is ready (or if
+// it fails) /files answers 503 and chat keeps working.
+const storageConfig = storageConfigFromEnv();
+let storage: Storage | null = null;
+initStorage(storageConfig)
+  .then((ready) => {
+    storage = ready;
+    if (ready) console.log("[storage] ready");
+  })
+  .catch((err) => {
+    console.error("[storage] failed to start; /files is unavailable:", err);
+  });
+const handleFiles = createFilesHandler(
+  () => storage?.files ?? null,
+  storageConfig?.maxUploadBytes ?? 0,
+);
+
 const server = http.createServer(async (req, res) => {
-  const pathname = new URL(req.url ?? "/", `http://${req.headers.host}`)
-    .pathname;
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  const pathname = url.pathname;
 
   if (req.method === "GET" && pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  if (pathname === "/files" || pathname.startsWith("/files/")) {
+    await handleFiles(req, res, url);
     return;
   }
 
