@@ -1,0 +1,191 @@
+# Builds the app on every PR, walks the key screens with Playwright, and posts
+# screenshots + a walkthrough GIF in a sticky PR comment, so reviewers can see
+# the UI without running `npm run dev`. Full-resolution videos and the
+# Playwright report are attached to the run as an artifact.
+#
+# Images are stored on the `ui-previews` branch (pr-<number>/<sha>/) so the
+# comment can show them inline; a PR's folder is removed when it closes.
+name: UI preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write # push images to the ui-previews branch
+  pull-requests: write # sticky preview comment
+
+concurrency:
+  group: ui-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PREVIEW_BRANCH: ui-previews
+  COMMENT_MARKER: "<!-- ui-preview -->"
+
+jobs:
+  preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+      COPILOTKIT_TELEMETRY_DISABLED: true
+      # Optional: with this secret the preview talks to real Claude; without
+      # it, e2e/mock-agent.mjs answers with a canned reply.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Forks get a read-only token and no secrets, so they only get the artifact.
+      CAN_PUBLISH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            agent/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci # postinstall also installs agent/
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build app
+        run: npm run build
+
+      - name: Capture UI preview
+        id: playwright
+        run: npx playwright test
+
+      - name: Make walkthrough GIF
+        if: always()
+        continue-on-error: true
+        run: |
+          command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          scripts/preview-gif.sh preview/walkthrough.gif
+
+      - name: Upload preview artifact
+        id: artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-preview-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            preview/
+            test-results/
+            playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Publish images to ${{ env.PREVIEW_BRANCH }}
+        id: publish
+        if: always() && env.CAN_PUBLISH == 'true' && hashFiles('preview/**') != ''
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          src="$PWD/preview"
+          dir="pr-$PR/$SHA"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          work=$(mktemp -d)
+          cd "$work"
+          git init -q
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          # Other PRs push to the same branch, so retry on a lost race.
+          for attempt in 1 2 3 4 5; do
+            if git fetch -q --depth 1 origin "$PREVIEW_BRANCH"; then
+              git checkout -q -B "$PREVIEW_BRANCH" FETCH_HEAD
+            else
+              git checkout -q --orphan "$PREVIEW_BRANCH"
+              git rm -rfq . 2>/dev/null || true
+              printf '# UI previews\n\nScreenshots published by .github/workflows/ui-preview.yml. Safe to delete.\n' > README.md
+            fi
+            rm -rf "pr-$PR" # keep only the latest commit's images per PR
+            mkdir -p "$dir"
+            cp -r "$src"/. "$dir"/
+            git add -A
+            git commit -qm "Preview for PR #$PR at ${SHA:0:7}" || true
+            if git push -q origin "$PREVIEW_BRANCH"; then break; fi
+            sleep $((attempt * 2))
+          done
+          echo "base=https://raw.githubusercontent.com/${{ github.repository }}/$PREVIEW_BRANCH/$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Update PR comment
+        if: always() && env.CAN_PUBLISH == 'true'
+        uses: actions/github-script@v7
+        env:
+          IMAGE_BASE: ${{ steps.publish.outputs.base }}
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+          TEST_OUTCOME: ${{ steps.playwright.outcome }}
+        with:
+          script: |
+            const fs = require("fs");
+            const { IMAGE_BASE: base, ARTIFACT_URL: artifactUrl, TEST_OUTCOME: outcome, COMMENT_MARKER: marker } = process.env;
+            const pr = context.payload.pull_request;
+            const sha = pr.head.sha.slice(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const shots = fs.existsSync("preview/screenshots")
+              ? fs.readdirSync("preview/screenshots").filter((f) => f.endsWith(".png")).sort()
+              : [];
+            const title = (f) => f.replace(/^\d+-/, "").replace(/\.png$/, "").replace(/-/g, " ");
+
+            const lines = [marker, `## UI preview for ${sha}`, ""];
+            if (outcome !== "success") {
+              lines.push(`> [!WARNING]`, `> The Playwright walkthrough ${outcome === "failure" ? "failed" : "did not finish"}; images below may be partial. See the [run log](${runUrl}).`, "");
+            }
+            lines.push(process.env.ANTHROPIC_API_KEY ? "_Agent: real Claude._" : "_Agent: mock (no `ANTHROPIC_API_KEY` secret), replies are canned._", "");
+            if (base && fs.existsSync("preview/walkthrough.gif")) {
+              lines.push("### Walkthrough", "", `<img src="${base}/walkthrough.gif" width="720" alt="walkthrough">`, "");
+            }
+            if (base && shots.length) {
+              lines.push("### Screenshots", "");
+              for (const f of shots) {
+                lines.push(`<details${f.startsWith("01") ? " open" : ""}><summary>${title(f)}</summary>`, "", `<img src="${base}/screenshots/${f}" width="720" alt="${title(f)}">`, "", "</details>");
+              }
+              lines.push("");
+            }
+            lines.push(`Full-size videos and the Playwright report: ${artifactUrl ? `[download artifact](${artifactUrl})` : `[workflow run](${runUrl})`}.`);
+            const body = lines.join("\n");
+
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr.number, per_page: 100 });
+            const existing = comments.find((c) => c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            }
+
+  cleanup:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove this PR's images from ${{ env.PREVIEW_BRANCH }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          work=$(mktemp -d)
+          cd "$work"
+          git init -q
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q --depth 1 origin "$PREVIEW_BRANCH" || exit 0
+            git checkout -q -B "$PREVIEW_BRANCH" FETCH_HEAD
+            [ -d "pr-$PR" ] || exit 0
+            git rm -rq "pr-$PR"
+            git commit -qm "Remove previews for closed PR #$PR"
+            if git push -q origin "$PREVIEW_BRANCH"; then exit 0; fi
+            sleep $((attempt * 2))
+          done
+          exit 1
