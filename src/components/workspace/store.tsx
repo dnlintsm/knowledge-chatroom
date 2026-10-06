@@ -6,7 +6,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -62,6 +61,13 @@ export function normalizePath(path: string) {
   return path.trim().replace(/^\/+/, "").replace(/\/+/g, "/");
 }
 
+/** False on the first render, true from the next commit on. */
+export function useHydrated() {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return hydrated;
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>({
     files: SEED_FILES,
@@ -70,9 +76,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   });
   const [selection, setSelection] = useState("");
   const [openCount, setOpenCount] = useState(0);
-  const loaded = useRef(false);
+  const hydrated = useHydrated();
 
   // Restore after mount so server and client render the same seed first.
+  // Saving waits for `hydrated` (set in the same commit as the restore), so the
+  // seed is never written over saved work, even when Strict Mode replays effects.
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -80,17 +88,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } catch {
       // Private mode or corrupt data: keep the seed.
     }
-    loaded.current = true;
   }, []);
 
   useEffect(() => {
-    if (!loaded.current) return;
+    if (!hydrated) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       // Quota exceeded (large uploads): the session still works in memory.
     }
-  }, [state]);
+  }, [state, hydrated]);
 
   const getFile = useCallback(
     (path: string) => state.files.find((f) => f.path === normalizePath(path)),
@@ -102,6 +109,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => setSelection(""), [state.active]);
 
   const open = useCallback((tab: TabId) => {
+    // Also when reopening the active file, e.g. after Claude rewrote it.
+    setSelection("");
     setOpenCount((n) => n + 1);
     setState((s) => ({
       ...s,

@@ -41,7 +41,8 @@ export function useWorkspaceAgent() {
         : ws.active === TASKS_TAB
           ? "The task board is open."
           : null,
-      selection: ws.selection || null,
+      selection: ws.selection ? ws.selection.slice(0, MAX_CONTEXT_CHARS) : null,
+      selectionTruncated: ws.selection.length > MAX_CONTEXT_CHARS,
       files: ws.files.map((f) => ({ path: f.path, kind: f.kind, by: f.author })),
     },
   });

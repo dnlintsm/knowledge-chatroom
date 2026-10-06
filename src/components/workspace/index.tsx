@@ -9,7 +9,7 @@ import { ChatPane } from "./chat-pane";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
-import { useWorkspace, WorkspaceProvider } from "./store";
+import { useHydrated, useWorkspace, WorkspaceProvider } from "./store";
 
 export { WorkspaceProvider, useWorkspace };
 
@@ -39,11 +39,13 @@ export function Workspace() {
       if (raw) setLayout({ ...DEFAULTS, ...JSON.parse(raw) });
     } catch {}
   }, []);
+  const hydrated = useHydrated();
   useEffect(() => {
+    if (!hydrated) return;
     try {
       window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
     } catch {}
-  }, [layout]);
+  }, [layout, hydrated]);
 
   // On phones, opening a file (even the one already open) should show it.
   useEffect(() => {

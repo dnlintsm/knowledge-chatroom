@@ -81,6 +81,17 @@ test("selection is dropped when its file closes", async ({ page }) => {
   await expect(context).not.toContainText("selected chars");
 });
 
+test("files and layout survive a reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("file-preview")).toBeVisible();
+  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByTestId("file-editor").fill("# Kept after reload");
+  await page.getByRole("button", { name: "Hide chat" }).click();
+  await page.reload();
+  await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
+});
+
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
