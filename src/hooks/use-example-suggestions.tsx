@@ -18,6 +18,16 @@ export const useExampleSuggestions = () => {
   useConfigureSuggestions({
     suggestions: [
       {
+        title: "Summarize This File (Workspace)",
+        message:
+          "Summarize the file I have open in a few bullets, then save the summary as a new file under artifacts/.",
+      },
+      {
+        title: "Draft a Note (Workspace)",
+        message:
+          "Look at my workspace files and draft a short note at notes/next-steps.md with what I should do next.",
+      },
+      {
         title: "Pie Chart (Controlled Generative UI)",
         message:
           "Show me a pie chart of our revenue distribution by category. Use the query_data tool to fetch the data first, then render it with the pieChart component.",
@@ -61,7 +71,7 @@ export const useExampleSuggestions = () => {
       {
         title: "Task Manager (Shared State)",
         message:
-          "Enable app mode and add three todos about learning CopilotKit: one about reading the docs, one about building a prototype, and one about exploring agent state.",
+          "Open the task board and add three todos about learning CopilotKit: one about reading the docs, one about building a prototype, and one about exploring agent state.",
       },
     ],
     available: "always",
