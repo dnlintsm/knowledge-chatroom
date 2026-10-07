@@ -55,6 +55,9 @@
     #85ecce 45.673%,
     #ffac4d 100%
   );
+
+  /* Lines a chat file reference points at */
+  --reveal: color-mix(in srgb, var(--cpk-yellow-400) 70%, transparent);
 }
 
 :root.dark,
@@ -81,6 +84,8 @@
   --chart-tooltip-bg: #191a1e;
   --chart-tooltip-border: #303136;
   --chart-axis: #adadb2;
+
+  --reveal: color-mix(in srgb, var(--cpk-yellow-400) 22%, transparent);
 }
 
 body {
@@ -109,6 +114,16 @@ html {
 [data-copilotkit] button[data-slot="suggestion-pill"].opengenui-highlight {
   border-color: var(--cpk-mint-400);
   background: color-mix(in srgb, var(--cpk-mint-400) 15%, var(--background));
+}
+
+/*
+ * Preview blocks a chat file reference points at (set by editor-pane.tsx). The
+ * shadow pads the highlight without shifting the layout.
+ */
+[data-revealed] {
+  border-radius: 2px;
+  background-color: var(--reveal);
+  box-shadow: 0 0 0 4px var(--reveal);
 }
 
 /*

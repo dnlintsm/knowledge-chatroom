@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { LineRange } from "./file-refs";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import {
   kindForPath,
@@ -34,6 +35,12 @@ interface Persisted {
   active: TabId | null;
 }
 
+/** Lines the middle pane scrolls to and highlights, from open(path, lines). */
+export interface Reveal {
+  path: string;
+  lines: LineRange;
+}
+
 interface WorkspaceValue {
   files: WorkspaceFile[];
   tabs: TabId[];
@@ -42,8 +49,11 @@ interface WorkspaceValue {
   selection: string;
   /** Bumps on every open(), even of the already-active tab. */
   openCount: number;
+  /** Set by the last open() that named lines; cleared by any other open or an edit to that file. */
+  reveal: Reveal | null;
   getFile: (path: string) => WorkspaceFile | undefined;
-  open: (tab: TabId) => void;
+  /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
+  open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
   /** Creates the file when it does not exist. */
   write: (
@@ -76,6 +86,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   });
   const [selection, setSelection] = useState("");
   const [openCount, setOpenCount] = useState(0);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
   const hydrated = useHydrated();
 
   // Restore after mount so server and client render the same seed first.
@@ -108,10 +119,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // tab changes (open, close, or delete), so it never pairs with another file.
   useEffect(() => setSelection(""), [state.active]);
 
-  const open = useCallback((tab: TabId) => {
+  const open = useCallback((tab: TabId, lines?: LineRange) => {
     // Also when reopening the active file, e.g. after Claude rewrote it.
     setSelection("");
     setOpenCount((n) => n + 1);
+    // A new object every time, so citing the same lines again scrolls back to them.
+    setReveal(lines ? { path: tab, lines } : null);
     setState((s) => ({
       ...s,
       tabs: s.tabs.includes(tab) ? s.tabs : [...s.tabs, tab],
@@ -148,6 +161,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           : [...s.files, file],
       };
     });
+    // Line numbers may now point at different text.
+    setReveal((r) => (r?.path === path ? null : r));
     return file;
   }, []);
 
@@ -172,6 +187,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeFile,
       selection,
       openCount,
+      reveal,
       getFile,
       open,
       close,
@@ -179,7 +195,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       remove,
       setSelection,
     };
-  }, [state, selection, openCount, getFile, open, close, write, remove]);
+  }, [state, selection, openCount, reveal, getFile, open, close, write, remove]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { z } from "zod";
 import { useAgentContext, useFrontendTool } from "@copilotkit/react-core/v2";
+import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { isTextFile, TASKS_TAB } from "./types";
 
@@ -16,7 +17,8 @@ const MAX_CONTEXT_CHARS = 20_000;
  * - frontend tools: list / read / write / open files, and open the task board.
  *
  * Tools run in the browser, so files Claude writes land straight in the
- * workspace (and open in the middle pane).
+ * workspace (and open in the middle pane). File content reaches Claude with
+ * numbered lines, so its answers can cite them (see file-refs.ts).
  */
 export function useWorkspaceAgent() {
   const ws = useWorkspace();
@@ -27,14 +29,14 @@ export function useWorkspaceAgent() {
   const open = ws.activeFile;
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane; `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
     value: {
       openFile: open
         ? {
             path: open.path,
             kind: open.kind,
             content: isTextFile(open)
-              ? open.content.slice(0, MAX_CONTEXT_CHARS)
+              ? numberLines(open.content.slice(0, MAX_CONTEXT_CHARS))
               : `(binary ${open.mime}, not shown)`,
             truncated: isTextFile(open) && open.content.length > MAX_CONTEXT_CHARS,
           }
@@ -64,20 +66,21 @@ export function useWorkspaceAgent() {
 
   useFrontendTool({
     name: "readWorkspaceFile",
-    description: "Read the full content of a workspace file by path.",
+    description:
+      "Read the full content of a workspace file by path. Each line starts with its line number and a tab, for citing lines; the numbers are not part of the file.",
     parameters: z.object({ path: z.string().describe("Workspace path, e.g. notes/welcome.md") }),
     handler: async ({ path }) => {
       const file = latest.current.getFile(path);
       if (!file) return { error: `No file at ${path}` };
       if (!isTextFile(file)) return { path: file.path, mime: file.mime, note: "Binary file; content not readable as text." };
-      return { path: file.path, content: file.content };
+      return { path: file.path, content: numberLines(file.content) };
     },
   });
 
   useFrontendTool({
     name: "writeWorkspaceFile",
     description:
-      "Create or overwrite a workspace file with the COMPLETE new content, then open it for the user. Put new generated documents under artifacts/ unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
+      "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents under artifacts/ unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
     parameters: z.object({
       path: z.string().describe("e.g. artifacts/summary.md"),
       content: z.string().describe("The full file content (markdown for .md files)."),
