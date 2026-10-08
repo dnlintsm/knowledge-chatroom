@@ -6,6 +6,8 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createDefaultAgent } from "@/agent";
 import { handle } from "hono/vercel";
+import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "@/lib/auth";
+import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server (Express + tsx) and
 // speaks AG-UI directly over HTTP, so we connect to it with HttpAgent from
@@ -56,7 +58,23 @@ const app = createCopilotEndpoint({
   basePath: "/api/copilotkit",
 });
 
-export const GET = handle(app);
-export const POST = handle(app);
-export const PATCH = handle(app);
-export const DELETE = handle(app);
+const handler = handle(app);
+
+// The runtime forwards x-* request headers to the agent, so the agent server
+// learns who a run is for from the signed X-Knowledge-User header set here
+// (never one the browser sent). With login on, chat needs a signed-in user.
+async function withUser(req: NextRequest) {
+  const headers = new Headers(req.headers);
+  headers.delete(IDENTITY_HEADER);
+  if (authSecret()) {
+    const user = sessionFrom(req);
+    if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });
+    headers.set(IDENTITY_HEADER, identityHeader(user));
+  }
+  return handler(new Request(req, { headers }));
+}
+
+export const GET = withUser;
+export const POST = withUser;
+export const PATCH = withUser;
+export const DELETE = withUser;

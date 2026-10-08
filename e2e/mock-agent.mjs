@@ -14,7 +14,7 @@
  * lines, so the preview also shows file references opening the middle pane.
  *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
- * storage routes /files and /nodes are forwarded there, so the preview can
+ * storage routes /files, /nodes and /access are forwarded there, so the preview can
  * show server storage and the knowledge tree without an API key.
  */
 
@@ -58,7 +58,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (STORAGE_URL && /^\/(files|nodes)(\/|$)/.test(pathname)) {
+  if (STORAGE_URL && /^\/(files|nodes|access)(\/|$)/.test(pathname)) {
     forward(req, res);
     return;
   }

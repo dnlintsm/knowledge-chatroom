@@ -101,6 +101,15 @@ jobs:
           command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           scripts/preview-gif.sh preview/walkthrough.gif
 
+      # Login and sharing need the app with login on, so they get their own run
+      # (and their own output folder, so the walkthrough video above stays).
+      - name: Capture login and sharing
+        id: login
+        if: always()
+        env:
+          AUTH_SECRET: preview-only-secret-0123456789abcdef0123456789
+        run: npx playwright test --output test-results-login --reporter=list
+
       - name: Upload preview artifact
         id: artifact
         if: always()
@@ -110,6 +119,7 @@ jobs:
           path: |
             preview/
             test-results/
+            test-results-login/
             playwright-report/
           retention-days: 14
           if-no-files-found: ignore
@@ -156,7 +166,7 @@ jobs:
         env:
           IMAGE_BASE: ${{ steps.publish.outputs.base }}
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
-          TEST_OUTCOME: ${{ steps.playwright.outcome }}
+          TEST_OUTCOME: ${{ steps.playwright.outcome == 'success' && steps.login.outcome == 'success' && 'success' || 'failure' }}
         with:
           script: |
             const fs = require("fs");
