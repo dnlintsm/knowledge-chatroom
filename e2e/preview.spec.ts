@@ -29,6 +29,13 @@ async function openHome(page: Page) {
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible();
 }
 
+// These screens show the browser-only workspace. When the run also has server
+// storage (for knowledge.spec.ts), the storage API answers 404 here, which is
+// what the app sees without DATABASE_URL.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/(files|nodes)([/?]|$)/, (route) => route.fulfill({ status: 404 }));
+});
+
 // Long timeouts leave room for a real Claude reply when ANTHROPIC_API_KEY is set.
 const reply = { timeout: 90_000 };
 

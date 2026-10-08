@@ -29,8 +29,27 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Server storage, so the preview shows what needs it (the knowledge tree,
+    # "Saved" files). Same setup as storage.yml.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knowledge
+          POSTGRES_PASSWORD: knowledge
+          POSTGRES_DB: knowledge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U knowledge -d knowledge"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       CI: true
+      DATABASE_URL: postgres://knowledge:knowledge@localhost:5432/knowledge
+      S3_ENDPOINT: http://localhost:8333
+      S3_ACCESS_KEY_ID: knowledge
+      S3_SECRET_ACCESS_KEY: knowledge-secret
+      S3_PUBLIC_URL: http://localhost:8333
       NEXT_TELEMETRY_DISABLED: 1
       COPILOTKIT_TELEMETRY_DISABLED: true
       # Optional: with this secret the preview talks to real Claude; without
@@ -40,6 +59,20 @@ jobs:
       CAN_PUBLISH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start SeaweedFS (S3)
+        run: |
+          docker run -d --name s3 -p 8333:8333 \
+            -v "$PWD/deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:latest \
+            server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8333/ || true)
+            [ "$code" = "403" ] && exit 0
+            sleep 2
+          done
+          docker logs s3
+          exit 1
 
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +102,15 @@ jobs:
           command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           scripts/preview-gif.sh preview/walkthrough.gif
 
+      # Login and sharing need the app with login on, so they get their own run
+      # (and their own output folder, so the walkthrough video above stays).
+      - name: Capture login and sharing
+        id: login
+        if: always()
+        env:
+          AUTH_SECRET: preview-only-secret-0123456789abcdef0123456789
+        run: npx playwright test --output test-results-login --reporter=list
+
       - name: Upload preview artifact
         id: artifact
         if: always()
@@ -78,6 +120,7 @@ jobs:
           path: |
             preview/
             test-results/
+            test-results-login/
             playwright-report/
           retention-days: 14
           if-no-files-found: ignore
@@ -124,7 +167,7 @@ jobs:
         env:
           IMAGE_BASE: ${{ steps.publish.outputs.base }}
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
-          TEST_OUTCOME: ${{ steps.playwright.outcome }}
+          TEST_OUTCOME: ${{ steps.playwright.outcome == 'success' && steps.login.outcome == 'success' && 'success' || 'failure' }}
         with:
           script: |
             const fs = require("fs");

@@ -6,6 +6,14 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createDefaultAgent } from "@/agent";
 import { handle } from "hono/vercel";
+import {
+  IDENTITY_HEADER,
+  authSecret,
+  identityHeader,
+  sessionFrom,
+  sessionFromRequest,
+} from "@/lib/auth";
+import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server (Express + tsx) and
 // speaks AG-UI directly over HTTP, so we connect to it with HttpAgent from
@@ -28,11 +36,16 @@ const runtime = new CopilotRuntime({
             ? { wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL }
             : {}),
         }),
-        // Demo stub — replace with your real auth-derived user identity before any
-        // multi-user deployment, or all users share one thread history. The id
-        // must correspond to a user that exists in CopilotKit Intelligence;
-        // an unknown id (like this literal) can make thread operations fail.
-        identifyUser: () => ({ id: "demo-user", name: "Demo User" }),
+        // With login on, each signed-in person has their own thread history
+        // (the id is their stable login subject); the id must correspond to a
+        // user CopilotKit Intelligence knows. Without login everyone is the
+        // demo user and shares one history.
+        identifyUser: (req: Request) => {
+          if (!authSecret()) return { id: "demo-user", name: "Demo User" };
+          const user = sessionFromRequest(req);
+          if (!user) throw new Error("Sign in first");
+          return { id: user.sub, name: user.name ?? user.email ?? user.sub };
+        },
       }
     : { runner: new InMemoryAgentRunner() }),
   // --- /copilotkit:intelligence ---
@@ -56,7 +69,23 @@ const app = createCopilotEndpoint({
   basePath: "/api/copilotkit",
 });
 
-export const GET = handle(app);
-export const POST = handle(app);
-export const PATCH = handle(app);
-export const DELETE = handle(app);
+const handler = handle(app);
+
+// The runtime forwards x-* request headers to the agent, so the agent server
+// learns who a run is for from the signed X-Knowledge-User header set here
+// (never one the browser sent). With login on, chat needs a signed-in user.
+async function withUser(req: NextRequest) {
+  const headers = new Headers(req.headers);
+  headers.delete(IDENTITY_HEADER);
+  if (authSecret()) {
+    const user = sessionFrom(req);
+    if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });
+    headers.set(IDENTITY_HEADER, identityHeader(user));
+  }
+  return handler(new Request(req, { headers }));
+}
+
+export const GET = withUser;
+export const POST = withUser;
+export const PATCH = withUser;
+export const DELETE = withUser;

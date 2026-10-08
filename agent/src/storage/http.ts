@@ -1,24 +1,61 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { FileEvent, FileService } from "./files";
-import type { StorageState } from "./index";
-import { InvalidPathError } from "./paths";
+import { AccessError, ForbiddenError, ROLES, type Role } from "./access";
+import type { EventHub, WorkspaceEvent } from "./events";
+import { identify } from "./identity";
+import type { Storage, StorageState } from "./index";
+import { NodeError, NodeNotFoundError } from "./nodes";
+import { InvalidPathError, isTextFile } from "./paths";
+import type { Session } from "./session";
 
 /**
- * REST file API, mounted at /files on the agent server:
+ * REST API for workspace files and the knowledge tree, mounted at /files and
+ * /nodes on the agent server:
  *
  *   GET    /files                   list live files (JSON)
- *   GET    /files?watch             change stream (Server-Sent Events): one
- *                                   `data: {"op":"write"|"delete","path",…}`
- *                                   per committed change
- *   GET    /files/<path>            file bytes, Content-Type = file mime
+ *   GET    /files?watch             change stream (Server-Sent Events), one
+ *                                   `data: {…}` per committed change:
+ *                                   {"op":"write"|"delete","node","path",…} for
+ *                                   files, {"op":"node","change","id"} for nodes
+ *   GET    /files/<path>            file bytes, Content-Type = file mime (binary
+ *                                   files: a 302 to a signed store link
+ *                                   when S3_PUBLIC_URL is set)
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
  *                                   Content-Type = mime (optional)
  *   DELETE /files/<path>            soft delete
  *
- * No auth yet: this is the single-user step. Login and per-workspace roles
- * come next (see issue #4), so keep the agent port off the public internet.
+ *   Every /files route takes ?node=<id> for that knowledge node's files;
+ *   without it, files at the workspace root.
+ *
+ *   GET    /nodes                   {types, rootRole, nodes}: the levels, your
+ *                                   role at the root, and the nodes you can see
+ *                                   (each with your role; null = shown only as
+ *                                   the path to something you can see)
+ *   POST   /nodes                   {parentId|null, name} → the new node (its
+ *                                   type is the level below the parent's)
+ *   GET    /nodes/<id>              {node, lineage}: lineage is top level first
+ *   PATCH  /nodes/<id>              {name} → rename
+ *   DELETE /nodes/<id>              soft delete, with everything below it
+ *
+ *   GET    /access                  {me, rootRole}
+ *   GET    /access/users            everyone who has signed in
+ *   GET    /access/groups           the org tree, with direct members
+ *   POST   /access/groups           {parentId|null, name}
+ *   PATCH  /access/groups/<id>      {name}
+ *   DELETE /access/groups/<id>      with its sub-groups
+ *   PUT    /access/groups/<id>/members/<userId>    add a member
+ *   DELETE /access/groups/<id>/members/<userId>    remove one
+ *   GET    /access/grants?node=<id> grants on a node (no node = workspace)
+ *   POST   /access/grants           {node|null, principalType: "user"|"group",
+ *                                   principalId, role: viewer|editor|owner}
+ *   DELETE /access/grants/<id>
+ *   GET    /access/audit?limit=     recent changes, newest first
+ *
+ * Reading needs viewer, changing files and nodes editor, deleting a node or
+ * managing grants on it owner (of that node or one above it), and managing
+ * groups owner of the workspace. Who is asking comes from identity.ts: the
+ * local user without AUTH_SECRET, the signed-in user with it.
  */
 
 function json(res: ServerResponse, status: number, body: unknown) {
@@ -26,10 +63,16 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
-async function watch(req: IncomingMessage, res: ServerResponse, service: FileService) {
+async function watch(res: ServerResponse, events: EventHub, session: Session) {
   // Subscribe before answering, so a failure still gets a normal error response.
-  const unsubscribe = await service.subscribe((event: FileEvent) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  // Events reach this connection in order, each once the previous was checked.
+  let queue = Promise.resolve();
+  const unsubscribe = await events.subscribe((event: WorkspaceEvent) => {
+    queue = queue
+      .then(async () => {
+        if (await session.canSee(event)) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      })
+      .catch((err) => console.error("[storage] watch:", err));
   });
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -58,18 +101,152 @@ async function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-export function createFilesHandler(
-  files: () => FileService | null,
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const bytes = await readBody(req, 64 * 1024);
+  if (!bytes) return null;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const optionalId = (value: unknown) =>
+  value === null || value === undefined ? null : typeof value === "string" ? value : undefined;
+
+async function handleNodes(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  const id = decodeURIComponent(url.pathname.replace(/^\/nodes\/?/, ""));
+  if (!id) {
+    if (req.method === "GET") {
+      json(res, 200, await session.tree());
+    } else if (req.method === "POST") {
+      const body = await readJson(req);
+      const parentId = optionalId(body?.parentId);
+      if (!body || typeof body.name !== "string" || parentId === undefined) {
+        json(res, 400, { error: "Expected {parentId: string | null, name: string}" });
+        return;
+      }
+      json(res, 201, await session.createNode(parentId, body.name));
+    } else {
+      json(res, 405, { error: "Method not allowed" });
+    }
+    return;
+  }
+
+  switch (req.method) {
+    case "GET": {
+      const lineage = await session.lineage(id);
+      json(res, 200, { node: lineage[lineage.length - 1], lineage });
+      return;
+    }
+    case "PATCH": {
+      const body = await readJson(req);
+      if (!body || typeof body.name !== "string") {
+        json(res, 400, { error: "Expected {name: string}" });
+        return;
+      }
+      const node = await session.renameNode(id, body.name);
+      if (!node) json(res, 404, { error: "Node not found" });
+      else json(res, 200, node);
+      return;
+    }
+    case "DELETE": {
+      if (await session.deleteNode(id)) json(res, 200, { deleted: id });
+      else json(res, 404, { error: "Node not found" });
+      return;
+    }
+    default:
+      json(res, 405, { error: "Method not allowed" });
+  }
+}
+
+async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  const parts = url.pathname.split("/").slice(2).map(decodeURIComponent); // after /access
+  const [section, id, sub, subId] = parts;
+  const method = req.method ?? "GET";
+  const notFound = () => json(res, 404, { error: "Not found" });
+  const done = (ok: boolean) => (ok ? json(res, 200, { ok: true }) : notFound());
+
+  if (!section) {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    const me = (await session.users()).find((u) => u.id === session.principal.userId) ?? null;
+    return json(res, 200, { me, rootRole: await session.role(null) });
+  }
+
+  if (section === "users" && !id && method === "GET") {
+    return json(res, 200, { users: await session.users() });
+  }
+
+  if (section === "groups") {
+    if (!id) {
+      if (method === "GET") return json(res, 200, { groups: await session.groups() });
+      if (method === "POST") {
+        const body = await readJson(req);
+        const parentId = optionalId(body?.parentId);
+        if (!body || typeof body.name !== "string" || parentId === undefined) {
+          return json(res, 400, { error: "Expected {parentId: string | null, name: string}" });
+        }
+        return json(res, 201, { id: await session.createGroup(parentId, body.name) });
+      }
+    } else if (!sub) {
+      if (method === "PATCH") {
+        const body = await readJson(req);
+        if (!body || typeof body.name !== "string") return json(res, 400, { error: "Expected {name: string}" });
+        return done(await session.renameGroup(id, body.name));
+      }
+      if (method === "DELETE") return done(await session.deleteGroup(id));
+    } else if (sub === "members" && subId && (method === "PUT" || method === "DELETE")) {
+      return done(await session.setMember(id, subId, method === "PUT"));
+    }
+  }
+
+  if (section === "grants") {
+    if (!id && method === "GET") {
+      return json(res, 200, { grants: await session.grants(url.searchParams.get("node") || null) });
+    }
+    if (!id && method === "POST") {
+      const body = await readJson(req);
+      const node = optionalId(body?.node);
+      if (
+        !body ||
+        node === undefined ||
+        (body.principalType !== "user" && body.principalType !== "group") ||
+        typeof body.principalId !== "string" ||
+        !ROLES.includes(body.role as Role)
+      ) {
+        return json(res, 400, {
+          error: 'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
+        });
+      }
+      const grantId = await session.setGrant(node, body.principalType, body.principalId, body.role as Role);
+      return json(res, 200, { id: grantId });
+    }
+    if (id && method === "DELETE") return done(await session.revoke(id));
+  }
+
+  if (section === "audit" && !id && method === "GET") {
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "100", 10);
+    return json(res, 200, { entries: await session.auditLog(Number.isNaN(limit) ? 100 : limit) });
+  }
+
+  json(res, 404, { error: "Not found" });
+}
+
+export function createStorageHandler(
+  storage: () => Storage | null,
   maxUploadBytes: number,
   state: () => StorageState = () => "ready",
 ) {
-  return async function handleFiles(
+  return async function handleStorage(
     req: IncomingMessage,
     res: ServerResponse,
     url: URL,
   ): Promise<void> {
-    const service = files();
-    if (!service) {
+    const current = storage();
+    if (!current) {
       // The UI tells these apart: 503 means "try again shortly"; 404 and 500
       // mean no server storage this session, so it keeps files in the browser.
       const now = state();
@@ -79,6 +256,41 @@ export function createFilesHandler(
       return;
     }
 
+    try {
+      const principal = await identify(req, current);
+      if (!principal) {
+        json(res, 401, { error: "Sign in to use the workspace" });
+        return;
+      }
+      const session = current.session(principal);
+      if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
+      else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
+      else await handleFiles(req, res, url, current, session);
+    } catch (err) {
+      if (err instanceof NodeNotFoundError) {
+        json(res, 404, { error: err.message });
+        return;
+      }
+      if (err instanceof ForbiddenError) {
+        json(res, 403, { error: err.message });
+        return;
+      }
+      if (err instanceof InvalidPathError || err instanceof NodeError || err instanceof AccessError) {
+        json(res, 400, { error: err.message });
+        return;
+      }
+      console.error("[storage] request failed:", err);
+      json(res, 500, { error: "Storage error" });
+    }
+  };
+
+  async function handleFiles(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    current: Storage,
+    session: Session,
+  ): Promise<void> {
     const rest = url.pathname.replace(/^\/files\/?/, "");
     let path: string;
     try {
@@ -88,76 +300,84 @@ export function createFilesHandler(
       return;
     }
 
-    try {
-      if (path === "") {
-        if (req.method !== "GET") {
-          json(res, 405, { error: "Method not allowed" });
+    if (path === "" && req.method === "GET" && url.searchParams.has("watch")) {
+      await watch(res, current.events, session);
+      return;
+    }
+
+    const service = await session.files(url.searchParams.get("node") || null);
+
+    if (path === "") {
+      if (req.method !== "GET") json(res, 405, { error: "Method not allowed" });
+      else json(res, 200, { files: await service.list() });
+      return;
+    }
+
+    switch (req.method) {
+      case "GET": {
+        if (url.searchParams.has("versions")) {
+          const versions = await service.history(path);
+          if (!versions) json(res, 404, { error: "Not found" });
+          else json(res, 200, { versions });
           return;
         }
-        if (url.searchParams.has("watch")) await watch(req, res, service);
-        else json(res, 200, { files: await service.list() });
-        return;
-      }
-
-      switch (req.method) {
-        case "GET": {
-          if (url.searchParams.has("versions")) {
-            const versions = await service.history(path);
-            if (!versions) json(res, 404, { error: "Not found" });
-            else json(res, 200, { versions });
-            return;
-          }
-          const file = await service.read(path);
-          if (!file) {
-            json(res, 404, { error: "Not found" });
-            return;
-          }
-          const etag = `"${file.info.sha256}"`;
-          if (req.headers["if-none-match"] === etag) {
-            res.writeHead(304, { ETag: etag });
+        // Binary files come straight from the object store when it is reachable
+        // from browsers: a short-lived link, made after the access check above.
+        // Text stays here, since the UI fetches it from this origin.
+        const info = await service.stat(path);
+        if (info && !isTextFile(info.path, info.mime)) {
+          const link = await current.blobs.downloadUrl(info.sha256, {
+            mime: info.mime,
+            filename: info.path.split("/").pop() ?? info.path,
+          });
+          if (link) {
+            res.writeHead(302, { Location: link, "Cache-Control": "no-store" });
             res.end();
             return;
           }
-          res.writeHead(200, {
-            "Content-Type": file.info.mime,
-            "Content-Length": file.bytes.byteLength,
-            ETag: etag,
-            "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
-            "X-File-Author": file.info.author,
-            "Cache-Control": "no-cache",
-          });
-          res.end(file.bytes);
+        }
+        const file = info && (await service.read(path));
+        if (!file) {
+          json(res, 404, { error: "Not found" });
           return;
         }
-        case "PUT": {
-          const bytes = await readBody(req, maxUploadBytes);
-          if (!bytes) {
-            json(res, 413, { error: `File exceeds ${maxUploadBytes} bytes` });
-            return;
-          }
-          const mime = req.headers["content-type"]?.split(";")[0].trim();
-          const info = await service.write(path, bytes, {
-            mime: mime && mime !== "application/octet-stream" ? mime : undefined,
-            author: "user",
-          });
-          json(res, 200, info);
+        const etag = `"${file.info.sha256}"`;
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { ETag: etag });
+          res.end();
           return;
         }
-        case "DELETE": {
-          if (await service.remove(path)) json(res, 200, { deleted: path });
-          else json(res, 404, { error: "Not found" });
-          return;
-        }
-        default:
-          json(res, 405, { error: "Method not allowed" });
-      }
-    } catch (err) {
-      if (err instanceof InvalidPathError) {
-        json(res, 400, { error: err.message });
+        res.writeHead(200, {
+          "Content-Type": file.info.mime,
+          "Content-Length": file.bytes.byteLength,
+          ETag: etag,
+          "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
+          "X-File-Author": file.info.author,
+          "Cache-Control": "no-cache",
+        });
+        res.end(file.bytes);
         return;
       }
-      console.error("[storage] request failed:", err);
-      json(res, 500, { error: "Storage error" });
+      case "PUT": {
+        const bytes = await readBody(req, maxUploadBytes);
+        if (!bytes) {
+          json(res, 413, { error: `File exceeds ${maxUploadBytes} bytes` });
+          return;
+        }
+        const mime = req.headers["content-type"]?.split(";")[0].trim();
+        const info = await service.write(path, bytes, {
+          mime: mime && mime !== "application/octet-stream" ? mime : undefined,
+        });
+        json(res, 200, info);
+        return;
+      }
+      case "DELETE": {
+        if (await service.remove(path)) json(res, 200, { deleted: path });
+        else json(res, 404, { error: "Not found" });
+        return;
+      }
+      default:
+        json(res, 405, { error: "Method not allowed" });
     }
-  };
+  }
 }

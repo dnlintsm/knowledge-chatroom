@@ -1,15 +1,32 @@
-import { S3BlobStore } from "./blobs";
+import { S3BlobStore, type BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
-import { connect, migrate, type Sql } from "./db";
+import { AccessService, type Principal } from "./access";
+import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
+import { EventHub } from "./events";
 import { FileService } from "./files";
+import { NodeService } from "./nodes";
+import { Session } from "./session";
 
 export { FileService } from "./files";
 export type { FileInfo, FileVersion } from "./files";
+export { NodeService } from "./nodes";
+export type { KnowledgeNode, NodeType } from "./nodes";
+export type { Principal, Role } from "./access";
+export { Session } from "./session";
 
 export interface Storage {
   config: StorageConfig;
   sql: Sql;
+  /** Files at the workspace root; .inNode(id) for a knowledge node's files. */
   files: FileService;
+  nodes: NodeService;
+  access: AccessService;
+  events: EventHub;
+  blobs: BlobStore;
+  /** Whether Postgres also enforces access for users' queries (004_row_security.sql). */
+  rowSecurity: boolean;
+  /** What `principal` may do; every API call and tool goes through one. */
+  session(principal: Principal): Session;
   close(): Promise<void>;
 }
 
@@ -26,12 +43,36 @@ export async function initStorage(
   try {
     const applied = await migrate(sql);
     if (applied.length) console.log(`[storage] applied migrations: ${applied.join(", ")}`);
+    const rowSecurity = await prepareRowSecurity(sql);
+    if (!rowSecurity) {
+      console.warn(
+        "[storage] row-level security is off: this database user can't use role knowledge_user " +
+          "(see 004_row_security.sql). Access is still checked by the app.",
+      );
+    }
 
     const blobs = new S3BlobStore(config.s3);
     await blobs.ensureBucket();
 
-    const files = await FileService.forWorkspace(sql, blobs);
-    return { config, sql, files, close: () => sql.end() };
+    // Single workspace until login and memberships arrive (issue #4, step 4).
+    const [ws] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
+    if (!ws) throw new Error("Workspace default not found");
+    const events = new EventHub(sql, ws.id);
+    const files = new FileService(sql, blobs, events, ws.id);
+    const nodes = new NodeService(sql, events, ws.id);
+    const access = new AccessService(sql, ws.id);
+    return {
+      config,
+      sql,
+      files,
+      nodes,
+      access,
+      events,
+      blobs,
+      rowSecurity,
+      session: (principal) => new Session({ files, nodes, access, sql, rowSecurity }, principal),
+      close: () => sql.end(),
+    };
   } catch (err) {
     await sql.end();
     throw err;
@@ -49,8 +90,8 @@ export function storageState(): StorageState {
 }
 
 /** The running storage, or null before it is ready / when it is off or failed. */
-export function currentFiles(): FileService | null {
-  return current?.files ?? null;
+export function currentStorage(): Storage | null {
+  return current;
 }
 
 /**
