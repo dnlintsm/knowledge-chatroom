@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { FileEvent, FileService } from "./files";
+import type { StorageState } from "./index";
 import { InvalidPathError } from "./paths";
 
 /**
@@ -60,6 +61,7 @@ async function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array
 export function createFilesHandler(
   files: () => FileService | null,
   maxUploadBytes: number,
+  state: () => StorageState = () => "ready",
 ) {
   return async function handleFiles(
     req: IncomingMessage,
@@ -68,7 +70,12 @@ export function createFilesHandler(
   ): Promise<void> {
     const service = files();
     if (!service) {
-      json(res, 503, { error: "File storage is not configured (set DATABASE_URL)" });
+      // The UI tells these apart: 503 means "try again shortly"; 404 and 500
+      // mean no server storage this session, so it keeps files in the browser.
+      const now = state();
+      if (now === "starting") json(res, 503, { error: "File storage is starting" });
+      else if (now === "failed") json(res, 500, { error: "File storage failed to start" });
+      else json(res, 404, { error: "File storage is not configured (set DATABASE_URL)" });
       return;
     }
 

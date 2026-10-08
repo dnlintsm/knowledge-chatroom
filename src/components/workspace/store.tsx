@@ -44,9 +44,15 @@ import {
 
 const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
 const SERVER_UI_KEY = "knowledge-chatroom.workspace.server-ui.v1";
-/** Set once this browser has filled an empty server workspace. */
+/**
+ * "1" once this browser has filled an empty server workspace, or a JSON list of
+ * paths whose upload failed and is retried on the next load.
+ */
 const SERVER_SEEDED_KEY = "knowledge-chatroom.workspace.server-seeded.v1";
 const SAVE_DELAY_MS = 600;
+/** How long to wait for storage that is still starting before using the browser. */
+const STARTUP_RETRY_MS = 2_000;
+const STARTUP_RETRIES = 30;
 
 export type StorageMode = "loading" | "server" | "local";
 
@@ -176,8 +182,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const save = useCallback(async (path: string) => {
+  const save = useCallback(async (path: string): Promise<void> => {
+    // Edits made while storage is still being picked wait for the decision.
+    if (mode.current === "loading") {
+      pending.current.set(path, setTimeout(() => void save(path), SAVE_DELAY_MS));
+      return;
+    }
     pending.current.delete(path);
+    if (mode.current === "local") return; // localStorage already has it.
     const file = files.current.find((f) => f.path === path);
     if (!file) return;
     inflight.current.set(path, (inflight.current.get(path) ?? 0) + 1);
@@ -202,8 +214,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   // Brings local files in line with the server's list: fetches what changed,
-  // drops what was deleted, and leaves files with unsaved edits alone.
-  const resync = useCallback(async (list: ServerFile[]) => {
+  // drops what was deleted, and leaves files with unsaved edits alone, also
+  // when the user starts editing while the fetches are in flight. `keep` names
+  // files that aren't on the server but must stay (failed first uploads).
+  const resync = useCallback(async (list: ServerFile[], keep = new Set<string>()) => {
     const local = new Map(files.current.map((f) => [f.path, f]));
     const next = await Promise.all(
       list.map(async (info) => {
@@ -216,9 +230,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }),
     );
     const listed = new Set(list.map((f) => f.path));
-    const unsaved = files.current.filter((f) => !listed.has(f.path) && busy(f.path));
+    const latest = new Map(files.current.map((f) => [f.path, f]));
+    const unsaved = files.current.filter(
+      (f) => !listed.has(f.path) && (busy(f.path) || keep.has(f.path)),
+    );
     setState((s) => {
-      const all = [...next, ...unsaved];
+      const all = [
+        ...next.map((f) => (busy(f.path) ? (latest.get(f.path) ?? f) : f)),
+        ...unsaved,
+      ];
       const exists = new Set(all.map((f) => f.path));
       const tabs = s.tabs.filter((t) => t === TASKS_TAB || exists.has(t));
       const active = s.active && tabs.includes(s.active) ? s.active : (tabs[0] ?? null);
@@ -242,35 +262,59 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       if (knownSha.current.get(path) === event.sha256) return; // Our own save.
       const list = await listServerFiles();
-      const info = list?.find((f) => f.path === path);
+      const info = Array.isArray(list) ? list.find((f) => f.path === path) : undefined;
       if (!info || busy(path)) return;
+      const file = await loadServerFile(info);
+      // The user may have started editing this file while it loaded.
+      if (busy(path)) return;
       knownSha.current.set(path, info.sha256);
-      upsert(await loadServerFile(info));
+      upsert(file);
       if (info.author === "agent") open(path);
     };
 
+    const useLocal = () => {
+      mode.current = "local";
+      setStorageMode("local");
+    };
+
     (async () => {
+      // Storage answers 503 while it migrates on startup; give it a moment.
       let list = await listServerFiles();
-      if (cancelled) return;
-      if (!list) {
-        mode.current = "local";
-        setStorageMode("local");
-        return;
+      for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
+        await new Promise((r) => setTimeout(r, STARTUP_RETRY_MS));
+        if (cancelled) return;
+        list = await listServerFiles();
       }
+      if (cancelled) return;
+      if (!Array.isArray(list)) return useLocal();
 
       // First visit to an empty server: bring over this browser's files (or
-      // the samples), so nothing made before storage existed is lost.
-      if (list.length === 0 && !window.localStorage.getItem(SERVER_SEEDED_KEY)) {
-        await Promise.all(files.current.map((f) => putServerFile(f).catch(() => null)));
-        window.localStorage.setItem(SERVER_SEEDED_KEY, "1");
-        list = (await listServerFiles()) ?? [];
+      // the samples), so nothing made before storage existed is lost. Uploads
+      // that fail stay visible, are reported, and are retried on the next load.
+      const seeded = window.localStorage.getItem(SERVER_SEEDED_KEY);
+      const retry: string[] = seeded && seeded !== "1" ? JSON.parse(seeded) : [];
+      const toUpload =
+        seeded === null && list.length === 0
+          ? files.current
+          : files.current.filter((f) => retry.includes(f.path));
+      let failed: string[] = [];
+      if (toUpload.length) {
+        failed = (
+          await Promise.all(toUpload.map((f) => putServerFile(f).then(() => null, () => f.path)))
+        ).filter((p): p is string => p !== null);
+        const again = await listServerFiles();
+        if (Array.isArray(again)) list = again;
+        if (failed.length) setSyncError(`Couldn't upload ${failed.join(", ")}; retrying on reload`);
+      }
+      if (seeded === null || toUpload.length) {
+        window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
       try {
         const ui = JSON.parse(window.localStorage.getItem(SERVER_UI_KEY) ?? "null");
         if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
       } catch {}
 
-      await resync(list);
+      await resync(list, new Set(failed));
       if (cancelled) return;
       mode.current = "server";
       setStorageMode("server");
@@ -283,12 +327,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       events.onopen = () => {
         if (!dropped) return;
         dropped = false;
-        void listServerFiles().then((l) => l && resync(l));
+        void listServerFiles().then((l) => {
+          if (Array.isArray(l)) void resync(l);
+        });
       };
     })().catch((err) => {
       console.error("[workspace] server storage failed to load:", err);
-      mode.current = "local";
-      setStorageMode("local");
+      useLocal();
     });
 
     return () => {
@@ -359,7 +404,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? files.current.map((f) => (f.path === path ? file : f))
         : [...files.current, file];
       upsert(file);
-      if (mode.current === "server") scheduleSave(path);
+      if (mode.current !== "local") scheduleSave(path);
       // Line numbers may now point at different text.
       setReveal((r) => (r?.path === path ? null : r));
       return file;

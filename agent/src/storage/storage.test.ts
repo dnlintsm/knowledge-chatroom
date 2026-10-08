@@ -262,6 +262,23 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(event.author, "user");
     });
 
+    test("without storage, says whether it is off, starting or failed", async () => {
+      const statusFor = async (state: "off" | "starting" | "failed") => {
+        const handle = createFilesHandler(() => null, 1024, () => state);
+        const srv = http.createServer((req, res) =>
+          handle(req, res, new URL(req.url!, "http://localhost")),
+        );
+        await new Promise<void>((resolve) => srv.listen(0, resolve));
+        const port = (srv.address() as AddressInfo).port;
+        const { status } = await fetch(`http://localhost:${port}/files`);
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+        return status;
+      };
+      assert.equal(await statusFor("off"), 404);
+      assert.equal(await statusFor("starting"), 503);
+      assert.equal(await statusFor("failed"), 500);
+    });
+
     test("rejects oversize uploads and bad paths", async () => {
       const big = await fetch(`${base}/files/uploads/big.bin`, {
         method: "PUT",

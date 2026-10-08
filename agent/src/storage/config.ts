@@ -1,6 +1,6 @@
 /**
  * Storage settings from the environment. Storage is optional: without
- * DATABASE_URL the agent runs as before and the /files API answers 503.
+ * DATABASE_URL the agent runs as before and the /files API answers 404.
  *
  * The S3 settings work with any S3-compatible store: the bundled SeaweedFS
  * (docker-compose.yml), Garage, AWS S3, Cloudflare R2 or Backblaze B2.

@@ -17,7 +17,7 @@ import type { RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 
 import { adapter } from "./agent";
-import { currentFiles, startStorage } from "./storage";
+import { currentFiles, startStorage, storageState } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFilesHandler } from "./storage/http";
 
@@ -27,7 +27,11 @@ const HOST = process.env.AGENT_HOST || "0.0.0.0";
 // Storage is optional (DATABASE_URL) and starts in the background.
 const storageConfig = storageConfigFromEnv();
 startStorage(storageConfig);
-const handleFiles = createFilesHandler(currentFiles, storageConfig?.maxUploadBytes ?? 0);
+const handleFiles = createFilesHandler(
+  currentFiles,
+  storageConfig?.maxUploadBytes ?? 0,
+  storageState,
+);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);

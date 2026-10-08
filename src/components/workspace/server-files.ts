@@ -30,14 +30,18 @@ export function fileUrl(path: string) {
   return `/api/files/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** The file list, or null when there is no server storage (any non-200). */
-export async function listServerFiles(): Promise<ServerFile[] | null> {
+/**
+ * The file list; "starting" when storage (or the agent server) may just not be
+ * up yet (503, 502, network error), so asking again shortly makes sense; null
+ * when this session has no server storage (404 = not configured, 500 = failed).
+ */
+export async function listServerFiles(): Promise<ServerFile[] | "starting" | null> {
   try {
     const res = await fetch("/api/files", { cache: "no-store" });
-    if (!res.ok) return null;
-    return ((await res.json()) as { files: ServerFile[] }).files;
+    if (res.ok) return ((await res.json()) as { files: ServerFile[] }).files;
+    return res.status === 503 || res.status === 502 ? "starting" : null;
   } catch {
-    return null;
+    return "starting";
   }
 }
 
