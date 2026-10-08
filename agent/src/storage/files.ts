@@ -5,6 +5,7 @@ import type { AuthorType, EventHub } from "./events";
 import { lockLiveExperiment } from "./experiments";
 import { isNodeId, NodeService } from "./nodes";
 import { kindForPath, mimeForPath, normalizePath, type FileKind } from "./paths";
+import { indexBlob } from "./search";
 
 export type { AuthorType, FileEvent } from "./events";
 
@@ -217,6 +218,8 @@ export class FileService {
         VALUES (${file.id}, ${sha256}, ${bytes.byteLength}, ${mime}, ${author},
                 ${opts.authorId ?? null})
         RETURNING id`;
+      // For search; once per distinct content.
+      await indexBlob(tx, sha256, bytes);
 
       await tx`
         UPDATE files

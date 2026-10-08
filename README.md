@@ -248,6 +248,23 @@ npm run dev
   their node with their status, and the Experiment tab holds the details and a comparison
   table. Moving an experiment's results into the node comes with proposed edits (step 7 of
   issue #4).
+- **Search**: every text file is indexed when it is written (`006_search.sql`): its text is
+  split into passages and stored once per distinct content, so versions, experiment copies and
+  duplicates share one entry. `GET /api/search?q=<text>` finds the files you can read whose
+  words (with their forms, so etch finds etching) or exact text (part numbers, CJK) or path
+  match, with the passage that matched. `&scope=<node id>` keeps to one node and everything
+  below it, and `&near=<node id>` or `&experiment=<id>` ranks files near there first. Files
+  stored before search existed are indexed in the background when the agent starts. The
+  Search view in the left rail searches as you type and opens a result where it lives.
+- **Search by meaning**: with pgvector in Postgres (the `docker compose` image has it), a
+  small multilingual embedding model (`Xenova/multilingual-e5-small`, MIT) runs inside the
+  agent, so nothing leaves your server. It downloads once (about 120 MB, to
+  `~/.cache/knowledge-chatroom/models` or `EMBEDDING_CACHE_DIR`), then embeds every passage
+  in the background, and search also finds passages close in meaning ("chamber wall
+  buildup" finds "polymer deposition on the liner"), marked "Similar meaning". Word
+  matches still rank first; "quotes" or -word ask for exact words only. Without pgvector,
+  or with `EMBEDDING_MODEL=off`, search matches words. Changing `EMBEDDING_MODEL` re-embeds
+  everything.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
@@ -269,8 +286,8 @@ npm run dev
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
-  (`agent/src/storage/migrations/004_row_security.sql`, and `005_experiments.sql` for
-  experiments) that apply the same grants. If a
+  (`agent/src/storage/migrations/004_row_security.sql`, `005_experiments.sql` for
+  experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
   otherwise the agent logs that row-level security is off, and an admin can enable it with
@@ -281,8 +298,8 @@ npm run dev
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
-- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `write_file`,
-  `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
+  `write_file`, `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. Its writes are versions authored by the
