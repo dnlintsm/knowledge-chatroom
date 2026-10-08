@@ -89,6 +89,9 @@ interface ActionsValue {
   run(id: string, by?: "user" | "agent"): Promise<ActionResult>;
 }
 
+/** How long after a start the same action is refused, covering a double click. */
+const REPEAT_MS = 600;
+
 const ActionsContext = createContext<ActionsValue | null>(null);
 
 export function ActionsProvider({
@@ -112,6 +115,9 @@ export function ActionsProvider({
   // Checked and set synchronously, so a double click (or the user and Claude
   // at once) can't start the same action twice.
   const running = useRef(new Set<string>());
+  // A double click's second click can land after a synchronous action (New
+  // Chat) has already finished, so a start also blocks repeats for a moment.
+  const lastStart = useRef(new Map<string, number>());
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
   const viewOf = useCallback(
@@ -144,11 +150,13 @@ export function ActionsProvider({
       if (!hasRole(c.role, def.requiredRole)) {
         return { ok: false, error: `"${id}" needs the ${def.requiredRole} role on this run` };
       }
-      if (running.current.has(id)) return { ok: false, error: `"${id}" is already running` };
+      const repeated = Date.now() - (lastStart.current.get(id) ?? -Infinity) < REPEAT_MS;
+      if (running.current.has(id) || repeated) return { ok: false, error: `"${id}" is already running` };
       const view = viewOf(def, c);
       if (!view.enabled) return { ok: false, error: view.hint ?? `"${id}" is not available` };
 
       running.current.add(id);
+      lastStart.current.set(id, Date.now());
       setBusy(new Set(running.current));
       try {
         await def.run(c);

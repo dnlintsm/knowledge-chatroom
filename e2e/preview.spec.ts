@@ -114,7 +114,8 @@ test("the Actions block starts a new chat about the run", async ({ page }) => {
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
   await shot(page, "09-actions");
 
-  await actions.getByRole("button", { name: "New Chat" }).click();
+  // A double click starts one new chat, not two (the runner refuses quick repeats).
+  await actions.getByRole("button", { name: "New Chat" }).dblclick();
   await expect(page.getByText("Hello there")).toHaveCount(0);
   await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
   await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
