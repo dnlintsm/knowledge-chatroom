@@ -13,10 +13,6 @@ const nextConfig: NextConfig = {
     // Folders that mark a run directory (comma-separated); see runs.ts.
     NEXT_PUBLIC_RUN_DIR_MARKERS: process.env.RUN_DIR_MARKERS || "xdoe-report",
   },
-  typescript: {
-    // Docker route override uses HttpAgent which has a type mismatch with CopilotRuntime
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;

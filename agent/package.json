@@ -8,7 +8,9 @@
     "dev": "tsx --watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test 'src/**/*.test.ts'"
+    "test": "npm run test:unit",
+    "test:unit": "tsx --test src/agent.test.ts",
+    "test:integration": "node scripts/test-integration.mjs"
   },
   "dependencies": {
     "@ag-ui/claude-agent-sdk": "0.0.3",

@@ -60,6 +60,11 @@ const SYSTEM_PROMPT = [
         "  (levels like tech › module › loop › process). The context's currentNode is",
         "  where the user is; pass its id as `node` to the file tools to work there,",
         "  and read parent nodes' files for background. list_nodes shows the tree.",
+        "- Experiments: a user's sandbox on a node, with its own copy of the node's files.",
+        "  When the context has currentExperiment, the user is in it: pass its id as",
+        "  `experiment` to the file tools and never write to its node. Keep its",
+        "  hypothesis, params and results up to date with update_experiment as the work",
+        "  shows them; list_experiments compares experiments on a node.",
       ]
     : []),
 ].join("\n");
