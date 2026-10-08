@@ -38,6 +38,9 @@ export interface NodeType {
   depth: number;
 }
 
+/** viewer reads, editor also writes, owner also deletes and shares. */
+export type Role = "viewer" | "editor" | "owner";
+
 export interface KnowledgeNode {
   id: string;
   parentId: string | null;
@@ -46,6 +49,15 @@ export interface KnowledgeNode {
   name: string;
   fileCount: number;
   updatedAt: string;
+  /** Your role here; null when shown only as the path to something you can see. */
+  role: Role | null;
+}
+
+export interface KnowledgeTree {
+  types: NodeType[];
+  /** Your role at the workspace root (root files and top-level nodes). */
+  rootRole: Role | null;
+  nodes: KnowledgeNode[];
 }
 
 const nodeQuery = (node: NodeId) => (node ? `?node=${encodeURIComponent(node)}` : "");
@@ -116,11 +128,11 @@ export async function deleteServerFile(path: string, node: NodeId = null): Promi
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
 }
 
-/** The knowledge tree's levels and nodes, or null when it can't be read. */
-export async function listNodes(): Promise<{ types: NodeType[]; nodes: KnowledgeNode[] } | null> {
+/** The knowledge tree's levels and the nodes you can see, or null when it can't be read. */
+export async function listNodes(): Promise<KnowledgeTree | null> {
   try {
     const res = await fetch("/api/nodes", { cache: "no-store" });
-    return res.ok ? ((await res.json()) as { types: NodeType[]; nodes: KnowledgeNode[] }) : null;
+    return res.ok ? ((await res.json()) as KnowledgeTree) : null;
   } catch {
     return null;
   }

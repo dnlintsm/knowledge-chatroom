@@ -8,9 +8,10 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
-import type { FileService } from "./files";
+import { AccessError, ForbiddenError, type Principal } from "./access";
 import type { Storage } from "./index";
 import { NodeError, type KnowledgeNode } from "./nodes";
+import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile } from "./paths";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
@@ -39,9 +40,11 @@ const nodeParam = z
     "Knowledge node id (from list_nodes or the context's currentNode). Omit for the workspace root.",
   );
 
-/** The tree as indented lines, e.g. `- Etch [tech] id=… (3 files)`. */
-export function formatTree(nodes: KnowledgeNode[]): string {
-  const children = new Map<string | null, KnowledgeNode[]>();
+/** The tree as indented lines, e.g. `- Etch [tech] id=… (3 files, editor)`. */
+type TreeNode = KnowledgeNode & { role?: string | null };
+
+export function formatTree(nodes: TreeNode[]): string {
+  const children = new Map<string | null, TreeNode[]>();
   for (const node of nodes) {
     const siblings = children.get(node.parentId) ?? [];
     siblings.push(node);
@@ -51,7 +54,9 @@ export function formatTree(nodes: KnowledgeNode[]): string {
   const walk = (parent: string | null, depth: number) => {
     for (const node of children.get(parent) ?? []) {
       const files = node.fileCount === 1 ? "1 file" : `${node.fileCount} files`;
-      lines.push(`${"  ".repeat(depth)}- ${node.name} [${node.type}] id=${node.id} (${files})`);
+      const about =
+        node.role === null ? "no access, shown as a path" : node.role ? `${files}, ${node.role}` : files;
+      lines.push(`${"  ".repeat(depth)}- ${node.name} [${node.type}] id=${node.id} (${about})`);
       walk(node.id, depth + 1);
     }
   };
@@ -59,38 +64,57 @@ export function formatTree(nodes: KnowledgeNode[]): string {
   return lines.join("\n");
 }
 
-export function createFileTools(storage: () => Storage | null) {
+/**
+ * `user` says whose behalf Claude acts on: its tools can do what that user can,
+ * and their changes are recorded as the agent's, acting for that user.
+ */
+export function createFileTools(
+  storage: () => Storage | null,
+  // With login on, the user must come from the chat run; until it does, no access.
+  user: (storage: Storage) => Promise<string | null> = async (s) =>
+    s.config.authSecret ? null : s.access.localUserId(),
+) {
   // Storage starts in the background; a call before it is ready (or after it
   // failed) gets a clear error instead of a crash.
-  const run = async (fn: (storage: Storage) => Promise<ToolResult>) => {
+  const run = async (fn: (session: Session) => Promise<ToolResult>) => {
     const current = storage();
     if (!current) return error("Workspace storage is unavailable right now.");
     try {
-      return await fn(current);
+      const userId = await user(current);
+      if (!userId) return error("The user is not signed in, so the workspace is unavailable.");
+      const principal: Principal = { userId, actor: "agent" };
+      return await fn(current.session(principal));
     } catch (err) {
-      if (err instanceof InvalidPathError || err instanceof NodeError) return error(err.message);
+      if (err instanceof NodeError && err.message === "Node not found") {
+        return error("No such knowledge node (or the user can't see it). Call list_nodes.");
+      }
+      if (
+        err instanceof InvalidPathError ||
+        err instanceof NodeError ||
+        err instanceof ForbiddenError ||
+        err instanceof AccessError
+      ) {
+        return error(err.message);
+      }
       console.error("[storage] tool failed:", err);
       return error("Workspace storage error.");
     }
   };
   /** Files of `node` (root when omitted). */
-  const inNode = (node: string | undefined, fn: (service: FileService) => Promise<ToolResult>) =>
-    run(async (current) => {
-      const service = await current.files.inNode(node || null);
-      if (!service) return error(`No knowledge node with id ${node}. Call list_nodes.`);
-      return fn(service);
-    });
+  const inNode = (node: string | undefined, fn: (files: FilesSession) => Promise<ToolResult>) =>
+    run(async (session) => fn(await session.files(node || null)));
 
   return [
     tool(
       "list_nodes",
       "Show the knowledge tree: its levels (e.g. tech › module › loop › process) and " +
-        "every node with its id and number of files. Files live at the workspace root " +
-        "or in a node.",
+        "the nodes the user can see, with id, number of files and the user's role " +
+        "(viewer can read, editor can also write, owner can also delete). Files live " +
+        "at the workspace root or in a node.",
       {},
       () =>
-        run(async (current) => {
-          const [types, nodes] = await Promise.all([current.nodes.types(), current.nodes.list()]);
+        run(async (session) => {
+          const { types, nodes } = await session.tree();
           return text(
             `Levels: ${types.map((t) => t.name).join(" › ")}\n` +
               (nodes.length ? formatTree(nodes) : "(no nodes yet)"),
@@ -106,8 +130,8 @@ export function createFileTools(storage: () => Storage | null) {
         name: z.string().describe("e.g. Etch, Module 3, Endpoint control"),
       },
       ({ parentId, name }) =>
-        run(async (current) => {
-          const node = await current.nodes.create(parentId || null, name);
+        run(async (session) => {
+          const node = await session.createNode(parentId || null, name);
           return text({ ok: true, id: node.id, name: node.name, type: node.type });
         }),
     ),
@@ -174,9 +198,7 @@ export function createFileTools(storage: () => Storage | null) {
       ({ path, content, node }) =>
         inNode(node, async (service) => {
           const existed = Boolean(await service.stat(path));
-          const info = await service.write(path, new TextEncoder().encode(content), {
-            author: "agent",
-          });
+          const info = await service.write(path, new TextEncoder().encode(content));
           return text({ ok: true, path: info.path, node: service.nodeId, created: !existed });
         }),
     ),

@@ -18,6 +18,11 @@ export interface StorageConfig {
     forcePathStyle: boolean;
   };
   maxUploadBytes: number;
+  /**
+   * Shared with the Next.js app, which signs who is logged in (identity.ts).
+   * Unset: no login, everyone is the local user who owns the workspace.
+   */
+  authSecret?: string;
 }
 
 export function storageConfigFromEnv(
@@ -38,5 +43,14 @@ export function storageConfigFromEnv(
       env.MAX_UPLOAD_BYTES || String(50 * 1024 * 1024),
       10,
     ),
+    authSecret: authSecretFromEnv(env),
   };
+}
+
+function authSecretFromEnv(env: NodeJS.ProcessEnv) {
+  const secret = env.AUTH_SECRET || undefined;
+  if (secret && secret.length < 32) {
+    throw new Error("AUTH_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)");
+  }
+  return secret;
 }
