@@ -11,6 +11,7 @@ import {
   MessagesSquare,
   Network,
   Package,
+  Search,
   Sparkles,
   Trash2,
   Upload,
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
+import { SearchPanel } from "./search-panel";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
 import { fileName, isTextFile, mimeForPath, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
@@ -28,6 +30,7 @@ export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
+  { id: "search", label: "Search", icon: Search },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
@@ -152,7 +155,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats" || !canEdit) return;
+        if (view === "chats" || view === "search" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -176,6 +179,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
         {view === "files" && <FileTree files={files} />}
+        {view === "search" && <SearchPanel />}
         {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
           <FlatList

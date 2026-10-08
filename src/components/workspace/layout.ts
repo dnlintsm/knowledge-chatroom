@@ -6,7 +6,14 @@
 
 export type PaneId = "explorer" | "editor" | "chat";
 
-export type SidebarView = "files" | "knowledge" | "skills" | "uploads" | "artifacts" | "chats";
+export type SidebarView =
+  | "files"
+  | "search"
+  | "knowledge"
+  | "skills"
+  | "uploads"
+  | "artifacts"
+  | "chats";
 
 export interface Layout {
   sideOpen: boolean;

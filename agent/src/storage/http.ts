@@ -7,11 +7,12 @@ import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile } from "./paths";
+import { SearchError } from "./search";
 import type { Session } from "./session";
 
 /**
- * REST API for workspace files and the knowledge tree, mounted at /files and
- * /nodes on the agent server:
+ * REST API for workspace files, the knowledge tree, experiments, search and
+ * access, mounted on the agent server:
  *
  *   GET    /files                   list live files (JSON)
  *   GET    /files?watch             change stream (Server-Sent Events), one
@@ -52,6 +53,15 @@ import type { Session } from "./session";
  *   DELETE /experiments/<id>        soft delete, with its files
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
+ *
+ *   GET    /search?q=<text>         {results}: files you can read whose text
+ *                                   or path matches, best first, each with
+ *                                   path, node, experiment, where (node names
+ *                                   from the top) and the matching snippet.
+ *                                   &scope=<node id> searches only that node,
+ *                                   the nodes below it and their experiments;
+ *                                   &near=<node id> or &experiment=<id> ranks
+ *                                   files near there first; &limit= (≤ 50)
  *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
@@ -310,6 +320,26 @@ async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL,
   json(res, 404, { error: "Not found" });
 }
 
+async function handleSearch(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  if (!/^\/search\/?$/.test(url.pathname)) {
+    json(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "GET") {
+    json(res, 405, { error: "Method not allowed" });
+    return;
+  }
+  const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  const results = await session.search({
+    query: url.searchParams.get("q") ?? "",
+    scope: url.searchParams.get("scope") || null,
+    near: url.searchParams.get("near") || null,
+    nearExperiment: url.searchParams.get("experiment") || null,
+    limit: Number.isNaN(limit) ? undefined : limit,
+  });
+  json(res, 200, { results });
+}
+
 export function createStorageHandler(
   storage: () => Storage | null,
   maxUploadBytes: number,
@@ -341,6 +371,7 @@ export function createStorageHandler(
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
       else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
+      else if (/^\/search(\/|$)/.test(url.pathname)) await handleSearch(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
     } catch (err) {
       if (err instanceof NodeNotFoundError) {
@@ -355,7 +386,8 @@ export function createStorageHandler(
         err instanceof InvalidPathError ||
         err instanceof NodeError ||
         err instanceof AccessError ||
-        err instanceof ExperimentError
+        err instanceof ExperimentError ||
+        err instanceof SearchError
       ) {
         json(res, 400, { error: err.message });
         return;

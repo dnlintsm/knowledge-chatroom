@@ -6,6 +6,7 @@ import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
+import { SearchService } from "./search";
 import { Session } from "./session";
 
 export { FileService } from "./files";
@@ -16,6 +17,8 @@ export type { Experiment, ExperimentStatus } from "./experiments";
 export type { KnowledgeNode, NodeType } from "./nodes";
 export type { Principal, Role } from "./access";
 export { Session } from "./session";
+export { SearchService } from "./search";
+export type { SearchHit, SearchOptions } from "./search";
 
 export interface Storage {
   config: StorageConfig;
@@ -25,6 +28,7 @@ export interface Storage {
   nodes: NodeService;
   experiments: ExperimentService;
   access: AccessService;
+  search: SearchService;
   events: EventHub;
   blobs: BlobStore;
   /** Whether Postgres also enforces access for users' queries (004_row_security.sql). */
@@ -66,6 +70,7 @@ export async function initStorage(
     const nodes = new NodeService(sql, events, ws.id);
     const experiments = new ExperimentService(sql, events, ws.id);
     const access = new AccessService(sql, ws.id);
+    const search = new SearchService(sql, blobs, ws.id);
     return {
       config,
       sql,
@@ -73,10 +78,11 @@ export async function initStorage(
       nodes,
       experiments,
       access,
+      search,
       events,
       blobs,
       rowSecurity,
-      session: (principal) => new Session({ files, nodes, experiments, access, sql, rowSecurity }, principal),
+      session: (principal) => new Session({ files, nodes, experiments, access, search, sql, rowSecurity }, principal),
       close: () => sql.end(),
     };
   } catch (err) {
@@ -101,6 +107,24 @@ export function currentStorage(): Storage | null {
 }
 
 /**
+ * Indexes files stored before search existed. Blobs the store couldn't hand
+ * over (a hiccup, not a missing object) are tried again later, waiting a
+ * minute, then twice as long each time, six times at most.
+ */
+function indexExisting(search: SearchService, attempt = 0) {
+  search
+    .indexAll()
+    .then(({ indexed, failed }) => {
+      if (indexed) console.log(`[search] indexed ${indexed} existing files`);
+      if (failed && attempt < 6) {
+        console.warn(`[search] ${failed} files could not be read for search yet; trying again later`);
+        setTimeout(() => indexExisting(search, attempt + 1), 60_000 * 2 ** attempt).unref();
+      }
+    })
+    .catch((err) => console.error("[search] indexing existing files failed:", err));
+}
+
+/**
  * Starts storage in the background for the server process. Until it is ready
  * the file API answers 503 (500 if it failed) and file tools return an error,
  * while chat keeps working.
@@ -113,6 +137,8 @@ export function startStorage(config: StorageConfig | null = storageConfigFromEnv
       current = ready;
       state = "ready";
       console.log("[storage] ready");
+      // Files written before search existed; new writes index themselves.
+      if (ready) indexExisting(ready.search);
     })
     .catch((err) => {
       state = "failed";
