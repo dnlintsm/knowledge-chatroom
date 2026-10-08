@@ -23,6 +23,25 @@ Panes resize by dragging and collapse from the title bar; below 1024px one pane 
 time. With [file storage](#file-storage) running, files are saved on the server (the title bar
 says "Saved"); without it they stay in this browser's localStorage ("This browser").
 
+### Workbench contract
+
+Everything that moves panes goes through one typed API, `useWorkbench()`
+(`src/components/workspace/workbench.tsx`): title bar buttons, the icon rail, the phone pane
+switcher, file references in answers, and Claude's open-file tools.
+
+| Part | Does |
+| --- | --- |
+| `panes.isOpen / show / hide / toggle(pane)` | `"explorer"`, `"editor"` or `"chat"`; on phones `show` switches to that pane |
+| `panes.resize / resetSize(pane, width)` | splitter drags, clamped to each pane's range |
+| `sidebar.select / show(view)` | the icon rail (`select` on the active view collapses the panel) |
+| `editor.open(path, lines?)` | opens a file or the task board, optionally at cited lines |
+| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat |
+| `notify(message, level)` | a short notice in the corner |
+
+The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit
+tested (`e2e/workbench.spec.ts`), and a test fails if anything outside the workbench starts
+keeping its own pane state.
+
 ### File references in answers
 
 Claude's answers can point at a file, or at lines in it, and a click opens them in the middle
