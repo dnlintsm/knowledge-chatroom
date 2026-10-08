@@ -60,6 +60,21 @@ export interface KnowledgeTree {
   nodes: KnowledgeNode[];
 }
 
+/**
+ * fetch for the storage API. With login on, a 401 means the session ended,
+ * so the browser goes to sign in again and comes back here.
+ */
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 && typeof window !== "undefined") {
+    const here = window.location.pathname + window.location.search;
+    window.location.assign(`/api/auth/login?returnTo=${encodeURIComponent(here)}`);
+    // Nothing more happens on this page.
+    await new Promise(() => {});
+  }
+  return res;
+}
+
 const nodeQuery = (node: NodeId) => (node ? `?node=${encodeURIComponent(node)}` : "");
 
 export function fileUrl(path: string, node: NodeId = null) {
@@ -70,13 +85,16 @@ export function fileUrl(path: string, node: NodeId = null) {
  * The file list; "starting" when storage (or the agent server) may just not be
  * up yet (503, 502, network error), so asking again shortly makes sense; null
  * when this session has no server storage (404 = not configured, 500 = failed).
+ * A place you have no access to lists as empty.
  */
 export async function listServerFiles(
   node: NodeId = null,
 ): Promise<ServerFile[] | "starting" | null> {
   try {
-    const res = await fetch(`/api/files${nodeQuery(node)}`, { cache: "no-store" });
+    const res = await apiFetch(`/api/files${nodeQuery(node)}`, { cache: "no-store" });
     if (res.ok) return ((await res.json()) as { files: ServerFile[] }).files;
+    // Signed in, but nothing here is shared with you (e.g. the workspace root).
+    if (res.status === 403) return [];
     return res.status === 503 || res.status === 502 ? "starting" : null;
   } catch {
     return "starting";
@@ -100,7 +118,7 @@ export async function loadServerFile(info: ServerFile, node: NodeId = null): Pro
   if (!isTextFile(info)) {
     return { ...base, content: `${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}` };
   }
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await apiFetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`GET ${info.path}: ${res.status}`);
   return { ...base, content: await res.text() };
 }
@@ -114,24 +132,25 @@ export async function putServerFile(
     !isTextFile(file) && file.content.startsWith("data:")
       ? await (await fetch(file.content)).blob()
       : file.content;
-  const res = await fetch(fileUrl(file.path, node), {
+  const res = await apiFetch(fileUrl(file.path, node), {
     method: "PUT",
     headers: { "Content-Type": file.mime },
     body,
   });
+  if (res.status === 403) throw new Error(`You can't change files here (${file.path})`);
   if (!res.ok) throw new Error(`PUT ${file.path}: ${res.status}`);
   return (await res.json()) as ServerFile;
 }
 
 export async function deleteServerFile(path: string, node: NodeId = null): Promise<void> {
-  const res = await fetch(fileUrl(path, node), { method: "DELETE" });
+  const res = await apiFetch(fileUrl(path, node), { method: "DELETE" });
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
 }
 
 /** The knowledge tree's levels and the nodes you can see, or null when it can't be read. */
 export async function listNodes(): Promise<KnowledgeTree | null> {
   try {
-    const res = await fetch("/api/nodes", { cache: "no-store" });
+    const res = await apiFetch("/api/nodes", { cache: "no-store" });
     return res.ok ? ((await res.json()) as KnowledgeTree) : null;
   } catch {
     return null;
@@ -139,7 +158,7 @@ export async function listNodes(): Promise<KnowledgeTree | null> {
 }
 
 async function nodeRequest(method: string, path: string, body?: unknown): Promise<KnowledgeNode> {
-  const res = await fetch(`/api/nodes${path}`, {
+  const res = await apiFetch(`/api/nodes${path}`, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -156,3 +175,19 @@ export const renameServerNode = (id: string, name: string) =>
   nodeRequest("PATCH", `/${encodeURIComponent(id)}`, { name });
 export const deleteServerNode = (id: string) =>
   nodeRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
+
+/** Whether login is on, and who is signed in (null without login). */
+export interface Account {
+  login: boolean;
+  user: { name: string | null; email: string | null } | null;
+}
+
+export async function getAccount(): Promise<Account> {
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    if (res.ok) return (await res.json()) as Account;
+  } catch {
+    // Treated as no login, like before it existed.
+  }
+  return { login: false, user: null };
+}

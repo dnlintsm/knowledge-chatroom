@@ -16,12 +16,14 @@ import {
   createServerNode,
   deleteServerFile,
   deleteServerNode,
+  getAccount,
   listNodes,
   listServerFiles,
   loadServerFile,
   putServerFile,
   renameServerNode,
   WATCH_URL,
+  type Account,
   type KnowledgeNode,
   type KnowledgeTree,
   type NodeId,
@@ -54,6 +56,9 @@ import {
  * loop › process). The user is always in one place, the workspace root or a
  * node, and `files` holds that place's files; enterNode() moves elsewhere.
  * Each place keeps its own tabs.
+ *
+ * With login on, what the user may do in each place comes from their role
+ * there (`placeRole`); `canEdit` says whether this place's files can change.
  */
 
 const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
@@ -122,6 +127,12 @@ interface WorkspaceValue {
   nodeTypes: NodeType[];
   /** Your role at the workspace root; each node carries its own. */
   rootRole: Role | null;
+  /** Your role in the current place (owner without server storage). */
+  placeRole: Role | null;
+  /** Whether you can add, change and delete files here. */
+  canEdit: boolean;
+  /** Whether login is on, and who is signed in. */
+  account: Account;
   /** Moves to a node (null = root) and loads its files; false if it's gone. */
   enterNode: (id: NodeId) => Promise<boolean>;
   /** These throw with a message for the user, e.g. a duplicate name. */
@@ -175,6 +186,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [node, setNode] = useState<NodeId>(null);
   const nodeRef = useRef<NodeId>(null);
   const [tree, setTree] = useState<KnowledgeTree>({ types: [], rootRole: null, nodes: [] });
+  const [account, setAccount] = useState<Account>({ login: false, user: null });
   // Server sync bookkeeping, per place and path: the content hash we last saw
   // on the server, edits waiting to save, and saves on the wire. Change events
   // for a file with local edits pending are ignored, so they can't overwrite
@@ -399,6 +411,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
 
     (async () => {
+      const who = await getAccount();
+      if (cancelled) return;
+      setAccount(who);
       // Storage answers 503 while it migrates on startup; give it a moment.
       let list = await listServerFiles();
       for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
@@ -412,7 +427,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // First visit to an empty server: bring over this browser's files (or
       // the samples), so nothing made before storage existed is lost. Uploads
       // that fail stay visible, are reported, and are retried on the next load.
-      const seeded = window.localStorage.getItem(SERVER_SEEDED_KEY);
+      // Not with login: a shared workspace that looks empty to you may just
+      // not be shared with you, and it isn't yours to fill.
+      const seeded = who.login ? "1" : window.localStorage.getItem(SERVER_SEEDED_KEY);
       const retry: string[] = seeded && seeded !== "1" ? JSON.parse(seeded) : [];
       const toUpload =
         seeded === null && list.length === 0
@@ -444,10 +461,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
       await resync(list, nodeRef.current === null ? new Set(failed) : new Set());
+      // Roles come with the tree; load it first so edit controls are right from the start.
+      await refreshTree();
       if (cancelled) return;
       mode.current = "server";
       setStorageMode("server");
-      void refreshTree();
 
       events = new EventSource(WATCH_URL);
       events.onmessage = (e) => void onEvent(JSON.parse(e.data) as ServerEvent).catch(() => {});
@@ -583,6 +601,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const lineage = useMemo(() => (node ? lineageOf(tree.nodes, node) : []), [tree.nodes, node]);
+  const placeRole: Role | null =
+    storageMode !== "server"
+      ? "owner"
+      : node
+        ? (tree.nodes.find((n) => n.id === node)?.role ?? null)
+        : tree.rootRole;
+  const canEdit = placeRole === "editor" || placeRole === "owner";
 
   const value = useMemo<WorkspaceValue>(() => {
     const activeFile =
@@ -608,6 +633,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       nodes: tree.nodes,
       nodeTypes: tree.types,
       rootRole: tree.rootRole,
+      placeRole,
+      canEdit,
+      account,
       enterNode,
       createNode,
       renameNode,
@@ -615,7 +643,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [
     state, selection, openCount, reveal, getFile, open, close, write, remove, storageMode,
-    syncError, node, lineage, tree, enterNode, createNode, renameNode, deleteNode,
+    syncError, node, lineage, tree, placeRole, canEdit, account, enterNode, createNode,
+    renameNode, deleteNode,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

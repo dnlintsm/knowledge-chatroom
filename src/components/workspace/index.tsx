@@ -20,6 +20,7 @@ import { useWorkspaceAgent } from "./agent-bridge";
 import { ChatPane } from "./chat-pane";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel, type SidebarView } from "./sidebar";
+import { AccountMenu, ShareButton } from "./sharing";
 import { Splitter } from "./splitter";
 import { useHydrated, useWorkspace, WorkspaceProvider } from "./store";
 
@@ -157,6 +158,8 @@ function TitleBar({
       <StorageStatus />
       <PlaceBreadcrumb />
       <div className="ml-auto flex items-center gap-0.5">
+        <ShareButton />
+        <AccountMenu />
         <button
           type="button"
           aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}

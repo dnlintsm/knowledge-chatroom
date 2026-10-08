@@ -481,6 +481,28 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(result.isError, true);
     });
 
+    test("tools made for a user can do only what that user can", async () => {
+      const local = await storage.access.localUserId();
+      const viewer = await storage.access.userForSubject("test|tool-viewer");
+      await storage.access.setGrant(null, "user", viewer, "viewer", local);
+      assert.equal(await storage.access.role(viewer, null), "viewer");
+      const toolsFor = (user: string | null) =>
+        Object.fromEntries(createFileTools(() => storage, async () => user).map((t) => [t.name, t]));
+      const run = async (user: string | null, name: string, args: Record<string, unknown>) =>
+        (await toolsFor(user)[name].handler(args as never, {})) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
+
+      assert.equal((await run(viewer, "list_files", {})).isError, undefined);
+      const denied = await run(viewer, "write_file", { path: "notes/viewer.md", content: "no" });
+      assert.equal(denied.isError, true);
+      assert.match(denied.content[0].text, /editor access/);
+      assert.equal(await storage.files.stat("notes/viewer.md"), null);
+      // No user (login on, but the run carried none): nothing at all.
+      assert.equal((await run(null, "list_files", {})).isError, true);
+    });
+
     test("list_nodes shows the tree; file tools work inside a node", async () => {
       const created = JSON.parse(
         (await call("create_node", { name: "CMP" })).text,

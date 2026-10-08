@@ -161,15 +161,25 @@ npm run dev
   The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
   check access in one place (`agent/src/storage/session.ts`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is
-  one built-in user who owns everything, so nothing changes for a single-user setup; login
-  (OIDC, with `AUTH_SECRET` shared by the app and the agent) is the next step of #4.
+  one built-in user who owns everything, so nothing changes for a single-user setup.
+- **Login** (optional): set `AUTH_SECRET` (the same value for the app and the agent, at least
+  32 characters, e.g. `openssl rand -hex 32`) and an OpenID Connect provider (`OIDC_ISSUER`,
+  `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` if the client has one; Keycloak, Authentik, Google,
+  Entra ID and others work). Register `<APP_URL>/api/auth/callback` as the redirect URI, and
+  set `APP_URL` when the app sits behind a proxy. Users then sign in before the workspace
+  opens; the app keeps them in a signed cookie and signs each request it forwards to the agent
+  (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
+  person to sign in owns the workspace and shares nodes from the title bar's Share button
+  (people show up there once they have signed in). Viewers get the files read only, and
+  Claude's tools in a chat act as the person chatting.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
   tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
   no browser tab is open. The file tools take a `node`; the chat context says which node the
   user is in. Its writes are versions authored by the agent.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
-  edits from other tabs. The first visit to an empty server uploads this browser's files.
+  edits from other tabs. Without login, the first visit to an empty server uploads this
+  browser's files.
   The Knowledge view in the left rail shows the tree; clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
@@ -248,7 +258,7 @@ a step that calls `shot(page, "NN-name")` for it.
   `src/server.ts` is a minimal `node:http` equivalent that serves the adapter.)
 
 To customize: add or edit tools in `agent/src/` and the system prompt in `agent/src/agent.ts`,
-and the UI in `src/app/page.tsx` and `src/components/`.
+and the UI in `src/app/home.tsx` and `src/components/`.
 
 ## Troubleshooting
 

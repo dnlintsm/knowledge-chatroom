@@ -206,8 +206,14 @@ export function KnowledgeTree() {
       {addInput(null, 0)}
       {!ws.nodes.length && editing === null && (
         <p className="px-3 py-2 text-[var(--muted-foreground)]">
-          No {top ?? "nodes"} yet. Use + to add one, then add{" "}
-          {ws.nodeTypes.slice(1).map((t) => t.name).join(", ")} levels under it.
+          {atLeast(ws.rootRole, "editor") ? (
+            <>
+              No {top ?? "nodes"} yet. Use + to add one, then add{" "}
+              {ws.nodeTypes.slice(1).map((t) => t.name).join(", ")} levels under it.
+            </>
+          ) : (
+            "Nothing in the knowledge tree is shared with you yet."
+          )}
         </p>
       )}
       {error && (

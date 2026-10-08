@@ -86,7 +86,7 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 }
 
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write, open } = useWorkspace();
+  const { files, write, open, canEdit } = useWorkspace();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -119,7 +119,8 @@ export function SidePanel({ view }: { view: SidebarView }) {
   };
 
   const title = VIEWS.find((v) => v.id === view)?.label ?? "";
-  const actions: ReactNode = (
+  // Viewers see the files but get no controls that change them.
+  const actions: ReactNode = canEdit && (
     <>
       {(view === "files" || view === "uploads") && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
@@ -148,7 +149,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats") return;
+        if (view === "chats" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -183,7 +184,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         {view === "uploads" && (
           <FlatList
             files={files.filter((f) => f.kind === "upload")}
-            empty="Drop files here or use the upload button."
+            empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
           />
         )}
         {view === "artifacts" && (
@@ -242,7 +243,7 @@ function FileRow({
   label?: string;
   depth?: number;
 }) {
-  const { active, open, remove } = useWorkspace();
+  const { active, open, remove, canEdit } = useWorkspace();
   const selected = active === file.path;
   return (
     <div
@@ -263,6 +264,7 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
+      {canEdit && (
       <button
         type="button"
         aria-label={`Delete ${file.path}`}
@@ -274,6 +276,7 @@ function FileRow({
       >
         <Trash2 className="size-3.5" />
       </button>
+      )}
     </div>
   );
 }

@@ -1,9 +1,12 @@
 import type { NextRequest } from "next/server";
 
+import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth";
+
 /**
  * Forwards a route group to the agent server (agent/src/storage/http.ts), so
  * the browser talks to one origin and the agent port stays private. Responses
- * stream through, which carries the /files?watch change stream too.
+ * stream through, which carries the /files?watch change stream too. With
+ * login on, each request says who it is for (see ./auth.ts).
  */
 
 const AGENT_URL = (process.env.AGENT_URL || "http://localhost:8000").replace(
@@ -27,6 +30,10 @@ export function agentProxy(prefix: string) {
     req: NextRequest,
     { params }: { params: Promise<{ path?: string[] }> },
   ) {
+    const user = authSecret() ? sessionFrom(req) : null;
+    if (authSecret() && !user) {
+      return Response.json({ error: "Sign in first" }, { status: 401 });
+    }
     const { path = [] } = await params;
     const target = new URL(
       `${AGENT_URL}/${prefix}/${path.map(encodeURIComponent).join("/")}`,
@@ -38,6 +45,7 @@ export function agentProxy(prefix: string) {
       const value = req.headers.get(name);
       if (value) headers.set(name, value);
     }
+    if (user) headers.set(IDENTITY_HEADER, identityHeader(user));
 
     let upstream: Response;
     try {

@@ -8,12 +8,14 @@
  * shared `todos` state via its built-in ag_ui_update_state tool.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import dotenv from "dotenv";
 import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import type { RunAgentInput } from "@ag-ui/core";
 
 import { resolveModel } from "./model";
 import { queryData } from "./query";
@@ -67,21 +69,42 @@ const SYSTEM_PROMPT = [
 // With storage configured (DATABASE_URL), workspace files live on the server and
 // the file tools run here; the browser then hides its own copies of them.
 const SERVER_NAME = "copilotkit";
+type Tools = NonNullable<Parameters<typeof createSdkMcpServer>[0]["tools"]>;
+const baseTools: Tools = [queryData, searchFlights, generateA2ui];
+const toolServer = (tools: Tools) =>
+  createSdkMcpServer({ name: SERVER_NAME, version: "1.0.0", tools });
+// The file tools act for a user (see ./storage/tools.ts). Without login that
+// is always the local user; with it, each run gets tools for its own user.
 const fileTools = serverStorage ? createFileTools(currentStorage) : [];
-const backendTools = [queryData, searchFlights, generateA2ui, ...fileTools];
+const backendTools: Tools = [...baseTools, ...fileTools];
 
-export const adapter = new ClaudeAgentAdapter({
+const runUser = new AsyncLocalStorage<string | null>();
+
+/**
+ * Runs `fn` (which starts an adapter run) for a storage user: that run's file
+ * tools can do what the user can, and nothing else. null = no access;
+ * undefined = the shared tools, which act for the local user without login.
+ */
+export const runAs = <T>(userId: string | null | undefined, fn: () => T): T =>
+  userId === undefined ? fn() : runUser.run(userId, fn);
+
+class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
+  // Called synchronously when a run starts, so runAs()'s user is in scope.
+  override buildOptions(input: RunAgentInput) {
+    const options = super.buildOptions(input);
+    const userId = runUser.getStore();
+    if (!serverStorage || userId === undefined) return options;
+    const tools = [...baseTools, ...createFileTools(currentStorage, async () => userId)];
+    return { ...options, mcpServers: { ...options.mcpServers, [SERVER_NAME]: toolServer(tools) } };
+  }
+}
+
+export const adapter = new WorkspaceAgentAdapter({
   agentId: "claude-sdk-typescript",
   description: "CopilotKit × Claude Agent SDK (TypeScript) starter",
   model: resolveModel(),
   systemPrompt: SYSTEM_PROMPT,
-  mcpServers: {
-    [SERVER_NAME]: createSdkMcpServer({
-      name: SERVER_NAME,
-      version: "1.0.0",
-      tools: backendTools,
-    }),
-  },
+  mcpServers: { [SERVER_NAME]: toolServer(backendTools) },
   allowedTools: backendTools.map((tool) => `mcp__${SERVER_NAME}__${tool.name}`),
   tools: [],
   includePartialMessages: true,

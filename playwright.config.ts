@@ -10,11 +10,22 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * With DATABASE_URL (and the S3_* vars) set, the real agent server also runs
  * for server storage, so knowledge.spec.ts can show the knowledge tree. With
- * no key it listens on :8001 and the mock forwards /files and /nodes to it.
+ * no key it listens on :8001 and the mock forwards /files, /nodes and /access
+ * to it.
+ *
+ * With AUTH_SECRET set too, login is on: e2e/mock-oidc.mjs plays the login
+ * provider and only login.spec.ts runs (the other specs assume no login).
  */
 const useRealAgent = Boolean(process.env.ANTHROPIC_API_KEY);
 const withStorage = Boolean(process.env.DATABASE_URL);
 const STORAGE_PORT = 8001;
+const withLogin = Boolean(process.env.AUTH_SECRET);
+const OIDC_PORT = 9400;
+if (withLogin) {
+  // Inherited by the app and agent servers started below.
+  process.env.OIDC_ISSUER ||= `http://localhost:${OIDC_PORT}`;
+  process.env.OIDC_CLIENT_ID ||= "knowledge-chatroom";
+}
 
 const agentServers = useRealAgent
   ? [{ command: "npm --prefix agent start", url: "http://localhost:8000/health" }]
@@ -37,6 +48,7 @@ const agentServers = useRealAgent
 
 export default defineConfig({
   testDir: "./e2e",
+  ...(withLogin ? { testMatch: "login.spec.ts" } : { testIgnore: "login.spec.ts" }),
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
@@ -64,6 +76,9 @@ export default defineConfig({
     },
   ],
   webServer: [
+    ...(withLogin
+      ? [{ command: `OIDC_PORT=${OIDC_PORT} node e2e/mock-oidc.mjs`, url: `http://localhost:${OIDC_PORT}/health` }]
+      : []),
     ...agentServers.map((server) => ({
       ...server,
       reuseExistingServer: !process.env.CI,
