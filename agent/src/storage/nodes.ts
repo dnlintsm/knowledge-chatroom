@@ -122,7 +122,11 @@ export class NodeService {
    * Adds a node under `parentId` (null for the top level). Its type is the
    * level below the parent's.
    */
-  async create(parentId: string | null, rawName: string): Promise<KnowledgeNode> {
+  async create(
+    parentId: string | null,
+    rawName: string,
+    inTx?: (tx: Tx, id: string) => Promise<unknown>,
+  ): Promise<KnowledgeNode> {
     const name = cleanName(rawName);
     if (parentId !== null && !isNodeId(parentId)) throw new NodeNotFoundError("Parent node not found");
     const id = await this.sql
@@ -151,6 +155,7 @@ export class NodeService {
           INSERT INTO nodes (workspace_id, parent_id, type_id, name)
           VALUES (${this.workspaceId}, ${parentId}, ${type.id}, ${name})
           RETURNING id`;
+        await inTx?.(tx, row.id);
         await this.events.notify(tx, { op: "node", change: "create", id: row.id });
         return row.id;
       })
@@ -158,7 +163,11 @@ export class NodeService {
     return (await this.get(id))!;
   }
 
-  async rename(id: string, rawName: string): Promise<KnowledgeNode | null> {
+  async rename(
+    id: string,
+    rawName: string,
+    inTx?: (tx: Tx) => Promise<unknown>,
+  ): Promise<KnowledgeNode | null> {
     const name = cleanName(rawName);
     if (!isNodeId(id)) return null;
     const renamed = await this.sql
@@ -167,6 +176,7 @@ export class NodeService {
           UPDATE nodes SET name = ${name}, updated_at = now()
           WHERE id = ${id} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL`;
         if (rows.count === 0) return false;
+        await inTx?.(tx);
         await this.events.notify(tx, { op: "node", change: "rename", id });
         return true;
       })
@@ -178,7 +188,7 @@ export class NodeService {
    * Soft-deletes the node, everything below it, and their files. History
    * stays in the database.
    */
-  async remove(id: string): Promise<boolean> {
+  async remove(id: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     if (!isNodeId(id)) return false;
     return this.sql.begin(async (tx) => {
       const [target] = await tx<{ path: string }[]>`
@@ -194,6 +204,7 @@ export class NodeService {
           RETURNING id)
         UPDATE files SET deleted_at = now()
         WHERE deleted_at IS NULL AND node_id IN (SELECT id FROM gone)`;
+      await inTx?.(tx);
       await this.events.notify(tx, { op: "node", change: "delete", id });
       return true;
     });

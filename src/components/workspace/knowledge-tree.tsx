@@ -3,9 +3,12 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, House, Pencil, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { KnowledgeNode, NodeId } from "./server-files";
+import type { KnowledgeNode, NodeId, Role } from "./server-files";
 import { FileTree } from "./sidebar";
 import { useWorkspace } from "./store";
+
+const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
+const atLeast = (role: Role | null, min: Role) => role !== null && RANK[role] >= RANK[min];
 
 type Editing = { mode: "add"; parentId: NodeId } | { mode: "rename"; id: string } | null;
 
@@ -74,7 +77,10 @@ export function KnowledgeTree() {
       const kids = children.get(n.id) ?? [];
       const current = ws.node === n.id;
       const isOpen = !collapsed.has(n.id);
-      const canAdd = Boolean(typeAt(n.depth + 1));
+      // Nodes you can't open are shown only as the path to ones you can.
+      const open = n.role !== null;
+      const canAdd = atLeast(n.role, "editor") && Boolean(typeAt(n.depth + 1));
+      const go = () => (open ? enter(n.id) : toggle(n.id));
       const Chevron = isOpen ? ChevronDown : ChevronRight;
       return (
         <div key={n.id} role="group">
@@ -92,8 +98,9 @@ export function KnowledgeTree() {
               aria-expanded={kids.length || current ? isOpen : undefined}
               tabIndex={0}
               data-testid="knowledge-node"
-              onClick={() => enter(n.id)}
-              onKeyDown={(e) => e.key === "Enter" && enter(n.id)}
+              title={open ? undefined : "You can't open this; it leads to something shared with you"}
+              onClick={go}
+              onKeyDown={(e) => e.key === "Enter" && go()}
               style={{ paddingLeft: 4 + depth * 12 }}
               className={cn(
                 "group flex h-7 cursor-pointer items-center gap-1 pr-2",
@@ -116,7 +123,9 @@ export function KnowledgeTree() {
               >
                 <Chevron className="size-4" />
               </button>
-              <span className="min-w-0 flex-1 truncate font-medium">{n.name}</span>
+              <span className={cn("min-w-0 flex-1 truncate font-medium", !open && "text-[var(--muted-foreground)]")}>
+                {n.name}
+              </span>
               <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)] group-hover:hidden">
                 {n.type}
               </span>
@@ -136,20 +145,24 @@ export function KnowledgeTree() {
                     <Plus className="size-3.5" />
                   </RowAction>
                 )}
-                <RowAction label={`Rename ${n.name}`} onClick={() => setEditing({ mode: "rename", id: n.id })}>
-                  <Pencil className="size-3.5" />
-                </RowAction>
-                <RowAction
-                  label={`Delete ${n.name}`}
-                  destructive
-                  onClick={() => {
-                    if (window.confirm(`Delete ${n.name} and everything under it, including files?`)) {
-                      void run(() => ws.deleteNode(n.id));
-                    }
-                  }}
-                >
-                  <Trash2 className="size-3.5" />
-                </RowAction>
+                {atLeast(n.role, "editor") && (
+                  <RowAction label={`Rename ${n.name}`} onClick={() => setEditing({ mode: "rename", id: n.id })}>
+                    <Pencil className="size-3.5" />
+                  </RowAction>
+                )}
+                {atLeast(n.role, "owner") && (
+                  <RowAction
+                    label={`Delete ${n.name}`}
+                    destructive
+                    onClick={() => {
+                      if (window.confirm(`Delete ${n.name} and everything under it, including files?`)) {
+                        void run(() => ws.deleteNode(n.id));
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </RowAction>
+                )}
               </span>
             </div>
           )}
@@ -182,7 +195,7 @@ export function KnowledgeTree() {
       >
         <House className="size-4 text-[var(--muted-foreground)]" />
         <span className="min-w-0 flex-1 truncate font-medium">Workspace</span>
-        {top && (
+        {top && atLeast(ws.rootRole, "editor") && (
           <RowAction label={`New ${top}`} onClick={() => setEditing({ mode: "add", parentId: null })}>
             <Plus className="size-3.5" />
           </RowAction>

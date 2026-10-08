@@ -1,6 +1,6 @@
 import type { BlobStore } from "./blobs";
 import { sha256Hex } from "./blobs";
-import type { Sql } from "./db";
+import type { Sql, Tx } from "./db";
 import type { AuthorType, EventHub } from "./events";
 import { isNodeId, NodeService } from "./nodes";
 import { kindForPath, mimeForPath, normalizePath, type FileKind } from "./paths";
@@ -31,6 +31,8 @@ export interface WriteOptions {
   mime?: string;
   author?: AuthorType;
   authorId?: string | null;
+  /** Runs inside the write's transaction when it adds a version (e.g. audit). */
+  inTx?: (tx: Tx) => Promise<unknown>;
 }
 
 interface FileRow {
@@ -158,6 +160,7 @@ export class FileService {
         SET current_version_id = ${version.id}, mime = ${mime}, updated_at = now()
         WHERE id = ${file.id}`;
 
+      await opts.inTx?.(tx);
       await this.events.notify(tx, { op: "write", node: this.nodeId, path, sha256, author });
     });
 
@@ -165,13 +168,14 @@ export class FileService {
   }
 
   /** Soft delete: history stays, and the path is free for a new file. */
-  async remove(rawPath: string): Promise<boolean> {
+  async remove(rawPath: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     const path = normalizePath(rawPath);
     return this.sql.begin(async (tx) => {
       const rows = await tx`
         UPDATE files f SET deleted_at = now()
         WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
       if (rows.count === 0) return false;
+      await inTx?.(tx);
       await this.events.notify(tx, { op: "delete", node: this.nodeId, path });
       return true;
     });

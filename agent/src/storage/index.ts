@@ -1,14 +1,18 @@
 import { S3BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
+import { AccessService, type Principal } from "./access";
 import { connect, migrate, type Sql } from "./db";
 import { EventHub } from "./events";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
+import { Session } from "./session";
 
 export { FileService } from "./files";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
 export type { KnowledgeNode, NodeType } from "./nodes";
+export type { Principal, Role } from "./access";
+export { Session } from "./session";
 
 export interface Storage {
   config: StorageConfig;
@@ -16,7 +20,10 @@ export interface Storage {
   /** Files at the workspace root; .inNode(id) for a knowledge node's files. */
   files: FileService;
   nodes: NodeService;
+  access: AccessService;
   events: EventHub;
+  /** What `principal` may do; every API call and tool goes through one. */
+  session(principal: Principal): Session;
   close(): Promise<void>;
 }
 
@@ -41,12 +48,17 @@ export async function initStorage(
     const [ws] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
     if (!ws) throw new Error("Workspace default not found");
     const events = new EventHub(sql, ws.id);
+    const files = new FileService(sql, blobs, events, ws.id);
+    const nodes = new NodeService(sql, events, ws.id);
+    const access = new AccessService(sql, ws.id);
     return {
       config,
       sql,
-      files: new FileService(sql, blobs, events, ws.id),
-      nodes: new NodeService(sql, events, ws.id),
+      files,
+      nodes,
+      access,
       events,
+      session: (principal) => new Session({ files, nodes, access }, principal),
       close: () => sql.end(),
     };
   } catch (err) {

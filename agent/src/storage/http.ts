@@ -1,9 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { AccessError, ForbiddenError, ROLES, type Role } from "./access";
 import type { EventHub, WorkspaceEvent } from "./events";
+import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
-import { NodeError, NodeNotFoundError, type NodeService } from "./nodes";
+import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError } from "./paths";
+import type { Session } from "./session";
 
 /**
  * REST API for workspace files and the knowledge tree, mounted at /files and
@@ -23,15 +26,34 @@ import { InvalidPathError } from "./paths";
  *   Every /files route takes ?node=<id> for that knowledge node's files;
  *   without it, files at the workspace root.
  *
- *   GET    /nodes                   {types, nodes}: the levels and every node
+ *   GET    /nodes                   {types, rootRole, nodes}: the levels, your
+ *                                   role at the root, and the nodes you can see
+ *                                   (each with your role; null = shown only as
+ *                                   the path to something you can see)
  *   POST   /nodes                   {parentId|null, name} → the new node (its
  *                                   type is the level below the parent's)
  *   GET    /nodes/<id>              {node, lineage}: lineage is top level first
  *   PATCH  /nodes/<id>              {name} → rename
  *   DELETE /nodes/<id>              soft delete, with everything below it
  *
- * No auth yet: this is the single-user step. Login and per-workspace roles
- * come next (see issue #4), so keep the agent port off the public internet.
+ *   GET    /access                  {me, rootRole}
+ *   GET    /access/users            everyone who has signed in
+ *   GET    /access/groups           the org tree, with direct members
+ *   POST   /access/groups           {parentId|null, name}
+ *   PATCH  /access/groups/<id>      {name}
+ *   DELETE /access/groups/<id>      with its sub-groups
+ *   PUT    /access/groups/<id>/members/<userId>    add a member
+ *   DELETE /access/groups/<id>/members/<userId>    remove one
+ *   GET    /access/grants?node=<id> grants on a node (no node = workspace)
+ *   POST   /access/grants           {node|null, principalType: "user"|"group",
+ *                                   principalId, role: viewer|editor|owner}
+ *   DELETE /access/grants/<id>
+ *   GET    /access/audit?limit=     recent changes, newest first
+ *
+ * Reading needs viewer, changing files and nodes editor, deleting a node or
+ * managing grants on it owner (of that node or one above it), and managing
+ * groups owner of the workspace. Who is asking comes from identity.ts: the
+ * local user without AUTH_SECRET, the signed-in user with it.
  */
 
 function json(res: ServerResponse, status: number, body: unknown) {
@@ -39,10 +61,16 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
-async function watch(res: ServerResponse, events: EventHub) {
+async function watch(res: ServerResponse, events: EventHub, session: Session) {
   // Subscribe before answering, so a failure still gets a normal error response.
+  // Events reach this connection in order, each once the previous was checked.
+  let queue = Promise.resolve();
   const unsubscribe = await events.subscribe((event: WorkspaceEvent) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    queue = queue
+      .then(async () => {
+        if (await session.canSee(event)) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      })
+      .catch((err) => console.error("[storage] watch:", err));
   });
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -84,24 +112,22 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown> |
   }
 }
 
-async function handleNodes(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  nodes: NodeService,
-) {
+const optionalId = (value: unknown) =>
+  value === null || value === undefined ? null : typeof value === "string" ? value : undefined;
+
+async function handleNodes(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   const id = decodeURIComponent(url.pathname.replace(/^\/nodes\/?/, ""));
   if (!id) {
     if (req.method === "GET") {
-      json(res, 200, { types: await nodes.types(), nodes: await nodes.list() });
+      json(res, 200, await session.tree());
     } else if (req.method === "POST") {
       const body = await readJson(req);
-      const parentId = body?.parentId ?? null;
-      if (!body || typeof body.name !== "string" || (parentId !== null && typeof parentId !== "string")) {
+      const parentId = optionalId(body?.parentId);
+      if (!body || typeof body.name !== "string" || parentId === undefined) {
         json(res, 400, { error: "Expected {parentId: string | null, name: string}" });
         return;
       }
-      json(res, 201, await nodes.create(parentId, body.name));
+      json(res, 201, await session.createNode(parentId, body.name));
     } else {
       json(res, 405, { error: "Method not allowed" });
     }
@@ -110,9 +136,8 @@ async function handleNodes(
 
   switch (req.method) {
     case "GET": {
-      const lineage = await nodes.lineage(id);
-      if (!lineage) json(res, 404, { error: "Node not found" });
-      else json(res, 200, { node: lineage[lineage.length - 1], lineage });
+      const lineage = await session.lineage(id);
+      json(res, 200, { node: lineage[lineage.length - 1], lineage });
       return;
     }
     case "PATCH": {
@@ -121,19 +146,91 @@ async function handleNodes(
         json(res, 400, { error: "Expected {name: string}" });
         return;
       }
-      const node = await nodes.rename(id, body.name);
+      const node = await session.renameNode(id, body.name);
       if (!node) json(res, 404, { error: "Node not found" });
       else json(res, 200, node);
       return;
     }
     case "DELETE": {
-      if (await nodes.remove(id)) json(res, 200, { deleted: id });
+      if (await session.deleteNode(id)) json(res, 200, { deleted: id });
       else json(res, 404, { error: "Node not found" });
       return;
     }
     default:
       json(res, 405, { error: "Method not allowed" });
   }
+}
+
+async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  const parts = url.pathname.split("/").slice(2).map(decodeURIComponent); // after /access
+  const [section, id, sub, subId] = parts;
+  const method = req.method ?? "GET";
+  const notFound = () => json(res, 404, { error: "Not found" });
+  const done = (ok: boolean) => (ok ? json(res, 200, { ok: true }) : notFound());
+
+  if (!section) {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    const me = (await session.users()).find((u) => u.id === session.principal.userId) ?? null;
+    return json(res, 200, { me, rootRole: await session.role(null) });
+  }
+
+  if (section === "users" && !id && method === "GET") {
+    return json(res, 200, { users: await session.users() });
+  }
+
+  if (section === "groups") {
+    if (!id) {
+      if (method === "GET") return json(res, 200, { groups: await session.groups() });
+      if (method === "POST") {
+        const body = await readJson(req);
+        const parentId = optionalId(body?.parentId);
+        if (!body || typeof body.name !== "string" || parentId === undefined) {
+          return json(res, 400, { error: "Expected {parentId: string | null, name: string}" });
+        }
+        return json(res, 201, { id: await session.createGroup(parentId, body.name) });
+      }
+    } else if (!sub) {
+      if (method === "PATCH") {
+        const body = await readJson(req);
+        if (!body || typeof body.name !== "string") return json(res, 400, { error: "Expected {name: string}" });
+        return done(await session.renameGroup(id, body.name));
+      }
+      if (method === "DELETE") return done(await session.deleteGroup(id));
+    } else if (sub === "members" && subId && (method === "PUT" || method === "DELETE")) {
+      return done(await session.setMember(id, subId, method === "PUT"));
+    }
+  }
+
+  if (section === "grants") {
+    if (!id && method === "GET") {
+      return json(res, 200, { grants: await session.grants(url.searchParams.get("node") || null) });
+    }
+    if (!id && method === "POST") {
+      const body = await readJson(req);
+      const node = optionalId(body?.node);
+      if (
+        !body ||
+        node === undefined ||
+        (body.principalType !== "user" && body.principalType !== "group") ||
+        typeof body.principalId !== "string" ||
+        !ROLES.includes(body.role as Role)
+      ) {
+        return json(res, 400, {
+          error: 'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
+        });
+      }
+      const grantId = await session.setGrant(node, body.principalType, body.principalId, body.role as Role);
+      return json(res, 200, { id: grantId });
+    }
+    if (id && method === "DELETE") return done(await session.revoke(id));
+  }
+
+  if (section === "audit" && !id && method === "GET") {
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "100", 10);
+    return json(res, 200, { entries: await session.auditLog(Number.isNaN(limit) ? 100 : limit) });
+  }
+
+  json(res, 404, { error: "Not found" });
 }
 
 export function createStorageHandler(
@@ -158,18 +255,26 @@ export function createStorageHandler(
     }
 
     try {
-      if (url.pathname === "/nodes" || url.pathname.startsWith("/nodes/")) {
-        await handleNodes(req, res, url, current.nodes);
+      const principal = await identify(req, current);
+      if (!principal) {
+        json(res, 401, { error: "Sign in to use the workspace" });
         return;
       }
-      await handleFiles(req, res, url, current);
+      const session = current.session(principal);
+      if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
+      else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
+      else await handleFiles(req, res, url, current, session);
     } catch (err) {
-      if (err instanceof InvalidPathError || (err instanceof NodeError && !(err instanceof NodeNotFoundError))) {
-        json(res, 400, { error: err.message });
-        return;
-      }
       if (err instanceof NodeNotFoundError) {
         json(res, 404, { error: err.message });
+        return;
+      }
+      if (err instanceof ForbiddenError) {
+        json(res, 403, { error: err.message });
+        return;
+      }
+      if (err instanceof InvalidPathError || err instanceof NodeError || err instanceof AccessError) {
+        json(res, 400, { error: err.message });
         return;
       }
       console.error("[storage] request failed:", err);
@@ -182,6 +287,7 @@ export function createStorageHandler(
     res: ServerResponse,
     url: URL,
     current: Storage,
+    session: Session,
   ): Promise<void> {
     const rest = url.pathname.replace(/^\/files\/?/, "");
     let path: string;
@@ -193,15 +299,11 @@ export function createStorageHandler(
     }
 
     if (path === "" && req.method === "GET" && url.searchParams.has("watch")) {
-      await watch(res, current.events);
+      await watch(res, current.events, session);
       return;
     }
 
-    const service = await current.files.inNode(url.searchParams.get("node") || null);
-    if (!service) {
-      json(res, 404, { error: "Node not found" });
-      return;
-    }
+    const service = await session.files(url.searchParams.get("node") || null);
 
     if (path === "") {
       if (req.method !== "GET") json(res, 405, { error: "Method not allowed" });
@@ -248,7 +350,6 @@ export function createStorageHandler(
         const mime = req.headers["content-type"]?.split(";")[0].trim();
         const info = await service.write(path, bytes, {
           mime: mime && mime !== "application/octet-stream" ? mime : undefined,
-          author: "user",
         });
         json(res, 200, info);
         return;

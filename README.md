@@ -153,6 +153,16 @@ npm run dev
   parent. Each node has its own files. `GET|POST /api/nodes` lists and adds nodes,
   `GET|PATCH|DELETE /api/nodes/<id>` reads (with its ancestors), renames and deletes one
   (with everything below it), and every `/api/files` route takes `?node=<id>`.
+- **Access**: users belong to groups in an org tree (company › dept › team), and a grant
+  gives a user or group a role on a node and everything below it, or on the whole
+  workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
+  file keeps its history) and adds and renames nodes; owner also deletes nodes and manages
+  grants. A grant to a group covers members of its sub-groups too.
+  The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
+  check access in one place (`agent/src/storage/session.ts`), and every change is written to
+  `audit_log` with who made it and whether Claude made it for them. Without login there is
+  one built-in user who owns everything, so nothing changes for a single-user setup; login
+  (OIDC, with `AUTH_SECRET` shared by the app and the agent) is the next step of #4.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
   tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
   no browser tab is open. The file tools take a `node`; the chat context says which node the

@@ -16,7 +16,10 @@ import { after, before, describe, test } from "node:test";
 import { storageConfigFromEnv } from "./config";
 import { connect } from "./db";
 import type { WorkspaceEvent } from "./events";
+import { AccessError, ForbiddenError, type Principal } from "./access";
 import { createStorageHandler } from "./http";
+import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
+import { NodeNotFoundError } from "./nodes";
 import { initStorage, type Storage } from "./index";
 import { createFileTools, formatTree, numberLines } from "./tools";
 
@@ -229,6 +232,212 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     });
   });
 
+  describe("access control", () => {
+    const as = (userId: string, actor: Principal["actor"] = "user") =>
+      storage.session({ userId, actor });
+    let alice: string, bob: string, carol: string;
+    let techX: string, moduleX: string, techY: string;
+    let dept: string;
+
+    before(async () => {
+      // The first person to sign in owns the workspace; later ones get nothing.
+      alice = await storage.access.userForSubject("test|alice", { name: "Alice" });
+      bob = await storage.access.userForSubject("test|bob", { name: "Bob", email: "bob@example.com" });
+      carol = await storage.access.userForSubject("test|carol");
+
+      const owner = as(alice);
+      techX = (await owner.createNode(null, "Tech X")).id;
+      moduleX = (await owner.createNode(techX, "Module X")).id;
+      techY = (await owner.createNode(null, "Tech Y")).id;
+      await (await owner.files(moduleX)).write("notes/x.md", text("x"));
+
+      // company › etch dept › team; bob is in the team.
+      const company = await owner.createGroup(null, "Company");
+      dept = await owner.createGroup(company, "Etch dept");
+      const team = await owner.createGroup(dept, "Endpoint team");
+      await owner.setMember(team, bob, true);
+      await owner.setGrant(techX, "group", dept, "editor");
+    });
+
+    test("the first signed-in user owns the workspace", async () => {
+      assert.equal(await as(alice).role(null), "owner");
+      assert.equal(await as(bob).role(null), null);
+      assert.equal(await as(await storage.access.localUserId()).role(null), "owner");
+      // Signing in again finds the same user.
+      assert.equal(await storage.access.userForSubject("test|bob"), bob);
+    });
+
+    test("grants inherit down both trees", async () => {
+      // Granted to the dept on Tech X; bob is in a team under the dept.
+      assert.equal(await as(bob).role(techX), "editor");
+      assert.equal(await as(bob).role(moduleX), "editor");
+      assert.equal(await as(bob).role(techY), null);
+      assert.equal(await as(carol).role(moduleX), null);
+    });
+
+    test("roles are additive: the best grant wins", async () => {
+      const grant = await as(alice).setGrant(moduleX, "user", bob, "viewer");
+      assert.equal(await as(bob).role(moduleX), "editor");
+      await as(alice).setGrant(moduleX, "user", bob, "owner"); // replaces the viewer grant
+      assert.equal(await as(bob).role(moduleX), "owner");
+      assert.equal(await as(bob).role(techX), "editor");
+      assert.equal(await as(alice).revoke(grant), true);
+      assert.equal(await as(bob).role(moduleX), "editor");
+    });
+
+    test("the tree shows only what you can see, and the path to it", async () => {
+      const bobTree = await as(bob).tree();
+      assert.equal(bobTree.rootRole, null);
+      assert.deepEqual(bobTree.nodes.map((n) => [n.name, n.role]), [
+        ["Tech X", "editor"],
+        ["Module X", "editor"],
+      ]);
+
+      await as(alice).setGrant(moduleX, "user", carol, "viewer");
+      const carolTree = await as(carol).tree();
+      assert.deepEqual(carolTree.nodes.map((n) => [n.name, n.role, n.fileCount]), [
+        ["Tech X", null, 0],
+        ["Module X", "viewer", 1],
+      ]);
+      await assert.rejects(as(carol).files(techX), NodeNotFoundError);
+      await assert.rejects(as(carol).lineage(techY), NodeNotFoundError);
+    });
+
+    test("viewers read, editors write, owners delete", async () => {
+      const carolFiles = await as(carol).files(moduleX);
+      assert.ok(await carolFiles.read("notes/x.md"));
+      await assert.rejects(carolFiles.write("notes/x.md", text("no")), ForbiddenError);
+      await assert.rejects(carolFiles.remove("notes/x.md"), ForbiddenError);
+      await assert.rejects(as(carol).createNode(moduleX, "Loop"), ForbiddenError);
+
+      const bobFiles = await as(bob).files(moduleX);
+      const info = await bobFiles.write("notes/bob.md", text("from bob"));
+      assert.equal(info.author, "user");
+      const [version] = (await bobFiles.history("notes/bob.md"))!;
+      assert.equal(version.authorId, bob);
+      await as(bob).createNode(moduleX, "Loop B");
+      await assert.rejects(as(bob).deleteNode(moduleX), ForbiddenError);
+      await assert.rejects(as(bob).files(null), ForbiddenError);
+      await assert.rejects(as(bob).createNode(null, "Tech Z"), ForbiddenError);
+      await assert.rejects(as(bob).createGroup(null, "Mine"), ForbiddenError);
+      await assert.rejects(as(bob).setGrant(techX, "user", bob, "owner"), ForbiddenError);
+    });
+
+    test("Claude acts with the user's access and is recorded as the agent", async () => {
+      const claude = as(bob, "agent");
+      const info = await (await claude.files(moduleX)).write("artifacts/claude.md", text("hi"));
+      assert.equal(info.author, "agent");
+      await assert.rejects(claude.files(techY), NodeNotFoundError);
+    });
+
+    test("the workspace always keeps an owner who can sign in", async () => {
+      const ownGrant = (await as(alice).grants(null)).find(
+        (g) => g.principalType === "user" && g.principalId === alice,
+      )!;
+      await assert.rejects(as(alice).revoke(ownGrant.id), AccessError);
+      await assert.rejects(as(alice).setGrant(null, "user", alice, "editor"), AccessError);
+      await as(alice).setGrant(null, "user", carol, "owner");
+      assert.equal(await as(alice).revoke(ownGrant.id), true);
+      assert.equal(await as(alice).role(null), null);
+      // Put things back for the other tests.
+      await as(carol).setGrant(null, "user", alice, "owner");
+      await as(alice).revoke((await as(alice).grants(null)).find((g) => g.principalId === carol)!.id);
+    });
+
+    test("deleting a group removes its grants", async () => {
+      const temp = await as(alice).createGroup(null, "Temp");
+      await as(alice).setMember(temp, carol, true);
+      await as(alice).setGrant(techY, "group", temp, "viewer");
+      assert.equal(await as(carol).role(techY), "viewer");
+      assert.equal(await as(alice).deleteGroup(temp), true);
+      assert.equal(await as(carol).role(techY), null);
+      assert.equal((await as(alice).grants(techY)).length, 0);
+    });
+
+    test("changes are audited with who made them", async () => {
+      const log = await as(alice).auditLog(500);
+      const bobWrite = log.find((e) => e.action === "file.write" && e.target.path === "notes/bob.md")!;
+      assert.equal(bobWrite.actorId, bob);
+      assert.equal(bobWrite.actorType, "user");
+      assert.equal(bobWrite.target.node, moduleX);
+      const claudeWrite = log.find((e) => e.target.path === "artifacts/claude.md")!;
+      assert.equal(claudeWrite.actorType, "agent");
+      assert.equal(claudeWrite.actorId, bob);
+      assert.ok(log.some((e) => e.action === "grant.set" && e.target.principalId === dept));
+      await assert.rejects(as(bob).auditLog(), ForbiddenError);
+    });
+
+    test("watchers only hear about places they can see", async () => {
+      const bobSession = as(bob);
+      assert.equal(await bobSession.canSee({ op: "write", node: moduleX, path: "a" }), true);
+      assert.equal(await bobSession.canSee({ op: "write", node: techY, path: "a" }), false);
+      assert.equal(await bobSession.canSee({ op: "delete", node: null, path: "a" }), false);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techX }), true);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techY }), false);
+      // Carol only sees Module X, so Tech X is the path to it.
+      assert.equal(await as(carol).canSee({ op: "node", change: "rename", id: techX }), true);
+    });
+
+    test("signed identities", () => {
+      const secret = "s".repeat(32);
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const token = signIdentity({ sub: "test|bob", exp }, secret);
+      assert.equal(verifyIdentity(token, secret)?.sub, "test|bob");
+      assert.equal(verifyIdentity(token, "t".repeat(32)), null);
+      assert.equal(verifyIdentity(token.replace(/\.[^.]+\./, ".e30."), secret), null);
+      assert.equal(verifyIdentity(signIdentity({ sub: "test|bob", exp: 1 }, secret), secret), null);
+      assert.equal(verifyIdentity(signIdentity({ sub: "local", exp }, secret), secret), null);
+    });
+
+    test("with login on, the API answers as the signed-in user", async () => {
+      const secret = "k".repeat(32);
+      const signed = { ...storage, config: { ...storage.config, authSecret: secret } };
+      const handle = createStorageHandler(() => signed, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const asUser = (sub: string) => ({ [IDENTITY_HEADER]: signIdentity({ sub, exp }, secret) });
+      try {
+        assert.equal((await fetch(`${url}/nodes`)).status, 401);
+        assert.equal((await fetch(`${url}/files`, { headers: { [IDENTITY_HEADER]: "v1.bad.sig" } })).status, 401);
+
+        const tree = (await (await fetch(`${url}/nodes`, { headers: asUser("test|bob") })).json()) as {
+          nodes: { name: string }[];
+        };
+        assert.deepEqual(tree.nodes.map((n) => n.name).slice(0, 2), ["Tech X", "Module X"]);
+        assert.equal((await fetch(`${url}/files`, { headers: asUser("test|bob") })).status, 403);
+        assert.equal((await fetch(`${url}/files?node=${techY}`, { headers: asUser("test|bob") })).status, 404);
+        const put = await fetch(`${url}/files/notes/api.md?node=${moduleX}`, {
+          method: "PUT",
+          headers: asUser("test|carol"),
+          body: "x",
+        });
+        assert.equal(put.status, 403);
+
+        const me = (await (await fetch(`${url}/access`, { headers: asUser("test|alice") })).json()) as {
+          me: { id: string };
+          rootRole: string;
+        };
+        assert.deepEqual([me.me.id, me.rootRole], [alice, "owner"]);
+        const grant = await fetch(`${url}/access/grants`, {
+          method: "POST",
+          headers: { ...asUser("test|alice"), "Content-Type": "application/json" },
+          body: JSON.stringify({ node: techY, principalType: "user", principalId: carol, role: "viewer" }),
+        });
+        assert.equal(grant.status, 200);
+        assert.equal(await as(carol).role(techY), "viewer");
+        assert.equal((await fetch(`${url}/access/audit`, { headers: asUser("test|bob") })).status, 403);
+        const groups = (await (await fetch(`${url}/access/groups`, { headers: asUser("test|bob") })).json()) as {
+          groups: { name: string }[];
+        };
+        assert.ok(groups.groups.some((g) => g.name === "Etch dept"));
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
+    });
+  });
+
   describe("Claude's file tools", () => {
     type Tool = ReturnType<typeof createFileTools>[number];
     let tools: Record<string, Tool>;
@@ -283,8 +492,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
 
       const tree = (await call("list_nodes")).text;
       assert.match(tree, /^Levels: tech › module › loop › process/);
-      assert.ok(tree.includes(`- CMP [tech] id=${created.id} (0 files)`));
-      assert.ok(tree.includes(`  - Pad wear [module] id=${child.id} (0 files)`));
+      assert.ok(tree.includes(`- CMP [tech] id=${created.id} (0 files, owner)`));
+      assert.ok(tree.includes(`  - Pad wear [module] id=${child.id} (0 files, owner)`));
 
       await call("write_file", { node: child.id, path: "notes/wear.md", content: "worn" });
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);

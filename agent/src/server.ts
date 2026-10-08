@@ -4,7 +4,8 @@
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `GET /health` reports status. Runs on port 8000.
  * When DATABASE_URL is set it also serves the workspace file API under
- * `/files` and the knowledge tree under `/nodes` (see src/storage/http.ts).
+ * `/files`, the knowledge tree under `/nodes` and groups and grants under
+ * `/access` (see src/storage/http.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -43,7 +44,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (/^\/(files|nodes)(\/|$)/.test(pathname)) {
+  if (/^\/(files|nodes|access)(\/|$)/.test(pathname)) {
     await handleStorage(req, res, url);
     return;
   }

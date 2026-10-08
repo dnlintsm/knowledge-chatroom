@@ -23,8 +23,10 @@ import {
   renameServerNode,
   WATCH_URL,
   type KnowledgeNode,
+  type KnowledgeTree,
   type NodeId,
   type NodeType,
+  type Role,
   type ServerEvent,
   type ServerFile,
 } from "./server-files";
@@ -118,6 +120,8 @@ interface WorkspaceValue {
   /** The knowledge tree (server storage only). */
   nodes: KnowledgeNode[];
   nodeTypes: NodeType[];
+  /** Your role at the workspace root; each node carries its own. */
+  rootRole: Role | null;
   /** Moves to a node (null = root) and loads its files; false if it's gone. */
   enterNode: (id: NodeId) => Promise<boolean>;
   /** These throw with a message for the user, e.g. a duplicate name. */
@@ -170,10 +174,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   files.current = state.files;
   const [node, setNode] = useState<NodeId>(null);
   const nodeRef = useRef<NodeId>(null);
-  const [tree, setTree] = useState<{ types: NodeType[]; nodes: KnowledgeNode[] }>({
-    types: [],
-    nodes: [],
-  });
+  const [tree, setTree] = useState<KnowledgeTree>({ types: [], rootRole: null, nodes: [] });
   // Server sync bookkeeping, per place and path: the content hash we last saw
   // on the server, edits waiting to save, and saves on the wire. Change events
   // for a file with local edits pending are ignored, so they can't overwrite
@@ -606,6 +607,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       lineage,
       nodes: tree.nodes,
       nodeTypes: tree.types,
+      rootRole: tree.rootRole,
       enterNode,
       createNode,
       renameNode,
