@@ -2,6 +2,7 @@ import type { BlobStore } from "./blobs";
 import { sha256Hex } from "./blobs";
 import type { Sql, Tx } from "./db";
 import type { AuthorType, EventHub } from "./events";
+import { lockLiveExperiment } from "./experiments";
 import { isNodeId, NodeService } from "./nodes";
 import { kindForPath, mimeForPath, normalizePath, type FileKind } from "./paths";
 
@@ -58,8 +59,8 @@ function toInfo(row: FileRow): FileInfo {
 }
 
 /**
- * Files in one workspace, at its root or in one knowledge node (each has its
- * own paths). Every write adds an immutable version; reads return the current
+ * Files in one workspace, at its root, in one knowledge node or in one
+ * experiment (each has its own paths). Every write adds an immutable version; reads return the current
  * one. Bytes go to the BlobStore first, so a crash can leave an unreferenced
  * blob (harmless, collectable later) but never a dangling row.
  */
@@ -69,13 +70,15 @@ export class FileService {
     private readonly blobs: BlobStore,
     private readonly events: EventHub,
     private readonly workspaceId: string,
-    /** null = the workspace root. */
+    /** null = the workspace root (or an experiment, below). */
     readonly nodeId: string | null = null,
+    /** Set for an experiment's files; nodeId is then null. */
+    readonly experimentId: string | null = null,
   ) {}
 
   /** The same files through another connection or transaction (see db.ts asUser). */
   withSql(sql: Sql): FileService {
-    return new FileService(sql, this.blobs, this.events, this.workspaceId, this.nodeId);
+    return new FileService(sql, this.blobs, this.events, this.workspaceId, this.nodeId, this.experimentId);
   }
 
   /** The same workspace's files in another node (null = root), or null if that node doesn't exist. */
@@ -91,11 +94,30 @@ export class FileService {
     return new FileService(this.sql, this.blobs, this.events, this.workspaceId, nodeId);
   }
 
-  /** WHERE condition for files in this service's node. */
+  /** An experiment's files, or null if it doesn't exist (see experiments.ts). */
+  async inExperiment(experimentId: string): Promise<FileService | null> {
+    if (experimentId === this.experimentId) return this;
+    if (!isNodeId(experimentId)) return null;
+    const [row] = await this.sql`
+      SELECT 1 FROM experiments
+      WHERE id = ${experimentId} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL`;
+    if (!row) return null;
+    return new FileService(this.sql, this.blobs, this.events, this.workspaceId, null, experimentId);
+  }
+
+  /** WHERE condition for files in this service's place. */
   private get here() {
+    if (this.experimentId !== null) {
+      return this.sql`f.workspace_id = ${this.workspaceId} AND f.experiment_id = ${this.experimentId}`;
+    }
     return this.nodeId === null
-      ? this.sql`f.workspace_id = ${this.workspaceId} AND f.node_id IS NULL`
+      ? this.sql`f.workspace_id = ${this.workspaceId} AND f.node_id IS NULL AND f.experiment_id IS NULL`
       : this.sql`f.workspace_id = ${this.workspaceId} AND f.node_id = ${this.nodeId}`;
+  }
+
+  /** Where change events say this service's files are. */
+  private get place() {
+    return this.experimentId ? { node: null, experiment: this.experimentId } : { node: this.nodeId };
   }
 
   async list(): Promise<FileInfo[]> {
@@ -139,13 +161,15 @@ export class FileService {
         ON CONFLICT (sha256) DO NOTHING`;
 
       if (this.nodeId) await NodeService.lockLive(tx, this.workspaceId, this.nodeId);
+      if (this.experimentId) await lockLiveExperiment(tx, this.workspaceId, this.experimentId);
 
       // Create the row if needed, then lock it so concurrent writers to one
       // path serialize instead of racing on the unique index.
       await tx`
-        INSERT INTO files (workspace_id, node_id, path, kind, mime)
-        VALUES (${this.workspaceId}, ${this.nodeId}, ${path}, ${kindForPath(path)}, ${mime})
-        ON CONFLICT (workspace_id, node_id, path) WHERE deleted_at IS NULL DO NOTHING`;
+        INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime)
+        VALUES (${this.workspaceId}, ${this.nodeId}, ${this.experimentId}, ${path},
+                ${kindForPath(path)}, ${mime})
+        ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING`;
       const [file] = await tx<{ id: string; sha256: string | null; mime: string }[]>`
         SELECT f.id, v.blob_sha256 AS sha256, f.mime
         FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
@@ -166,7 +190,7 @@ export class FileService {
         WHERE id = ${file.id}`;
 
       await opts.inTx?.(tx);
-      await this.events.notify(tx, { op: "write", node: this.nodeId, path, sha256, author });
+      await this.events.notify(tx, { op: "write", ...this.place, path, sha256, author });
     });
 
     return (await this.stat(path))!;
@@ -181,7 +205,7 @@ export class FileService {
         WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
       if (rows.count === 0) return false;
       await inTx?.(tx);
-      await this.events.notify(tx, { op: "delete", node: this.nodeId, path });
+      await this.events.notify(tx, { op: "delete", ...this.place, path });
       return true;
     });
   }
