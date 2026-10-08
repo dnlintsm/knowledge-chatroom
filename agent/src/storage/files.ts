@@ -1,9 +1,11 @@
 import type { BlobStore } from "./blobs";
 import { sha256Hex } from "./blobs";
 import type { Sql, Tx } from "./db";
+import type { AuthorType, EventHub } from "./events";
+import { isNodeId, NodeService } from "./nodes";
 import { kindForPath, mimeForPath, normalizePath, type FileKind } from "./paths";
 
-export type AuthorType = "user" | "agent";
+export type { AuthorType, FileEvent } from "./events";
 
 export interface FileInfo {
   path: string;
@@ -25,21 +27,12 @@ export interface FileVersion {
   createdAt: string;
 }
 
-/** Sent on every committed change, to every process via Postgres NOTIFY. */
-export interface FileEvent {
-  op: "write" | "delete";
-  path: string;
-  /** Present for writes. */
-  sha256?: string;
-  author?: AuthorType;
-}
-
-const CHANNEL = "workspace_files";
-
 export interface WriteOptions {
   mime?: string;
   author?: AuthorType;
   authorId?: string | null;
+  /** Runs inside the write's transaction when it adds a version (e.g. audit). */
+  inTx?: (tx: Tx) => Promise<unknown>;
 }
 
 interface FileRow {
@@ -65,53 +58,44 @@ function toInfo(row: FileRow): FileInfo {
 }
 
 /**
- * Files in one workspace. Every write adds an immutable version; reads return
- * the current one. Bytes go to the BlobStore first, so a crash can leave an
- * unreferenced blob (harmless, collectable later) but never a dangling row.
+ * Files in one workspace, at its root or in one knowledge node (each has its
+ * own paths). Every write adds an immutable version; reads return the current
+ * one. Bytes go to the BlobStore first, so a crash can leave an unreferenced
+ * blob (harmless, collectable later) but never a dangling row.
  */
 export class FileService {
-  private readonly listeners = new Set<(event: FileEvent) => void>();
-  private listening: Promise<unknown> | null = null;
-
   constructor(
     private readonly sql: Sql,
     private readonly blobs: BlobStore,
+    private readonly events: EventHub,
     private readonly workspaceId: string,
+    /** null = the workspace root. */
+    readonly nodeId: string | null = null,
   ) {}
 
-  /**
-   * Calls `listener` for every change in this workspace, including changes
-   * made by other processes. Returns an unsubscribe function.
-   */
-  async subscribe(listener: (event: FileEvent) => void): Promise<() => void> {
-    this.listening ??= this.sql.listen(CHANNEL, (payload) => {
-      const { workspaceId, ...event } = JSON.parse(payload) as FileEvent & {
-        workspaceId: string;
-      };
-      if (workspaceId !== this.workspaceId) return;
-      for (const l of this.listeners) l(event);
-    }).catch((err) => {
-      this.listening = null; // Let the next subscriber retry.
-      throw err;
-    });
-    await this.listening;
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  /** The same files through another connection or transaction (see db.ts asUser). */
+  withSql(sql: Sql): FileService {
+    return new FileService(sql, this.blobs, this.events, this.workspaceId, this.nodeId);
   }
 
-  private notify(tx: Tx, event: FileEvent) {
-    // Delivered on commit, so listeners never see a change that rolled back.
-    return tx`SELECT pg_notify(${CHANNEL}, ${JSON.stringify({
-      ...event,
-      workspaceId: this.workspaceId,
-    })})`;
+  /** The same workspace's files in another node (null = root), or null if that node doesn't exist. */
+  async inNode(nodeId: string | null): Promise<FileService | null> {
+    if (nodeId === this.nodeId) return this;
+    if (nodeId !== null) {
+      if (!isNodeId(nodeId)) return null;
+      const [row] = await this.sql`
+        SELECT 1 FROM nodes
+        WHERE id = ${nodeId} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL`;
+      if (!row) return null;
+    }
+    return new FileService(this.sql, this.blobs, this.events, this.workspaceId, nodeId);
   }
 
-  static async forWorkspace(sql: Sql, blobs: BlobStore, slug = "default") {
-    const [ws] = await sql<{ id: string }[]>`
-      SELECT id FROM workspaces WHERE slug = ${slug}`;
-    if (!ws) throw new Error(`Workspace ${slug} not found`);
-    return new FileService(sql, blobs, ws.id);
+  /** WHERE condition for files in this service's node. */
+  private get here() {
+    return this.nodeId === null
+      ? this.sql`f.workspace_id = ${this.workspaceId} AND f.node_id IS NULL`
+      : this.sql`f.workspace_id = ${this.workspaceId} AND f.node_id = ${this.nodeId}`;
   }
 
   async list(): Promise<FileInfo[]> {
@@ -119,7 +103,7 @@ export class FileService {
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
              f.updated_at, v.author_type
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
-      WHERE f.workspace_id = ${this.workspaceId} AND f.deleted_at IS NULL
+      WHERE ${this.here} AND f.deleted_at IS NULL
       ORDER BY f.path`;
     return rows.map(toInfo);
   }
@@ -130,8 +114,7 @@ export class FileService {
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
              f.updated_at, v.author_type
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
-      WHERE f.workspace_id = ${this.workspaceId} AND f.path = ${path}
-        AND f.deleted_at IS NULL`;
+      WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
     return row ? toInfo(row) : null;
   }
 
@@ -155,17 +138,18 @@ export class FileService {
         INSERT INTO blobs (sha256, size) VALUES (${sha256}, ${bytes.byteLength})
         ON CONFLICT (sha256) DO NOTHING`;
 
+      if (this.nodeId) await NodeService.lockLive(tx, this.workspaceId, this.nodeId);
+
       // Create the row if needed, then lock it so concurrent writers to one
       // path serialize instead of racing on the unique index.
       await tx`
-        INSERT INTO files (workspace_id, path, kind, mime)
-        VALUES (${this.workspaceId}, ${path}, ${kindForPath(path)}, ${mime})
-        ON CONFLICT (workspace_id, path) WHERE deleted_at IS NULL DO NOTHING`;
+        INSERT INTO files (workspace_id, node_id, path, kind, mime)
+        VALUES (${this.workspaceId}, ${this.nodeId}, ${path}, ${kindForPath(path)}, ${mime})
+        ON CONFLICT (workspace_id, node_id, path) WHERE deleted_at IS NULL DO NOTHING`;
       const [file] = await tx<{ id: string; sha256: string | null; mime: string }[]>`
         SELECT f.id, v.blob_sha256 AS sha256, f.mime
         FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
-        WHERE f.workspace_id = ${this.workspaceId} AND f.path = ${path}
-          AND f.deleted_at IS NULL
+        WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
 
       if (file.sha256 === sha256 && file.mime === mime) return;
@@ -181,22 +165,23 @@ export class FileService {
         SET current_version_id = ${version.id}, mime = ${mime}, updated_at = now()
         WHERE id = ${file.id}`;
 
-      await this.notify(tx, { op: "write", path, sha256, author });
+      await opts.inTx?.(tx);
+      await this.events.notify(tx, { op: "write", node: this.nodeId, path, sha256, author });
     });
 
     return (await this.stat(path))!;
   }
 
   /** Soft delete: history stays, and the path is free for a new file. */
-  async remove(rawPath: string): Promise<boolean> {
+  async remove(rawPath: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     const path = normalizePath(rawPath);
     return this.sql.begin(async (tx) => {
       const rows = await tx`
-        UPDATE files SET deleted_at = now()
-        WHERE workspace_id = ${this.workspaceId} AND path = ${path}
-          AND deleted_at IS NULL`;
+        UPDATE files f SET deleted_at = now()
+        WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
       if (rows.count === 0) return false;
-      await this.notify(tx, { op: "delete", path });
+      await inTx?.(tx);
+      await this.events.notify(tx, { op: "delete", node: this.nodeId, path });
       return true;
     });
   }
@@ -204,9 +189,8 @@ export class FileService {
   async history(rawPath: string): Promise<FileVersion[] | null> {
     const path = normalizePath(rawPath);
     const [file] = await this.sql<{ id: string }[]>`
-      SELECT id FROM files
-      WHERE workspace_id = ${this.workspaceId} AND path = ${path}
-        AND deleted_at IS NULL`;
+      SELECT f.id FROM files f
+      WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
     if (!file) return null;
     const rows = await this.sql<
       {

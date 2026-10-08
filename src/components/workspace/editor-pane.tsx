@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, Eye, ListTodo, Pencil, X } from "lucide-react";
+import { Bot, Code, Eye, ListTodo, Lock, Pencil, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ function canPreview(file: WorkspaceFile) {
 }
 
 export function EditorPane() {
-  const { tabs, active, activeFile, getFile, open, close } = useWorkspace();
+  const { tabs, active, activeFile, getFile, open, close, canEdit } = useWorkspace();
   // Remembered per file; empty files start in edit mode so new notes are typeable.
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -31,7 +31,7 @@ export function EditorPane() {
   }, [active]);
   const mode: Mode | null =
     activeFile && canPreview(activeFile)
-      ? (modes[activeFile.path] ?? (activeFile.content ? "preview" : "edit"))
+      ? (modes[activeFile.path] ?? (activeFile.content || !canEdit ? "preview" : "edit"))
       : null;
 
   return (
@@ -92,6 +92,11 @@ export function EditorPane() {
               <Bot className="size-3" /> Written by Claude
             </span>
           )}
+          {!canEdit && (
+            <span className="flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5">
+              <Lock className="size-3" /> Read only
+            </span>
+          )}
           <span className="ml-auto shrink-0 max-sm:hidden">
             {new Date(activeFile.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           </span>
@@ -108,8 +113,14 @@ export function EditorPane() {
                     mode === m && "bg-[var(--secondary)] text-[var(--foreground)]",
                   )}
                 >
-                  {m === "preview" ? <Eye className="size-3" /> : <Pencil className="size-3" />}
-                  {m}
+                  {m === "preview" ? (
+                    <Eye className="size-3" />
+                  ) : canEdit ? (
+                    <Pencil className="size-3" />
+                  ) : (
+                    <Code className="size-3" />
+                  )}
+                  {m === "edit" && !canEdit ? "source" : m}
                 </button>
               ))}
             </div>
@@ -131,7 +142,7 @@ export function EditorPane() {
 }
 
 function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
-  const { write, setSelection, reveal } = useWorkspace();
+  const { write, setSelection, reveal, canEdit } = useWorkspace();
   const previewRef = useRef<HTMLElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const lines = reveal?.path === file.path ? reveal.lines : null;
@@ -184,8 +195,9 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
       aria-label={`Edit ${file.path}`}
       value={file.content}
       spellCheck={isMarkdown(file)}
-      autoFocus={!file.content}
-      placeholder="Start typing…"
+      autoFocus={!file.content && canEdit}
+      readOnly={!canEdit}
+      placeholder={canEdit ? "Start typing…" : ""}
       onChange={(e) => write(file.path, e.target.value)}
       onSelect={(e) => {
         const t = e.currentTarget;

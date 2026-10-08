@@ -126,10 +126,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const runs = useMemo(() => findRunDirs(ws.files.map((f) => f.path)), [ws.files]);
 
   // Entering Traverse shows the run list; entering a run shows its files.
+  // On page load this happens just after the first render, so a view the
+  // user picked in that moment wins over it.
   const shownRun = useRef<string | null | undefined>(undefined);
+  const pickedView = useRef(false);
   useEffect(() => {
     if (runDir === undefined || shownRun.current === runDir) return;
+    const first = shownRun.current === undefined;
     shownRun.current = runDir;
+    if (first && pickedView.current) return;
     apply(runDir ? { type: "setView", view: "files" } : { type: "showView", view: "runs" });
   }, [runDir, apply]);
 
@@ -238,8 +243,14 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       },
       sidebar: {
         view: shown.view,
-        select: (view) => apply({ type: "selectView", view }),
-        show: (view) => apply({ type: "showView", view }),
+        select: (view) => {
+          pickedView.current = true;
+          apply({ type: "selectView", view });
+        },
+        show: (view) => {
+          pickedView.current = true;
+          apply({ type: "showView", view });
+        },
       },
       editor: { open },
       chat: {

@@ -1,29 +1,17 @@
-"use client";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
-import { Workspace, WorkspaceProvider } from "@/components/workspace";
-import { useGenerativeUIExamples, useExampleSuggestions } from "@/hooks";
+import { SESSION_COOKIE, authSecret, readSession } from "@/lib/auth";
+import { Home } from "./home";
 
-import { CopilotChatConfigurationProvider } from "@copilotkit/react-core/v2";
+// Login is decided per request (AUTH_SECRET may be set only at runtime), so
+// this page is never prerendered at build time.
+export const dynamic = "force-dynamic";
 
-function Demos() {
-  useGenerativeUIExamples();
-  useExampleSuggestions();
-  return null;
-}
-
-export default function HomePage() {
-  return (
-    /*
-      One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
-      the active thread. The threads list in the sidebar's Chats view and the
-      chat's "New chat" button drive it directly; a *controlled* provider would
-      block "New chat" from resetting the conversation.
-    */
-    <CopilotChatConfigurationProvider agentId="default">
-      <WorkspaceProvider>
-        <Demos />
-        <Workspace />
-      </WorkspaceProvider>
-    </CopilotChatConfigurationProvider>
-  );
+// With login on (AUTH_SECRET), the workspace is for signed-in users only.
+export default async function HomePage() {
+  if (authSecret() && !readSession((await cookies()).get(SESSION_COOKIE)?.value)) {
+    redirect("/api/auth/login");
+  }
+  return <Home />;
 }

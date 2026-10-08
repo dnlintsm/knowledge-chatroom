@@ -188,8 +188,8 @@ docker compose up -d   # Postgres + SeaweedFS (self-hosted S3)
 npm run dev
 ```
 
-- **Postgres** holds the file tree, every version of every file, and who wrote it
-  (`agent/src/storage/migrations`). Migrations run when the agent starts.
+- **Postgres** (15 or newer) holds the file tree, every version of every file, and who
+  wrote it (`agent/src/storage/migrations`). Migrations run when the agent starts.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
@@ -199,12 +199,54 @@ npm run dev
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). There is no login yet, so keep the
   agent port private.
-- **Claude** gets `list_files`, `read_file` and `write_file` tools on the agent server
-  (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
-  Its writes are versions authored by the agent.
+- **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
+  are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
+  Postgres `ltree`, and the database checks that each node sits exactly one level below its
+  parent. Each node has its own files. `GET|POST /api/nodes` lists and adds nodes,
+  `GET|PATCH|DELETE /api/nodes/<id>` reads (with its ancestors), renames and deletes one
+  (with everything below it), and every `/api/files` route takes `?node=<id>`.
+- **Access**: users belong to groups in an org tree (company › dept › team), and a grant
+  gives a user or group a role on a node and everything below it, or on the whole
+  workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
+  file keeps its history) and adds and renames nodes; owner also deletes nodes and manages
+  grants. A grant to a group covers members of its sub-groups too.
+  The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
+  check access in one place (`agent/src/storage/session.ts`), and every change is written to
+  `audit_log` with who made it and whether Claude made it for them. Without login there is
+  one built-in user who owns everything, so nothing changes for a single-user setup.
+- **Login** (optional): set `AUTH_SECRET` (the same value for the app and the agent, at least
+  32 characters, e.g. `openssl rand -hex 32`) and an OpenID Connect provider (`OIDC_ISSUER`,
+  `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` if the client has one; Keycloak, Authentik, Google,
+  Entra ID and others work). Register `<APP_URL>/api/auth/callback` as the redirect URI, and
+  set `APP_URL` when the app sits behind a proxy. Users then sign in before the workspace
+  opens; the app keeps them in a signed cookie and signs each request it forwards to the agent
+  (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
+  person to sign in owns the workspace and shares nodes from the title bar's Share button
+  (people show up there once they have signed in). Viewers get the files read only, and
+  Claude's tools in a chat act as the person chatting.
+- **Database-enforced access**: file and node queries made for a user run in Postgres as
+  the restricted role `knowledge_user`, with row-level security policies
+  (`agent/src/storage/migrations/004_row_security.sql`) that apply the same grants. If a
+  check in the app were ever missed, Postgres would still refuse. The migration creates the
+  role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
+  otherwise the agent logs that row-level security is off, and an admin can enable it with
+  `CREATE ROLE knowledge_user NOLOGIN; GRANT knowledge_user TO <app user>;` before the next
+  start.
+- **Download links**: set `S3_PUBLIC_URL` to the object store's address as browsers reach it
+  (e.g. `http://localhost:8333` with `docker compose`, or `https://s3.<region>.amazonaws.com`)
+  and images and other binary files download straight from the store. After the access
+  check, the API answers with a redirect to a signed link that works for five minutes.
+  Text files are still served by the app, which the editor reads them through.
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
+  tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
+  no browser tab is open. The file tools take a `node`; the chat context says which node the
+  user is in. Its writes are versions authored by the agent.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
-  edits from other tabs. The first visit to an empty server uploads this browser's files.
+  edits from other tabs. Without login, the first visit to an empty server uploads this
+  browser's files.
+  The Knowledge view in the left rail shows the tree; clicking a node moves the workspace
+  there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.
 - **Tests**: `cd agent && npm test` with `TEST_DATABASE_URL` and the `S3_*` vars set
@@ -213,14 +255,17 @@ npm run dev
 ## UI previews on pull requests
 
 Every PR runs `.github/workflows/ui-preview.yml`: it builds the app, walks the key screens with
-Playwright (`e2e/preview.spec.ts`), and posts a sticky PR comment with a walkthrough GIF and
+Playwright (`e2e/preview.spec.ts`, plus `e2e/knowledge.spec.ts` for server storage), and posts a sticky PR comment with a walkthrough GIF and
 screenshots, so reviewers can see the UI without running it locally. Full-size `.webm` videos
 and the Playwright HTML report are attached to the workflow run as an artifact. Comment images
 live on the `ui-previews` branch and are removed when the PR closes.
 
 The preview doesn't need an Anthropic key: without the `ANTHROPIC_API_KEY` repository secret, a
 canned AG-UI server (`e2e/mock-agent.mjs`) stands in for the agent. Add the secret to preview
-against real Claude instead.
+against real Claude instead. CI also starts Postgres and SeaweedFS, so the knowledge tree and
+server-saved files show up; there the agent server runs on :8001 for storage and the mock
+forwards `/files` and `/nodes` to it. `preview.spec.ts` answers the storage API with 404, so its
+screens show the browser-only workspace.
 
 To run it locally (first time: `npx playwright install chromium`):
 
@@ -229,7 +274,11 @@ npm run test:preview          # reuses `npm run dev` if it's already running, el
 open preview/screenshots      # screenshots; videos are under test-results/
 ```
 
-To capture a new screen, add a step to `e2e/preview.spec.ts` that calls `shot(page, "NN-name")`.
+With `docker compose up -d` and the storage values from `.env.example` exported,
+`npm run test:preview` runs `knowledge.spec.ts` too; without `DATABASE_URL` it is skipped.
+
+The preview only shows the screens these specs visit, so a PR that adds or changes UI should add
+a step that calls `shot(page, "NN-name")` for it.
 
 ## Project structure
 
@@ -274,7 +323,7 @@ To capture a new screen, add a step to `e2e/preview.spec.ts` that calls `shot(pa
   `src/server.ts` is a minimal `node:http` equivalent that serves the adapter.)
 
 To customize: add or edit tools in `agent/src/` and the system prompt in `agent/src/agent.ts`,
-and the UI in `src/app/page.tsx` and `src/components/`.
+and the UI in `src/app/home.tsx` and `src/components/`.
 
 ## Troubleshooting
 

@@ -12,12 +12,17 @@
  *
  * A message asking what to "read next" gets an answer that cites workspace
  * lines, so the preview also shows file references opening the middle pane.
+ *
+ * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
+ * storage routes /files, /nodes and /access are forwarded there, so the preview can
+ * show server storage and the knowledge tree without an API key.
  */
 
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
+const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
 
 const REPLY =
   "Hi! I'm a mock agent running in CI, so this preview works without an " +
@@ -50,6 +55,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", mock: true }));
+    return;
+  }
+
+  if (STORAGE_URL && /^\/(files|nodes|access)(\/|$)/.test(pathname)) {
+    forward(req, res);
     return;
   }
 
@@ -116,6 +126,24 @@ const server = http.createServer(async (req, res) => {
   send({ type: "RUN_FINISHED", threadId, runId });
   res.end();
 });
+
+/** Streams a request to the storage server and its answer back (SSE included). */
+function forward(req, res) {
+  const target = new URL(req.url ?? "/", STORAGE_URL);
+  const upstream = http.request(
+    target,
+    { method: req.method, headers: { ...req.headers, host: target.host } },
+    (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    },
+  );
+  upstream.on("error", () => {
+    if (!res.headersSent) res.writeHead(503);
+    res.end();
+  });
+  req.pipe(upstream);
+}
 
 server.listen(PORT, () => {
   console.log(`Mock AG-UI agent listening on http://localhost:${PORT}`);
