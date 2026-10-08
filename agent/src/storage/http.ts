@@ -5,6 +5,7 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
+import { FileExistsError, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile } from "./paths";
 import { SearchError } from "./search";
@@ -24,8 +25,14 @@ import type { Session } from "./session";
  *                                   when S3_PUBLIC_URL is set)
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
- *                                   Content-Type = mime (optional)
+ *                                   Content-Type = mime (optional).
+ *                                   `If-None-Match: *` only creates (412 when
+ *                                   the file exists); `X-Read-Only: true`
+ *                                   makes a new file read-only
  *   DELETE /files/<path>            soft delete
+ *
+ *   Read-only files answer 403 to PUT and DELETE, and carry
+ *   `X-File-Read-Only: true` on GET.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
  *   ?experiment=<id> for an experiment's; without either, files at the
@@ -384,6 +391,14 @@ export function createStorageHandler(
         json(res, 403, { error: err.message });
         return;
       }
+      if (err instanceof ReadOnlyFileError) {
+        json(res, 403, { error: err.message, readOnly: true });
+        return;
+      }
+      if (err instanceof FileExistsError) {
+        json(res, 412, { error: err.message, exists: true });
+        return;
+      }
       if (
         err instanceof InvalidPathError ||
         err instanceof NodeError ||
@@ -471,6 +486,7 @@ export function createStorageHandler(
           ETag: etag,
           "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
           "X-File-Author": file.info.author,
+          ...(file.info.readOnly ? { "X-File-Read-Only": "true" } : {}),
           "Cache-Control": "no-cache",
         });
         res.end(file.bytes);
@@ -485,6 +501,8 @@ export function createStorageHandler(
         const mime = req.headers["content-type"]?.split(";")[0].trim();
         const info = await service.write(path, bytes, {
           mime: mime && mime !== "application/octet-stream" ? mime : undefined,
+          createOnly: req.headers["if-none-match"]?.trim() === "*",
+          readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
         });
         json(res, 200, info);
         return;

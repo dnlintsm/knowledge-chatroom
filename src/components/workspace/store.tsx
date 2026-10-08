@@ -44,9 +44,11 @@ import {
 } from "./server-files";
 import {
   EXPERIMENT_TAB,
+  FileExistsError,
   isBuiltInTab,
   kindForPath,
   mimeForPath,
+  ReadOnlyFileError,
   type TabId,
   type WorkspaceFile,
 } from "./types";
@@ -118,12 +120,23 @@ interface WorkspaceValue {
   /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
   open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
-  /** Creates the file when it does not exist. */
+  /** Creates the file when it does not exist. Throws ReadOnlyFileError for a read-only file. */
   write: (
     path: string,
     content: string,
     opts?: { mime?: string; author?: WorkspaceFile["author"] },
   ) => WorkspaceFile;
+  /**
+   * Creates a new file, saved right away (not debounced). Throws
+   * FileExistsError when the path is taken, here or on the server, which
+   * decides when two tabs race. `readOnly` files can never change afterwards.
+   */
+  create: (
+    path: string,
+    content: string,
+    opts?: { mime?: string; author?: WorkspaceFile["author"]; readOnly?: boolean },
+  ) => Promise<WorkspaceFile>;
+  /** Throws ReadOnlyFileError for a read-only file. */
   remove: (path: string) => void;
   setSelection: (text: string) => void;
   /** Where files are kept; see the comment at the top of this file. */
@@ -614,6 +627,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (rawPath, content, opts) => {
       const path = normalizePath(rawPath);
       const existing = files.current.find((f) => f.path === path);
+      if (existing?.readOnly) throw new ReadOnlyFileError(path);
       const file: WorkspaceFile = {
         path,
         content,
@@ -635,8 +649,56 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [upsert, scheduleSave],
   );
 
+  const create = useCallback<WorkspaceValue["create"]>(
+    async (rawPath, content, opts) => {
+      const path = normalizePath(rawPath);
+      if (mode.current === "loading") throw new Error("Files are still loading");
+      if (files.current.some((f) => f.path === path)) throw new FileExistsError(path);
+      const file: WorkspaceFile = {
+        path,
+        content,
+        kind: kindForPath(path),
+        mime: opts?.mime ?? mimeForPath(path),
+        author: opts?.author ?? "user",
+        updatedAt: Date.now(),
+        ...(opts?.readOnly ? { readOnly: true } : {}),
+      };
+      if (mode.current === "server") {
+        const at = placeRef.current;
+        const k = key(path, at);
+        // Counted as in flight, so the change event for this write is ignored.
+        inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
+        let lost = false;
+        try {
+          const info = await putServerFile(file, at, { createOnly: true, readOnly: opts?.readOnly });
+          knownSha.current.set(k, info.sha256);
+        } catch (err) {
+          if (!(err instanceof FileExistsError)) throw err;
+          lost = true;
+        } finally {
+          inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
+        }
+        if (lost) {
+          // Another tab or browser won. Its change event was ignored while this
+          // write was in flight, so load its file now, before callers open it.
+          const list = await listServerFiles(at);
+          if (Array.isArray(list) && placeRef.current === at) await resync(list);
+          throw new FileExistsError(path);
+        }
+        // The user moved to another place meanwhile; the file is saved there.
+        if (placeRef.current !== at) return file;
+      }
+      // A resync may have brought the new file in meanwhile; this is the same file.
+      files.current = [...files.current.filter((f) => f.path !== path), file];
+      upsert(file);
+      return file;
+    },
+    [upsert, resync],
+  );
+
   const remove = useCallback(
     (path: string) => {
+      if (files.current.find((f) => f.path === path)?.readOnly) throw new ReadOnlyFileError(path);
       removeLocal(path);
       if (mode.current !== "server") return;
       const k = key(path);
@@ -747,6 +809,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       open,
       close,
       write,
+      create,
       remove,
       setSelection,
       storageMode,
@@ -771,7 +834,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deleteExperiment,
     };
   }, [
-    state, selection, openCount, reveal, getFile, open, close, write, remove, storageMode,
+    state, selection, openCount, reveal, getFile, open, close, write, create, remove, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment,

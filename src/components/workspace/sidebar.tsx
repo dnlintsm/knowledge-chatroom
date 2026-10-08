@@ -9,6 +9,7 @@ import {
   FilePlus,
   FlaskConical,
   ListTodo,
+  Lock,
   MessagesSquare,
   Network,
   Package,
@@ -28,7 +29,7 @@ import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
-import { fileName, isTextFile, mimeForPath, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { fileName, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
@@ -97,7 +98,7 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 
 export function SidePanel({ view }: { view: SidebarView }) {
   const { files, write, canEdit } = useWorkspace();
-  const { editor, runDir } = useWorkbench();
+  const { editor, runDir, notify } = useWorkbench();
   const { open } = editor;
   // In Focus mode the Files view shows the run, and new files go into it.
   const root = view === "files" ? runDir : null;
@@ -108,7 +109,13 @@ export function SidePanel({ view }: { view: SidebarView }) {
     let last: string | null = null;
     for (const file of Array.from(list ?? [])) {
       const { content, mime } = await readUpload(file);
-      last = write(root ? `${root}/${file.name}` : `uploads/${file.name}`, content, { mime }).path;
+      const path = root ? `${root}/${file.name}` : `uploads/${file.name}`;
+      try {
+        last = write(path, content, { mime }).path;
+      } catch (err) {
+        if (!(err instanceof ReadOnlyFileError)) throw err;
+        notify(`${path} is read-only, so the upload was skipped.`, "warning");
+      }
     }
     if (last) open(last);
   };
@@ -289,18 +296,22 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
-      {canEdit && (
-      <button
-        type="button"
-        aria-label={`Delete ${file.path}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
-        }}
-        className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
-      >
-        <Trash2 className="size-3.5" />
-      </button>
+      {file.readOnly ? (
+        <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
+      ) : (
+        canEdit && (
+          <button
+            type="button"
+            aria-label={`Delete ${file.path}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
+            }}
+            className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )
       )}
     </div>
   );

@@ -46,6 +46,7 @@ and Timeline sections), whose buttons act on the current run:
 | Action | Role | Does |
 | --- | --- | --- |
 | **New Chat** | viewer | starts an empty conversation, still about the same run |
+| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without `<run>/models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
 
 Actions are entries in one registry (`src/components/workspace/actions.tsx`), each with an
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
@@ -53,6 +54,28 @@ and state for the current run, and a `run(ctx)` that acts only through the workb
 contract and the file API. One runner serves the block and Claude: it refuses disabled,
 unauthorized or already-running actions, so a double click never runs one twice. Until
 login lands (#4) the single user has every role.
+
+#### Rules API
+
+Generate Rules gets JSON from `GET /api/rules?run=<run>`. The Next.js server forwards that to
+`RULES_API_URL` (`GET <url>?run=<run>`), so the API's address stays off the browser. Without
+`RULES_API_URL` it answers with a built-in mock (`src/lib/rules-mock.ts`), which is also served
+at `/api/mock/rules`. The answer looks like this:
+
+```json
+{ "run": "runs/etch-2026-10-01", "generatedAt": "2026-10-08T00:00:00.000Z",
+  "rules": [{ "id": "R1", "title": "…", "condition": "…", "action": "…", "confidence": 0.93 }] }
+```
+
+A fixed transform (`src/components/workspace/rules.ts`, unit tested) turns it into a markdown
+table. The file is written once and is read-only for everyone, Claude included: the editor
+only previews it, and the file API refuses to change or delete it.
+
+The API is called at most once per run. The button is disabled while it works, and a lock
+shared by the browser's tabs, plus a check with the server just before the call, stops a
+second tab from asking again. The write only creates (`If-None-Match: *`), so even two
+browsers can't overwrite the file. Without server storage, files live in each tab separately,
+so only the first two guards apply.
 
 ### Workbench contract
 
@@ -197,8 +220,10 @@ npm run dev
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
   (request body = bytes) and deletes one, `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
-  LISTEN/NOTIFY, so it works across processes). There is no login yet, so keep the
-  agent port private.
+  LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
+  (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,
+  `PUT` and `DELETE` answer 403, for every role. There is no login yet, so keep the agent
+  port private.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
   Postgres `ltree`, and the database checks that each node sits exactly one level below its

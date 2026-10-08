@@ -109,6 +109,7 @@ export function useWorkspaceAgent() {
         mime: f.mime,
         size: f.content.length,
         lastWrittenBy: f.author,
+        ...(f.readOnly ? { readOnly: true } : {}),
       })),
   }, [browserFiles]);
 
@@ -136,7 +137,9 @@ export function useWorkspaceAgent() {
       content: z.string().describe("The full file content (markdown for .md files)."),
     }),
     handler: async ({ path, content }) => {
-      const existed = Boolean(latest.current.getFile(path));
+      const existing = latest.current.getFile(path);
+      if (existing?.readOnly) return { error: `${existing.path} is read-only: it can't be changed or deleted.` };
+      const existed = Boolean(existing);
       const file = latest.current.write(path, content, { author: "agent" });
       latestWorkbench.current.editor.open(file.path);
       return { ok: true, path: file.path, created: !existed };

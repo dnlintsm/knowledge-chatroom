@@ -22,6 +22,7 @@ import { createStorageHandler } from "./http";
 import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
+import { FileExistsError, ReadOnlyFileError } from "./files";
 import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
@@ -148,6 +149,42 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     for (const bad of ["", "../etc/passwd", "notes/../../x", "notes/", "a/./b"]) {
       await assert.rejects(storage.files.write(bad, text("x")), /Invalid path/);
     }
+  });
+
+  test("create-only writes never replace a file", async () => {
+    await storage.files.write("runs/r1/a.md", text("first"), { createOnly: true });
+    await assert.rejects(
+      storage.files.write("runs/r1/a.md", text("second"), { createOnly: true }),
+      FileExistsError,
+    );
+    const file = await storage.files.read("runs/r1/a.md");
+    assert.equal(new TextDecoder().decode(file!.bytes), "first");
+    // Only one of several racing creators wins.
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, i) =>
+        storage.files.write("runs/r1/race.md", text(`creator ${i}`), { createOnly: true }),
+      ),
+    );
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  });
+
+  test("read-only files can't be changed or deleted", async () => {
+    const info = await storage.files.write("runs/r1/models/general_rules.md", text("# Rules"), {
+      createOnly: true,
+      readOnly: true,
+    });
+    assert.equal(info.readOnly, true);
+    await assert.rejects(
+      storage.files.write("runs/r1/models/general_rules.md", text("changed")),
+      ReadOnlyFileError,
+    );
+    await assert.rejects(storage.files.remove("runs/r1/models/general_rules.md"), ReadOnlyFileError);
+    const listed = (await storage.files.list()).find((f) => f.path === "runs/r1/models/general_rules.md");
+    assert.equal(listed?.readOnly, true);
+    assert.equal((await storage.files.history("runs/r1/models/general_rules.md"))!.length, 1);
+    // The flag only applies when creating.
+    await storage.files.write("notes/plain.md", text("a"));
+    assert.equal((await storage.files.write("notes/plain.md", text("b"), { readOnly: true })).readOnly, false);
   });
 
   test("concurrent writes to a new path do not collide", async () => {
@@ -1011,6 +1048,15 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(result.isError, true);
     });
 
+    test("write_file refuses read-only files", async () => {
+      await storage.files.write("runs/r2/models/general_rules.md", text("# Rules"), { readOnly: true });
+      const result = await call("write_file", { path: "runs/r2/models/general_rules.md", content: "x" });
+      assert.equal(result.isError, true);
+      assert.match(result.text, /read-only/);
+      const listed = JSON.parse((await call("list_files")).text) as { path: string; readOnly?: boolean }[];
+      assert.equal(listed.find((f) => f.path === "runs/r2/models/general_rules.md")?.readOnly, true);
+    });
+
     test("tools made for a user can do only what that user can", async () => {
       const local = await storage.access.localUserId();
       const viewer = await storage.access.userForSubject("test|tool-viewer");
@@ -1276,6 +1322,29 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(await statusFor("off"), 404);
       assert.equal(await statusFor("starting"), 503);
       assert.equal(await statusFor("failed"), 500);
+    });
+
+    test("If-None-Match: * only creates; read-only files refuse PUT and DELETE", async () => {
+      const url = `${base}/files/runs/r3/models/general_rules.md`;
+      const create = () =>
+        fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "text/markdown", "If-None-Match": "*", "X-Read-Only": "true" },
+          body: "# Rules",
+        });
+      const first = await create();
+      assert.equal(first.status, 200);
+      assert.equal(((await first.json()) as { readOnly: boolean }).readOnly, true);
+      assert.equal((await create()).status, 412);
+
+      const get = await fetch(url);
+      assert.equal(get.headers.get("x-file-read-only"), "true");
+      assert.equal(await get.text(), "# Rules");
+
+      const put = await fetch(url, { method: "PUT", body: "changed" });
+      assert.equal(put.status, 403);
+      assert.equal((await fetch(url, { method: "DELETE" })).status, 403);
+      assert.equal(await (await fetch(url)).text(), "# Rules");
     });
 
     test("experiments: create, files, update, delete", async () => {

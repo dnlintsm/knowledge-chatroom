@@ -154,6 +154,44 @@ test("the Actions block starts a new chat about the run", async ({ page }) => {
   await expect(page.getByTestId("actions")).toHaveCount(0);
 });
 
+test("Generate Rules writes the run's rules once, read-only, then opens them", async ({ page }) => {
+  const apiCalls: string[] = [];
+  page.on("request", (req) => {
+    if (new URL(req.url()).pathname === "/api/rules") apiCalls.push(req.url());
+  });
+  await gotoRun(page);
+  const actions = page.getByTestId("actions");
+  const generate = actions.getByRole("button", { name: "Generate Rules" });
+  await expect(generate).toBeEnabled();
+  // A double click still asks the API once.
+  await generate.dblclick();
+  const preview = page.getByTestId("file-preview");
+  await expect(preview).toContainText("General rules: etch-2026-10-01");
+  await expect(page.getByTestId("read-only-badge")).toBeVisible();
+  await expect(page.getByRole("group", { name: "View mode" })).toHaveCount(0);
+  await expect(page.getByTestId("notices")).toContainText("Generated models/general_rules.md");
+  await expect(actions.getByRole("button", { name: "Open Rules" })).toBeVisible();
+  const row = page.getByRole("treeitem", { name: /general_rules\.md/ });
+  await expect(row).toHaveAttribute("title", `${RUN}/models/general_rules.md`);
+  await expect(row.getByRole("button", { name: /Delete/ })).toHaveCount(0);
+  await shot(page, "10-generated-rules");
+  expect(apiCalls).toHaveLength(1);
+  expect(apiCalls[0]).toContain(`run=${encodeURIComponent(RUN)}`);
+
+  // After a reload the rules are there, so the action only opens them.
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "Current run" })).toBeVisible();
+  await page.getByRole("tab", { name: /welcome\.md/ }).click();
+  await page.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
+  await expect(preview).toContainText("General rules: etch-2026-10-01");
+  expect(apiCalls).toHaveLength(1);
+
+  // The other run has no rules yet.
+  await page.getByRole("button", { name: "Traverse", exact: true }).click();
+  await page.getByRole("button", { name: /litho-2026-10-03/ }).click();
+  await expect(page.getByTestId("actions").getByRole("button", { name: "Generate Rules" })).toBeVisible();
+});
+
 test("selection is dropped when its file closes", async ({ page }) => {
   await gotoRun(page);
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
@@ -185,7 +223,7 @@ test("files and layout survive a reload", async ({ page }) => {
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
-  await shot(page, "10-dark-mode");
+  await shot(page, "11-dark-mode");
 });
 
 test("mobile layout", async ({ page }) => {
@@ -196,15 +234,15 @@ test("mobile layout", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveCount(0);
   await gotoRun(page);
   await expect(page.getByTestId("file-preview")).toBeVisible();
-  await shot(page, "11-mobile-editor");
+  await shot(page, "12-mobile-editor");
   await page.getByRole("button", { name: "Files" }).last().click();
-  await shot(page, "12-mobile-files");
+  await shot(page, "13-mobile-files");
   // Tapping a file switches to the editor.
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
-  await shot(page, "13-mobile-chat");
+  await shot(page, "14-mobile-chat");
 });
 
 // The mock agent answers "read next" with references to notes/reading-list.md
@@ -223,7 +261,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
   const cited = page.getByTestId("file-preview").locator("[data-revealed]");
   await expect(cited).toHaveText(/The Pragmatic Programmer/);
   await expect(cited).toBeInViewport();
-  await shot(page, "14-file-reference");
+  await shot(page, "15-file-reference");
 
   // The editor selects the same line.
   await page.getByRole("button", { name: "edit", exact: true }).click();

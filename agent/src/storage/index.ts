@@ -10,7 +10,7 @@ import { SearchService } from "./search";
 import { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 import { Session } from "./session";
 
-export { FileService } from "./files";
+export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
 export { ExperimentService } from "./experiments";
