@@ -29,7 +29,17 @@ export interface StorageConfig {
    * Unset: no login, everyone is the local user who owns the workspace.
    */
   authSecret?: string;
+  /**
+   * The embedding model for search by meaning (semantic.ts), run inside the
+   * agent; null when turned off (EMBEDDING_MODEL=off). Needs Postgres with
+   * pgvector; without it search stays word-based.
+   */
+  embeddingModel: string | null;
+  /** Where the model is downloaded to on first use. */
+  embeddingCacheDir?: string;
 }
+
+export const DEFAULT_EMBEDDING_MODEL = "Xenova/multilingual-e5-small";
 
 export function storageConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -51,6 +61,9 @@ export function storageConfigFromEnv(
       10,
     ),
     authSecret: authSecretFromEnv(env),
+    embeddingModel:
+      env.EMBEDDING_MODEL === "off" ? null : env.EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL,
+    embeddingCacheDir: env.EMBEDDING_CACHE_DIR || undefined,
   };
 }
 

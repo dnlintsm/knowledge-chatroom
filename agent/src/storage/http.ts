@@ -57,7 +57,9 @@ import type { Session } from "./session";
  *   GET    /search?q=<text>         {results}: files you can read whose text
  *                                   or path matches, best first, each with
  *                                   path, node, experiment, where (node names
- *                                   from the top) and the matching snippet.
+ *                                   from the top), the matching snippet and
+ *                                   match: "words", or "meaning" for a passage
+ *                                   only close in meaning (semantic.ts).
  *                                   &scope=<node id> searches only that node,
  *                                   the nodes below it and their experiments;
  *                                   &near=<node id> or &experiment=<id> ranks

@@ -210,7 +210,9 @@ export function createFileTools(
       "search_files",
       "Search the text and paths of every workspace file the user can read: the root, all " +
         "knowledge nodes and the experiments they can see. Matches whole words (and their " +
-        "forms: etch finds etching) and also exact text, so part numbers and phrases work. " +
+        "forms: etch finds etching), exact text (part numbers) and, when available, passages " +
+        "close in meaning (match: \"meaning\"), so describe what you're after in plain words. " +
+        "\"Quotes\" or -word ask for exact words only. " +
         "Each result has the place to pass to read_file (node or experiment) and the passage " +
         "that matched. Use it to find what the workspace already knows before answering or " +
         "writing.",
@@ -250,6 +252,7 @@ export function createFileTools(
                 ...(h.where.length ? h.where : ["(workspace root)"]),
                 ...(h.experimentTitle ? [`experiment: ${h.experimentTitle}`] : []),
               ].join(" › "),
+              match: h.match,
               snippet: h.snippet || "(matched by path)",
               updatedAt: h.updatedAt,
             })),

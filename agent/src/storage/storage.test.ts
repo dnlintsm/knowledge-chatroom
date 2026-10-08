@@ -24,9 +24,38 @@ import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
+import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, formatTree, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+
+/**
+ * Stands in for an embedding model: words that share a concept land on the
+ * same axis, so "wall buildup" is close to "polymer deposition on the liner".
+ */
+const CONCEPTS: Record<string, string> = {
+  buildup: "buildup", deposition: "buildup", polymer: "buildup", residue: "buildup",
+  wall: "chamber", walls: "chamber", liner: "chamber", chamber: "chamber",
+  pump: "vacuum", vacuum: "vacuum", hums: "noise", noise: "noise",
+};
+class ConceptEmbedder implements Embedder {
+  constructor(readonly model = "test/concepts") {}
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map((t) => {
+      const v = new Array<number>(16).fill(0);
+      for (const word of t.toLowerCase().match(/[a-z]+/g) ?? []) {
+        const concept = CONCEPTS[word];
+        if (!concept) continue;
+        let h = 0;
+        for (const ch of concept) h = (h * 31 + ch.charCodeAt(0)) % 16;
+        v[h] += 1;
+      }
+      v[15] += 0.01; // never all zero
+      const norm = Math.hypot(...v);
+      return v.map((x) => x / norm);
+    });
+  }
+}
 const text = (s: string) => new TextEncoder().encode(s);
 
 async function waitFor(check: () => boolean, ms = 3000) {
@@ -876,6 +905,65 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       );
       assert.match((await call({ query: "nothing-like-this" })).content[0].text, /^No files match/);
       assert.equal((await call({ query: "" })).isError, true);
+    });
+  });
+
+  describe("search by meaning", () => {
+    let meaningful: Storage;
+    let vectors = false;
+    let alice: string, eli: string, fab: string;
+    const as = (userId: string) => meaningful.session({ userId, actor: "user" });
+    // Inside Fab 2: other tests' notes about chamber liners are close in meaning too.
+    const found = async (userId: string, query: string) =>
+      (await as(userId).search({ query, scope: fab })).map((h) => [h.path, h.match]);
+
+    before(async () => {
+      meaningful = (await initStorage(storage.config, new ConceptEmbedder()))!;
+      vectors = await meaningful.semantic!.prepare();
+      alice = await meaningful.access.userForSubject("test|alice");
+      eli = await meaningful.access.userForSubject("test|eli");
+      fab = (await as(alice).createNode(null, "Fab 2")).id;
+      const files = await as(alice).files(fab);
+      await files.write("notes/walls.md", text("Polymer deposition on the chamber liner grows weekly."));
+      await files.write("notes/pump.md", text("The roughing pump hums."));
+    });
+
+    after(() => meaningful?.close());
+
+    test("finds passages close in meaning once they are embedded", async (t) => {
+      if (!vectors) return t.skip("Postgres has no pgvector");
+      assert.ok(meaningful.search.semantic?.ready);
+      // Nothing shares a word with the query, and nothing is embedded yet.
+      assert.deepEqual(await found(alice, "wall buildup"), []);
+      assert.ok((await meaningful.semantic!.embedAll()) >= 2);
+      assert.deepEqual(await found(alice, "wall buildup"), [["notes/walls.md", "meaning"]]);
+      const [hit] = await as(alice).search({ query: "wall buildup", scope: fab });
+      assert.match(hit.snippet, /Polymer deposition/);
+      assert.deepEqual(hit.where, ["Fab 2"]);
+      // A word match counts as one, and comes first.
+      await (await as(alice).files(fab)).write("notes/residue.md", text("Wall buildup checklist."));
+      await meaningful.semantic!.embedAll();
+      assert.deepEqual(await found(alice, "wall buildup"), [
+        ["notes/residue.md", "words"],
+        ["notes/walls.md", "meaning"],
+      ]);
+      // Asking for exact words ("phrase", -word) leaves meaning out.
+      assert.deepEqual(await found(alice, '"wall buildup"'), [["notes/residue.md", "words"]]);
+      // And it never shows what the user can't read.
+      assert.deepEqual(await as(eli).search({ query: "wall buildup" }), []);
+    });
+
+    test("a different model starts the vectors over", async (t) => {
+      if (!vectors) return t.skip("Postgres has no pgvector");
+      const other = new SemanticIndex(meaningful.sql, new ConceptEmbedder("test/other"));
+      assert.equal(await other.prepare(), true);
+      const [{ n }] = await meaningful.sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM blob_chunks WHERE embedding IS NOT NULL`;
+      assert.equal(n, 0);
+      assert.ok((await other.embedAll()) > 0);
+      // Back to the first model, for the other tests.
+      assert.equal(await meaningful.semantic!.prepare(), true);
+      await meaningful.semantic!.embedAll();
     });
   });
 

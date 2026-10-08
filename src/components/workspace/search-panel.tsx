@@ -142,8 +142,9 @@ export function SearchPanel() {
       )}
       {!query.trim() && (
         <p className="text-[12px] text-[var(--muted-foreground)]">
-          Finds words in every file you can read, including other nodes and shared experiments.
-          Use &quot;quotes&quot; for a phrase and -word to leave a word out.
+          Finds words, and passages that mean the same, in every file you can read, including
+          other nodes and shared experiments. Use &quot;quotes&quot; for an exact phrase and
+          -word to leave a word out.
         </p>
       )}
 
@@ -176,6 +177,11 @@ export function SearchPanel() {
                   </>
                 )}
               </span>
+              {hit.match === "meaning" && (
+                <span className="w-fit rounded bg-[var(--secondary)] px-1 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Similar meaning
+                </span>
+              )}
               {hit.snippet && (
                 <span className="line-clamp-3 text-[12px] leading-snug text-[var(--foreground)]/80">
                   {highlight(plain(hit.snippet), query)}

@@ -192,6 +192,15 @@ npm run dev
   below it, and `&near=<node id>` or `&experiment=<id>` ranks files near there first. Files
   stored before search existed are indexed in the background when the agent starts. The
   Search view in the left rail searches as you type and opens a result where it lives.
+- **Search by meaning**: with pgvector in Postgres (the `docker compose` image has it), a
+  small multilingual embedding model (`Xenova/multilingual-e5-small`, MIT) runs inside the
+  agent, so nothing leaves your server. It downloads once (about 120 MB, to
+  `~/.cache/knowledge-chatroom/models` or `EMBEDDING_CACHE_DIR`), then embeds every passage
+  in the background, and search also finds passages close in meaning ("chamber wall
+  buildup" finds "polymer deposition on the liner"), marked "Similar meaning". Word
+  matches still rank first; "quotes" or -word ask for exact words only. Without pgvector,
+  or with `EMBEDDING_MODEL=off`, search matches words. Changing `EMBEDDING_MODEL` re-embeds
+  everything.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted

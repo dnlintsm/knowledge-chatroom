@@ -7,6 +7,7 @@ import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
 import { SearchService } from "./search";
+import { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 import { Session } from "./session";
 
 export { FileService } from "./files";
@@ -19,6 +20,7 @@ export type { Principal, Role } from "./access";
 export { Session } from "./session";
 export { SearchService } from "./search";
 export type { SearchHit, SearchOptions } from "./search";
+export { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 
 export interface Storage {
   config: StorageConfig;
@@ -29,6 +31,8 @@ export interface Storage {
   experiments: ExperimentService;
   access: AccessService;
   search: SearchService;
+  /** Search by meaning; null when no embedding model is set. Not ready until prepared. */
+  semantic: SemanticIndex | null;
   events: EventHub;
   blobs: BlobStore;
   /** Whether Postgres also enforces access for users' queries (004_row_security.sql). */
@@ -44,6 +48,8 @@ export interface Storage {
  */
 export async function initStorage(
   config: StorageConfig | null = storageConfigFromEnv(),
+  /** The model for search by meaning; the server passes the configured one (startStorage). */
+  embedder: Embedder | null = null,
 ): Promise<Storage | null> {
   if (!config) return null;
 
@@ -70,7 +76,8 @@ export async function initStorage(
     const nodes = new NodeService(sql, events, ws.id);
     const experiments = new ExperimentService(sql, events, ws.id);
     const access = new AccessService(sql, ws.id);
-    const search = new SearchService(sql, blobs, ws.id);
+    const semantic = embedder && new SemanticIndex(sql, embedder);
+    const search = new SearchService(sql, blobs, ws.id, semantic);
     return {
       config,
       sql,
@@ -79,11 +86,15 @@ export async function initStorage(
       experiments,
       access,
       search,
+      semantic,
       events,
       blobs,
       rowSecurity,
       session: (principal) => new Session({ files, nodes, experiments, access, search, sql, rowSecurity }, principal),
-      close: () => sql.end(),
+      close: () => {
+        semantic?.stop();
+        return sql.end();
+      },
     };
   } catch (err) {
     await sql.end();
@@ -132,13 +143,18 @@ function indexExisting(search: SearchService, attempt = 0) {
 export function startStorage(config: StorageConfig | null = storageConfigFromEnv()) {
   if (!config) return;
   state = "starting";
-  initStorage(config)
+  const embedder = config.embeddingModel
+    ? new LocalEmbedder(config.embeddingModel, config.embeddingCacheDir)
+    : null;
+  initStorage(config, embedder)
     .then((ready) => {
       current = ready;
       state = "ready";
       console.log("[storage] ready");
       // Files written before search existed; new writes index themselves.
       if (ready) indexExisting(ready.search);
+      // Loads the model and embeds passages in the background (semantic.ts).
+      ready?.semantic?.start();
     })
     .catch((err) => {
       state = "failed";
