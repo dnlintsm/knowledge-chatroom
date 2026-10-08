@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck:
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,7 +28,7 @@ jobs:
             agent/package-lock.json
       - name: Install locked dependencies
         run: npm ci
-      - name: Check frontend and agent types
-        run: npm run typecheck
+      - name: Check frontend and agent types and unit tests
+        run: npm run check
       - name: Verify lockfiles are unchanged
         run: git diff --exit-code -- package-lock.json agent/package-lock.json

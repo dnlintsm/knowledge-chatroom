@@ -65,4 +65,4 @@ jobs:
 
       - name: Test
         working-directory: agent
-        run: npm test
+        run: npm run test:integration
