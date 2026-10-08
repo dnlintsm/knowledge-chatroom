@@ -13,6 +13,10 @@
  * A message asking what to "read next" gets an answer that cites workspace
  * lines, so the preview also shows file references opening the middle pane.
  *
+ * A message asking for the "rules" calls the runAction tool (generate-rules),
+ * and one naming the "litho" run calls focusRun, so the preview shows Claude
+ * driving the workbench too.
+ *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
  * storage routes /files, /nodes, /access, /experiments and /search are
  * forwarded there, so the preview can show server storage and the knowledge
@@ -44,6 +48,12 @@ const ARTIFACT = `# Summary
 - The middle pane previews or edits the open file.
 - The chat sees the open file and your selection.
 `;
+
+const TOOL_REPLIES = {
+  writeWorkspaceFile: `Saved the summary to ${ARTIFACT_PATH} and opened it.`,
+  runAction: "Generated the run's general rules and opened them.",
+  focusRun: "Switched to the litho-2026-10-03 run.",
+};
 
 const textOf = (message) =>
   typeof message?.content === "string"
@@ -91,27 +101,40 @@ const server = http.createServer(async (req, res) => {
 
   const messages = input.messages ?? [];
   const last = messages[messages.length - 1];
-  const wantsArtifact = last?.role === "user" && textOf(last).includes("artifacts/");
+  const asked = last?.role === "user" ? textOf(last) : "";
+  // The frontend tool to call for this message, if any.
+  const toolCall = asked.includes("artifacts/")
+    ? { name: "writeWorkspaceFile", args: { path: ARTIFACT_PATH, content: ARTIFACT } }
+    : asked.includes("rules")
+      ? { name: "runAction", args: { id: "generate-rules" } }
+      : asked.includes("litho")
+        ? { name: "focusRun", args: { path: "runs/litho-2026-10-03" } }
+        : null;
+  // After a tool ran, one line about the tool that was called.
+  const calledTool = messages
+    .filter((m) => m.role === "assistant")
+    .flatMap((m) => m.toolCalls ?? [])
+    .pop()?.function?.name;
   const reply =
     last?.role === "tool"
-      ? `Saved the summary to ${ARTIFACT_PATH} and opened it.`
-      : last?.role === "user" && textOf(last).includes("read next")
+      ? (TOOL_REPLIES[calledTool] ?? "Done.")
+      : asked.includes("read next")
         ? CITING_REPLY
         : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
-  if (wantsArtifact) {
+  if (toolCall) {
     const toolCallId = randomUUID();
     send({
       type: "TOOL_CALL_START",
       toolCallId,
-      toolCallName: "writeWorkspaceFile",
+      toolCallName: toolCall.name,
       parentMessageId: messageId,
     });
     send({
       type: "TOOL_CALL_ARGS",
       toolCallId,
-      delta: JSON.stringify({ path: ARTIFACT_PATH, content: ARTIFACT }),
+      delta: JSON.stringify(toolCall.args),
     });
     send({ type: "TOOL_CALL_END", toolCallId });
     send({ type: "RUN_FINISHED", threadId, runId });

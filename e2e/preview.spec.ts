@@ -192,6 +192,24 @@ test("Generate Rules writes the run's rules once, read-only, then opens them", a
   await expect(page.getByTestId("actions").getByRole("button", { name: "Generate Rules" })).toBeVisible();
 });
 
+test("Claude runs actions and switches runs through the workbench", async ({ page }) => {
+  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned tool calls.");
+  await openHome(page);
+  await send(page, "Please generate the rules for this run");
+  await expect(page.getByTestId("file-preview")).toContainText("General rules: etch-2026-10-01", reply);
+  await expect(page.getByTestId("read-only-badge")).toBeVisible();
+  await expect(page.getByText("Generated the run's general rules")).toBeVisible(reply);
+  await expect(page.getByTestId("actions").getByRole("button", { name: "Open Rules" })).toBeVisible();
+  await shot(page, "11-claude-runs-action");
+
+  await send(page, "Now show me the litho run");
+  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("litho-2026-10-03", reply);
+  await expect(page.getByTestId("file-preview")).toContainText("xDOE report: CD vs. dose and focus");
+  // The conversation carries on in the other run.
+  await expect(page.getByText("Switched to the litho-2026-10-03 run.")).toBeVisible(reply);
+  await expect(page.getByTestId("chat-context-run")).toContainText("litho-2026-10-03");
+});
+
 test("selection is dropped when its file closes", async ({ page }) => {
   await gotoRun(page);
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
@@ -223,7 +241,7 @@ test("files and layout survive a reload", async ({ page }) => {
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
-  await shot(page, "11-dark-mode");
+  await shot(page, "12-dark-mode");
 });
 
 test("mobile layout", async ({ page }) => {
@@ -234,15 +252,15 @@ test("mobile layout", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveCount(0);
   await gotoRun(page);
   await expect(page.getByTestId("file-preview")).toBeVisible();
-  await shot(page, "12-mobile-editor");
+  await shot(page, "13-mobile-editor");
   await page.getByRole("button", { name: "Files" }).last().click();
-  await shot(page, "13-mobile-files");
+  await shot(page, "14-mobile-files");
   // Tapping a file switches to the editor.
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
-  await shot(page, "14-mobile-chat");
+  await shot(page, "15-mobile-chat");
 });
 
 // The mock agent answers "read next" with references to notes/reading-list.md
@@ -261,7 +279,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
   const cited = page.getByTestId("file-preview").locator("[data-revealed]");
   await expect(cited).toHaveText(/The Pragmatic Programmer/);
   await expect(cited).toBeInViewport();
-  await shot(page, "15-file-reference");
+  await shot(page, "16-file-reference");
 
   // The editor selects the same line.
   await page.getByRole("button", { name: "edit", exact: true }).click();

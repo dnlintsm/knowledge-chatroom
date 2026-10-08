@@ -94,6 +94,12 @@ switcher, file references in answers, and Claude's open-file tools.
 | `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat (Focus mode only) |
 | `notify(message, level)` | a short notice in the corner |
 
+Claude drives the same contract through frontend tools: `showPane` / `hidePane`,
+`listRuns` / `focusRun`, `openWorkspaceFile`, and `listActions` / `runAction`. `runAction`
+goes through the Actions block's runner with the user's role, and only runs actions marked
+`agentInvocable` (Generate Rules is; New Chat isn't, since it would end Claude's own
+conversation). Claude can't leave the run, because Traverse mode has no chat.
+
 The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit
 tested (`e2e/workbench.spec.ts`), and a test fails if anything outside the workbench starts
 keeping its own pane state.
