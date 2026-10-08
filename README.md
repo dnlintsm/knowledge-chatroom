@@ -23,6 +23,21 @@ Panes resize by dragging and collapse from the title bar; below 1024px one pane 
 time. With [file storage](#file-storage) running, files are saved on the server (the title bar
 says "Saved"); without it they stay in this browser's localStorage ("This browser").
 
+### Runs: Focus and Traverse modes
+
+A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. Any folder that
+contains a marker folder is a run, `xdoe-report/` by default (set `RUN_DIR_MARKERS`,
+comma-separated, to add more). The workspace works in one of two modes:
+
+- **Traverse** (`/`): the **Traverse** view on the icon rail lists every run. There is no chat.
+- **Focus** (`/?run=runs/etch-2026-10-01`): the panes work on that run. The Files view is
+  rooted at it (new notes and uploads land in it), the title bar shows where you are with a
+  button to leave, and Claude gets the run as context (its path, files and
+  `xdoe-report/report.md`). Picking a run opens its report.
+
+The URL is the source of truth, so links open a run directly and back/forward move between
+runs. A link to a run that isn't there falls back to Traverse with a notice.
+
 ### Workbench contract
 
 Everything that moves panes goes through one typed API, `useWorkbench()`
@@ -31,11 +46,13 @@ switcher, file references in answers, and Claude's open-file tools.
 
 | Part | Does |
 | --- | --- |
+| `mode`, `runDir`, `runs` | Focus or Traverse, the focused run, every run in the workspace |
+| `run.focus(path) / leave()` | moves to a run (a new history entry) or back to Traverse |
 | `panes.isOpen / show / hide / toggle(pane)` | `"explorer"`, `"editor"` or `"chat"`; on phones `show` switches to that pane |
 | `panes.resize / resetSize(pane, width)` | splitter drags, clamped to each pane's range |
 | `sidebar.select / show(view)` | the icon rail (`select` on the active view collapses the panel) |
 | `editor.open(path, lines?)` | opens a file or the task board, optionally at cited lines |
-| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat |
+| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat (Focus mode only) |
 | `notify(message, level)` | a short notice in the corner |
 
 The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit

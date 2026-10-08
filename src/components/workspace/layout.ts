@@ -9,6 +9,7 @@ export type PaneId = "explorer" | "editor" | "chat";
 export type SidebarView =
   | "files"
   | "search"
+  | "runs"
   | "knowledge"
   | "skills"
   | "uploads"
@@ -54,6 +55,8 @@ export type LayoutCommand =
   /** An icon rail click: picking the view already shown collapses the pane. */
   | { type: "selectView"; view: SidebarView }
   | { type: "showView"; view: SidebarView }
+  /** Switches the view without opening the pane or moving the phone to it. */
+  | { type: "setView"; view: SidebarView }
   /** Saved layout from an earlier visit; unknown or malformed values are ignored. */
   | { type: "restore"; saved: unknown };
 
@@ -99,6 +102,8 @@ export function reduceLayout(layout: Layout, command: LayoutCommand): Layout {
       return { ...layout, view: command.view, sideOpen: !(layout.sideOpen && layout.view === command.view) };
     case "showView":
       return { ...layout, view: command.view, sideOpen: true, mobilePane: "explorer" };
+    case "setView":
+      return { ...layout, view: command.view };
     case "restore": {
       const saved = (command.saved ?? {}) as Partial<Record<string, unknown>>;
       let next = layout;
@@ -113,6 +118,23 @@ export function reduceLayout(layout: Layout, command: LayoutCommand): Layout {
       return next;
     }
   }
+}
+
+/** Commands that would show, size or otherwise touch the chat pane. */
+export function touchesChat(command: LayoutCommand): boolean {
+  return "pane" in command && command.pane === "chat";
+}
+
+/**
+ * The layout as shown in Traverse mode, which has no chat pane. The user's own
+ * chat setting is kept underneath and comes back in Focus mode.
+ */
+export function withoutChat(layout: Layout): Layout {
+  return {
+    ...layout,
+    chatOpen: false,
+    mobilePane: layout.mobilePane === "chat" ? "editor" : layout.mobilePane,
+  };
 }
 
 export function persistedLayout(layout: Layout) {

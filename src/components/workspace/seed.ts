@@ -73,6 +73,71 @@ description: Summarize one or more workspace files into a short brief.
 2026-09,51200,149
 `,
   },
+  {
+    path: "runs/etch-2026-10-01/xdoe-report/report.md",
+    kind: "note",
+    mime: "text/markdown",
+    author: "user",
+    updatedAt: t,
+    content: `# xDOE report: etch rate vs. RF power and pressure
+
+Run \`etch-2026-10-01\`, 2-factor full factorial with a center point, 3 replicates.
+
+## Factors
+
+| Factor | Low | Center | High |
+| --- | --- | --- | --- |
+| RF power (W) | 300 | 400 | 500 |
+| Chamber pressure (mTorr) | 20 | 30 | 40 |
+
+## Results
+
+| Power (W) | Pressure (mTorr) | Etch rate (nm/min) | Uniformity (%) |
+| --- | --- | --- | --- |
+| 300 | 20 | 118 | 3.1 |
+| 500 | 20 | 171 | 4.4 |
+| 300 | 40 | 104 | 2.6 |
+| 500 | 40 | 149 | 3.8 |
+| 400 | 30 | 139 | 3.2 |
+
+## Findings
+
+- RF power dominates etch rate (+26 nm/min per 100 W).
+- Higher pressure lowers the rate but improves uniformity.
+- No significant interaction at the 95% level.
+`,
+  },
+  {
+    path: "runs/etch-2026-10-01/xdoe-report/effects.csv",
+    kind: "note",
+    mime: "text/csv",
+    author: "user",
+    updatedAt: t,
+    content: `term,effect,p_value
+power,49.0,0.001
+pressure,-18.0,0.012
+power:pressure,-4.0,0.41
+`,
+  },
+  {
+    path: "runs/litho-2026-10-03/xdoe-report/report.md",
+    kind: "note",
+    mime: "text/markdown",
+    author: "user",
+    updatedAt: t,
+    content: `# xDOE report: CD vs. dose and focus
+
+Run \`litho-2026-10-03\`, 3×3 dose/focus matrix.
+
+| Dose (mJ/cm²) | Focus (µm) | CD (nm) |
+| --- | --- | --- |
+| 28 | -0.1 | 47.2 |
+| 30 | 0.0 | 45.0 |
+| 32 | +0.1 | 43.1 |
+
+Best focus is 0.0 µm; CD falls about 1 nm per mJ/cm² of dose.
+`,
+  },
 ];
 
 export const DEFAULT_OPEN = "notes/welcome.md";

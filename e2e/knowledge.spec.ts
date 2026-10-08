@@ -131,7 +131,9 @@ test("experiments", async ({ page, request }) => {
 
   // Its files are a copy: editing the recipe here leaves the process alone.
   await tree.getByRole("treeitem", { name: /untitled-1\.md/ }).click();
-  await page.getByRole("button", { name: "edit", exact: true }).click();
+  // Traverse mode has no chat pane, so the editor toolbar reaches the top-right
+  // corner, where the CopilotKit inspector button (and its popover) can sit.
+  await page.getByRole("button", { name: "edit", exact: true }).dispatchEvent("click");
   await page.getByTestId("file-editor").fill("# Main etch recipe\n\nRF power: 350 W\nPressure: 30 mTorr");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 

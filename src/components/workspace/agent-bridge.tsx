@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilotkit/react-core/v2";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
+import { isInRun, RUN_REPORT } from "./runs";
 import { isTextFile, TASKS_TAB } from "./types";
 import { useWorkbench } from "./workbench";
 
@@ -34,11 +35,13 @@ export function useWorkspaceAgent() {
   latestWorkbench.current = workbench;
 
   const open = ws.activeFile;
+  const { runDir } = workbench;
+  const report = runDir ? ws.getFile(`${runDir}/${RUN_REPORT}`) : undefined;
   // Only while files are browser-only; see the comment above.
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment on that node the user is working in; `files` are the files where the user is.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment on that node the user is working in; `files` are the files where the user is. `run` is the experiment run (RUN_DIR, a folder among those files) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder.",
     value: {
       currentNode: ws.node
         ? {
@@ -58,6 +61,21 @@ export function useWorkspaceAgent() {
             // Plain JSON from the server.
             params: ws.experiment.params as JsonSerializable,
             results: ws.experiment.results as JsonSerializable,
+          }
+        : null,
+      run: runDir
+        ? {
+            path: runDir,
+            files: ws.files.filter((f) => isInRun(f.path, runDir)).map((f) => f.path),
+            report: !report
+              ? null
+              : report.path === open?.path
+                ? { path: report.path, content: "(the open file)" }
+                : {
+                    path: report.path,
+                    content: numberLines(report.content.slice(0, MAX_CONTEXT_CHARS)),
+                    truncated: report.content.length > MAX_CONTEXT_CHARS,
+                  },
           }
         : null,
       openFile: open
@@ -112,9 +130,9 @@ export function useWorkspaceAgent() {
     name: "writeWorkspaceFile",
     available: browserFiles,
     description:
-      "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents under artifacts/ unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
+      "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents in the focused run's artifacts/ folder (<run>/artifacts/, see `run` in context), or under artifacts/ when there is no run, unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
     parameters: z.object({
-      path: z.string().describe("e.g. artifacts/summary.md"),
+      path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
       content: z.string().describe("The full file content (markdown for .md files)."),
     }),
     handler: async ({ path, content }) => {
