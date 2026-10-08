@@ -27,7 +27,7 @@ import {
   touchesChat,
   withoutChat,
 } from "./layout";
-import { findRunDirs, normalizeRunDir, RUN_REPORT, runFromSearch, searchWithRun, type RunDir } from "./runs";
+import { findRunDirs, isInRun, normalizeRunDir, RUN_REPORT, runFromSearch, searchWithRun, type RunDir } from "./runs";
 import { useHydrated, useWorkspace } from "./store";
 import type { TabId } from "./types";
 
@@ -182,13 +182,27 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const focusRun = useCallback(
     (dir: string) => {
       const next = normalizeRunDir(dir);
-      if (!next || next === runDir) return;
-      navigate(next);
-      const report = `${next}/${RUN_REPORT}`;
-      if (getFile(report)) open(report);
+      if (next && next !== runDir) navigate(next);
     },
-    [runDir, navigate, getFile, open],
+    [runDir, navigate],
   );
+
+  // However a run gets focused (a pick, a link, back/forward), the middle pane
+  // shows that run: its report opens unless a file of the run is already open,
+  // so the editor never shows another run's report beside this run's context.
+  // Waits for the files, as a linked run's report may not have loaded yet.
+  const shownReportFor = useRef<string | null>(null);
+  const { active } = ws;
+  useEffect(() => {
+    if (!runDir) {
+      shownReportFor.current = null;
+      return;
+    }
+    if (ws.storageMode === "loading" || shownReportFor.current === runDir) return;
+    shownReportFor.current = runDir;
+    const report = `${runDir}/${RUN_REPORT}`;
+    if (!(active && isInRun(active, runDir)) && getFile(report)) open(report);
+  }, [runDir, ws.storageMode, active, getFile, open]);
 
   const startNewThread = chatConfig?.startNewThread;
   const chatAvailable = mode === "focus";

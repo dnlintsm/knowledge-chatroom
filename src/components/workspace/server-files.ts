@@ -72,7 +72,7 @@ export async function loadServerFile(info: ServerFile): Promise<WorkspaceFile> {
  * Writing a read-only file throws ReadOnlyFileError.
  */
 export async function putServerFile(
-  file: Pick<WorkspaceFile, "path" | "mime" | "content">,
+  file: Pick<WorkspaceFile, "path" | "mime" | "content" | "readOnly">,
   opts: { createOnly?: boolean; readOnly?: boolean } = {},
 ): Promise<ServerFile> {
   // Binary uploads arrive as data: URLs; send their bytes.
@@ -82,7 +82,8 @@ export async function putServerFile(
       : file.content;
   const headers: Record<string, string> = { "Content-Type": file.mime };
   if (opts.createOnly) headers["If-None-Match"] = "*";
-  if (opts.readOnly) headers["X-Read-Only"] = "true";
+  // A read-only browser file stays read-only when it first moves to the server.
+  if (opts.readOnly ?? file.readOnly) headers["X-Read-Only"] = "true";
   const res = await fetch(fileUrl(file.path), { method: "PUT", headers, body });
   if (res.status === 412) throw new FileExistsError(file.path);
   if (res.status === 403) throw new ReadOnlyFileError(file.path);

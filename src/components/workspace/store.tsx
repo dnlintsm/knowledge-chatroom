@@ -443,11 +443,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (mode.current === "server") {
         // Counted as in flight, so the change event for this write is ignored.
         inflight.current.set(path, (inflight.current.get(path) ?? 0) + 1);
+        let lost = false;
         try {
           const info = await putServerFile(file, { createOnly: true, readOnly: opts?.readOnly });
           knownSha.current.set(path, info.sha256);
+        } catch (err) {
+          if (!(err instanceof FileExistsError)) throw err;
+          lost = true;
         } finally {
           inflight.current.set(path, (inflight.current.get(path) ?? 1) - 1);
+        }
+        if (lost) {
+          // Another tab or browser won. Its change event was ignored while this
+          // write was in flight, so load its file now, before callers open it.
+          const list = await listServerFiles();
+          if (Array.isArray(list)) await resync(list);
+          throw new FileExistsError(path);
         }
       }
       // A resync may have brought the new file in meanwhile; this is the same file.
@@ -455,7 +466,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       upsert(file);
       return file;
     },
-    [upsert],
+    [upsert, resync],
   );
 
   const remove = useCallback(
