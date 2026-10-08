@@ -170,14 +170,17 @@ npm run dev
 ## UI previews on pull requests
 
 Every PR runs `.github/workflows/ui-preview.yml`: it builds the app, walks the key screens with
-Playwright (`e2e/preview.spec.ts`), and posts a sticky PR comment with a walkthrough GIF and
+Playwright (`e2e/preview.spec.ts`, plus `e2e/knowledge.spec.ts` for server storage), and posts a sticky PR comment with a walkthrough GIF and
 screenshots, so reviewers can see the UI without running it locally. Full-size `.webm` videos
 and the Playwright HTML report are attached to the workflow run as an artifact. Comment images
 live on the `ui-previews` branch and are removed when the PR closes.
 
 The preview doesn't need an Anthropic key: without the `ANTHROPIC_API_KEY` repository secret, a
 canned AG-UI server (`e2e/mock-agent.mjs`) stands in for the agent. Add the secret to preview
-against real Claude instead.
+against real Claude instead. CI also starts Postgres and SeaweedFS, so the knowledge tree and
+server-saved files show up; there the agent server runs on :8001 for storage and the mock
+forwards `/files` and `/nodes` to it. `preview.spec.ts` answers the storage API with 404, so its
+screens show the browser-only workspace.
 
 To run it locally (first time: `npx playwright install chromium`):
 
@@ -186,7 +189,11 @@ npm run test:preview          # reuses `npm run dev` if it's already running, el
 open preview/screenshots      # screenshots; videos are under test-results/
 ```
 
-To capture a new screen, add a step to `e2e/preview.spec.ts` that calls `shot(page, "NN-name")`.
+With `docker compose up -d` and the storage values from `.env.example` exported,
+`npm run test:preview` runs `knowledge.spec.ts` too; without `DATABASE_URL` it is skipped.
+
+The preview only shows the screens these specs visit, so a PR that adds or changes UI should add
+a step that calls `shot(page, "NN-name")` for it.
 
 ## Project structure
 

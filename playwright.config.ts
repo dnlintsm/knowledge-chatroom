@@ -7,8 +7,33 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Without ANTHROPIC_API_KEY the agent is replaced by e2e/mock-agent.mjs, a
  * canned AG-UI server, so the preview never needs a real key.
+ *
+ * With DATABASE_URL (and the S3_* vars) set, the real agent server also runs
+ * for server storage, so knowledge.spec.ts can show the knowledge tree. With
+ * no key it listens on :8001 and the mock forwards /files and /nodes to it.
  */
 const useRealAgent = Boolean(process.env.ANTHROPIC_API_KEY);
+const withStorage = Boolean(process.env.DATABASE_URL);
+const STORAGE_PORT = 8001;
+
+const agentServers = useRealAgent
+  ? [{ command: "npm --prefix agent start", url: "http://localhost:8000/health" }]
+  : [
+      ...(withStorage
+        ? [
+            {
+              command: `AGENT_PORT=${STORAGE_PORT} npm --prefix agent start`,
+              url: `http://localhost:${STORAGE_PORT}/health`,
+            },
+          ]
+        : []),
+      {
+        command: withStorage
+          ? `STORAGE_URL=http://localhost:${STORAGE_PORT} node e2e/mock-agent.mjs`
+          : "node e2e/mock-agent.mjs",
+        url: "http://localhost:8000/health",
+      },
+    ];
 
 export default defineConfig({
   testDir: "./e2e",
@@ -39,14 +64,11 @@ export default defineConfig({
     },
   ],
   webServer: [
-    {
-      command: useRealAgent
-        ? "npm --prefix agent start"
-        : "node e2e/mock-agent.mjs",
-      url: "http://localhost:8000/health",
+    ...agentServers.map((server) => ({
+      ...server,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-    },
+    })),
     {
       // CI builds first and serves the production build; locally, dev mode.
       command: process.env.CI ? "npx next start -p 3000" : "npm run dev:ui",
