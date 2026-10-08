@@ -453,6 +453,12 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         assert.equal(await inY.remove("notes/y.md"), false);
         assert.equal(await storage.nodes.withSql(db).rename(techY, "Mine now"), null);
       });
+      // Bob edits Tech X, so he may rename it, but deleting it needs owner.
+      await assert.rejects(
+        asDbUser(storage.sql, bob, (db) => storage.nodes.withSql(db).remove(techX)),
+        /row-level security/,
+      );
+      assert.ok(await storage.nodes.get(techX));
       await assert.rejects(
         asDbUser(storage.sql, bob, async (db) =>
           (await filesIn(techY)).withSql(db).write("notes/z.md", text("z")),

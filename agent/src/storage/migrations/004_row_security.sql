@@ -56,9 +56,11 @@ CREATE POLICY nodes_read ON nodes FOR SELECT
   USING (sees_path(workspace_id, app_user(), path));
 CREATE POLICY nodes_add ON nodes FOR INSERT
   WITH CHECK (role_rank(effective_role(workspace_id, app_user(), parent_id)) >= 2);
+-- Editors rename; deleting (setting deleted_at) needs owner, as in session.ts.
 CREATE POLICY nodes_change ON nodes FOR UPDATE
   USING (role_rank(path_role(workspace_id, app_user(), path)) >= 2)
-  WITH CHECK (role_rank(path_role(workspace_id, app_user(), path)) >= 2);
+  WITH CHECK (role_rank(path_role(workspace_id, app_user(), path))
+              >= CASE WHEN deleted_at IS NULL THEN 2 ELSE 3 END);
 
 ALTER TABLE files ENABLE ROW LEVEL SECURITY;
 CREATE POLICY files_read ON files FOR SELECT
