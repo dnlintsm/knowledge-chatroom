@@ -264,6 +264,8 @@ export interface SearchHit {
   experimentTitle: string | null;
   /** The passage that matched; "" when only the path did. */
   snippet: string;
+  /** "meaning": no words in common, but a passage close in meaning. */
+  match: "words" | "meaning";
   updatedAt: string;
 }
 

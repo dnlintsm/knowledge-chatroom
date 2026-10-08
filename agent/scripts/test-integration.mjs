@@ -10,7 +10,10 @@ if (missing.length) {
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cli = fileURLToPath(new URL("../node_modules/tsx/dist/cli.mjs", import.meta.url));
-const result = spawnSync(process.execPath, [cli, "--test", "src/storage/storage.test.ts"], {
+// The real embedding model downloads about 120 MB, so it's checked only on request.
+const files = ["src/storage/storage.test.ts"];
+if (process.env.EMBEDDING_TEST) files.push("src/storage/embeddings.test.ts");
+const result = spawnSync(process.execPath, [cli, "--test", ...files], {
   cwd: root,
   stdio: "inherit",
 });

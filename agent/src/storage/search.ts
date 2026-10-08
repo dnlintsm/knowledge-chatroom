@@ -3,6 +3,7 @@ import type { Sql, Tx } from "./db";
 import type { AuthorType } from "./events";
 import { isNodeId } from "./nodes";
 import type { FileKind } from "./paths";
+import type { SemanticIndex } from "./semantic";
 
 /**
  * Full-text search over workspace files (issue #4, step 6; 006_search.sql).
@@ -109,24 +110,63 @@ export interface SearchHit {
   experimentTitle: string | null;
   /** The passage that matched, or "" when only the path did. */
   snippet: string;
+  /** "words": its text or path has the words; "meaning": only a passage close in meaning. */
+  match: "words" | "meaning";
   updatedAt: string;
   author: AuthorType;
 }
 
 export class SearchError extends Error {}
 
-interface HitRow {
+/** Where a search looks and ranks from, resolved (see search()). */
+interface Where {
+  userId: string;
+  /** Node path to stay inside, or null for everywhere. */
+  scope: string | null;
+  /** Node path the user is at ("" = the root). */
+  near: string;
+  /** Experiment the user works in, whose unchanged copies are kept. */
+  workingIn: string | null;
+}
+
+interface FileRow {
+  id: string;
   path: string;
   kind: FileKind;
   mime: string;
   node_id: string | null;
   experiment_id: string | null;
   experiment_title: string | null;
-  body: string | null;
-  lineage: string[] | null;
+  place_path: string;
+  distance: number;
   updated_at: Date;
   author_type: AuthorType;
 }
+
+interface WordRow extends FileRow {
+  body: string | null;
+  score: number;
+}
+
+interface MeaningRow extends FileRow {
+  body: string;
+  similarity: number;
+}
+
+interface Candidate extends FileRow {
+  /** Word relevance, 0 when only the meaning matched. */
+  words: number;
+  /** 0..1: how far past the similarity bar the closest passage is. */
+  meaning: number;
+  passage: string | null;
+}
+
+/** Files each kind of search hands over for merging. */
+const CANDIDATES = 100;
+/** Passages the meaning search looks at, before access and scope filters. */
+const NEAREST = 200;
+/** A meaning-only match at its best counts like a fair word match. */
+const MEANING_WEIGHT = 0.5;
 
 /**
  * The query's wanted words joined with `or`, for finding the passages that
@@ -166,11 +206,13 @@ export class SearchService {
     private readonly sql: Sql,
     private readonly blobs: BlobStore,
     private readonly workspaceId: string,
+    /** Search by meaning, when the agent runs an embedding model (semantic.ts). */
+    readonly semantic: SemanticIndex | null = null,
   ) {}
 
   /** The same search through another connection or transaction (see db.ts asUser). */
   withSql(sql: Sql): SearchService {
-    return new SearchService(sql, this.blobs, this.workspaceId);
+    return new SearchService(sql, this.blobs, this.workspaceId, this.semantic);
   }
 
   /** A node's path if `userId` can see it (as in the tree), else null. */
@@ -209,41 +251,114 @@ export class SearchService {
       (opts.nearExperiment ? await this.experimentPath(userId, opts.nearExperiment) : null) ??
       (opts.near ? await this.visiblePath(userId, opts.near) : null) ??
       "";
-
     const workingIn =
       opts.nearExperiment && isNodeId(opts.nearExperiment) ? opts.nearExperiment : null;
-    // Substring match too, for what full-text search doesn't split into words.
+    const where: Where = { userId, scope, near, workingIn };
+
+    // Words always; meaning too when it's available and the query isn't
+    // asking for exact words ("phrases", -exclusions).
+    const exact = /(^|\s)-\S|"/.test(query);
+    const [byWords, byMeaning] = await Promise.all([
+      this.byWords(query, where),
+      exact ? [] : this.byMeaning(query, where),
+    ]);
+
+    // One list: word matches score by relevance (plus 1 for a path match),
+    // meaning matches add up to MEANING_WEIGHT by how close they are, and
+    // files nearer where the user is rank higher.
+    const min = this.semantic?.minSimilarity ?? 0;
+    const merged = new Map<string, Candidate>();
+    for (const row of byWords) {
+      merged.set(row.id, { ...row, words: Number(row.score), meaning: 0, passage: row.body });
+    }
+    for (const row of byMeaning) {
+      const meaning = (Number(row.similarity) - min) / (1 - min);
+      const seen = merged.get(row.id);
+      if (seen) {
+        seen.meaning = meaning;
+        seen.passage ??= row.body;
+      } else {
+        merged.set(row.id, { ...row, words: 0, meaning, passage: row.body });
+      }
+    }
+    const rank = (c: Candidate) => (c.words + MEANING_WEIGHT * c.meaning) / (1 + 0.25 * c.distance);
+    const best = [...merged.values()]
+      .sort(
+        (a, b) =>
+          rank(b) - rank(a) ||
+          b.updated_at.getTime() - a.updated_at.getTime() ||
+          a.path.localeCompare(b.path),
+      )
+      .slice(0, limit);
+
+    const lineages = await this.lineages(best.map((c) => c.place_path));
+    return best.map((c) => ({
+      path: c.path,
+      kind: c.kind,
+      mime: c.mime,
+      node: c.node_id,
+      experiment: c.experiment_id,
+      where: lineages.get(c.place_path) ?? [],
+      experimentTitle: c.experiment_title,
+      snippet: c.passage ? snippetFor(c.passage, query) : "",
+      match: c.words > 0 ? "words" : "meaning",
+      updatedAt: c.updated_at.toISOString(),
+      author: c.author_type,
+    }));
+  }
+
+  /** The joins and conditions both kinds of search share; `f` is the file, `v` its current version. */
+  private placeJoins() {
+    return this.sql`
+      LEFT JOIN nodes n ON n.id = f.node_id
+      LEFT JOIN file_versions fv ON fv.id = f.forked_from
+      LEFT JOIN experiments e ON e.id = f.experiment_id
+      LEFT JOIN nodes en ON en.id = e.node_id`;
+  }
+
+  private columns(near: string) {
+    return this.sql`
+      f.id, f.path, f.kind, f.mime, f.node_id, f.experiment_id, f.updated_at, v.author_type,
+      e.title AS experiment_title,
+      coalesce(n.path, en.path, ''::ltree)::text AS place_path,
+      tree_distance(coalesce(n.path, en.path, ''::ltree), ${near}::ltree) AS distance`;
+  }
+
+  private filters({ userId, scope, workingIn }: Where) {
+    return this.sql`
+      f.workspace_id = ${this.workspaceId} AND f.deleted_at IS NULL
+      AND place_rank(f.workspace_id, ${userId}, f.node_id, f.experiment_id) >= 1
+      -- An experiment's unchanged copy of a node file would only repeat the
+      -- node's, except for someone working in that experiment.
+      AND NOT (fv.blob_sha256 IS NOT DISTINCT FROM v.blob_sha256
+               AND f.experiment_id IS DISTINCT FROM ${workingIn}::uuid)
+      ${scope === null ? this.sql`` : this.sql`AND coalesce(n.path, en.path) <@ ${scope}::ltree`}`;
+  }
+
+  /**
+   * Files whose whole text satisfies the query (so -word and words in
+   * different passages count across the file), whose text contains the query
+   * as written (for what full-text search doesn't split into words), or
+   * whose path does. `anyq` (one of the wanted words) finds candidate
+   * passages fast and picks the one to show.
+   */
+  private byWords(query: string, where: Where) {
     const pattern = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    // A file matches when its whole text satisfies the query (so -word and
-    // words in different passages count across the file), its text contains
-    // the query as written, or its path does. `any` (one of the wanted words)
-    // finds candidate passages fast and picks the one to show.
-    const rows = await this.sql<HitRow[]>`
+    return this.sql<WordRow[]>`
       WITH q AS (
         SELECT websearch_to_tsquery('english', ${query}) AS tsq,
                websearch_to_tsquery('english', ${anyWords(query)}) AS anyq
       ),
       candidates AS (
-        SELECT f.id, f.path, f.kind, f.mime, f.node_id, f.experiment_id, f.updated_at,
-               v.author_type, v.blob_sha256, e.title AS experiment_title,
-               coalesce(n.path, en.path, ''::ltree) AS place_path
+        SELECT ${this.columns(where.near)}, v.blob_sha256
         FROM files f
         JOIN file_versions v ON v.id = f.current_version_id
-        LEFT JOIN nodes n ON n.id = f.node_id
-        LEFT JOIN file_versions fv ON fv.id = f.forked_from
-        LEFT JOIN experiments e ON e.id = f.experiment_id
-        LEFT JOIN nodes en ON en.id = e.node_id
+        ${this.placeJoins()}
         CROSS JOIN q
-        WHERE f.workspace_id = ${this.workspaceId} AND f.deleted_at IS NULL
+        WHERE ${this.filters(where)}
           AND (f.path ILIKE ${pattern} OR EXISTS (
                 SELECT 1 FROM blob_chunks c
                 WHERE c.sha256 = v.blob_sha256 AND (c.tsv @@ q.anyq OR c.body ILIKE ${pattern})))
-          AND place_rank(f.workspace_id, ${userId}, f.node_id, f.experiment_id) >= 1
-          -- An experiment's unchanged copy of a node file would only repeat the
-          -- node's, except for someone working in that experiment.
-          AND NOT (fv.blob_sha256 IS NOT DISTINCT FROM v.blob_sha256
-                   AND f.experiment_id IS DISTINCT FROM ${workingIn}::uuid)
-          ${scope === null ? this.sql`` : this.sql`AND coalesce(n.path, en.path) <@ ${scope}::ltree`}
       ),
       hits AS (
         SELECT h.*, passage.body,
@@ -267,33 +382,58 @@ export class SearchService {
         WHERE doc.tsv @@ q.tsq OR h.path ILIKE ${pattern}
            OR EXISTS (SELECT 1 FROM blob_chunks c
                       WHERE c.sha256 = h.blob_sha256 AND c.body ILIKE ${pattern})
-      ),
-      best AS (
-        SELECT * FROM hits
-        ORDER BY score / (1 + 0.25 * tree_distance(place_path, ${near}::ltree)) DESC,
-                 updated_at DESC, path
-        LIMIT ${limit}
       )
-      SELECT b.*,
-        (SELECT array_agg(a.name ORDER BY nlevel(a.path)) FROM nodes a
-         WHERE a.workspace_id = ${this.workspaceId} AND a.path @> b.place_path
-           AND nlevel(b.place_path) > 0) AS lineage
-      FROM best b
-      ORDER BY b.score / (1 + 0.25 * tree_distance(b.place_path, ${near}::ltree)) DESC,
-               b.updated_at DESC, b.path`;
+      SELECT * FROM hits
+      ORDER BY score / (1 + 0.25 * distance) DESC, updated_at DESC, path
+      LIMIT ${CANDIDATES}`;
+  }
 
-    return rows.map((r) => ({
-      path: r.path,
-      kind: r.kind,
-      mime: r.mime,
-      node: r.node_id,
-      experiment: r.experiment_id,
-      where: r.lineage ?? [],
-      experimentTitle: r.experiment_title,
-      snippet: r.body ? snippetFor(r.body, query) : "",
-      updatedAt: r.updated_at.toISOString(),
-      author: r.author_type,
-    }));
+  /**
+   * Files with a passage close in meaning to the query (semantic.ts), each
+   * with its closest passage; none when search by meaning isn't available.
+   */
+  private async byMeaning(query: string, where: Where): Promise<MeaningRow[]> {
+    const semantic = this.semantic;
+    if (!semantic?.ready) return [];
+    let vector: string;
+    try {
+      vector = await semantic.queryVector(query);
+    } catch (err) {
+      console.error("[search] could not embed the query; matching words only:", err);
+      return [];
+    }
+    return this.sql.begin(async (tx) => {
+      // Keep scanning the index past passages the filters drop (pgvector 0.8+).
+      await tx`SELECT set_config('hnsw.ef_search', '200', true),
+                      set_config('hnsw.iterative_scan', 'relaxed_order', true)`;
+      return tx<MeaningRow[]>`
+        WITH nearest AS MATERIALIZED (
+          SELECT c.sha256, c.body, 1 - (c.embedding <=> ${vector}::vector) AS similarity
+          FROM blob_chunks c
+          WHERE c.embedding IS NOT NULL
+          ORDER BY c.embedding <=> ${vector}::vector
+          LIMIT ${NEAREST}
+        )
+        SELECT DISTINCT ON (f.id) ${this.columns(where.near)}, k.body, k.similarity
+        FROM nearest k
+        JOIN file_versions v ON v.blob_sha256 = k.sha256
+        JOIN files f ON f.current_version_id = v.id
+        ${this.placeJoins()}
+        WHERE ${this.filters(where)} AND k.similarity >= ${semantic.minSimilarity}
+        ORDER BY f.id, k.similarity DESC`;
+    }) as Promise<MeaningRow[]>;
+  }
+
+  /** Node names from the top down to each place path ("" = the root). */
+  private async lineages(paths: string[]): Promise<Map<string, string[]>> {
+    const wanted = [...new Set(paths.filter(Boolean))];
+    if (!wanted.length) return new Map();
+    const rows = await this.sql<{ path: string; names: string[] | null }[]>`
+      SELECT p.path,
+        (SELECT array_agg(a.name ORDER BY nlevel(a.path)) FROM nodes a
+         WHERE a.workspace_id = ${this.workspaceId} AND a.path @> p.path::ltree) AS names
+      FROM unnest(${wanted}::text[]) AS p(path)`;
+    return new Map(rows.map((r) => [r.path, r.names ?? []]));
   }
 
   /**
