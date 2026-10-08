@@ -73,11 +73,11 @@ test("restores only well-formed saved values", () => {
 test("only the workbench changes pane layout", () => {
   const dir = path.join(__dirname, "../src");
   const sources = readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((f) => /\.tsx?$/.test(f))
-    .map((f) => path.join("src", f));
-  const owners = sources.filter((f) =>
-    /\breduceLayout\(|knowledge-chatroom\.layout\./.test(readFileSync(path.join(__dirname, "..", f), "utf8")),
-  );
+    .filter((f) => /\.tsx?$/.test(f));
+  const owners = sources
+    .filter((f) => /\breduceLayout\(|knowledge-chatroom\.layout\./.test(readFileSync(path.join(dir, f), "utf8")))
+    // Forward slashes on every platform (readdirSync gives backslashes on Windows).
+    .map((f) => `src/${f.split(path.sep).join("/")}`);
   expect(owners.sort()).toEqual([
     "src/components/workspace/layout.ts",
     "src/components/workspace/workbench.tsx",
