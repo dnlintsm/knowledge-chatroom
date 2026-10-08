@@ -1,5 +1,5 @@
-# Storage for the workspace: Postgres (metadata, versions, later search via
-# pgvector) and SeaweedFS as a self-hosted S3-compatible object store.
+# Storage for the workspace: Postgres (metadata, versions, search, with pgvector
+# for search by meaning) and SeaweedFS as a self-hosted S3-compatible object store.
 #
 #   docker compose up -d
 #

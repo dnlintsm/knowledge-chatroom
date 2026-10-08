@@ -23,9 +23,39 @@ import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { initStorage, type Storage } from "./index";
+import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
+import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, formatTree, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+
+/**
+ * Stands in for an embedding model: words that share a concept land on the
+ * same axis, so "wall buildup" is close to "polymer deposition on the liner".
+ */
+const CONCEPTS: Record<string, string> = {
+  buildup: "buildup", deposition: "buildup", polymer: "buildup", residue: "buildup",
+  wall: "chamber", walls: "chamber", liner: "chamber", chamber: "chamber",
+  pump: "vacuum", vacuum: "vacuum", hums: "noise", noise: "noise",
+};
+class ConceptEmbedder implements Embedder {
+  constructor(readonly model = "test/concepts") {}
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map((t) => {
+      const v = new Array<number>(16).fill(0);
+      for (const word of t.toLowerCase().match(/[a-z]+/g) ?? []) {
+        const concept = CONCEPTS[word];
+        if (!concept) continue;
+        let h = 0;
+        for (const ch of concept) h = (h * 31 + ch.charCodeAt(0)) % 16;
+        v[h] += 1;
+      }
+      v[15] += 0.01; // never all zero
+      const norm = Math.hypot(...v);
+      return v.map((x) => x / norm);
+    });
+  }
+}
 const text = (s: string) => new TextEncoder().encode(s);
 
 async function waitFor(check: () => boolean, ms = 3000) {
@@ -672,6 +702,271 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     });
   });
 
+  describe("search", () => {
+    const as = (userId: string, actor: Principal["actor"] = "user") =>
+      storage.session({ userId, actor });
+    const paths = (hits: { path: string }[]) => hits.map((h) => h.path);
+    const RECIPE_WHERE = ["Plasma", "Chamber", "Seasoning", "Recipe"];
+    let alice: string, dora: string, eli: string;
+    let plasma: string, chamber: string, recipe: string, wet: string;
+
+    before(async () => {
+      alice = await storage.access.userForSubject("test|alice");
+      dora = await storage.access.userForSubject("test|dora");
+      eli = await storage.access.userForSubject("test|eli");
+      // Plasma › Chamber › Seasoning › Recipe, and Rinse bay beside it.
+      plasma = (await as(alice).createNode(null, "Plasma")).id;
+      chamber = (await as(alice).createNode(plasma, "Chamber")).id;
+      const loop = await as(alice).createNode(chamber, "Seasoning");
+      recipe = (await as(alice).createNode(loop.id, "Recipe")).id;
+      wet = (await as(alice).createNode(null, "Rinse bay")).id;
+      await (await as(alice).files(plasma)).write(
+        "notes/overview.md",
+        text("# Plasma\n\nThe zircon liner wears faster at high RF power."),
+      );
+      await (await as(alice).files(recipe)).write(
+        "notes/steps.md",
+        text("Step 1: season the chamber.\n\nStep 2: check the zircon liner for flaking."),
+      );
+      const wetFiles = await as(alice).files(wet);
+      await wetFiles.write("notes/zircon.md", text("Rinse twice."));
+      await wetFiles.write("uploads/zircon-photo.png", new Uint8Array([0x89, 0x50, 0, 1]));
+      await storage.files.write(
+        "notes/glossary.md",
+        text("Zircon: a ceramic. 等离子体刻蚀 means plasma etching."),
+      );
+      // Dora may read the Chamber subtree only; Eli nothing.
+      await as(alice).setGrant(chamber, "user", dora, "viewer");
+    });
+
+    test("text helpers: chunks, binary detection, snippets", () => {
+      const long = Array.from({ length: 30 }, (_, i) => `Paragraph ${i} ${"word ".repeat(30)}`);
+      const chunks = chunkText(long.join("\n\n"));
+      assert.ok(chunks.length > 1 && chunks.every((c) => c.length <= 1500));
+      assert.equal(chunks.join(" ").match(/Paragraph/g)!.length, 30);
+      assert.ok(chunkText("x".repeat(4000)).every((c) => c.length <= 1500));
+      assert.equal(extractText(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), null);
+      assert.equal(extractText(text("a\u0000b")), null);
+      assert.equal(extractText(text("héllo")), "héllo");
+      const body = `${"filler ".repeat(100)}the needle is here${" filler".repeat(100)}`;
+      const snippet = snippetFor(body, "needle");
+      assert.ok(snippet.startsWith("…") && snippet.endsWith("…"));
+      assert.ok(snippet.includes("the needle is here"));
+    });
+
+    test("finds files by their words and by path, everywhere the user can read", async () => {
+      const hits = await as(alice).search({ query: "zircon" });
+      assert.deepEqual(
+        new Set(paths(hits)),
+        new Set([
+          "notes/overview.md",
+          "notes/steps.md",
+          "notes/zircon.md",
+          "notes/glossary.md",
+          "uploads/zircon-photo.png",
+        ]),
+      );
+      const steps = hits.find((h) => h.path === "notes/steps.md")!;
+      assert.deepEqual([steps.node, steps.experiment, steps.where], [recipe, null, RECIPE_WHERE]);
+      assert.match(steps.snippet, /zircon liner for flaking/);
+      assert.equal(hits.find((h) => h.path === "uploads/zircon-photo.png")!.snippet, "");
+      // Word forms: "seasoning" finds "season".
+      assert.deepEqual(paths(await as(alice).search({ query: "seasoning" })), ["notes/steps.md"]);
+      // Text that full-text search doesn't split into words.
+      assert.deepEqual(paths(await as(alice).search({ query: "等离子体" })), ["notes/glossary.md"]);
+      // Phrases and exclusions.
+      const phrase = await as(alice).search({ query: '"zircon liner" -flaking' });
+      assert.deepEqual(paths(phrase), ["notes/overview.md"]);
+    });
+
+    test("a query applies to the whole file, not one passage", async () => {
+      // Two passages: the words sit in different ones.
+      const filler = "Routine check, nothing to report. ".repeat(40);
+      const long = `Bellows leak found.\n\n${filler}\n\n${filler}\n\nGasket replaced.`;
+      const files = await as(alice).files(wet);
+      await files.write("notes/maintenance.md", text(long));
+      const n = await storage.sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM blob_chunks c JOIN blob_texts t USING (sha256)
+        WHERE c.body LIKE 'Bellows%' OR c.body LIKE '%Gasket replaced.'`;
+      assert.ok(n[0].n >= 2, "the test needs the words in separate passages");
+      assert.deepEqual(paths(await as(alice).search({ query: "bellows gasket" })), [
+        "notes/maintenance.md",
+      ]);
+      assert.deepEqual(paths(await as(alice).search({ query: "bellows -gasket" })), []);
+      assert.match((await as(alice).search({ query: "gasket" }))[0].snippet, /Gasket replaced/);
+      await files.remove("notes/maintenance.md");
+      assert.equal(anyWords('"zircon liner" -flaking -"wet clean" or rinse'), "zircon or liner or rinse");
+    });
+
+    test("nearby files rank first, and a scope keeps to one subtree", async () => {
+      const nearRecipe = await as(alice).search({ query: "zircon liner", near: recipe });
+      assert.equal(nearRecipe[0].path, "notes/steps.md");
+      const nearWet = await as(alice).search({ query: "zircon", near: wet });
+      assert.equal(nearWet[0].node, wet);
+      const scoped = await as(alice).search({ query: "zircon", scope: plasma });
+      assert.deepEqual(new Set(paths(scoped)), new Set(["notes/overview.md", "notes/steps.md"]));
+      await assert.rejects(as(alice).search({ query: "zircon", scope: "nope" }), /No such knowledge node/);
+      await assert.rejects(as(alice).search({ query: "   " }), /at least one word/);
+      assert.equal((await as(alice).search({ query: "zircon", limit: 1 })).length, 1);
+    });
+
+    test("results never include what the user can't read", async () => {
+      assert.deepEqual(paths(await as(dora).search({ query: "zircon" })), ["notes/steps.md"]);
+      assert.deepEqual(await as(eli).search({ query: "zircon" }), []);
+      // Plasma shows for Dora only as the path to Chamber: searching it finds nothing of its own.
+      assert.deepEqual(paths(await as(dora).search({ query: "zircon", scope: plasma })), [
+        "notes/steps.md",
+      ]);
+      await assert.rejects(as(eli).search({ query: "zircon", scope: plasma }), /No such knowledge node/);
+
+      if (storage.rowSecurity) {
+        // The database agrees: Eli's queries can't read the indexed text either.
+        const count = (userId: string) =>
+          asDbUser(storage.sql, userId, async (db) => {
+            const [row] = await db<{ n: number }[]>`
+              SELECT count(*)::int AS n FROM blob_chunks WHERE body LIKE '%zircon liner%'`;
+            return row.n;
+          });
+        assert.equal(await count(eli), 0);
+        assert.equal(await count(dora), 1);
+        assert.equal(await count(alice), 2);
+      }
+    });
+
+    test("follows changes: new versions, deletes, experiments and their drafts", async () => {
+      const files = await as(alice).files(wet);
+      await files.write("notes/zircon.md", text("Rinse three times with hafnium-free water."));
+      assert.deepEqual(paths(await as(alice).search({ query: "rinse twice" })), []);
+      assert.deepEqual(paths(await as(alice).search({ query: "hafnium" })), ["notes/zircon.md"]);
+      await files.remove("notes/zircon.md");
+      assert.deepEqual(paths(await as(alice).search({ query: "hafnium" })), []);
+      // Content indexed before (here by Recipe's note) is shared, not indexed again.
+      const copy = "Step 1: season the chamber.\n\nStep 2: check the zircon liner for flaking.";
+      await files.write("notes/copy.md", text(copy));
+      const flakes = await as(alice).search({ query: "flaking" });
+      assert.deepEqual(new Set(paths(flakes)), new Set(["notes/steps.md", "notes/copy.md"]));
+      await files.remove("notes/copy.md");
+
+      // A fork shares the node's text; edits in it are found there, by its author only.
+      const exp = await as(dora).createExperiment(recipe, { title: "Thicker liner" });
+      await (await as(dora).experimentFiles(exp.id)).write("notes/run.md", text("Yttria coating held."));
+      const mine = await as(dora).search({ query: "yttria" });
+      assert.deepEqual(
+        mine.map((h) => [h.path, h.experiment, h.experimentTitle, h.where]),
+        [["notes/run.md", exp.id, "Thicker liner", RECIPE_WHERE]],
+      );
+      const flaking = await as(dora).search({ query: "flaking", nearExperiment: exp.id });
+      assert.deepEqual(new Set(flaking.map((h) => h.experiment)), new Set([exp.id, null]));
+      assert.deepEqual(await as(alice).search({ query: "yttria" }), []);
+      await as(dora).updateExperiment(exp.id, { status: "shared" });
+      assert.deepEqual(paths(await as(alice).search({ query: "yttria" })), ["notes/run.md"]);
+    });
+
+    test("indexes files written before search existed", async () => {
+      await (await as(alice).files(plasma)).write("notes/legacy.md", text("About quartz windows."));
+      // As if written before 006_search.sql: no text for its blob yet.
+      await storage.sql`
+        DELETE FROM blob_texts t USING file_versions v, files f
+        WHERE t.sha256 = v.blob_sha256 AND v.id = f.current_version_id
+          AND f.path = 'notes/legacy.md'`;
+      assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), []);
+      const [{ id: ws }] = await storage.sql<{ id: string }[]>`
+        SELECT id FROM workspaces WHERE slug = 'default'`;
+      const failing = (err: unknown) =>
+        new SearchService(storage.sql, { ...storage.blobs, get: () => Promise.reject(err) }, ws);
+      // A store hiccup leaves it pending for a later try...
+      const flaky = await failing(new Error("socket hang up")).indexAll();
+      assert.ok(flaky.failed >= 1);
+      assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), []);
+      // ...and the real store then indexes it.
+      const done = await storage.search.indexAll();
+      assert.ok(done.indexed >= 1 && done.failed === 0);
+      assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), ["notes/legacy.md"]);
+      assert.deepEqual(await storage.search.indexPending(), { indexed: 0, failed: [] });
+    });
+
+    test("Claude's search_files tool", async () => {
+      const tools = Object.fromEntries(
+        createFileTools(() => storage, async () => dora).map((t) => [t.name, t]),
+      );
+      const call = async (args: Record<string, unknown>) =>
+        (await tools.search_files.handler(args as never, {})) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
+      const found = JSON.parse((await call({ query: "zircon" })).content[0].text) as {
+        path: string;
+        node: string;
+        where: string;
+      }[];
+      assert.deepEqual(
+        found.map((h) => [h.path, h.node, h.where]),
+        [["notes/steps.md", recipe, RECIPE_WHERE.join(" › ")]],
+      );
+      assert.match((await call({ query: "nothing-like-this" })).content[0].text, /^No files match/);
+      assert.equal((await call({ query: "" })).isError, true);
+    });
+  });
+
+  describe("search by meaning", () => {
+    let meaningful: Storage;
+    let vectors = false;
+    let alice: string, eli: string, fab: string;
+    const as = (userId: string) => meaningful.session({ userId, actor: "user" });
+    // Inside Fab 2: other tests' notes about chamber liners are close in meaning too.
+    const found = async (userId: string, query: string) =>
+      (await as(userId).search({ query, scope: fab })).map((h) => [h.path, h.match]);
+
+    before(async () => {
+      meaningful = (await initStorage(storage.config, new ConceptEmbedder()))!;
+      vectors = await meaningful.semantic!.prepare();
+      alice = await meaningful.access.userForSubject("test|alice");
+      eli = await meaningful.access.userForSubject("test|eli");
+      fab = (await as(alice).createNode(null, "Fab 2")).id;
+      const files = await as(alice).files(fab);
+      await files.write("notes/walls.md", text("Polymer deposition on the chamber liner grows weekly."));
+      await files.write("notes/pump.md", text("The roughing pump hums."));
+    });
+
+    after(() => meaningful?.close());
+
+    test("finds passages close in meaning once they are embedded", async (t) => {
+      if (!vectors) return t.skip("Postgres has no pgvector");
+      assert.ok(meaningful.search.semantic?.ready);
+      // Nothing shares a word with the query, and nothing is embedded yet.
+      assert.deepEqual(await found(alice, "wall buildup"), []);
+      assert.ok((await meaningful.semantic!.embedAll()) >= 2);
+      assert.deepEqual(await found(alice, "wall buildup"), [["notes/walls.md", "meaning"]]);
+      const [hit] = await as(alice).search({ query: "wall buildup", scope: fab });
+      assert.match(hit.snippet, /Polymer deposition/);
+      assert.deepEqual(hit.where, ["Fab 2"]);
+      // A word match counts as one, and comes first.
+      await (await as(alice).files(fab)).write("notes/residue.md", text("Wall buildup checklist."));
+      await meaningful.semantic!.embedAll();
+      assert.deepEqual(await found(alice, "wall buildup"), [
+        ["notes/residue.md", "words"],
+        ["notes/walls.md", "meaning"],
+      ]);
+      // Asking for exact words ("phrase", -word) leaves meaning out.
+      assert.deepEqual(await found(alice, '"wall buildup"'), [["notes/residue.md", "words"]]);
+      // And it never shows what the user can't read.
+      assert.deepEqual(await as(eli).search({ query: "wall buildup" }), []);
+    });
+
+    test("a different model starts the vectors over", async (t) => {
+      if (!vectors) return t.skip("Postgres has no pgvector");
+      const other = new SemanticIndex(meaningful.sql, new ConceptEmbedder("test/other"));
+      assert.equal(await other.prepare(), true);
+      const [{ n }] = await meaningful.sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM blob_chunks WHERE embedding IS NOT NULL`;
+      assert.equal(n, 0);
+      assert.ok((await other.embedAll()) > 0);
+      // Back to the first model, for the other tests.
+      assert.equal(await meaningful.semantic!.prepare(), true);
+      await meaningful.semantic!.embedAll();
+    });
+  });
+
   describe("Claude's file tools", () => {
     type Tool = ReturnType<typeof createFileTools>[number];
     let tools: Record<string, Tool>;
@@ -865,6 +1160,24 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const event = JSON.parse(received.split("data: ")[1]);
       assert.equal(event.op, "write");
       assert.equal(event.author, "user");
+    });
+
+    test("search API", async () => {
+      await fetch(`${base}/files/notes/searchable.md`, {
+        method: "PUT",
+        body: "Mentions the obsidian wafer.",
+      });
+      const res = await fetch(`${base}/search?q=obsidian&limit=5`);
+      assert.equal(res.status, 200);
+      const { results } = (await res.json()) as { results: { path: string; snippet: string }[] };
+      assert.deepEqual(
+        results.map((r) => [r.path, r.snippet]),
+        [["notes/searchable.md", "Mentions the obsidian wafer."]],
+      );
+      assert.equal((await fetch(`${base}/search?q=`)).status, 400);
+      assert.equal((await fetch(`${base}/search?q=x&scope=nope`)).status, 400);
+      assert.equal((await fetch(`${base}/search/more`)).status, 404);
+      assert.equal((await fetch(`${base}/search?q=x`, { method: "POST" })).status, 405);
     });
 
     test("nodes API and ?node= file routes", async () => {
