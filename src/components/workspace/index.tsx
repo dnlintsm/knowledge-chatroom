@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ChevronRight,
   CloudAlert,
   CloudCheck,
   FolderTree,
@@ -154,6 +155,7 @@ function TitleBar({
       <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
       <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
       <StorageStatus />
+      <PlaceBreadcrumb />
       <div className="ml-auto flex items-center gap-0.5">
         <button
           type="button"
@@ -213,6 +215,36 @@ function StorageStatus() {
       <Icon className="size-3.5" />
       <span className="max-sm:hidden">{label}</span>
     </span>
+  );
+}
+
+/** Where in the knowledge tree the workspace is; each step goes back there. */
+function PlaceBreadcrumb() {
+  const { storageMode, lineage, enterNode } = useWorkspace();
+  if (storageMode !== "server") return null;
+  const steps = [{ id: null as string | null, name: "Workspace" }, ...lineage];
+  return (
+    <nav aria-label="Location" className="ml-3 flex min-w-0 items-center gap-1 text-xs text-[var(--muted-foreground)]">
+      {steps.map((step, i) => {
+        const last = i === steps.length - 1;
+        return (
+          <span key={step.id ?? "root"} className={cn("flex min-w-0 items-center gap-1", !last && "max-sm:hidden")}>
+            {i > 0 && <ChevronRight className="size-3 shrink-0" />}
+            <button
+              type="button"
+              aria-current={last ? "location" : undefined}
+              onClick={() => void enterNode(step.id)}
+              className={cn(
+                "truncate rounded px-1 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer",
+                last && "text-[var(--foreground)]",
+              )}
+            >
+              {step.name}
+            </button>
+          </span>
+        );
+      })}
+    </nav>
   );
 }
 

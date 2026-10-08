@@ -9,6 +9,7 @@ import {
   FilePlus,
   ListTodo,
   MessagesSquare,
+  Network,
   Package,
   Sparkles,
   Trash2,
@@ -17,13 +18,15 @@ import {
 import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
+import { KnowledgeTree } from "./knowledge-tree";
 import { useWorkspace } from "./store";
 import { fileName, isTextFile, mimeForPath, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
-export type SidebarView = "files" | "skills" | "uploads" | "artifacts" | "chats";
+export type SidebarView = "files" | "knowledge" | "skills" | "uploads" | "artifacts" | "chats";
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
+  { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
   { id: "artifacts", label: "Artifacts", icon: Package },
@@ -169,6 +172,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
         {view === "files" && <FileTree files={files} />}
+        {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
           <FlatList
             files={files.filter((f) => f.kind === "skill")}
@@ -327,7 +331,7 @@ function buildTree(files: WorkspaceFile[]): Folder {
   return root;
 }
 
-function FileTree({ files }: { files: WorkspaceFile[] }) {
+export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) =>
@@ -365,5 +369,6 @@ function FileTree({ files }: { files: WorkspaceFile[] }) {
     </>
   );
 
-  return <div role="tree">{render(tree, 0)}</div>;
+  // Nested in the knowledge tree, this is a group inside that tree.
+  return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
 }

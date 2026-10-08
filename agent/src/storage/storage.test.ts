@@ -15,10 +15,10 @@ import { after, before, describe, test } from "node:test";
 
 import { storageConfigFromEnv } from "./config";
 import { connect } from "./db";
-import { createFilesHandler } from "./http";
-import type { FileEvent } from "./files";
+import type { WorkspaceEvent } from "./events";
+import { createStorageHandler } from "./http";
 import { initStorage, type Storage } from "./index";
-import { createFileTools, numberLines } from "./tools";
+import { createFileTools, formatTree, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const text = (s: string) => new TextEncoder().encode(s);
@@ -127,8 +127,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
   });
 
   test("subscribers hear committed writes and deletes", async () => {
-    const events: FileEvent[] = [];
-    const unsubscribe = await storage.files.subscribe((e) => events.push(e));
+    const events: WorkspaceEvent[] = [];
+    const unsubscribe = await storage.events.subscribe((e) => events.push(e));
     await storage.files.write("notes/watched.md", text("hi"), { author: "agent" });
     await storage.files.remove("notes/watched.md");
     await storage.files.remove("notes/never-existed.md");
@@ -138,10 +138,95 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     assert.equal(events.length, 2);
     assert.deepEqual(
       { ...events[0], sha256: undefined },
-      { op: "write", path: "notes/watched.md", author: "agent", sha256: undefined },
+      { op: "write", node: null, path: "notes/watched.md", author: "agent", sha256: undefined },
     );
-    assert.match(events[0].sha256!, /^[0-9a-f]{64}$/);
-    assert.deepEqual(events[1], { op: "delete", path: "notes/watched.md" });
+    assert.match((events[0] as { sha256: string }).sha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(events[1], { op: "delete", node: null, path: "notes/watched.md" });
+  });
+
+  describe("knowledge tree", () => {
+    test("levels go tech › module › loop › process, one at a time", async () => {
+      assert.deepEqual(
+        (await storage.nodes.types()).map((t) => t.name),
+        ["tech", "module", "loop", "process"],
+      );
+      const tech = await storage.nodes.create(null, "  Etch  ");
+      assert.equal(tech.name, "Etch");
+      assert.equal(tech.type, "tech");
+      const mod = await storage.nodes.create(tech.id, "Module 3");
+      const loop = await storage.nodes.create(mod.id, "Endpoint");
+      const proc = await storage.nodes.create(loop.id, "Recipe tuning");
+      assert.equal(proc.type, "process");
+      assert.equal(proc.parentId, loop.id);
+
+      await assert.rejects(storage.nodes.create(proc.id, "Too deep"), /below a process/);
+      await assert.rejects(storage.nodes.create(tech.id, "module 3"), /already exists/);
+      await assert.rejects(storage.nodes.create(null, " "), /needs a name/);
+      await assert.rejects(
+        storage.nodes.create("00000000-0000-0000-0000-000000000000", "x"),
+        /Parent node not found/,
+      );
+      // The same name is fine under another parent.
+      const other = await storage.nodes.create(null, "Litho");
+      await storage.nodes.create(other.id, "Module 3");
+
+      const lineage = await storage.nodes.lineage(proc.id);
+      assert.deepEqual(lineage!.map((n) => n.name), ["Etch", "Module 3", "Endpoint", "Recipe tuning"]);
+    });
+
+    test("the database refuses a node at the wrong level", async () => {
+      const tech = await storage.nodes.create(null, "Deposition");
+      await assert.rejects(
+        storage.sql`
+          INSERT INTO nodes (workspace_id, parent_id, type_id, name)
+          SELECT n.workspace_id, n.id, t.id, 'skips a level'
+          FROM nodes n JOIN node_types t ON t.workspace_id = n.workspace_id AND t.depth = 3
+          WHERE n.id = ${tech.id}`,
+        /exactly one level below/,
+      );
+    });
+
+    test("each node has its own files; deleting a node removes its subtree", async () => {
+      const tech = await storage.nodes.create(null, "Implant");
+      const mod = await storage.nodes.create(tech.id, "Beamline");
+      const techFiles = (await storage.files.inNode(tech.id))!;
+      const modFiles = (await storage.files.inNode(mod.id))!;
+
+      await storage.files.write("notes/overview.md", text("root"));
+      await techFiles.write("notes/overview.md", text("tech"));
+      await modFiles.write("notes/overview.md", text("module"));
+      const read = async (files: typeof techFiles) =>
+        new TextDecoder().decode((await files.read("notes/overview.md"))!.bytes);
+      assert.equal(await read(storage.files), "root");
+      assert.equal(await read(techFiles), "tech");
+      assert.equal(await read(modFiles), "module");
+      assert.deepEqual((await modFiles.list()).map((f) => f.path), ["notes/overview.md"]);
+      assert.equal((await storage.nodes.get(tech.id))!.fileCount, 1);
+
+      // Renaming changes nothing else.
+      await storage.nodes.rename(tech.id, "Ion implant");
+      assert.equal(await read(techFiles), "tech");
+
+      assert.equal(await storage.nodes.remove(tech.id), true);
+      assert.equal(await storage.nodes.get(mod.id), null);
+      assert.equal(await modFiles.read("notes/overview.md"), null);
+      assert.equal(await storage.files.inNode(mod.id), null);
+      await assert.rejects(modFiles.write("notes/late.md", text("x")), /Node not found/);
+      assert.equal(await read(storage.files), "root");
+      assert.equal(await storage.nodes.remove(tech.id), false);
+    });
+
+    test("events name the node", async () => {
+      const events: WorkspaceEvent[] = [];
+      const unsubscribe = await storage.events.subscribe((e) => events.push(e));
+      const tech = await storage.nodes.create(null, "Metrology");
+      await (await storage.files.inNode(tech.id))!.write("notes/a.md", text("x"));
+      await waitFor(() => events.length >= 2);
+      unsubscribe();
+      assert.deepEqual(events[0], { op: "node", change: "create", id: tech.id });
+      assert.equal(events[1].op, "write");
+      assert.equal((events[1] as { node: string }).node, tech.id);
+    });
   });
 
   describe("Claude's file tools", () => {
@@ -156,7 +241,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     };
 
     before(() => {
-      tools = Object.fromEntries(createFileTools(() => storage.files).map((t) => [t.name, t]));
+      tools = Object.fromEntries(createFileTools(() => storage).map((t) => [t.name, t]));
     });
 
     test("write_file records an agent version, read_file numbers lines", async () => {
@@ -167,6 +252,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual(JSON.parse(written.text), {
         ok: true,
         path: "artifacts/tool.md",
+        node: null,
         created: true,
       });
       assert.equal((await storage.files.stat("artifacts/tool.md"))!.author, "agent");
@@ -186,6 +272,29 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(result.isError, true);
     });
 
+    test("list_nodes shows the tree; file tools work inside a node", async () => {
+      const created = JSON.parse(
+        (await call("create_node", { name: "CMP" })).text,
+      ) as { id: string; type: string };
+      assert.equal(created.type, "tech");
+      const child = JSON.parse(
+        (await call("create_node", { parentId: created.id, name: "Pad wear" })).text,
+      ) as { id: string };
+
+      const tree = (await call("list_nodes")).text;
+      assert.match(tree, /^Levels: tech › module › loop › process/);
+      assert.ok(tree.includes(`- CMP [tech] id=${created.id} (0 files)`));
+      assert.ok(tree.includes(`  - Pad wear [module] id=${child.id} (0 files)`));
+
+      await call("write_file", { node: child.id, path: "notes/wear.md", content: "worn" });
+      assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
+      const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
+      assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
+      const missing = await call("list_files", { node: "not-a-node" });
+      assert.equal(missing.isError, true);
+      assert.match(missing.text, /list_nodes/);
+    });
+
     test("binary files are described, not dumped", async () => {
       await storage.files.write("uploads/pic.png", new Uint8Array([137, 80, 78, 71]));
       const read = JSON.parse((await call("read_file", { path: "uploads/pic.png" })).text);
@@ -199,7 +308,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     let base: string;
 
     before(async () => {
-      const handle = createFilesHandler(() => storage.files, 1024);
+      const handle = createStorageHandler(() => storage, 1024);
       server = http.createServer((req, res) =>
         handle(req, res, new URL(req.url!, "http://localhost")),
       );
@@ -262,9 +371,54 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(event.author, "user");
     });
 
+    test("nodes API and ?node= file routes", async () => {
+      const send = (path: string, method: string, body?: unknown) =>
+        fetch(`${base}${path}`, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      const created = await send("/nodes", "POST", { parentId: null, name: "Wet clean" });
+      assert.equal(created.status, 201);
+      const tech = (await created.json()) as { id: string };
+      const mod = (await (await send("/nodes", "POST", { parentId: tech.id, name: "SC1" })).json()) as {
+        id: string;
+      };
+
+      const { types, nodes } = (await (await fetch(`${base}/nodes`)).json()) as {
+        types: { name: string }[];
+        nodes: { id: string }[];
+      };
+      assert.equal(types[0].name, "tech");
+      assert.ok(nodes.some((n) => n.id === mod.id));
+
+      const { lineage } = (await (await fetch(`${base}/nodes/${mod.id}`)).json()) as {
+        lineage: { name: string }[];
+      };
+      assert.deepEqual(lineage.map((n) => n.name), ["Wet clean", "SC1"]);
+
+      assert.equal((await send(`/nodes/${tech.id}`, "PATCH", { name: "Wet" })).status, 200);
+      assert.equal((await send("/nodes", "POST", { parentId: tech.id, name: "sc1" })).status, 400);
+      assert.equal((await send("/nodes", "POST", { name: 3 })).status, 400);
+
+      const put = await fetch(`${base}/files/notes/bath.md?node=${mod.id}`, { method: "PUT", body: "hot" });
+      assert.equal(put.status, 200);
+      assert.equal(await (await fetch(`${base}/files/notes/bath.md?node=${mod.id}`)).text(), "hot");
+      assert.equal((await fetch(`${base}/files/notes/bath.md`)).status, 404);
+      const listed = (await (await fetch(`${base}/files?node=${mod.id}`)).json()) as {
+        files: { path: string }[];
+      };
+      assert.deepEqual(listed.files.map((f) => f.path), ["notes/bath.md"]);
+
+      assert.equal((await send(`/nodes/${tech.id}`, "DELETE")).status, 200);
+      assert.equal((await fetch(`${base}/files?node=${mod.id}`)).status, 404);
+      assert.equal((await fetch(`${base}/files?node=nope`)).status, 404);
+      assert.equal((await fetch(`${base}/nodes/${mod.id}`)).status, 404);
+    });
+
     test("without storage, says whether it is off, starting or failed", async () => {
       const statusFor = async (state: "off" | "starting" | "failed") => {
-        const handle = createFilesHandler(() => null, 1024, () => state);
+        const handle = createStorageHandler(() => null, 1024, () => state);
         const srv = http.createServer((req, res) =>
           handle(req, res, new URL(req.url!, "http://localhost")),
         );
