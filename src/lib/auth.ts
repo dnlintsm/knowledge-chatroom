@@ -76,6 +76,16 @@ export function readSession(cookie: string | undefined): SessionUser | null {
 
 export const sessionFrom = (req: NextRequest) => readSession(req.cookies.get(SESSION_COOKIE)?.value);
 
+/** The same, for a plain Request (as libraries like the CopilotKit runtime pass). */
+export function sessionFromRequest(req: Request): SessionUser | null {
+  const cookie = req.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${SESSION_COOKIE}=`));
+  return readSession(cookie && decodeURIComponent(cookie.slice(SESSION_COOKIE.length + 1)));
+}
+
 /** The X-Knowledge-User value for a request made for `user`. */
 export function identityHeader(user: SessionUser): string {
   return seal("v1", { ...user, exp: now() + HEADER_SECONDS }, authSecret()!);
