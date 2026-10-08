@@ -172,6 +172,19 @@ npm run dev
   person to sign in owns the workspace and shares nodes from the title bar's Share button
   (people show up there once they have signed in). Viewers get the files read only, and
   Claude's tools in a chat act as the person chatting.
+- **Database-enforced access**: file and node queries made for a user run in Postgres as
+  the restricted role `knowledge_user`, with row-level security policies
+  (`agent/src/storage/migrations/004_row_security.sql`) that apply the same grants. If a
+  check in the app were ever missed, Postgres would still refuse. The migration creates the
+  role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
+  otherwise the agent logs that row-level security is off, and an admin can enable it with
+  `CREATE ROLE knowledge_user NOLOGIN; GRANT knowledge_user TO <app user>;` before the next
+  start.
+- **Download links**: set `S3_PUBLIC_URL` to the object store's address as browsers reach it
+  (e.g. `http://localhost:8333` with `docker compose`, or `https://s3.<region>.amazonaws.com`)
+  and images and other binary files download straight from the store. After the access
+  check, the API answers with a redirect to a signed link that works for five minutes.
+  Text files are still served by the app, which the editor reads them through.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
   tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
   no browser tab is open. The file tools take a `node`; the chat context says which node the

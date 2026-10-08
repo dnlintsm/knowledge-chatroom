@@ -1,7 +1,7 @@
-import { S3BlobStore } from "./blobs";
+import { S3BlobStore, type BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { AccessService, type Principal } from "./access";
-import { connect, migrate, type Sql } from "./db";
+import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
 import { EventHub } from "./events";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
@@ -22,6 +22,9 @@ export interface Storage {
   nodes: NodeService;
   access: AccessService;
   events: EventHub;
+  blobs: BlobStore;
+  /** Whether Postgres also enforces access for users' queries (004_row_security.sql). */
+  rowSecurity: boolean;
   /** What `principal` may do; every API call and tool goes through one. */
   session(principal: Principal): Session;
   close(): Promise<void>;
@@ -40,6 +43,13 @@ export async function initStorage(
   try {
     const applied = await migrate(sql);
     if (applied.length) console.log(`[storage] applied migrations: ${applied.join(", ")}`);
+    const rowSecurity = await prepareRowSecurity(sql);
+    if (!rowSecurity) {
+      console.warn(
+        "[storage] row-level security is off: this database user can't use role knowledge_user " +
+          "(see 004_row_security.sql). Access is still checked by the app.",
+      );
+    }
 
     const blobs = new S3BlobStore(config.s3);
     await blobs.ensureBucket();
@@ -58,7 +68,9 @@ export async function initStorage(
       nodes,
       access,
       events,
-      session: (principal) => new Session({ files, nodes, access }, principal),
+      blobs,
+      rowSecurity,
+      session: (principal) => new Session({ files, nodes, access, sql, rowSecurity }, principal),
       close: () => sql.end(),
     };
   } catch (err) {

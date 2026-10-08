@@ -73,6 +73,11 @@ export class FileService {
     readonly nodeId: string | null = null,
   ) {}
 
+  /** The same files through another connection or transaction (see db.ts asUser). */
+  withSql(sql: Sql): FileService {
+    return new FileService(sql, this.blobs, this.events, this.workspaceId, this.nodeId);
+  }
+
   /** The same workspace's files in another node (null = root), or null if that node doesn't exist. */
   async inNode(nodeId: string | null): Promise<FileService | null> {
     if (nodeId === this.nodeId) return this;

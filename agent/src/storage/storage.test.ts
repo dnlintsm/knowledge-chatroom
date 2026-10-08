@@ -13,8 +13,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 
+import { S3BlobStore } from "./blobs";
 import { storageConfigFromEnv } from "./config";
-import { connect } from "./db";
+import { asUser as asDbUser, connect } from "./db";
 import type { WorkspaceEvent } from "./events";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { createStorageHandler } from "./http";
@@ -436,6 +437,42 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         await new Promise<void>((resolve) => srv.close(() => resolve()));
       }
     });
+
+    test("Postgres enforces access too, even with the app's checks skipped", async () => {
+      assert.equal(storage.rowSecurity, true, "the test database user should be able to use knowledge_user");
+      await (await as(alice).files(techY)).write("notes/y.md", text("secret"));
+      const filesIn = async (node: string | null) => (await storage.files.inNode(node))!;
+
+      // Straight to the services as bob, without Session's checks.
+      await asDbUser(storage.sql, bob, async (db) => {
+        const nodes = await storage.nodes.withSql(db).list();
+        assert.ok(nodes.some((n) => n.id === techX));
+        assert.ok(!nodes.some((n) => n.id === techY));
+        const inY = (await filesIn(techY)).withSql(db);
+        assert.deepEqual(await inY.list(), []);
+        assert.equal(await inY.remove("notes/y.md"), false);
+        assert.equal(await storage.nodes.withSql(db).rename(techY, "Mine now"), null);
+      });
+      await assert.rejects(
+        asDbUser(storage.sql, bob, async (db) =>
+          (await filesIn(techY)).withSql(db).write("notes/z.md", text("z")),
+        ),
+      );
+      // No role at the root: nothing can be added there.
+      await assert.rejects(
+        asDbUser(storage.sql, carol, async (db) => (await filesIn(null)).withSql(db).write("x.md", text("x"))),
+        /row-level security/,
+      );
+      await assert.rejects(
+        asDbUser(storage.sql, carol, (db) => storage.nodes.withSql(db).create(null, "Carol's")),
+        /row-level security/,
+      );
+
+      const y = await filesIn(techY);
+      assert.equal((await y.read("notes/y.md"))?.bytes.length, 6);
+      assert.equal(await y.stat("notes/z.md"), null);
+      assert.equal((await storage.nodes.get(techY))?.name, "Tech Y");
+    });
   });
 
   describe("Claude's file tools", () => {
@@ -645,6 +682,42 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await fetch(`${base}/files?node=${mod.id}`)).status, 404);
       assert.equal((await fetch(`${base}/files?node=nope`)).status, 404);
       assert.equal((await fetch(`${base}/nodes/${mod.id}`)).status, 404);
+    });
+
+    test("binary downloads redirect to a signed store link when S3_PUBLIC_URL is set", async () => {
+      const publicUrl = storage.config.s3.endpoint;
+      if (!publicUrl) return; // AWS: nothing local to point browsers at.
+      const linked = { ...storage, blobs: new S3BlobStore({ ...storage.config.s3, publicUrl }) };
+      const handle = createStorageHandler(() => linked, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      try {
+        const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+        await fetch(`${url}/files/uploads/pic.png`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/png" },
+          body: png,
+        });
+        const res = await fetch(`${url}/files/uploads/pic.png`, { redirect: "manual" });
+        assert.equal(res.status, 302);
+        const link = res.headers.get("location")!;
+        assert.ok(link.startsWith(publicUrl), link);
+        assert.match(link, /X-Amz-Expires=300/);
+        const fromStore = await fetch(link);
+        assert.equal(fromStore.status, 200);
+        assert.equal(fromStore.headers.get("content-type"), "image/png");
+        assert.deepEqual(new Uint8Array(await fromStore.arrayBuffer()), png);
+
+        // Text is still served here (the UI fetches it from this origin).
+        await fetch(`${url}/files/notes/plain.md`, { method: "PUT", body: "plain" });
+        const text = await fetch(`${url}/files/notes/plain.md`, { redirect: "manual" });
+        assert.equal(text.status, 200);
+        assert.equal(await text.text(), "plain");
+        assert.equal((await fetch(`${url}/files/uploads/missing.png`, { redirect: "manual" })).status, 404);
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
     });
 
     test("without storage, says whether it is off, starting or failed", async () => {
