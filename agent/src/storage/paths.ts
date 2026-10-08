@@ -49,7 +49,28 @@ const MIME_BY_EXT: Record<string, string> = {
   svg: "image/svg+xml",
 };
 
+// Same list as the UI (src/components/workspace/types.ts).
+const TEXT_EXTENSIONS = new Set([
+  "md", "markdown", "txt", "json", "csv", "ts", "tsx", "js", "jsx", "py",
+  "yaml", "yml", "html", "css", "sql", "sh", "toml", "xml",
+]);
+
+function extension(path: string): string {
+  const name = path.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
 export function mimeForPath(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+  const ext = extension(path);
+  return MIME_BY_EXT[ext] ?? (TEXT_EXTENSIONS.has(ext) ? "text/plain" : "application/octet-stream");
+}
+
+export function isTextFile(path: string, mime: string): boolean {
+  return (
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    mime === "image/svg+xml" ||
+    TEXT_EXTENSIONS.has(extension(path))
+  );
 }

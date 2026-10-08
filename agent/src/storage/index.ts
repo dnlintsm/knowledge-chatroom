@@ -37,3 +37,27 @@ export async function initStorage(
     throw err;
   }
 }
+
+let current: Storage | null = null;
+
+/** The running storage, or null before it is ready / when it is off or failed. */
+export function currentFiles(): FileService | null {
+  return current?.files ?? null;
+}
+
+/**
+ * Starts storage in the background for the server process. Until it is ready
+ * (or if it fails) the file API answers 503 and file tools return an error,
+ * while chat keeps working.
+ */
+export function startStorage(config: StorageConfig | null = storageConfigFromEnv()) {
+  if (!config) return;
+  initStorage(config)
+    .then((ready) => {
+      current = ready;
+      console.log("[storage] ready");
+    })
+    .catch((err) => {
+      console.error("[storage] failed to start; /files is unavailable:", err);
+    });
+}

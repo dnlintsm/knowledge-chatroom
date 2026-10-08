@@ -16,10 +16,20 @@ import { after, before, describe, test } from "node:test";
 import { storageConfigFromEnv } from "./config";
 import { connect } from "./db";
 import { createFilesHandler } from "./http";
+import type { FileEvent } from "./files";
 import { initStorage, type Storage } from "./index";
+import { createFileTools, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const text = (s: string) => new TextEncoder().encode(s);
+
+async function waitFor(check: () => boolean, ms = 3000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("Timed out waiting");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" }, () => {
   let storage: Storage;
@@ -116,6 +126,74 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     assert.equal((await storage.files.history("notes/race.md"))!.length, 8);
   });
 
+  test("subscribers hear committed writes and deletes", async () => {
+    const events: FileEvent[] = [];
+    const unsubscribe = await storage.files.subscribe((e) => events.push(e));
+    await storage.files.write("notes/watched.md", text("hi"), { author: "agent" });
+    await storage.files.remove("notes/watched.md");
+    await storage.files.remove("notes/never-existed.md");
+    await waitFor(() => events.length >= 2);
+    unsubscribe();
+
+    assert.equal(events.length, 2);
+    assert.deepEqual(
+      { ...events[0], sha256: undefined },
+      { op: "write", path: "notes/watched.md", author: "agent", sha256: undefined },
+    );
+    assert.match(events[0].sha256!, /^[0-9a-f]{64}$/);
+    assert.deepEqual(events[1], { op: "delete", path: "notes/watched.md" });
+  });
+
+  describe("Claude's file tools", () => {
+    type Tool = ReturnType<typeof createFileTools>[number];
+    let tools: Record<string, Tool>;
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const result = (await tools[name].handler(args as never, {})) as {
+        content: { text: string }[];
+        isError?: boolean;
+      };
+      return { text: result.content[0].text, isError: Boolean(result.isError) };
+    };
+
+    before(() => {
+      tools = Object.fromEntries(createFileTools(() => storage.files).map((t) => [t.name, t]));
+    });
+
+    test("write_file records an agent version, read_file numbers lines", async () => {
+      const written = await call("write_file", {
+        path: "artifacts/tool.md",
+        content: "line one\nline two",
+      });
+      assert.deepEqual(JSON.parse(written.text), {
+        ok: true,
+        path: "artifacts/tool.md",
+        created: true,
+      });
+      assert.equal((await storage.files.stat("artifacts/tool.md"))!.author, "agent");
+
+      const read = await call("read_file", { path: "artifacts/tool.md" });
+      assert.equal(read.text, `artifacts/tool.md\n${numberLines("line one\nline two")}`);
+
+      const listed = JSON.parse((await call("list_files")).text) as { path: string }[];
+      assert.ok(listed.some((f) => f.path === "artifacts/tool.md"));
+    });
+
+    test("errors are reported, not thrown", async () => {
+      assert.equal((await call("read_file", { path: "notes/missing.md" })).isError, true);
+      assert.equal((await call("write_file", { path: "../x", content: "" })).isError, true);
+      const offline = createFileTools(() => null)[0];
+      const result = (await offline.handler({} as never, {})) as { isError?: boolean };
+      assert.equal(result.isError, true);
+    });
+
+    test("binary files are described, not dumped", async () => {
+      await storage.files.write("uploads/pic.png", new Uint8Array([137, 80, 78, 71]));
+      const read = JSON.parse((await call("read_file", { path: "uploads/pic.png" })).text);
+      assert.equal(read.mime, "image/png");
+      assert.match(read.note, /Binary/);
+    });
+  });
+
   describe("HTTP API", () => {
     let server: http.Server;
     let base: string;
@@ -164,6 +242,24 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const del = await fetch(`${base}/files/skills/my%20skill/SKILL.md`, { method: "DELETE" });
       assert.equal(del.status, 200);
       assert.equal((await fetch(`${base}/files/skills/my%20skill/SKILL.md`)).status, 404);
+    });
+
+    test("?watch streams changes as server-sent events", async () => {
+      const controller = new AbortController();
+      const res = await fetch(`${base}/files?watch`, { signal: controller.signal });
+      assert.equal(res.headers.get("content-type"), "text/event-stream");
+      const reader = res.body!.getReader();
+      let received = "";
+      await reader.read(); // ": watching" comment, sent once subscribed
+
+      await storage.files.write("notes/streamed.md", text("x"));
+      while (!received.includes("notes/streamed.md")) {
+        received += new TextDecoder().decode((await reader.read()).value);
+      }
+      controller.abort();
+      const event = JSON.parse(received.split("data: ")[1]);
+      assert.equal(event.op, "write");
+      assert.equal(event.author, "user");
     });
 
     test("rejects oversize uploads and bad paths", async () => {

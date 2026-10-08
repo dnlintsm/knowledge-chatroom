@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 /**
  * Forwards /api/files/* to the agent server's file API (agent/src/storage),
  * so the browser talks to one origin and the agent port stays private.
+ * Responses stream through, which carries the ?watch change stream too.
  */
 
 const AGENT_URL = (process.env.AGENT_URL || "http://localhost:8000").replace(
@@ -10,7 +11,7 @@ const AGENT_URL = (process.env.AGENT_URL || "http://localhost:8000").replace(
   "",
 );
 
-const FORWARDED_REQUEST_HEADERS = ["content-type", "if-none-match"];
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",
@@ -43,6 +44,8 @@ async function proxy(
       headers,
       body: req.method === "PUT" ? await req.arrayBuffer() : undefined,
       cache: "no-store",
+      // Closing the browser's request (e.g. an EventSource) closes ours.
+      signal: req.signal,
     });
   } catch {
     return Response.json({ error: "Agent server unreachable" }, { status: 502 });

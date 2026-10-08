@@ -1,6 +1,6 @@
 import type { BlobStore } from "./blobs";
 import { sha256Hex } from "./blobs";
-import type { Sql } from "./db";
+import type { Sql, Tx } from "./db";
 import { kindForPath, mimeForPath, normalizePath, type FileKind } from "./paths";
 
 export type AuthorType = "user" | "agent";
@@ -24,6 +24,17 @@ export interface FileVersion {
   authorId: string | null;
   createdAt: string;
 }
+
+/** Sent on every committed change, to every process via Postgres NOTIFY. */
+export interface FileEvent {
+  op: "write" | "delete";
+  path: string;
+  /** Present for writes. */
+  sha256?: string;
+  author?: AuthorType;
+}
+
+const CHANNEL = "workspace_files";
 
 export interface WriteOptions {
   mime?: string;
@@ -59,11 +70,42 @@ function toInfo(row: FileRow): FileInfo {
  * unreferenced blob (harmless, collectable later) but never a dangling row.
  */
 export class FileService {
+  private readonly listeners = new Set<(event: FileEvent) => void>();
+  private listening: Promise<unknown> | null = null;
+
   constructor(
     private readonly sql: Sql,
     private readonly blobs: BlobStore,
     private readonly workspaceId: string,
   ) {}
+
+  /**
+   * Calls `listener` for every change in this workspace, including changes
+   * made by other processes. Returns an unsubscribe function.
+   */
+  async subscribe(listener: (event: FileEvent) => void): Promise<() => void> {
+    this.listening ??= this.sql.listen(CHANNEL, (payload) => {
+      const { workspaceId, ...event } = JSON.parse(payload) as FileEvent & {
+        workspaceId: string;
+      };
+      if (workspaceId !== this.workspaceId) return;
+      for (const l of this.listeners) l(event);
+    }).catch((err) => {
+      this.listening = null; // Let the next subscriber retry.
+      throw err;
+    });
+    await this.listening;
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(tx: Tx, event: FileEvent) {
+    // Delivered on commit, so listeners never see a change that rolled back.
+    return tx`SELECT pg_notify(${CHANNEL}, ${JSON.stringify({
+      ...event,
+      workspaceId: this.workspaceId,
+    })})`;
+  }
 
   static async forWorkspace(sql: Sql, blobs: BlobStore, slug = "default") {
     const [ws] = await sql<{ id: string }[]>`
@@ -138,6 +180,8 @@ export class FileService {
         UPDATE files
         SET current_version_id = ${version.id}, mime = ${mime}, updated_at = now()
         WHERE id = ${file.id}`;
+
+      await this.notify(tx, { op: "write", path, sha256, author });
     });
 
     return (await this.stat(path))!;
@@ -146,11 +190,15 @@ export class FileService {
   /** Soft delete: history stays, and the path is free for a new file. */
   async remove(rawPath: string): Promise<boolean> {
     const path = normalizePath(rawPath);
-    const rows = await this.sql`
-      UPDATE files SET deleted_at = now()
-      WHERE workspace_id = ${this.workspaceId} AND path = ${path}
-        AND deleted_at IS NULL`;
-    return rows.count > 0;
+    return this.sql.begin(async (tx) => {
+      const rows = await tx`
+        UPDATE files SET deleted_at = now()
+        WHERE workspace_id = ${this.workspaceId} AND path = ${path}
+          AND deleted_at IS NULL`;
+      if (rows.count === 0) return false;
+      await this.notify(tx, { op: "delete", path });
+      return true;
+    });
   }
 
   async history(rawPath: string): Promise<FileVersion[] | null> {

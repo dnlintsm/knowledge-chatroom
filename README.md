@@ -15,14 +15,13 @@ The UI is an IDE-style workspace, heading toward a personal knowledge container:
   onto the panel to upload them.
 - **Middle:** tabs that preview or edit the open file (Markdown, CSV, images, plain text), plus
   the shared todo board.
-- **Right:** the Claude chat. Claude gets the open file and your selection as context, and
-  frontend tools (`listWorkspaceFiles`, `readWorkspaceFile`, `writeWorkspaceFile`,
-  `openWorkspaceFile`, `openTaskBoard`) to work with files. Files it writes are badged
-  "Written by Claude".
+- **Right:** the Claude chat. Claude gets the open file and your selection as context, plus
+  tools to list, read and write files and to open a file or the task board. Files it writes
+  open automatically and are badged "Written by Claude".
 
 Panes resize by dragging and collapse from the title bar; below 1024px one pane shows at a
-time. Files live in the browser (localStorage) for now, in `src/components/workspace/store.tsx`,
-until the backend design decides where they belong.
+time. With [file storage](#file-storage) running, files are saved on the server (the title bar
+says "Saved"); without it they stay in this browser's localStorage ("This browser").
 
 ### File references in answers
 
@@ -144,8 +143,18 @@ npm run dev
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
 - **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
-  (request body = bytes) and deletes one, and `?versions` returns its history.
-  There is no login yet, so keep the agent port private.
+  (request body = bytes) and deletes one, `?versions` returns its history, and
+  `GET /api/files?watch` streams every change as server-sent events (Postgres
+  LISTEN/NOTIFY, so it works across processes). There is no login yet, so keep the
+  agent port private.
+- **Claude** gets `list_files`, `read_file` and `write_file` tools on the agent server
+  (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
+  Its writes are versions authored by the agent.
+- **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
+  server, edits save there (debounced), and the change stream brings in Claude's writes and
+  edits from other tabs. The first visit to an empty server uploads this browser's files.
+  If it doesn't answer, everything stays in localStorage and the browser-side file tools
+  are used instead.
 - **Tests**: `cd agent && npm test` with `TEST_DATABASE_URL` and the `S3_*` vars set
   (see `agent/src/storage/storage.test.ts`); CI runs them on every PR that touches `agent/`.
 
