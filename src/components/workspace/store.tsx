@@ -301,7 +301,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scheduleSave = useCallback(
@@ -310,7 +309,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(pending.current.get(key(path, at)));
       pending.current.set(key(path, at), setTimeout(() => void save(path, at), SAVE_DELAY_MS));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [save],
   );
 
@@ -482,7 +480,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (info.author === "agent") open(path);
     };
 
-    const useLocal = () => {
+    const activateLocalStorage = () => {
       mode.current = "local";
       setStorageMode("local");
     };
@@ -499,7 +497,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         list = await listServerFiles();
       }
       if (cancelled) return;
-      if (!Array.isArray(list)) return useLocal();
+      if (!Array.isArray(list)) return activateLocalStorage();
 
       // First visit to an empty server: bring over this browser's files (or
       // the samples), so nothing made before storage existed is lost. Uploads
@@ -561,7 +559,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
     })().catch((err) => {
       console.error("[workspace] server storage failed to load:", err);
-      useLocal();
+      activateLocalStorage();
     });
 
     return () => {
@@ -648,7 +646,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setSyncError(`Couldn't delete ${path}`);
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [removeLocal],
   );
 

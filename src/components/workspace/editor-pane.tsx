@@ -178,7 +178,6 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
   if (file.mime.startsWith("image/")) {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        {/* eslint-disable-next-line @next/next/no-img-element -- data: URL from an upload */}
         <img src={file.content} alt={file.path} className="max-h-full max-w-full rounded-lg shadow" />
       </div>
     );
