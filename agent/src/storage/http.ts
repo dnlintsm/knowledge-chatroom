@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { AccessError, ForbiddenError, ROLES, type Role } from "./access";
 import type { EventHub, WorkspaceEvent } from "./events";
+import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { FileExistsError, ReadOnlyFileError } from "./files";
@@ -32,8 +33,9 @@ import type { Session } from "./session";
  *   Read-only files answer 403 to PUT and DELETE, and carry
  *   `X-File-Read-Only: true` on GET.
  *
- *   Every /files route takes ?node=<id> for that knowledge node's files;
- *   without it, files at the workspace root.
+ *   Every /files route takes ?node=<id> for that knowledge node's files, or
+ *   ?experiment=<id> for an experiment's; without either, files at the
+ *   workspace root. File events carry "experiment" for an experiment's files.
  *
  *   GET    /nodes                   {types, rootRole, nodes}: the levels, your
  *                                   role at the root, and the nodes you can see
@@ -44,6 +46,19 @@ import type { Session } from "./session";
  *   GET    /nodes/<id>              {node, lineage}: lineage is top level first
  *   PATCH  /nodes/<id>              {name} → rename
  *   DELETE /nodes/<id>              soft delete, with everything below it
+ *
+ *   GET    /experiments?node=<id>   {experiments}: the ones you can see, on
+ *                                   that node or (without node) anywhere, each
+ *                                   with your access: writer (its author) or reader
+ *   POST   /experiments             {nodeId, title, hypothesis?, params?,
+ *                                   results?} → a new draft, with a copy of
+ *                                   the node's files
+ *   GET    /experiments/<id>        one experiment
+ *   PATCH  /experiments/<id>        {title?, hypothesis?, params?, results?,
+ *                                   status?: draft|shared|archived}
+ *   DELETE /experiments/<id>        soft delete, with its files
+ *   Changes arrive on the /files change stream as
+ *   {"op":"experiment","change","id","node"}.
  *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
@@ -61,7 +76,9 @@ import type { Session } from "./session";
  *
  * Reading needs viewer, changing files and nodes editor, deleting a node or
  * managing grants on it owner (of that node or one above it), and managing
- * groups owner of the workspace. Who is asking comes from identity.ts: the
+ * groups owner of the workspace. Viewers may fork a node into an experiment;
+ * a draft is seen by its author only, a shared or archived one by everyone
+ * who can view the node, and only its author changes it. Who is asking comes from identity.ts: the
  * local user without AUTH_SECRET, the signed-in user with it.
  */
 
@@ -170,6 +187,64 @@ async function handleNodes(req: IncomingMessage, res: ServerResponse, url: URL, 
   }
 }
 
+/** The experiment fields in a request body; undefined when one has the wrong type. */
+function experimentInput(body: Record<string, unknown>): ExperimentInput | undefined {
+  const input: ExperimentInput = {};
+  for (const key of ["title", "hypothesis", "status"] as const) {
+    if (body[key] === undefined) continue;
+    if (typeof body[key] !== "string") return undefined;
+    (input as Record<string, unknown>)[key] = body[key];
+  }
+  for (const key of ["params", "results"] as const) {
+    if (body[key] !== undefined) input[key] = body[key] as Record<string, unknown>;
+  }
+  return input;
+}
+
+async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
+  const expected =
+    "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived}";
+  if (!id) {
+    if (req.method === "GET") {
+      json(res, 200, { experiments: await session.experiments(url.searchParams.get("node") || undefined) });
+    } else if (req.method === "POST") {
+      const body = await readJson(req);
+      const input = body && experimentInput(body);
+      if (!body || typeof body.nodeId !== "string" || !input) {
+        json(res, 400, { error: `Expected {nodeId: string, title: string, …}; ${expected}` });
+        return;
+      }
+      json(res, 201, await session.createExperiment(body.nodeId, input));
+    } else {
+      json(res, 405, { error: "Method not allowed" });
+    }
+    return;
+  }
+
+  switch (req.method) {
+    case "GET":
+      json(res, 200, await session.experiment(id));
+      return;
+    case "PATCH": {
+      const body = await readJson(req);
+      const input = body && experimentInput(body);
+      if (!input) {
+        json(res, 400, { error: expected });
+        return;
+      }
+      json(res, 200, await session.updateExperiment(id, input));
+      return;
+    }
+    case "DELETE":
+      if (await session.deleteExperiment(id)) json(res, 200, { deleted: id });
+      else json(res, 404, { error: "Experiment not found" });
+      return;
+    default:
+      json(res, 405, { error: "Method not allowed" });
+  }
+}
+
 async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   const parts = url.pathname.split("/").slice(2).map(decodeURIComponent); // after /access
   const [section, id, sub, subId] = parts;
@@ -272,6 +347,7 @@ export function createStorageHandler(
       const session = current.session(principal);
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
+      else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
     } catch (err) {
       if (err instanceof NodeNotFoundError) {
@@ -290,7 +366,12 @@ export function createStorageHandler(
         json(res, 412, { error: err.message, exists: true });
         return;
       }
-      if (err instanceof InvalidPathError || err instanceof NodeError || err instanceof AccessError) {
+      if (
+        err instanceof InvalidPathError ||
+        err instanceof NodeError ||
+        err instanceof AccessError ||
+        err instanceof ExperimentError
+      ) {
         json(res, 400, { error: err.message });
         return;
       }
@@ -320,7 +401,10 @@ export function createStorageHandler(
       return;
     }
 
-    const service = await session.files(url.searchParams.get("node") || null);
+    const experiment = url.searchParams.get("experiment");
+    const service = experiment
+      ? await session.experimentFiles(experiment)
+      : await session.files(url.searchParams.get("node") || null);
 
     if (path === "") {
       if (req.method !== "GET") json(res, 405, { error: "Method not allowed" });

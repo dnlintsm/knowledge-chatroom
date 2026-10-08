@@ -20,6 +20,7 @@ import type { WorkspaceEvent } from "./events";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { createStorageHandler } from "./http";
 import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
+import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { FileExistsError, ReadOnlyFileError } from "./files";
 import { initStorage, type Storage } from "./index";
@@ -518,6 +519,196 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     });
   });
 
+  describe("experiments", () => {
+    const as = (userId: string, actor: Principal["actor"] = "user") =>
+      storage.session({ userId, actor });
+    let alice: string, bob: string, carol: string;
+    let leveling: string;
+    const read = async (files: { read(p: string): Promise<{ bytes: Uint8Array } | null> }, path: string) =>
+      new TextDecoder().decode((await files.read(path))!.bytes);
+
+    before(async () => {
+      alice = await storage.access.userForSubject("test|alice");
+      bob = await storage.access.userForSubject("test|bob");
+      carol = await storage.access.userForSubject("test|carol");
+      const tech = await as(alice).createNode(null, "Lithography");
+      const mod = await as(alice).createNode(tech.id, "Scanner");
+      const loop = await as(alice).createNode(mod.id, "Focus");
+      leveling = (await as(alice).createNode(loop.id, "Leveling")).id;
+      const files = await as(alice).files(leveling);
+      await files.write("notes/recipe.md", text("dose 30"));
+      await files.write("uploads/map.bin", new Uint8Array([1, 2, 3]));
+      // Bob edits the leveling, Carol only views it.
+      await as(alice).setGrant(tech.id, "user", bob, "editor");
+      await as(alice).setGrant(leveling, "user", carol, "viewer");
+    });
+
+    test("a viewer forks a node into a private draft with a copy of its files", async () => {
+      const exp = await as(carol).createExperiment(leveling, {
+        title: "  Higher   dose ",
+        hypothesis: "More dose, less defocus",
+        params: { dose_mJ: 35 },
+      });
+      assert.deepEqual(
+        [exp.title, exp.status, exp.access, exp.mine, exp.authorId, exp.fileCount, exp.params],
+        ["Higher dose", "draft", "writer", true, carol, 2, { dose_mJ: 35 }],
+      );
+      const files = await as(carol).experimentFiles(exp.id);
+      assert.deepEqual((await files.list()).map((f) => f.path), ["notes/recipe.md", "uploads/map.bin"]);
+      assert.deepEqual((await files.read("uploads/map.bin"))!.bytes, new Uint8Array([1, 2, 3]));
+
+      // Changes stay in the experiment; the node keeps its files.
+      await files.write("notes/recipe.md", text("dose 35"));
+      await files.write("notes/run-1.md", text("defocus 12 nm"));
+      await files.remove("uploads/map.bin");
+      const node = await as(alice).files(leveling);
+      assert.equal(await read(node, "notes/recipe.md"), "dose 30");
+      assert.equal(await node.stat("notes/run-1.md"), null);
+      assert.ok(await node.stat("uploads/map.bin"));
+      assert.equal(await read(files, "notes/recipe.md"), "dose 35");
+      // History starts from the node's version.
+      assert.equal((await files.history("notes/recipe.md"))!.length, 2);
+      // Experiment files are not the workspace root's.
+      assert.equal(await storage.files.stat("notes/run-1.md"), null);
+
+      // Not even the node's owner sees a draft.
+      for (const other of [alice, bob]) {
+        assert.deepEqual(await as(other).experiments(leveling), []);
+        await assert.rejects(as(other).experiment(exp.id), NodeNotFoundError);
+        await assert.rejects(as(other).experimentFiles(exp.id), NodeNotFoundError);
+      }
+      assert.equal(await as(bob).canSee({ op: "experiment", change: "update", id: exp.id, node: leveling }), false);
+      assert.equal(await as(bob).canSee({ op: "write", node: null, experiment: exp.id, path: "x" }), false);
+      assert.equal(await as(carol).canSee({ op: "experiment", change: "update", id: exp.id, node: leveling }), true);
+    });
+
+    test("shared experiments are read by the node's viewers, changed only by the author", async () => {
+      const exp = await as(carol).createExperiment(leveling, { title: "Shared run" });
+      // Bob hears that it stopped being a draft, then everything about it.
+      assert.equal(await as(bob).canSee({ op: "experiment", change: "status", id: exp.id, node: leveling }), true);
+      const shared = await as(carol).updateExperiment(exp.id, { status: "shared", results: { defocus_nm: 12 } });
+      assert.deepEqual([shared.status, shared.results], ["shared", { defocus_nm: 12 }]);
+      assert.equal(await as(bob).canSee({ op: "experiment", change: "update", id: exp.id, node: leveling }), true);
+
+      const seen = (await as(bob).experiments(leveling)).find((e) => e.id === exp.id)!;
+      assert.deepEqual([seen.access, seen.mine], ["reader", false]);
+      const bobFiles = await as(bob).experimentFiles(exp.id);
+      assert.equal(await read(bobFiles, "notes/recipe.md"), "dose 30");
+      await assert.rejects(bobFiles.write("notes/recipe.md", text("mine")), ForbiddenError);
+      await assert.rejects(as(bob).updateExperiment(exp.id, { title: "Mine" }), ForbiddenError);
+      await assert.rejects(as(bob).deleteExperiment(exp.id), ForbiddenError);
+      // Someone with no role on the node sees nothing, shared or not.
+      const dave = await storage.access.userForSubject("test|dave");
+      await assert.rejects(as(dave).experiment(exp.id), NodeNotFoundError);
+      await assert.rejects(as(dave).experiments(leveling), NodeNotFoundError);
+    });
+
+    test("archived experiments are read only until restored", async () => {
+      const exp = await as(carol).createExperiment(leveling, { title: "Dead end" });
+      await as(carol).updateExperiment(exp.id, { status: "archived" });
+      const files = await as(carol).experimentFiles(exp.id);
+      assert.equal(files.role, "viewer");
+      await assert.rejects(files.write("notes/more.md", text("x")), ForbiddenError);
+      await assert.rejects(as(carol).updateExperiment(exp.id, { results: { ok: false } }), ForbiddenError);
+      // Visible to the node's viewers, like a shared one.
+      assert.ok((await as(bob).experiments(leveling)).some((e) => e.id === exp.id));
+
+      const restored = await as(carol).updateExperiment(exp.id, { status: "shared", results: { ok: false } });
+      assert.equal(restored.access, "writer");
+      await (await as(carol).experimentFiles(exp.id)).write("notes/more.md", text("x"));
+    });
+
+    test("bad input is refused with a reason", async () => {
+      await assert.rejects(as(carol).createExperiment(leveling, { title: " " }), ExperimentError);
+      await assert.rejects(
+        as(carol).createExperiment(leveling, { title: "x", params: [] as never }),
+        /params must be an object/,
+      );
+      const exp = await as(carol).createExperiment(leveling, { title: "Statuses" });
+      await assert.rejects(as(carol).updateExperiment(exp.id, { status: "done" as never }), ExperimentError);
+      await assert.rejects(as(carol).createExperiment("not-a-node", { title: "x" }), NodeNotFoundError);
+    });
+
+    test("deleting an experiment, or its node, takes its files", async () => {
+      const exp = await as(carol).createExperiment(leveling, { title: "Short lived" });
+      assert.equal(await as(carol).deleteExperiment(exp.id), true);
+      await assert.rejects(as(carol).experimentFiles(exp.id), NodeNotFoundError);
+      const [left] = await storage.sql<{ n: string }[]>`
+        SELECT count(*) AS n FROM files WHERE experiment_id = ${exp.id} AND deleted_at IS NULL`;
+      assert.equal(Number(left.n), 0);
+
+      // Alice deletes a node holding Carol's draft, which Alice can't see.
+      const tech = await as(alice).createNode(null, "Doomed tech");
+      await as(alice).setGrant(tech.id, "user", carol, "viewer");
+      await (await as(alice).files(tech.id)).write("notes/a.md", text("a"));
+      const draft = await as(carol).createExperiment(tech.id, { title: "Draft on doomed" });
+      assert.equal(await as(alice).deleteNode(tech.id), true);
+      await assert.rejects(as(carol).experiment(draft.id), NodeNotFoundError);
+      const [rows] = await storage.sql<{ live: string }[]>`
+        SELECT (SELECT count(*) FROM experiments WHERE id = ${draft.id} AND deleted_at IS NULL)
+             + (SELECT count(*) FROM files WHERE experiment_id = ${draft.id} AND deleted_at IS NULL) AS live`;
+      assert.equal(Number(rows.live), 0);
+    });
+
+    test("an experiment can't be started on a node being deleted", async () => {
+      const tech = await as(alice).createNode(null, "Racing tech");
+      // Straight to the service, without Session's check: a deleted node is refused.
+      const gone = await as(alice).createNode(null, "Gone tech");
+      await as(alice).deleteNode(gone.id);
+      await assert.rejects(storage.experiments.create(alice, gone.id, { title: "x" }), NodeNotFoundError);
+
+      // The delete holds the node; a fork started meanwhile waits, then fails.
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      const deleting = storage.sql.begin(async (tx) => {
+        await tx`UPDATE nodes SET deleted_at = now() WHERE id = ${tech.id}`;
+        await held;
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      const forking = storage.experiments.create(alice, tech.id, { title: "Too late" });
+      await new Promise((r) => setTimeout(r, 100));
+      release();
+      await deleting;
+      await assert.rejects(forking, NodeNotFoundError);
+      const [row] = await storage.sql<{ n: string }[]>`
+        SELECT count(*) AS n FROM experiments WHERE node_id = ${tech.id} AND deleted_at IS NULL`;
+      assert.equal(Number(row.n), 0);
+    });
+
+    test("Postgres keeps drafts private and archived ones read only", async () => {
+      const draft = await as(carol).createExperiment(leveling, { title: "RLS draft" });
+      const inDraft = (await storage.files.inExperiment(draft.id))!;
+      await asDbUser(storage.sql, alice, async (db) => {
+        assert.equal(await storage.experiments.withSql(db).get(alice, draft.id), null);
+        assert.deepEqual(await inDraft.withSql(db).list(), []);
+        const [row] = await db`SELECT count(*) AS n FROM experiments WHERE id = ${draft.id}`;
+        assert.equal(Number(row.n), 0);
+      });
+      await assert.rejects(
+        asDbUser(storage.sql, bob, (db) => inDraft.withSql(db).write("notes/x.md", text("x"))),
+      );
+      assert.equal(
+        await asDbUser(storage.sql, bob, (db) => storage.experiments.withSql(db).update(draft.id, { title: "x" })),
+        false,
+      );
+      // The author writes through the restricted role, but not once it is archived.
+      await asDbUser(storage.sql, carol, (db) => inDraft.withSql(db).write("notes/rls.md", text("ok")));
+      await storage.experiments.update(draft.id, { status: "archived" });
+      await assert.rejects(
+        asDbUser(storage.sql, carol, (db) => inDraft.withSql(db).write("notes/rls.md", text("no"))),
+      );
+      assert.equal(await read(inDraft, "notes/rls.md"), "ok");
+    });
+
+    test("changes are audited", async () => {
+      const log = await as(alice).auditLog(1000);
+      const created = log.find((e) => e.action === "experiment.create" && e.target.title === "Shared run")!;
+      assert.equal(created.actorId, carol);
+      assert.equal(created.target.node, leveling);
+      assert.ok(log.some((e) => e.action === "file.write" && e.target.experiment && e.target.path === "notes/run-1.md"));
+    });
+  });
+
   describe("Claude's file tools", () => {
     type Tool = ReturnType<typeof createFileTools>[number];
     let tools: Record<string, Tool>;
@@ -542,6 +733,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         ok: true,
         path: "artifacts/tool.md",
         node: null,
+        experiment: null,
         created: true,
       });
       assert.equal((await storage.files.stat("artifacts/tool.md"))!.author, "agent");
@@ -613,6 +805,36 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const missing = await call("list_files", { node: "not-a-node" });
       assert.equal(missing.isError, true);
       assert.match(missing.text, /list_nodes/);
+    });
+
+    test("Claude starts an experiment, works in it and records results", async () => {
+      const tech = JSON.parse((await call("create_node", { name: "Sputtering" })).text) as { id: string };
+      await call("write_file", { node: tech.id, path: "notes/base.md", content: "base" });
+      const exp = JSON.parse(
+        (await call("create_experiment", { node: tech.id, title: "Thinner film", params: { nm: 50 } })).text,
+      ) as { id: string; files: number };
+      assert.equal(exp.files, 1);
+
+      const written = JSON.parse(
+        (await call("write_file", { experiment: exp.id, path: "notes/base.md", content: "tried" })).text,
+      ) as { experiment: string; node: string | null };
+      assert.deepEqual([written.experiment, written.node], [exp.id, null]);
+      assert.match((await call("read_file", { node: tech.id, path: "notes/base.md" })).text, /\tbase$/);
+      assert.match((await call("read_file", { experiment: exp.id, path: "notes/base.md" })).text, /\ttried$/);
+
+      await call("update_experiment", { id: exp.id, results: { stress_MPa: 120 } });
+      const [listed] = JSON.parse((await call("list_experiments", { node: tech.id })).text) as {
+        title: string;
+        status: string;
+        results: unknown;
+        canChange: boolean;
+      }[];
+      assert.deepEqual(
+        [listed.title, listed.status, listed.results, listed.canChange],
+        ["Thinner film", "draft", { stress_MPa: 120 }, true],
+      );
+      const bad = await call("update_experiment", { id: exp.id, results: "great" });
+      assert.equal(bad.isError, true);
     });
 
     test("binary files are described, not dumped", async () => {
@@ -810,6 +1032,42 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(put.status, 403);
       assert.equal((await fetch(url, { method: "DELETE" })).status, 403);
       assert.equal(await (await fetch(url)).text(), "# Rules");
+    });
+
+    test("experiments: create, files, update, delete", async () => {
+      const node = await storage.nodes.create(null, "API tech");
+      await storage.files.inNode(node.id).then((f) => f!.write("notes/n.md", text("node")));
+      const jsonReq = (method: string, body: unknown) => ({
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const created = await fetch(`${base}/experiments`, jsonReq("POST", { nodeId: node.id, title: "Via API" }));
+      assert.equal(created.status, 201);
+      const exp = (await created.json()) as { id: string; fileCount: number; status: string };
+      assert.deepEqual([exp.fileCount, exp.status], [1, "draft"]);
+      assert.equal((await fetch(`${base}/experiments`, jsonReq("POST", { nodeId: node.id }))).status, 400);
+      assert.equal((await fetch(`${base}/experiments`, jsonReq("POST", { title: "x" }))).status, 400);
+
+      const put = await fetch(`${base}/files/notes/n.md?experiment=${exp.id}`, { method: "PUT", body: "changed" });
+      assert.equal(put.status, 200);
+      assert.equal(await (await fetch(`${base}/files/notes/n.md?experiment=${exp.id}`)).text(), "changed");
+      assert.equal(await (await fetch(`${base}/files/notes/n.md?node=${node.id}`)).text(), "node");
+
+      const patched = await fetch(`${base}/experiments/${exp.id}`, jsonReq("PATCH", { results: { ok: 1 }, status: "shared" }));
+      assert.equal(((await patched.json()) as { status: string }).status, "shared");
+      assert.equal((await fetch(`${base}/experiments/${exp.id}`, jsonReq("PATCH", { params: "x" }))).status, 400);
+      assert.equal((await fetch(`${base}/experiments/${exp.id}`, jsonReq("PATCH", { title: 5 }))).status, 400);
+
+      const { experiments } = (await (await fetch(`${base}/experiments?node=${node.id}`)).json()) as {
+        experiments: { id: string; results: unknown }[];
+      };
+      assert.deepEqual(experiments.map((e) => [e.id, e.results]), [[exp.id, { ok: 1 }]]);
+
+      assert.equal((await fetch(`${base}/experiments/${exp.id}`, { method: "DELETE" })).status, 200);
+      assert.equal((await fetch(`${base}/experiments/${exp.id}`)).status, 404);
+      assert.equal((await fetch(`${base}/files?experiment=${exp.id}`)).status, 404);
     });
 
     test("rejects oversize uploads and bad paths", async () => {

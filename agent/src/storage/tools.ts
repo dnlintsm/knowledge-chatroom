@@ -9,6 +9,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import { AccessError, ForbiddenError, type Principal } from "./access";
+import { ExperimentError } from "./experiments";
 import type { Storage } from "./index";
 import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
@@ -40,6 +41,14 @@ const nodeParam = z
   .describe(
     "Knowledge node id (from list_nodes or the context's currentNode). Omit for the workspace root.",
   );
+const experimentParam = z
+  .string()
+  .optional()
+  .describe(
+    "Experiment id (from list_experiments or the context's currentExperiment); the experiment's " +
+      "files instead of a node's. Takes precedence over `node`.",
+  );
+const jsonObject = z.record(z.string(), z.unknown());
 
 /** The tree as indented lines, e.g. `- Etch [tech] id=… (3 files, editor)`. */
 type TreeNode = KnowledgeNode & { role?: string | null };
@@ -96,7 +105,8 @@ export function createFileTools(
         err instanceof InvalidPathError ||
         err instanceof NodeError ||
         err instanceof ForbiddenError ||
-        err instanceof AccessError
+        err instanceof AccessError ||
+        err instanceof ExperimentError
       ) {
         return error(err.message);
       }
@@ -104,9 +114,18 @@ export function createFileTools(
       return error("Workspace storage error.");
     }
   };
-  /** Files of `node` (root when omitted). */
-  const inNode = (node: string | undefined, fn: (files: FilesSession) => Promise<ToolResult>) =>
-    run(async (session) => fn(await session.files(node || null)));
+  /** Files of `experiment`, else of `node` (root when both are omitted). */
+  const inPlace = (
+    place: { node?: string; experiment?: string },
+    fn: (files: FilesSession) => Promise<ToolResult>,
+  ) =>
+    run(async (session) =>
+      fn(
+        place.experiment
+          ? await session.experimentFiles(place.experiment)
+          : await session.files(place.node || null),
+      ),
+    );
 
   return [
     tool(
@@ -141,11 +160,11 @@ export function createFileTools(
     ),
     tool(
       "list_files",
-      "List the files at the workspace root or in one knowledge node, with kind " +
-        "(note, skill, upload, artifact), size in bytes and who last wrote it.",
-      { node: nodeParam },
-      ({ node }) =>
-        inNode(node, async (service) =>
+      "List the files at the workspace root, in one knowledge node or in one experiment, " +
+        "with kind (note, skill, upload, artifact), size in bytes and who last wrote it.",
+      { node: nodeParam, experiment: experimentParam },
+      (place) =>
+        inPlace(place, async (service) =>
           text(
             (await service.list()).map((f) => ({
               path: f.path,
@@ -161,12 +180,16 @@ export function createFileTools(
     ),
     tool(
       "read_file",
-      "Read a workspace file by path (in a knowledge node when `node` is given). " +
+      "Read a workspace file by path (in a knowledge node or experiment when given). " +
         "Each line starts with its line number and a tab, for citing lines; the " +
         "numbers are not part of the file.",
-      { path: z.string().describe("Workspace path, e.g. notes/welcome.md"), node: nodeParam },
-      ({ path, node }) =>
-        inNode(node, async (service) => {
+      {
+        path: z.string().describe("Workspace path, e.g. notes/welcome.md"),
+        node: nodeParam,
+        experiment: experimentParam,
+      },
+      ({ path, ...place }) =>
+        inPlace(place, async (service) => {
           const file = await service.read(path);
           if (!file) return error(`No file at ${path}`);
           const { info } = file;
@@ -189,24 +212,99 @@ export function createFileTools(
     tool(
       "write_file",
       "Create or overwrite a workspace file with the COMPLETE new content (no line " +
-        "numbers), at the workspace root or in a knowledge node. Write where the user " +
-        "is working (the context's currentNode) unless they say otherwise. It opens " +
+        "numbers), at the workspace root, in a knowledge node or in an experiment. Write " +
+        "where the user is working (the context's currentExperiment, else currentNode) " +
+        "unless they say otherwise; inside an experiment, never write to its node. It opens " +
         "for the user automatically. Put new generated documents in the focused run's " +
-        "artifacts/ folder (<run>/artifacts/, see `run` in context), or under " +
-        "artifacts/ when there is no run, unless the user asks to change an existing " +
-        "file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or " +
-        "artifacts/ decide where the file is listed. Every write is kept as a version. " +
-        "Read-only files (readOnly in list_files) can't be written.",
+        "artifacts/ folder (<run>/artifacts/, see `run` in context), or under artifacts/ " +
+        "when there is no run, unless the user asks to change an existing file. Paths " +
+        "starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where " +
+        "the file is listed. Every write is kept as a version. Read-only files (readOnly " +
+        "in list_files) can't be written.",
       {
         path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
         node: nodeParam,
+        experiment: experimentParam,
       },
-      ({ path, content, node }) =>
-        inNode(node, async (service) => {
+      ({ path, content, ...place }) =>
+        inPlace(place, async (service) => {
           const existed = Boolean(await service.stat(path));
           const info = await service.write(path, new TextEncoder().encode(content));
-          return text({ ok: true, path: info.path, node: service.nodeId, created: !existed });
+          return text({
+            ok: true,
+            path: info.path,
+            node: service.nodeId,
+            experiment: service.experimentId,
+            created: !existed,
+          });
+        }),
+    ),
+    tool(
+      "list_experiments",
+      "List the experiments the user can see, on one knowledge node or (without node) " +
+        "anywhere: id, title, status (draft = only its author sees it, shared, archived), " +
+        "author, hypothesis, params and results. Use it to compare experiments on a node.",
+      { node: nodeParam },
+      ({ node }) =>
+        run(async (session) => {
+          const list = await session.experiments(node || undefined);
+          return text(
+            list.length
+              ? list.map((e) => ({
+                  id: e.id,
+                  node: e.nodeId,
+                  title: e.title,
+                  status: e.status,
+                  author: e.authorName,
+                  canChange: e.access === "writer",
+                  hypothesis: e.hypothesis,
+                  params: e.params,
+                  results: e.results,
+                  files: e.fileCount,
+                  forkedAt: e.forkedAt,
+                }))
+              : "(no experiments)",
+          );
+        }),
+    ),
+    tool(
+      "create_experiment",
+      "Start an experiment on a knowledge node (usually a process) for the user: a private " +
+        "draft with a copy of the node's files, where changes don't touch the node. Only when " +
+        "the user asks to try or explore something as an experiment. Then work in it by " +
+        "passing its id as `experiment` to the file tools.",
+      {
+        node: z.string().describe("Knowledge node id to fork."),
+        title: z.string().describe("Short name, e.g. 'Lower RF power, 40 W'"),
+        hypothesis: z.string().optional().describe("What the user expects and why."),
+        params: jsonObject.optional().describe('What is varied, e.g. {"rfPower_W": 40}'),
+      },
+      ({ node, ...input }) =>
+        run(async (session) => {
+          const created = await session.createExperiment(node, input);
+          return text({ ok: true, id: created.id, title: created.title, files: created.fileCount });
+        }),
+    ),
+    tool(
+      "update_experiment",
+      "Change an experiment the user authored: title, hypothesis, params or results (each " +
+        "replaces the old value whole, so send the complete object), or its status. Record " +
+        "results as numbers with units in the key where you can, e.g. {\"yield_pct\": 92.5}. " +
+        "Only change status (shared shows it to everyone who can see the node; archived makes " +
+        "it read only) when the user asks.",
+      {
+        id: z.string().describe("Experiment id"),
+        title: z.string().optional(),
+        hypothesis: z.string().optional(),
+        params: jsonObject.optional(),
+        results: jsonObject.optional(),
+        status: z.enum(["draft", "shared", "archived"]).optional(),
+      },
+      ({ id, ...input }) =>
+        run(async (session) => {
+          const updated = await session.updateExperiment(id, input);
+          return text({ ok: true, id: updated.id, status: updated.status });
         }),
     ),
   ];

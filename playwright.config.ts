@@ -10,8 +10,8 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * With DATABASE_URL (and the S3_* vars) set, the real agent server also runs
  * for server storage, so knowledge.spec.ts can show the knowledge tree. With
- * no key it listens on :8001 and the mock forwards /files, /nodes and /access
- * to it.
+ * no key it listens on :8001 and the mock forwards /files, /nodes, /access and
+ * /experiments to it.
  *
  * With AUTH_SECRET set too, login is on: e2e/mock-oidc.mjs plays the login
  * provider and only login.spec.ts runs (the other specs assume no login).

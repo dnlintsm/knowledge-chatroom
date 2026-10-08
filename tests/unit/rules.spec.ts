@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { parseRulesResponse, rulesPath, rulesToMarkdown } from "../src/components/workspace/rules";
-import { mockRules } from "../src/lib/rules-mock";
+import { parseRulesResponse, rulesPath, rulesToMarkdown } from "../../src/components/workspace/rules";
+import { mockRules } from "../../src/lib/rules-mock";
 
 /** The rules API answer and its fixed markdown transform (src/components/workspace/rules.ts). */
 

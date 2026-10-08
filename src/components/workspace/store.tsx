@@ -13,31 +13,42 @@ import {
 import type { LineRange } from "./file-refs";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import {
+  createServerExperiment,
   createServerNode,
+  deleteServerExperiment,
   deleteServerFile,
   deleteServerNode,
+  eventPlace,
+  experimentOf,
+  experimentPlace,
   getAccount,
+  listExperiments,
   listNodes,
   listServerFiles,
   loadServerFile,
   putServerFile,
   renameServerNode,
+  updateServerExperiment,
   WATCH_URL,
   type Account,
+  type Experiment,
+  type ExperimentChange,
   type KnowledgeNode,
   type KnowledgeTree,
   type NodeId,
   type NodeType,
+  type PlaceId,
   type Role,
   type ServerEvent,
   type ServerFile,
 } from "./server-files";
 import {
+  EXPERIMENT_TAB,
   FileExistsError,
+  isBuiltInTab,
   kindForPath,
   mimeForPath,
   ReadOnlyFileError,
-  TASKS_TAB,
   type TabId,
   type WorkspaceFile,
 } from "./types";
@@ -55,9 +66,10 @@ import {
  * Open tabs always stay in localStorage; they are per-browser UI state.
  *
  * With server storage the workspace also has a knowledge tree (tech › module ›
- * loop › process). The user is always in one place, the workspace root or a
- * node, and `files` holds that place's files; enterNode() moves elsewhere.
- * Each place keeps its own tabs.
+ * loop › process), and experiments on its nodes. The user is always in one
+ * place, the workspace root, a node or an experiment, and `files` holds that
+ * place's files; enterNode() and enterExperiment() move elsewhere. Each place
+ * keeps its own tabs.
  *
  * With login on, what the user may do in each place comes from their role
  * there (`placeRole`); `canEdit` says whether this place's files can change.
@@ -66,9 +78,9 @@ import {
 const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
 /** Tabs at the workspace root, from before the knowledge tree. */
 const SERVER_UI_KEY = "knowledge-chatroom.workspace.server-ui.v1";
-/** Tabs per place: {"": root, "<node id>": that node}. */
+/** Tabs per place: {"": root, "<node id>": that node, "x:<id>": that experiment}. */
 const PLACE_UI_KEY = "knowledge-chatroom.workspace.place-ui.v1";
-/** The node the user was last in, so a reload returns there. */
+/** The place the user was last in, so a reload returns there. */
 const NODE_KEY = "knowledge-chatroom.workspace.node.v1";
 /**
  * "1" once this browser has filled an empty server workspace, or a JSON list of
@@ -131,13 +143,20 @@ interface WorkspaceValue {
   storageMode: StorageMode;
   /** The last failed save, cleared by the next successful one. */
   syncError: string | null;
-  /** Where the user is: a knowledge node, or null for the workspace root. */
+  /**
+   * Where the user is: a knowledge node (also when in one of its experiments),
+   * or null for the workspace root.
+   */
   node: NodeId;
+  /** The experiment the user is in, if any; `node` is then the node it belongs to. */
+  experiment: Experiment | null;
   /** The current node and its ancestors, top level first; empty at the root. */
   lineage: KnowledgeNode[];
   /** The knowledge tree (server storage only). */
   nodes: KnowledgeNode[];
   nodeTypes: NodeType[];
+  /** Experiments you can see, newest first. */
+  experiments: Experiment[];
   /** Your role at the workspace root; each node carries its own. */
   rootRole: Role | null;
   /** Your role in the current place (owner without server storage). */
@@ -148,6 +167,12 @@ interface WorkspaceValue {
   account: Account;
   /** Moves to a node (null = root) and loads its files; false if it's gone. */
   enterNode: (id: NodeId) => Promise<boolean>;
+  /** Moves into an experiment; false if it's gone. */
+  enterExperiment: (id: string) => Promise<boolean>;
+  /** Forks a node into a new experiment of yours and moves into it. These throw with a message too. */
+  createExperiment: (nodeId: string, title: string) => Promise<Experiment>;
+  updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
+  deleteExperiment: (id: string) => Promise<void>;
   /** These throw with a message for the user, e.g. a duplicate name. */
   createNode: (parentId: NodeId, name: string) => Promise<KnowledgeNode>;
   renameNode: (id: string, name: string) => Promise<void>;
@@ -196,9 +221,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const mode = useRef<StorageMode>("loading");
   const files = useRef(state.files);
   files.current = state.files;
-  const [node, setNode] = useState<NodeId>(null);
-  const nodeRef = useRef<NodeId>(null);
+  const [place, setPlace] = useState<PlaceId>(null);
+  const placeRef = useRef<PlaceId>(null);
   const [tree, setTree] = useState<KnowledgeTree>({ types: [], rootRole: null, nodes: [] });
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [account, setAccount] = useState<Account>({ login: false, user: null });
   // Server sync bookkeeping, per place and path: the content hash we last saw
   // on the server, edits waiting to save, and saves on the wire. Change events
@@ -207,8 +233,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const knownSha = useRef(new Map<string, string>());
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inflight = useRef(new Map<string, number>());
-  const key = (path: string, at: NodeId = nodeRef.current) => `${at ?? ""}\n${path}`;
-  const busy = (path: string, at: NodeId = nodeRef.current) =>
+  /** Files whose last save failed, until one succeeds. */
+  const failed = useRef(new Set<string>());
+  const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
+  const busy = (path: string, at: PlaceId = placeRef.current) =>
     pending.current.has(key(path, at)) || (inflight.current.get(key(path, at)) ?? 0) > 0;
 
   // Restore after mount so server and client render the same seed first.
@@ -230,15 +258,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       } else {
         const ui = readPlaceUi();
-        ui[node ?? ""] = { tabs: state.tabs, active: state.active };
+        ui[place ?? ""] = { tabs: state.tabs, active: state.active };
         window.localStorage.setItem(PLACE_UI_KEY, JSON.stringify(ui));
-        if (node) window.localStorage.setItem(NODE_KEY, node);
+        if (place) window.localStorage.setItem(NODE_KEY, place);
         else window.localStorage.removeItem(NODE_KEY);
       }
     } catch {
       // Quota exceeded (large uploads): the session still works in memory.
     }
-  }, [state, hydrated, storageMode, node]);
+  }, [state, hydrated, storageMode, place]);
 
   const upsert = useCallback((file: WorkspaceFile) => {
     setState((s) => ({
@@ -260,7 +288,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const save = useCallback(async (path: string, at: NodeId): Promise<void> => {
+  const save = useCallback(async (path: string, at: PlaceId): Promise<void> => {
     const k = key(path, at);
     // Edits made while storage is still being picked wait for the decision.
     if (mode.current === "loading") {
@@ -270,16 +298,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     pending.current.delete(k);
     if (mode.current === "local") return; // localStorage already has it.
     // Leaving a place flushes its saves first, so its files are still loaded here.
-    if (at !== nodeRef.current) return;
+    if (at !== placeRef.current) return;
     const file = files.current.find((f) => f.path === path);
     if (!file) return;
     inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
     try {
       const info = await putServerFile(file, at);
       knownSha.current.set(k, info.sha256);
+      failed.current.delete(k);
       setSyncError(null);
     } catch (err) {
       console.error("[workspace] save failed:", err);
+      failed.current.add(k);
       setSyncError(`Couldn't save ${path}`);
     } finally {
       inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
@@ -289,7 +319,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const scheduleSave = useCallback(
     (path: string) => {
-      const at = nodeRef.current;
+      const at = placeRef.current;
       clearTimeout(pending.current.get(key(path, at)));
       pending.current.set(key(path, at), setTimeout(() => void save(path, at), SAVE_DELAY_MS));
     },
@@ -306,12 +336,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [save]);
 
+  /**
+   * Sends waiting edits and waits for the saves of `at`'s files; throws if one
+   * of them didn't make it, so a step that relies on the server's copy (a fork,
+   * archiving) doesn't go ahead without the user's latest edits.
+   */
+  const settleSaves = useCallback(
+    async (at: PlaceId) => {
+      flushSaves();
+      const prefix = `${at ?? ""}\n`;
+      const mine = (keys: Iterable<string>) => [...keys].filter((k) => k.startsWith(prefix));
+      const onWire = () => mine(inflight.current.keys()).some((k) => (inflight.current.get(k) ?? 0) > 0);
+      for (let i = 0; i < 200 && onWire(); i++) await new Promise((r) => setTimeout(r, 50));
+      if (onWire() || mine(pending.current.keys()).length || mine(failed.current).length) {
+        throw new Error("Your latest edits here haven't saved yet; try again once they are saved");
+      }
+    },
+    [flushSaves],
+  );
+
   // Brings local files in line with the server's list: fetches what changed,
   // drops what was deleted, and leaves files with unsaved edits alone, also
   // when the user starts editing while the fetches are in flight. `keep` names
   // files that aren't on the server but must stay (failed first uploads).
   const resync = useCallback(async (list: ServerFile[], keep = new Set<string>()) => {
-    const at = nodeRef.current;
+    const at = placeRef.current;
     const local = new Map(files.current.map((f) => [f.path, f]));
     const next = await Promise.all(
       list.map(async (info) => {
@@ -325,7 +374,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }),
     );
     // The user moved elsewhere meanwhile; that move loads its own files.
-    if (nodeRef.current !== at) return;
+    if (placeRef.current !== at) return;
     const listed = new Set(list.map((f) => f.path));
     const latest = new Map(files.current.map((f) => [f.path, f]));
     const unsaved = files.current.filter(
@@ -337,32 +386,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ...unsaved,
       ];
       const exists = new Set(all.map((f) => f.path));
-      const tabs = s.tabs.filter((t) => t === TASKS_TAB || exists.has(t));
+      const tabs = s.tabs.filter((t) => isBuiltInTab(t) || exists.has(t));
       const active = s.active && tabs.includes(s.active) ? s.active : (tabs[0] ?? null);
       return { files: all, tabs, active };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshTree = useCallback(async () => {
-    const next = await listNodes();
-    if (next) setTree(next);
-    return next?.nodes ?? null;
+  const refreshExperiments = useCallback(async () => {
+    const next = await listExperiments();
+    if (next) setExperiments(next);
+    return next;
   }, []);
+
+  /** The tree and the experiments on it; null when the tree can't be read. */
+  const refreshTree = useCallback(async () => {
+    const [next, list] = await Promise.all([listNodes(), refreshExperiments()]);
+    if (next) setTree(next);
+    return next && list ? { nodes: next.nodes, experiments: list } : null;
+  }, [refreshExperiments]);
 
   // Counts the latest move, so an older one that finishes late does nothing.
   const moves = useRef(0);
-  const enterNode = useCallback(
-    async (id: NodeId): Promise<boolean> => {
+  const enterPlace = useCallback(
+    async (id: PlaceId): Promise<boolean> => {
       if (mode.current !== "server") return false;
-      if (id === nodeRef.current) return true;
+      if (id === placeRef.current) return true;
       const move = ++moves.current;
       const list = await listServerFiles(id);
       if (move !== moves.current || !Array.isArray(list)) return false;
       flushSaves();
-      nodeRef.current = id;
-      setNode(id);
-      const ui = readPlaceUi()[id ?? ""] ?? { tabs: [], active: null };
+      placeRef.current = id;
+      setPlace(id);
+      const ui = readPlaceUi()[id ?? ""] ?? {
+        // An experiment opens on its details the first time.
+        tabs: experimentOf(id) ? [EXPERIMENT_TAB] : [],
+        active: experimentOf(id) ? EXPERIMENT_TAB : null,
+      };
       files.current = [];
       setState({ files: [], tabs: ui.tabs, active: ui.active });
       setSelection("");
@@ -372,6 +432,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [flushSaves, resync],
   );
+  const enterNode = enterPlace;
+  const enterExperiment = useCallback((id: string) => enterPlace(experimentPlace(id)), [enterPlace]);
 
   // Pick server or local storage once, after the local restore above.
   useEffect(() => {
@@ -381,10 +443,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const onEvent = async (event: ServerEvent) => {
       if (event.op === "node") {
-        const nodes = await refreshTree();
+        const now = await refreshTree();
         // Deleted, or under a deleted node: go back to the root.
-        if (nodes && nodeRef.current && !nodes.some((n) => n.id === nodeRef.current)) {
-          void enterNode(null);
+        const here = placeRef.current;
+        const gone =
+          now &&
+          here &&
+          (experimentOf(here)
+            ? !now.experiments.some((e) => e.id === experimentOf(here))
+            : !now.nodes.some((n) => n.id === here));
+        if (gone) void enterNode(null);
+        return;
+      }
+      if (event.op === "experiment") {
+        const list = await refreshExperiments();
+        // Deleted, or no longer shared with you: back to its node.
+        const here = experimentOf(placeRef.current);
+        if (list && here === event.id && !list.some((e) => e.id === here)) {
+          if (!(await enterNode(event.node))) void enterNode(null);
         }
         return;
       }
@@ -392,8 +468,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(treeTimer);
       treeTimer = setTimeout(() => void refreshTree(), 300);
 
-      const { path, node: at } = event;
-      if (at !== nodeRef.current) {
+      const { path } = event;
+      const at = eventPlace(event);
+      if (at !== placeRef.current) {
         // Claude wrote somewhere else: follow it there.
         if (event.op === "write" && event.author === "agent") {
           if (await enterNode(at)) open(path);
@@ -409,10 +486,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (knownSha.current.get(key(path)) === event.sha256) return; // Our own save.
       const list = await listServerFiles(at);
       const info = Array.isArray(list) ? list.find((f) => f.path === path) : undefined;
-      if (!info || busy(path) || nodeRef.current !== at) return;
+      if (!info || busy(path) || placeRef.current !== at) return;
       const file = await loadServerFile(info, at);
       // The user may have started editing this file, or moved, while it loaded.
-      if (busy(path) || nodeRef.current !== at) return;
+      if (busy(path) || placeRef.current !== at) return;
       knownSha.current.set(key(path), info.sha256);
       upsert(file);
       if (info.author === "agent") open(path);
@@ -461,19 +538,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
 
-      // Return to the node this browser was last in, if it still exists.
+      // Return to the place this browser was last in, if it still exists.
       const lastNode = window.localStorage.getItem(NODE_KEY);
       const there = lastNode ? await listServerFiles(lastNode) : null;
       if (cancelled) return;
       if (lastNode && Array.isArray(there)) {
-        nodeRef.current = lastNode;
-        setNode(lastNode);
+        placeRef.current = lastNode;
+        setPlace(lastNode);
         list = there;
       }
-      const ui = readPlaceUi()[nodeRef.current ?? ""];
+      const ui = readPlaceUi()[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
-      await resync(list, nodeRef.current === null ? new Set(failed) : new Set());
+      await resync(list, placeRef.current === null ? new Set(failed) : new Set());
       // Roles come with the tree; load it first so edit controls are right from the start.
       await refreshTree();
       if (cancelled) return;
@@ -489,9 +566,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!dropped) return;
         dropped = false;
         void refreshTree();
-        const at = nodeRef.current;
+        const at = placeRef.current;
         void listServerFiles(at).then((l) => {
-          if (Array.isArray(l) && nodeRef.current === at) void resync(l);
+          if (Array.isArray(l) && placeRef.current === at) void resync(l);
           else if (l === null && at) void enterNode(null); // The node was deleted.
         });
       };
@@ -587,7 +664,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ...(opts?.readOnly ? { readOnly: true } : {}),
       };
       if (mode.current === "server") {
-        const at = nodeRef.current;
+        const at = placeRef.current;
         const k = key(path, at);
         // Counted as in flight, so the change event for this write is ignored.
         inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
@@ -605,11 +682,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // Another tab or browser won. Its change event was ignored while this
           // write was in flight, so load its file now, before callers open it.
           const list = await listServerFiles(at);
-          if (Array.isArray(list) && nodeRef.current === at) await resync(list);
+          if (Array.isArray(list) && placeRef.current === at) await resync(list);
           throw new FileExistsError(path);
         }
         // The user moved to another place meanwhile; the file is saved there.
-        if (nodeRef.current !== at) return file;
+        if (placeRef.current !== at) return file;
       }
       // A resync may have brought the new file in meanwhile; this is the same file.
       files.current = [...files.current.filter((f) => f.path !== path), file];
@@ -628,7 +705,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(pending.current.get(k));
       pending.current.delete(k);
       knownSha.current.delete(k);
-      deleteServerFile(path, nodeRef.current).catch((err) => {
+      deleteServerFile(path, placeRef.current).catch((err) => {
         console.error("[workspace] delete failed:", err);
         setSyncError(`Couldn't delete ${path}`);
       });
@@ -654,26 +731,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const deleteNode = useCallback(
     async (id: string) => {
-      const inside = nodeRef.current !== null && lineageOf(tree.nodes, nodeRef.current).some((n) => n.id === id);
+      const at = placeRef.current;
+      const nodeHere = experimentOf(at)
+        ? experiments.find((e) => e.id === experimentOf(at))?.nodeId
+        : at;
+      const inside = nodeHere && lineageOf(tree.nodes, nodeHere).some((n) => n.id === id);
       if (inside) await enterNode(null);
       await deleteServerNode(id);
       await refreshTree();
     },
-    [refreshTree, enterNode, tree.nodes],
+    [refreshTree, enterNode, tree.nodes, experiments],
   );
 
+  const createExperiment = useCallback(
+    async (nodeId: string, title: string) => {
+      // The fork copies what the server has, so recent edits go first.
+      if (placeRef.current === nodeId) await settleSaves(nodeId);
+      const created = await createServerExperiment(nodeId, title);
+      await refreshExperiments();
+      await enterExperiment(created.id);
+      return created;
+    },
+    [refreshExperiments, enterExperiment, settleSaves],
+  );
+  const updateExperiment = useCallback(
+    async (id: string, change: ExperimentChange) => {
+      // Archived is read only, so edits still on their way would be refused.
+      const here = experimentPlace(id);
+      if (change.status === "archived" && placeRef.current === here) await settleSaves(here);
+      const updated = await updateServerExperiment(id, change);
+      setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
+      return updated;
+    },
+    [settleSaves],
+  );
+  const deleteExperiment = useCallback(
+    async (id: string) => {
+      const doomed = experiments.find((e) => e.id === id);
+      if (doomed && experimentOf(placeRef.current) === id) await enterNode(doomed.nodeId);
+      await deleteServerExperiment(id);
+      await refreshExperiments();
+    },
+    [experiments, enterNode, refreshExperiments],
+  );
+
+  const experimentId = experimentOf(place);
+  const experiment = experimentId ? (experiments.find((e) => e.id === experimentId) ?? null) : null;
+  const node: NodeId = experimentId ? (experiment?.nodeId ?? null) : place;
   const lineage = useMemo(() => (node ? lineageOf(tree.nodes, node) : []), [tree.nodes, node]);
+  // In an experiment, its author edits and everyone else who sees it reads.
   const placeRole: Role | null =
     storageMode !== "server"
       ? "owner"
-      : node
-        ? (tree.nodes.find((n) => n.id === node)?.role ?? null)
-        : tree.rootRole;
+      : experimentId
+        ? experiment
+          ? experiment.access === "writer"
+            ? "editor"
+            : "viewer"
+          : null
+        : node
+          ? (tree.nodes.find((n) => n.id === node)?.role ?? null)
+          : tree.rootRole;
   const canEdit = placeRole === "editor" || placeRole === "owner";
 
   const value = useMemo<WorkspaceValue>(() => {
     const activeFile =
-      state.active && state.active !== TASKS_TAB
+      state.active && !isBuiltInTab(state.active)
         ? (state.files.find((f) => f.path === state.active) ?? null)
         : null;
     return {
@@ -692,22 +815,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       storageMode,
       syncError,
       node,
+      experiment,
       lineage,
       nodes: tree.nodes,
       nodeTypes: tree.types,
+      experiments,
       rootRole: tree.rootRole,
       placeRole,
       canEdit,
       account,
       enterNode,
+      enterExperiment,
       createNode,
       renameNode,
       deleteNode,
+      createExperiment,
+      updateExperiment,
+      deleteExperiment,
     };
   }, [
     state, selection, openCount, reveal, getFile, open, close, write, create, remove, storageMode,
-    syncError, node, lineage, tree, placeRole, canEdit, account, enterNode, createNode,
-    renameNode, deleteNode,
+    syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
+    updateExperiment, deleteExperiment,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

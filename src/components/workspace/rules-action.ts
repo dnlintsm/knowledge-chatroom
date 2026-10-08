@@ -1,7 +1,7 @@
 import { BookOpenCheck, Wand2 } from "lucide-react";
 import type { ActionContext, ActionDef } from "./actions";
 import { parseRulesResponse, RULES_FILE, rulesPath, rulesToMarkdown } from "./rules";
-import { serverFileExists } from "./server-files";
+import { experimentPlace, serverFileExists } from "./server-files";
 import { FileExistsError } from "./types";
 
 /**
@@ -45,7 +45,10 @@ async function generateOrOpenRules({ runDir, workbench, workspace }: ActionConte
   await withLock(`knowledge-chatroom:generate-rules:${path}`, async () => {
     const exists =
       workspace.storageMode === "server"
-        ? await serverFileExists(path, workspace.node)
+        ? await serverFileExists(
+            path,
+            workspace.experiment ? experimentPlace(workspace.experiment.id) : workspace.node,
+          )
         : Boolean(workspace.getFile(path));
     if (exists) return alreadyGenerated();
 
