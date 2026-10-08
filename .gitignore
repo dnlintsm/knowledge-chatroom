@@ -51,6 +51,7 @@ __pycache__/
 
 # playwright
 /test-results/
+/test-results-login/
 /playwright-report/
 /blob-report/
 /preview/
