@@ -6,6 +6,8 @@ import {
   isPaneOpen,
   persistedLayout,
   reduceLayout,
+  touchesChat,
+  withoutChat,
   type Layout,
   type LayoutCommand,
 } from "../src/components/workspace/layout";
@@ -56,6 +58,21 @@ test("the icon rail collapses the pane when its view is picked again", () => {
     sideOpen: true,
     mobilePane: "explorer",
   });
+});
+
+test("setView switches the view without opening anything", () => {
+  const collapsed = run({ type: "hide", pane: "explorer" });
+  expect(reduceLayout(collapsed, { type: "setView", view: "runs" })).toEqual({ ...collapsed, view: "runs" });
+});
+
+test("Traverse mode shows no chat but keeps the user's setting", () => {
+  const onChat = run({ type: "show", pane: "chat" });
+  expect(withoutChat(onChat)).toMatchObject({ chatOpen: false, mobilePane: "editor" });
+  expect(onChat.chatOpen).toBe(true);
+  expect(touchesChat({ type: "toggle", pane: "chat" })).toBe(true);
+  expect(touchesChat({ type: "resize", pane: "chat", width: 400 })).toBe(true);
+  expect(touchesChat({ type: "show", pane: "editor" })).toBe(false);
+  expect(touchesChat({ type: "selectView", view: "files" })).toBe(false);
 });
 
 test("restores only well-formed saved values", () => {

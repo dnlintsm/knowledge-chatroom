@@ -3,7 +3,9 @@
 import { useRef } from "react";
 import {
   CloudAlert,
+  ChevronRight,
   CloudCheck,
+  FlaskConical,
   FolderTree,
   HardDrive,
   MessagesSquare,
@@ -12,6 +14,7 @@ import {
   PanelRight,
   PanelsTopLeft,
   Sun,
+  X,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
@@ -108,7 +111,7 @@ function WorkspaceLayout() {
 
 function TitleBar() {
   const { setTheme } = useTheme();
-  const { panes } = useWorkbench();
+  const { panes, mode } = useWorkbench();
   const sideOpen = panes.isOpen("explorer");
   const chatOpen = panes.isOpen("chat");
   const button =
@@ -119,6 +122,7 @@ function TitleBar() {
       <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
       <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
       <StorageStatus />
+      <RunBreadcrumb />
       <div className="ml-auto flex items-center gap-0.5">
         <button
           type="button"
@@ -130,16 +134,18 @@ function TitleBar() {
         >
           <PanelLeft className="size-4" />
         </button>
-        <button
-          type="button"
-          aria-label={chatOpen ? "Hide chat" : "Show chat"}
-          title={chatOpen ? "Hide chat" : "Show chat"}
-          aria-pressed={chatOpen}
-          onClick={() => panes.toggle("chat")}
-          className={cn(button, "max-lg:hidden")}
-        >
-          <PanelRight className="size-4" />
-        </button>
+        {mode === "focus" && (
+          <button
+            type="button"
+            aria-label={chatOpen ? "Hide chat" : "Show chat"}
+            title={chatOpen ? "Hide chat" : "Show chat"}
+            aria-pressed={chatOpen}
+            onClick={() => panes.toggle("chat")}
+            className={cn(button, "max-lg:hidden")}
+          >
+            <PanelRight className="size-4" />
+          </button>
+        )}
         <button
           type="button"
           aria-label="Toggle theme"
@@ -154,6 +160,40 @@ function TitleBar() {
         </button>
       </div>
     </header>
+  );
+}
+
+/** The focused run (Focus mode) and a way back to Traverse. */
+function RunBreadcrumb() {
+  const { runDir, run } = useWorkbench();
+  if (!runDir) return null;
+  const parts = runDir.split("/");
+  return (
+    <nav aria-label="Current run" className="ml-3 flex min-w-0 items-center gap-1 text-xs">
+      <FlaskConical className="size-3.5 shrink-0 text-[var(--muted-foreground)]" />
+      {parts.map((part, i) => (
+        <span key={i} className="flex min-w-0 items-center gap-1">
+          {i > 0 && <ChevronRight className="size-3 shrink-0 text-[var(--muted-foreground)]" />}
+          <span
+            className={cn(
+              "truncate",
+              i === parts.length - 1 ? "font-medium" : "text-[var(--muted-foreground)] max-sm:hidden",
+            )}
+          >
+            {part}
+          </span>
+        </span>
+      ))}
+      <button
+        type="button"
+        title="Leave run (back to Traverse)"
+        aria-label="Leave run"
+        onClick={run.leave}
+        className="ml-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
+      >
+        <X className="size-3.5" />
+      </button>
+    </nav>
   );
 }
 
@@ -182,13 +222,15 @@ function StorageStatus() {
 }
 
 function MobileSwitcher() {
-  const { layout, panes } = useWorkbench();
+  const { layout, panes, mode } = useWorkbench();
   const pane = layout.mobilePane;
-  const items = [
+  const all = [
     { id: "explorer" as const, label: "Files", icon: FolderTree },
     { id: "editor" as const, label: "Editor", icon: PanelsTopLeft },
     { id: "chat" as const, label: "Chat", icon: MessagesSquare },
   ];
+  // Traverse mode has no chat.
+  const items = mode === "focus" ? all : all.filter((item) => item.id !== "chat");
   return (
     <nav aria-label="Panes" className="flex shrink-0 border-t border-[var(--border)] bg-[var(--secondary)] lg:hidden">
       {items.map(({ id, label, icon: Icon }) => (

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useAgentContext, useFrontendTool } from "@copilotkit/react-core/v2";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
+import { isInRun, RUN_REPORT } from "./runs";
 import { isTextFile, TASKS_TAB } from "./types";
 import { useWorkbench } from "./workbench";
 
@@ -34,12 +35,29 @@ export function useWorkspaceAgent() {
   latestWorkbench.current = workbench;
 
   const open = ws.activeFile;
+  const { runDir } = workbench;
+  const report = runDir ? ws.getFile(`${runDir}/${RUN_REPORT}`) : undefined;
   // Only while files are browser-only; see the comment above.
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
+      "The user's knowledge workspace (shown beside the chat). `run` is the experiment run (RUN_DIR) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder. `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
     value: {
+      run: runDir
+        ? {
+            path: runDir,
+            files: ws.files.filter((f) => isInRun(f.path, runDir)).map((f) => f.path),
+            report: !report
+              ? null
+              : report.path === open?.path
+                ? { path: report.path, content: "(the open file)" }
+                : {
+                    path: report.path,
+                    content: numberLines(report.content.slice(0, MAX_CONTEXT_CHARS)),
+                    truncated: report.content.length > MAX_CONTEXT_CHARS,
+                  },
+          }
+        : null,
       openFile: open
         ? {
             path: open.path,
