@@ -16,9 +16,12 @@ const MAX_CONTEXT_CHARS = 20_000;
  *   every run so "summarize this" or "rewrite the selected part" just works;
  * - frontend tools: list / read / write / open files, and open the task board.
  *
- * Tools run in the browser, so files Claude writes land straight in the
- * workspace (and open in the middle pane). File content reaches Claude with
- * numbered lines, so its answers can cite them (see file-refs.ts).
+ * With server storage the agent has its own list / read / write tools (they
+ * work without this tab), so the browser's copies are switched off and the
+ * store's change stream opens files Claude writes. Without it, these browser
+ * tools write straight into the local workspace. Either way file content
+ * reaches Claude with numbered lines, so its answers can cite them (see
+ * file-refs.ts).
  */
 export function useWorkspaceAgent() {
   const ws = useWorkspace();
@@ -27,6 +30,8 @@ export function useWorkspaceAgent() {
   latest.current = ws;
 
   const open = ws.activeFile;
+  // Only while files are browser-only; see the comment above.
+  const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
       "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
@@ -51,6 +56,7 @@ export function useWorkspaceAgent() {
 
   useFrontendTool({
     name: "listWorkspaceFiles",
+    available: browserFiles,
     description:
       "List every file in the user's workspace with its kind (note, skill, upload, artifact), size and who last wrote it.",
     parameters: z.object({}),
@@ -62,10 +68,11 @@ export function useWorkspaceAgent() {
         size: f.content.length,
         lastWrittenBy: f.author,
       })),
-  });
+  }, [browserFiles]);
 
   useFrontendTool({
     name: "readWorkspaceFile",
+    available: browserFiles,
     description:
       "Read the full content of a workspace file by path. Each line starts with its line number and a tab, for citing lines; the numbers are not part of the file.",
     parameters: z.object({ path: z.string().describe("Workspace path, e.g. notes/welcome.md") }),
@@ -75,10 +82,11 @@ export function useWorkspaceAgent() {
       if (!isTextFile(file)) return { path: file.path, mime: file.mime, note: "Binary file; content not readable as text." };
       return { path: file.path, content: numberLines(file.content) };
     },
-  });
+  }, [browserFiles]);
 
   useFrontendTool({
     name: "writeWorkspaceFile",
+    available: browserFiles,
     description:
       "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents under artifacts/ unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
     parameters: z.object({
@@ -91,7 +99,7 @@ export function useWorkspaceAgent() {
       latest.current.open(file.path);
       return { ok: true, path: file.path, created: !existed };
     },
-  });
+  }, [browserFiles]);
 
   useFrontendTool({
     name: "openWorkspaceFile",

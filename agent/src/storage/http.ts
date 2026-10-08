@@ -1,12 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { FileService } from "./files";
+import type { FileEvent, FileService } from "./files";
+import type { StorageState } from "./index";
 import { InvalidPathError } from "./paths";
 
 /**
  * REST file API, mounted at /files on the agent server:
  *
  *   GET    /files                   list live files (JSON)
+ *   GET    /files?watch             change stream (Server-Sent Events): one
+ *                                   `data: {"op":"write"|"delete","path",…}`
+ *                                   per committed change
  *   GET    /files/<path>            file bytes, Content-Type = file mime
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
@@ -20,6 +24,27 @@ import { InvalidPathError } from "./paths";
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+async function watch(req: IncomingMessage, res: ServerResponse, service: FileService) {
+  // Subscribe before answering, so a failure still gets a normal error response.
+  const unsubscribe = await service.subscribe((event: FileEvent) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  // A comment line first so proxies flush headers, then a heartbeat so idle
+  // connections are not cut.
+  res.write(": watching\n\n");
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
+  res.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 }
 
 async function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array | null> {
@@ -36,6 +61,7 @@ async function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array
 export function createFilesHandler(
   files: () => FileService | null,
   maxUploadBytes: number,
+  state: () => StorageState = () => "ready",
 ) {
   return async function handleFiles(
     req: IncomingMessage,
@@ -44,7 +70,12 @@ export function createFilesHandler(
   ): Promise<void> {
     const service = files();
     if (!service) {
-      json(res, 503, { error: "File storage is not configured (set DATABASE_URL)" });
+      // The UI tells these apart: 503 means "try again shortly"; 404 and 500
+      // mean no server storage this session, so it keeps files in the browser.
+      const now = state();
+      if (now === "starting") json(res, 503, { error: "File storage is starting" });
+      else if (now === "failed") json(res, 500, { error: "File storage failed to start" });
+      else json(res, 404, { error: "File storage is not configured (set DATABASE_URL)" });
       return;
     }
 
@@ -63,7 +94,8 @@ export function createFilesHandler(
           json(res, 405, { error: "Method not allowed" });
           return;
         }
-        json(res, 200, { files: await service.list() });
+        if (url.searchParams.has("watch")) await watch(req, res, service);
+        else json(res, 200, { files: await service.list() });
         return;
       }
 

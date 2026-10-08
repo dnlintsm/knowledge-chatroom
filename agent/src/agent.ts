@@ -19,6 +19,9 @@ import { resolveModel } from "./model";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
 import { generateA2ui } from "./a2ui_dynamic_schema";
+import { currentFiles } from "./storage";
+import { storageConfigFromEnv } from "./storage/config";
+import { createFileTools } from "./storage/tools";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
@@ -35,9 +38,9 @@ const SYSTEM_PROMPT = [
   "- Todos: the todo board is shared state under `todos`; call openTaskBoard, then",
   "  ag_ui_update_state with the COMPLETE list to add or change todos.",
   "- Workspace: the user works on files beside the chat. The open file and their",
-  "  selection arrive as context. Use listWorkspaceFiles / readWorkspaceFile to look",
-  "  around and writeWorkspaceFile (full content) to create or edit files; new",
-  "  generated documents go under artifacts/. Say what you changed in one line.",
+  "  selection arrive as context. Use the workspace file tools to look around (list,",
+  "  read) and to create or edit files (write, full content); new generated",
+  "  documents go under artifacts/. Say what you changed in one line.",
   "- File references: when you mention a workspace file or lines in it, link them so",
   "  the user can click to open them beside the chat: [welcome.md](notes/welcome.md),",
   "  [welcome.md:12](notes/welcome.md#L12) or [welcome.md:12-18](notes/welcome.md#L12-L18).",
@@ -49,8 +52,12 @@ const SYSTEM_PROMPT = [
 // allowedTools pre-approves those names so they run without a permission prompt.
 // (`tools` is a different field — Claude Code's BUILT-IN toolset; [] disables it
 // so the model only uses ours + the AG-UI protocol tools.)
+//
+// With storage configured (DATABASE_URL), workspace files live on the server and
+// the file tools run here; the browser then hides its own copies of them.
 const SERVER_NAME = "copilotkit";
-const backendTools = [queryData, searchFlights, generateA2ui];
+const fileTools = storageConfigFromEnv() ? createFileTools(currentFiles) : [];
+const backendTools = [queryData, searchFlights, generateA2ui, ...fileTools];
 
 export const adapter = new ClaudeAgentAdapter({
   agentId: "claude-sdk-typescript",

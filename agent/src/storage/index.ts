@@ -37,3 +37,38 @@ export async function initStorage(
     throw err;
   }
 }
+
+let current: Storage | null = null;
+
+/** off: no DATABASE_URL. starting: connecting/migrating. failed: gave up. */
+export type StorageState = "off" | "starting" | "ready" | "failed";
+let state: StorageState = "off";
+
+export function storageState(): StorageState {
+  return state;
+}
+
+/** The running storage, or null before it is ready / when it is off or failed. */
+export function currentFiles(): FileService | null {
+  return current?.files ?? null;
+}
+
+/**
+ * Starts storage in the background for the server process. Until it is ready
+ * the file API answers 503 (500 if it failed) and file tools return an error,
+ * while chat keeps working.
+ */
+export function startStorage(config: StorageConfig | null = storageConfigFromEnv()) {
+  if (!config) return;
+  state = "starting";
+  initStorage(config)
+    .then((ready) => {
+      current = ready;
+      state = "ready";
+      console.log("[storage] ready");
+    })
+    .catch((err) => {
+      state = "failed";
+      console.error("[storage] failed to start; /files is unavailable:", err);
+    });
+}

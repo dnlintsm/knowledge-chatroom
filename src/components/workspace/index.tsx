@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FolderTree, MessagesSquare, Moon, PanelLeft, PanelRight, PanelsTopLeft, Sun } from "lucide-react";
+import {
+  CloudAlert,
+  CloudCheck,
+  FolderTree,
+  HardDrive,
+  MessagesSquare,
+  Moon,
+  PanelLeft,
+  PanelRight,
+  PanelsTopLeft,
+  Sun,
+} from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import { useWorkspaceAgent } from "./agent-bridge";
@@ -142,6 +153,7 @@ function TitleBar({
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4 pr-24">
       <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
       <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
+      <StorageStatus />
       <div className="ml-auto flex items-center gap-0.5">
         <button
           type="button"
@@ -177,6 +189,30 @@ function TitleBar({
         </button>
       </div>
     </header>
+  );
+}
+
+/** Where files are saved, and whether the last save failed. */
+function StorageStatus() {
+  const { storageMode, syncError } = useWorkspace();
+  if (storageMode === "loading") return null;
+  const [Icon, label, title] = syncError
+    ? [CloudAlert, "Not saved", syncError]
+    : storageMode === "server"
+      ? [CloudCheck, "Saved", "Files are saved on the server, with every version kept."]
+      : [HardDrive, "This browser", "No storage server, so files are kept in this browser only."];
+  return (
+    <span
+      title={title}
+      role="status"
+      className={cn(
+        "ml-2 flex items-center gap-1 text-xs",
+        syncError ? "text-red-500" : "text-[var(--muted-foreground)]",
+      )}
+    >
+      <Icon className="size-3.5" />
+      <span className="max-sm:hidden">{label}</span>
+    </span>
   );
 }
 
