@@ -1,6 +1,7 @@
 import { AccessService, atLeast, ForbiddenError, type Principal, type Role } from "./access";
 import { asUser, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
+import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
 
@@ -30,6 +31,7 @@ export interface Tree {
 interface Parts {
   files: FileService;
   nodes: NodeService;
+  experiments: ExperimentService;
   access: AccessService;
   sql: Sql;
   /** Whether queries can run as the restricted role (db.ts prepareRowSecurity). */
@@ -127,6 +129,64 @@ export class Session {
     );
   }
 
+  // Experiments: anyone who can view a node may fork it into their own
+  // experiment; only its author changes it (see 005_experiments.sql).
+
+  /** Experiments you can see, on one node or anywhere. */
+  async experiments(nodeId?: string): Promise<Experiment[]> {
+    if (nodeId !== undefined) await this.need(nodeId, "viewer");
+    const userId = this.principal.userId;
+    return this.scoped((db) => on(this.parts.experiments, db).list(userId, nodeId));
+  }
+
+  async experiment(id: string): Promise<Experiment> {
+    const userId = this.principal.userId;
+    const found = await this.scoped((db) => on(this.parts.experiments, db).get(userId, id));
+    if (!found) throw new NodeNotFoundError("Experiment not found");
+    return found;
+  }
+
+  async createExperiment(nodeId: string, input: ExperimentInput): Promise<Experiment> {
+    await this.need(nodeId, "viewer");
+    const userId = this.principal.userId;
+    return this.scoped((db) =>
+      on(this.parts.experiments, db).create(userId, nodeId, input, (tx, id) =>
+        this.audit("experiment.create", { experiment: id, node: nodeId, title: input.title })(tx),
+      ),
+    );
+  }
+
+  /** Archived experiments are read only, apart from changing the status back. */
+  async updateExperiment(id: string, input: ExperimentInput): Promise<Experiment> {
+    const current = await this.experiment(id);
+    this.needAuthor(current);
+    const archived = current.status === "archived" && (input.status ?? "archived") === "archived";
+    if (archived && Object.keys(input).some((k) => k !== "status")) {
+      throw new ForbiddenError("This experiment is archived; restore it to change it");
+    }
+    await this.scoped((db) =>
+      on(this.parts.experiments, db).update(
+        id,
+        input,
+        this.audit("experiment.update", { experiment: id, fields: Object.keys(input) }),
+      ),
+    );
+    return this.experiment(id);
+  }
+
+  async deleteExperiment(id: string): Promise<boolean> {
+    this.needAuthor(await this.experiment(id));
+    return this.scoped((db) =>
+      on(this.parts.experiments, db).remove(id, this.audit("experiment.delete", { experiment: id })),
+    );
+  }
+
+  private needAuthor(experiment: Experiment) {
+    if (!experiment.mine) {
+      throw new ForbiddenError("Only the experiment's author can change it");
+    }
+  }
+
   // Files
 
   /** Files at the workspace root (null) or in a node. */
@@ -134,19 +194,34 @@ export class Session {
     const role = await this.need(nodeId, "viewer");
     const service = await this.parts.files.inNode(nodeId);
     if (!service) throw new NodeNotFoundError("Node not found");
+    return this.filesSession(service, role, { node: nodeId });
+  }
+
+  /** An experiment's files: its author edits them, others who may see it read them. */
+  async experimentFiles(id: string): Promise<FilesSession> {
+    const access = await this.parts.experiments.access(this.principal.userId, id);
+    const service = access && (await this.parts.files.inExperiment(id));
+    if (!service) throw new NodeNotFoundError("Experiment not found");
+    return this.filesSession(service, access === "writer" ? "editor" : "viewer", { experiment: id });
+  }
+
+  private filesSession(service: FileService, role: Role, place: Record<string, string | null>) {
     return new FilesSession(
       service,
       role,
       this.principal,
-      (action, target) => this.audit(action, { node: nodeId, ...target }),
+      (action, target) => this.audit(action, { ...place, ...target }),
       (fn) => this.scoped((db) => fn(on(service, db))),
     );
   }
 
   /** Whether this principal may hear about a change. */
   async canSee(event: WorkspaceEvent): Promise<boolean> {
+    const userId = this.principal.userId;
     // Hidden nodes stay hidden: not even their ids go out.
-    if (event.op === "node") return this.parts.access.seesNode(this.principal.userId, event.id);
+    if (event.op === "node") return this.parts.access.seesNode(userId, event.id);
+    if (event.op === "experiment") return this.parts.experiments.hears(userId, event.id, event.change);
+    if (event.experiment) return (await this.parts.experiments.access(userId, event.experiment)) !== null;
     return (await this.role(event.node)) !== null;
   }
 
@@ -252,8 +327,17 @@ export class FilesSession {
     return this.service.nodeId;
   }
 
+  get experimentId() {
+    return this.service.experimentId;
+  }
+
   private needEditor() {
-    if (!atLeast(this.role, "editor")) throw new ForbiddenError("This needs editor access");
+    if (atLeast(this.role, "editor")) return;
+    throw new ForbiddenError(
+      this.experimentId
+        ? "Only the experiment's author can change its files, and not once it is archived"
+        : "This needs editor access",
+    );
   }
 
   list(): Promise<FileInfo[]> {
