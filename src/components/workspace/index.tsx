@@ -47,10 +47,14 @@ export function Workspace() {
     } catch {}
   }, [layout, hydrated]);
 
-  // On phones, opening a file (even the one already open) should show it.
-  useEffect(() => {
-    if (openCount > 0) setMobilePane("editor");
-  }, [openCount]);
+  // On phones, opening a file (even the one already open) should show it. This
+  // happens during render, not in an effect, so the editor is already visible
+  // when it scrolls to lines a chat reference points at.
+  const [shownOpens, setShownOpens] = useState(openCount);
+  if (openCount !== shownOpens) {
+    setShownOpens(openCount);
+    setMobilePane("editor");
+  }
 
   const selectView = (next: SidebarView) => {
     setLayout((l) => ({ ...l, sideOpen: !(l.sideOpen && view === next) }));

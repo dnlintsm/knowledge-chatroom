@@ -38,6 +38,10 @@ const SYSTEM_PROMPT = [
   "  selection arrive as context. Use listWorkspaceFiles / readWorkspaceFile to look",
   "  around and writeWorkspaceFile (full content) to create or edit files; new",
   "  generated documents go under artifacts/. Say what you changed in one line.",
+  "- File references: when you mention a workspace file or lines in it, link them so",
+  "  the user can click to open them beside the chat: [welcome.md](notes/welcome.md),",
+  "  [welcome.md:12](notes/welcome.md#L12) or [welcome.md:12-18](notes/welcome.md#L12-L18).",
+  "  Use the workspace path and the line numbers shown in the content you were given.",
 ].join("\n");
 
 // The Claude Agent SDK exposes custom tools through an in-process MCP server

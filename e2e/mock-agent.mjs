@@ -9,6 +9,9 @@
  * A message mentioning "artifacts/" instead calls the browser's
  * writeWorkspaceFile tool, so the preview also shows Claude creating a file;
  * the follow-up run (carrying the tool result) confirms it in one line.
+ *
+ * A message asking what to "read next" gets an answer that cites workspace
+ * lines, so the preview also shows file references opening the middle pane.
  */
 
 import http from "node:http";
@@ -19,6 +22,12 @@ const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const REPLY =
   "Hi! I'm a mock agent running in CI, so this preview works without an " +
   "Anthropic API key. With a real key, Claude answers here instead.";
+
+// File references as the system prompt asks Claude to write them
+// (src/components/workspace/file-refs.ts).
+const CITING_REPLY =
+  "Read [The Pragmatic Programmer](notes/reading-list.md#L7) next: it's the one marked Next. " +
+  "Meanwhile [sales.csv:3-4](uploads/sales.csv#L3-L4) shows revenue still climbing.";
 
 const ARTIFACT_PATH = "artifacts/welcome-summary.md";
 const ARTIFACT = `# Summary
@@ -73,7 +82,11 @@ const server = http.createServer(async (req, res) => {
   const last = messages[messages.length - 1];
   const wantsArtifact = last?.role === "user" && textOf(last).includes("artifacts/");
   const reply =
-    last?.role === "tool" ? `Saved the summary to ${ARTIFACT_PATH} and opened it.` : REPLY;
+    last?.role === "tool"
+      ? `Saved the summary to ${ARTIFACT_PATH} and opened it.`
+      : last?.role === "user" && textOf(last).includes("read next")
+        ? CITING_REPLY
+        : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
   if (wantsArtifact) {

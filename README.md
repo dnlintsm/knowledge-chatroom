@@ -24,6 +24,28 @@ Panes resize by dragging and collapse from the title bar; below 1024px one pane 
 time. Files live in the browser (localStorage) for now, in `src/components/workspace/store.tsx`,
 until the backend design decides where they belong.
 
+### File references in answers
+
+Claude's answers can point at a file, or at lines in it, and a click opens them in the middle
+pane. A reference is a plain Markdown link to the workspace path, with a GitHub-style line
+fragment (the format Claude Code uses in IDEs):
+
+| Claude writes | A click opens |
+| --- | --- |
+| `[welcome.md](notes/welcome.md)` | the file |
+| `[welcome.md:12](notes/welcome.md#L12)` | the file at line 12 |
+| `[welcome.md:12-18](notes/welcome.md#L12-L18)` | the file at lines 12–18 |
+
+Paths are relative to the workspace root; lines are 1-based and inclusive. The preview
+highlights the paragraphs, list items, table rows or code blocks the lines belong to, and the
+editor selects the lines themselves. Links to files that aren't in the workspace show greyed
+out, and web links work as before.
+
+Claude learns the format from the system prompt (`agent/src/agent.ts`), and file content
+reaches it with numbered lines (the open file in context, and `readWorkspaceFile`), so it can
+cite them. The contract lives in `src/components/workspace/file-refs.ts`, whose parser also
+accepts `#L12-18` and `notes/welcome.md:12`.
+
 ---
 
 ## About the starter

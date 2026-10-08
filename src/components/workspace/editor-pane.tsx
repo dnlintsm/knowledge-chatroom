@@ -2,15 +2,18 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bot, Eye, ListTodo, Pencil, X } from "lucide-react";
-import { Streamdown } from "streamdown";
+import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
 import { FileIcon } from "./file-icon";
+import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
 import { extension, fileName, isMarkdown, isTextFile, TASKS_TAB, type WorkspaceFile } from "./types";
 
 type Mode = "preview" | "edit";
+
+const PREVIEW_REHYPE_PLUGINS = [...Object.values(defaultRehypePlugins), sourceLines];
 
 function canPreview(file: WorkspaceFile) {
   return isMarkdown(file) || extension(file.path) === "csv";
@@ -128,7 +131,18 @@ export function EditorPane() {
 }
 
 function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
-  const { write, setSelection } = useWorkspace();
+  const { write, setSelection, reveal } = useWorkspace();
+  const previewRef = useRef<HTMLElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const lines = reveal?.path === file.path ? reveal.lines : null;
+
+  // Lines a chat reference points at (file-refs.ts): highlighted in the preview,
+  // selected in the editor. Switching modes shows them again in the new view.
+  useEffect(() => {
+    if (!lines) return;
+    if (previewRef.current) return highlightLines(previewRef.current, lines);
+    if (editorRef.current) selectLines(editorRef.current, lines);
+  }, [lines, mode]);
 
   const captureSelection = () => setSelection(window.getSelection()?.toString().trim() ?? "");
 
@@ -152,6 +166,7 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
   if (mode === "preview") {
     return (
       <article
+        ref={previewRef}
         data-testid="file-preview"
         onMouseUp={captureSelection}
         onKeyUp={captureSelection}
@@ -164,6 +179,7 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
 
   return (
     <textarea
+      ref={editorRef}
       data-testid="file-editor"
       aria-label={`Edit ${file.path}`}
       value={file.content}
@@ -183,6 +199,7 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
 /** Markdown with YAML front matter (as in SKILL.md) shown as a metadata card. */
 function Markdown({ text }: { text: string }) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  const frontMatter = match?.[0] ?? "";
   const meta = match?.[1]
     .split(/\r?\n/)
     .map((line) => /^([\w-]+):\s*(.*)$/.exec(line))
@@ -190,7 +207,11 @@ function Markdown({ text }: { text: string }) {
   return (
     <>
       {meta && meta.length > 0 && (
-        <dl className="mb-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-3 text-sm">
+        <dl
+          data-line={1}
+          data-line-end={frontMatter.trimEnd().split(/\r?\n/).length}
+          className="mb-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-3 text-sm"
+        >
           {meta.map(([, key, value]) => (
             <div key={key} className="contents">
               <dt className="font-[family-name:var(--font-code)] text-[var(--muted-foreground)]">{key}</dt>
@@ -199,19 +220,22 @@ function Markdown({ text }: { text: string }) {
           ))}
         </dl>
       )}
-      <Streamdown>{match ? text.slice(match[0].length) : text}</Streamdown>
+      {/* Static mode parses the whole text at once, so source positions are file
+          lines; blanking the front matter (not cutting it) keeps them that way. */}
+      <Streamdown mode="static" rehypePlugins={PREVIEW_REHYPE_PLUGINS}>
+        {frontMatter.replace(/[^\r\n]/g, "") + text.slice(frontMatter.length)}
+      </Streamdown>
     </>
   );
 }
 
 function CsvTable({ text }: { text: string }) {
-  const rows = parseCsv(text);
-  const [head, ...body] = rows;
+  const [head, ...body] = parseCsv(text);
   return (
     <table className="w-full border-collapse text-sm">
       <thead>
-        <tr>
-          {head?.map((cell, i) => (
+        <tr data-line={head?.lines.start} data-line-end={head?.lines.end}>
+          {head?.cells.map((cell, i) => (
             <th key={i} className="border-b-2 border-[var(--border)] px-3 py-2 text-left font-semibold">
               {cell}
             </th>
@@ -220,8 +244,8 @@ function CsvTable({ text }: { text: string }) {
       </thead>
       <tbody>
         {body.map((row, r) => (
-          <tr key={r}>
-            {row.map((cell, i) => (
+          <tr key={r} data-line={row.lines.start} data-line-end={row.lines.end}>
+            {row.cells.map((cell, i) => (
               <td key={i} className="whitespace-pre-line border-b border-[var(--border)] px-3 py-2">
                 {cell}
               </td>
@@ -231,6 +255,52 @@ function CsvTable({ text }: { text: string }) {
       </tbody>
     </table>
   );
+}
+
+/** Marks the preview blocks `lines` came from and centers the first; returns the undo. */
+function highlightLines(root: HTMLElement, lines: LineRange) {
+  const blocks = Array.from(root.querySelectorAll<HTMLElement>("[data-line]"));
+  const spans = blocks.map((el) => ({ start: Number(el.dataset.line), end: Number(el.dataset.lineEnd) }));
+  const hits = blocksForLines(spans, lines).map((i) => blocks[i]);
+  hits.forEach((el) => (el.dataset.revealed = ""));
+  hits[0]?.scrollIntoView({ block: "center" });
+  return () => hits.forEach((el) => delete el.dataset.revealed);
+}
+
+/** Selects `lines` in the editor and scrolls them a third of the way down. */
+function selectLines(textarea: HTMLTextAreaElement, lines: LineRange) {
+  const range = lineOffsets(textarea.value, lines);
+  if (!range) return;
+  textarea.focus({ preventScroll: true });
+  textarea.setSelectionRange(...range);
+  textarea.scrollTop = lineTop(textarea, range[0]) - textarea.clientHeight / 3;
+}
+
+const MIRRORED_STYLES = [
+  "fontFamily", "fontSize", "fontStyle", "fontWeight", "letterSpacing", "lineHeight",
+  "tabSize", "wordSpacing", "paddingTop", "paddingRight", "paddingLeft",
+] as const;
+
+/** How far below the top of the textarea's content the line holding `index` starts, wrapping included. */
+function lineTop(textarea: HTMLTextAreaElement, index: number) {
+  const style = getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  for (const prop of MIRRORED_STYLES) mirror.style[prop] = style[prop];
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    boxSizing: "border-box",
+    width: `${textarea.clientWidth}px`,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+  });
+  mirror.textContent = textarea.value.slice(0, index);
+  const marker = mirror.appendChild(document.createElement("span"));
+  marker.textContent = "\u200b";
+  document.body.append(mirror);
+  const top = marker.offsetTop;
+  mirror.remove();
+  return top;
 }
 
 function Centered({ children }: { children: ReactNode }) {
