@@ -38,6 +38,22 @@ comma-separated, to add more). The workspace works in one of two modes:
 The URL is the source of truth, so links open a run directly and back/forward move between
 runs. A link to a run that isn't there falls back to Traverse with a notice.
 
+### Actions
+
+In Focus mode the Files view ends with a foldable **Actions** block (like VS Code's Outline
+and Timeline sections), whose buttons act on the current run:
+
+| Action | Role | Does |
+| --- | --- | --- |
+| **New Chat** | viewer | starts an empty conversation, still about the same run |
+
+Actions are entries in one registry (`src/components/workspace/actions.tsx`), each with an
+id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
+and state for the current run, and a `run(ctx)` that acts only through the workbench
+contract and the file API. One runner serves the block and Claude: it refuses disabled,
+unauthorized or already-running actions, so a double click never runs one twice. Until
+login lands (#4) the single user has every role.
+
 ### Workbench contract
 
 Everything that moves panes goes through one typed API, `useWorkbench()`

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
@@ -221,6 +222,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           </div>
         )}
       </div>
+      {root && <ActionsBlock />}
       {view !== "chats" && view !== "runs" && (
         <button
           type="button"

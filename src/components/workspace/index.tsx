@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
+import { ActionsProvider } from "./actions";
 import { useWorkspaceAgent } from "./agent-bridge";
 import { ChatPane } from "./chat-pane";
 import { EditorPane } from "./editor-pane";
@@ -41,7 +42,9 @@ export { useWorkbench, type Workbench } from "./workbench";
 export function Workspace() {
   return (
     <WorkbenchProvider>
-      <WorkspaceLayout />
+      <ActionsProvider>
+        <WorkspaceLayout />
+      </ActionsProvider>
     </WorkbenchProvider>
   );
 }
