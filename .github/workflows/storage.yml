@@ -14,10 +14,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+        # Postgres with pgvector, as in docker-compose.yml, for search by meaning.
+        image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
         env:
           POSTGRES_USER: knowledge
           POSTGRES_PASSWORD: knowledge
@@ -32,6 +33,8 @@ jobs:
       S3_ENDPOINT: http://localhost:8333
       S3_ACCESS_KEY_ID: knowledge
       S3_SECRET_ACCESS_KEY: knowledge-secret
+      # Also check the real embedding model (embeddings.test.ts), cached below.
+      EMBEDDING_TEST: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +57,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: agent/package-lock.json
+
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/knowledge-chatroom/models
+          key: embedding-model-multilingual-e5-small-q8
 
       - name: Install agent dependencies
         working-directory: agent
