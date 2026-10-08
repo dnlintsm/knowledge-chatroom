@@ -4,7 +4,7 @@
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `GET /health` reports status. Runs on port 8000.
  * When DATABASE_URL is set it also serves the workspace file API under
- * `/files` (see src/storage/http.ts).
+ * `/files` and the knowledge tree under `/nodes` (see src/storage/http.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -17,9 +17,9 @@ import type { RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 
 import { adapter } from "./agent";
-import { currentFiles, startStorage, storageState } from "./storage";
+import { currentStorage, startStorage, storageState } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
-import { createFilesHandler } from "./storage/http";
+import { createStorageHandler } from "./storage/http";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
@@ -27,8 +27,8 @@ const HOST = process.env.AGENT_HOST || "0.0.0.0";
 // Storage is optional (DATABASE_URL) and starts in the background.
 const storageConfig = storageConfigFromEnv();
 startStorage(storageConfig);
-const handleFiles = createFilesHandler(
-  currentFiles,
+const handleStorage = createStorageHandler(
+  currentStorage,
   storageConfig?.maxUploadBytes ?? 0,
   storageState,
 );
@@ -43,8 +43,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === "/files" || pathname.startsWith("/files/")) {
-    await handleFiles(req, res, url);
+  if (/^\/(files|nodes)(\/|$)/.test(pathname)) {
+    await handleStorage(req, res, url);
     return;
   }
 

@@ -19,7 +19,7 @@ import { resolveModel } from "./model";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
 import { generateA2ui } from "./a2ui_dynamic_schema";
-import { currentFiles } from "./storage";
+import { currentStorage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
 
@@ -28,6 +28,9 @@ import { createFileTools } from "./storage/tools";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config();
+
+// With storage configured (DATABASE_URL), workspace files live on the server.
+const serverStorage = Boolean(storageConfigFromEnv());
 
 const SYSTEM_PROMPT = [
   "You are a polished, professional demo assistant. Keep responses to 1-2 sentences.",
@@ -45,6 +48,14 @@ const SYSTEM_PROMPT = [
   "  the user can click to open them beside the chat: [welcome.md](notes/welcome.md),",
   "  [welcome.md:12](notes/welcome.md#L12) or [welcome.md:12-18](notes/welcome.md#L12-L18).",
   "  Use the workspace path and the line numbers shown in the content you were given.",
+  ...(serverStorage
+    ? [
+        "- Knowledge tree: files live at the workspace root or in a node of the tree",
+        "  (levels like tech › module › loop › process). The context's currentNode is",
+        "  where the user is; pass its id as `node` to the file tools to work there,",
+        "  and read parent nodes' files for background. list_nodes shows the tree.",
+      ]
+    : []),
 ].join("\n");
 
 // The Claude Agent SDK exposes custom tools through an in-process MCP server
@@ -56,7 +67,7 @@ const SYSTEM_PROMPT = [
 // With storage configured (DATABASE_URL), workspace files live on the server and
 // the file tools run here; the browser then hides its own copies of them.
 const SERVER_NAME = "copilotkit";
-const fileTools = storageConfigFromEnv() ? createFileTools(currentFiles) : [];
+const fileTools = serverStorage ? createFileTools(currentStorage) : [];
 const backendTools = [queryData, searchFlights, generateA2ui, ...fileTools];
 
 export const adapter = new ClaudeAgentAdapter({

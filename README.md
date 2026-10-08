@@ -136,8 +136,8 @@ docker compose up -d   # Postgres + SeaweedFS (self-hosted S3)
 npm run dev
 ```
 
-- **Postgres** holds the file tree, every version of every file, and who wrote it
-  (`agent/src/storage/migrations`). Migrations run when the agent starts.
+- **Postgres** (15 or newer) holds the file tree, every version of every file, and who
+  wrote it (`agent/src/storage/migrations`). Migrations run when the agent starts.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
@@ -147,12 +147,21 @@ npm run dev
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). There is no login yet, so keep the
   agent port private.
-- **Claude** gets `list_files`, `read_file` and `write_file` tools on the agent server
-  (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
-  Its writes are versions authored by the agent.
+- **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
+  are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
+  Postgres `ltree`, and the database checks that each node sits exactly one level below its
+  parent. Each node has its own files. `GET|POST /api/nodes` lists and adds nodes,
+  `GET|PATCH|DELETE /api/nodes/<id>` reads (with its ancestors), renames and deletes one
+  (with everything below it), and every `/api/files` route takes `?node=<id>`.
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
+  tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
+  no browser tab is open. The file tools take a `node`; the chat context says which node the
+  user is in. Its writes are versions authored by the agent.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. The first visit to an empty server uploads this browser's files.
+  The Knowledge view in the left rail shows the tree; clicking a node moves the workspace
+  there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.
 - **Tests**: `cd agent && npm test` with `TEST_DATABASE_URL` and the `S3_*` vars set

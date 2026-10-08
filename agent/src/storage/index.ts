@@ -1,15 +1,22 @@
 import { S3BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { connect, migrate, type Sql } from "./db";
+import { EventHub } from "./events";
 import { FileService } from "./files";
+import { NodeService } from "./nodes";
 
 export { FileService } from "./files";
 export type { FileInfo, FileVersion } from "./files";
+export { NodeService } from "./nodes";
+export type { KnowledgeNode, NodeType } from "./nodes";
 
 export interface Storage {
   config: StorageConfig;
   sql: Sql;
+  /** Files at the workspace root; .inNode(id) for a knowledge node's files. */
   files: FileService;
+  nodes: NodeService;
+  events: EventHub;
   close(): Promise<void>;
 }
 
@@ -30,8 +37,18 @@ export async function initStorage(
     const blobs = new S3BlobStore(config.s3);
     await blobs.ensureBucket();
 
-    const files = await FileService.forWorkspace(sql, blobs);
-    return { config, sql, files, close: () => sql.end() };
+    // Single workspace until login and memberships arrive (issue #4, step 4).
+    const [ws] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
+    if (!ws) throw new Error("Workspace default not found");
+    const events = new EventHub(sql, ws.id);
+    return {
+      config,
+      sql,
+      files: new FileService(sql, blobs, events, ws.id),
+      nodes: new NodeService(sql, events, ws.id),
+      events,
+      close: () => sql.end(),
+    };
   } catch (err) {
     await sql.end();
     throw err;
@@ -49,8 +66,8 @@ export function storageState(): StorageState {
 }
 
 /** The running storage, or null before it is ready / when it is off or failed. */
-export function currentFiles(): FileService | null {
-  return current?.files ?? null;
+export function currentStorage(): Storage | null {
+  return current;
 }
 
 /**
