@@ -133,7 +133,10 @@ export class NodeService {
             SELECT t.depth, t.name AS type
             FROM nodes n JOIN node_types t ON t.id = n.type_id
             WHERE n.id = ${parentId} AND n.workspace_id = ${this.workspaceId}
-              AND n.deleted_at IS NULL`;
+              AND n.deleted_at IS NULL
+            FOR SHARE OF n`;
+          // Held until commit, so a delete of the parent waits and then
+          // removes this child too, instead of leaving it orphaned.
           if (!parent) throw new NodeNotFoundError("Parent node not found");
         }
         const [type] = await tx<{ id: string }[]>`
