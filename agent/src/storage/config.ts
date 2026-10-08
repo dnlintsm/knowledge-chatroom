@@ -16,6 +16,12 @@ export interface StorageConfig {
     secretAccessKey?: string;
     /** Self-hosted stores usually need path-style URLs (endpoint/bucket/key). */
     forcePathStyle: boolean;
+    /**
+     * The store's address as browsers reach it. When set, downloads of binary
+     * files go straight to the store through short-lived signed links instead
+     * of streaming through the app.
+     */
+    publicUrl?: string;
   };
   maxUploadBytes: number;
   /**
@@ -38,6 +44,7 @@ export function storageConfigFromEnv(
       accessKeyId: env.S3_ACCESS_KEY_ID || undefined,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY || undefined,
       forcePathStyle: (env.S3_FORCE_PATH_STYLE ?? "true") !== "false",
+      publicUrl: env.S3_PUBLIC_URL || undefined,
     },
     maxUploadBytes: Number.parseInt(
       env.MAX_UPLOAD_BYTES || String(50 * 1024 * 1024),

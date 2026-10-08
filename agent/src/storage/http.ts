@@ -5,7 +5,7 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { NodeError, NodeNotFoundError } from "./nodes";
-import { InvalidPathError } from "./paths";
+import { InvalidPathError, isTextFile } from "./paths";
 import type { Session } from "./session";
 
 /**
@@ -17,7 +17,9 @@ import type { Session } from "./session";
  *                                   `data: {…}` per committed change:
  *                                   {"op":"write"|"delete","node","path",…} for
  *                                   files, {"op":"node","change","id"} for nodes
- *   GET    /files/<path>            file bytes, Content-Type = file mime
+ *   GET    /files/<path>            file bytes, Content-Type = file mime (binary
+ *                                   files: a 302 to a signed store link
+ *                                   when S3_PUBLIC_URL is set)
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
  *                                   Content-Type = mime (optional)
@@ -319,7 +321,22 @@ export function createStorageHandler(
           else json(res, 200, { versions });
           return;
         }
-        const file = await service.read(path);
+        // Binary files come straight from the object store when it is reachable
+        // from browsers: a short-lived link, made after the access check above.
+        // Text stays here, since the UI fetches it from this origin.
+        const info = await service.stat(path);
+        if (info && !isTextFile(info.path, info.mime)) {
+          const link = await current.blobs.downloadUrl(info.sha256, {
+            mime: info.mime,
+            filename: info.path.split("/").pop() ?? info.path,
+          });
+          if (link) {
+            res.writeHead(302, { Location: link, "Cache-Control": "no-store" });
+            res.end();
+            return;
+          }
+        }
+        const file = info && (await service.read(path));
         if (!file) {
           json(res, 404, { error: "Not found" });
           return;

@@ -49,6 +49,7 @@ jobs:
       S3_ENDPOINT: http://localhost:8333
       S3_ACCESS_KEY_ID: knowledge
       S3_SECRET_ACCESS_KEY: knowledge-secret
+      S3_PUBLIC_URL: http://localhost:8333
       NEXT_TELEMETRY_DISABLED: 1
       COPILOTKIT_TELEMETRY_DISABLED: true
       # Optional: with this secret the preview talks to real Claude; without

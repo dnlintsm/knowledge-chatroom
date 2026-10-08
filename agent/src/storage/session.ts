@@ -1,5 +1,5 @@
 import { AccessService, atLeast, ForbiddenError, type Principal, type Role } from "./access";
-import type { Tx } from "./db";
+import { asUser, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
@@ -9,6 +9,10 @@ import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType 
  * workspace. The HTTP API and Claude's tools both go through here, so access
  * is checked and audited in one place. A node the principal can't see at all
  * is reported as not found, so its existence doesn't leak.
+ *
+ * With row-level security available, file and node queries also run as the
+ * restricted database role for this principal (db.ts asUser), so Postgres
+ * enforces the same rules if a check here is ever missed.
  */
 
 export interface VisibleNode extends KnowledgeNode {
@@ -27,7 +31,14 @@ interface Parts {
   files: FileService;
   nodes: NodeService;
   access: AccessService;
+  sql: Sql;
+  /** Whether queries can run as the restricted role (db.ts prepareRowSecurity). */
+  rowSecurity: boolean;
 }
+
+type Scoped = <T>(fn: (db: Sql | null) => Promise<T>) => Promise<T>;
+const on = <S extends { withSql(sql: Sql): S }>(service: S, db: Sql | null) =>
+  db ? service.withSql(db) : service;
 
 export class Session {
   constructor(
@@ -49,6 +60,12 @@ export class Session {
     return role;
   }
 
+  /** Runs file and node queries for this principal (db = null without row security). */
+  private readonly scoped: Scoped = (fn) =>
+    this.parts.rowSecurity
+      ? asUser(this.parts.sql, this.principal.userId, (db) => fn(db))
+      : fn(null);
+
   private audit(action: string, target: Record<string, unknown>) {
     return (tx: Tx) => this.parts.access.audit(tx, this.principal, action, target);
   }
@@ -58,7 +75,7 @@ export class Session {
   async tree(): Promise<Tree> {
     const [types, all, roles, rootRole] = await Promise.all([
       this.parts.nodes.types(),
-      this.parts.nodes.list(),
+      this.scoped((db) => on(this.parts.nodes, db).list()),
       this.parts.access.nodeRoles(this.principal.userId),
       this.role(null),
     ]);
@@ -82,26 +99,32 @@ export class Session {
 
   async lineage(id: string): Promise<KnowledgeNode[]> {
     await this.need(id, "viewer");
-    const lineage = await this.parts.nodes.lineage(id);
+    const lineage = await this.scoped((db) => on(this.parts.nodes, db).lineage(id));
     if (!lineage) throw new NodeNotFoundError("Node not found");
     return lineage;
   }
 
   async createNode(parentId: string | null, name: string) {
     await this.need(parentId, "editor");
-    return this.parts.nodes.create(parentId, name, (tx, id) =>
-      this.audit("node.create", { node: id, parent: parentId, name })(tx),
+    return this.scoped((db) =>
+      on(this.parts.nodes, db).create(parentId, name, (tx, id) =>
+        this.audit("node.create", { node: id, parent: parentId, name })(tx),
+      ),
     );
   }
 
   async renameNode(id: string, name: string) {
     await this.need(id, "editor");
-    return this.parts.nodes.rename(id, name, this.audit("node.rename", { node: id, name }));
+    return this.scoped((db) =>
+      on(this.parts.nodes, db).rename(id, name, this.audit("node.rename", { node: id, name })),
+    );
   }
 
   async deleteNode(id: string) {
     await this.need(id, "owner");
-    return this.parts.nodes.remove(id, this.audit("node.delete", { node: id }));
+    return this.scoped((db) =>
+      on(this.parts.nodes, db).remove(id, this.audit("node.delete", { node: id })),
+    );
   }
 
   // Files
@@ -111,8 +134,12 @@ export class Session {
     const role = await this.need(nodeId, "viewer");
     const service = await this.parts.files.inNode(nodeId);
     if (!service) throw new NodeNotFoundError("Node not found");
-    return new FilesSession(service, role, this.principal, (action, target) =>
-      this.audit(action, { node: nodeId, ...target }),
+    return new FilesSession(
+      service,
+      role,
+      this.principal,
+      (action, target) => this.audit(action, { node: nodeId, ...target }),
+      (fn) => this.scoped((db) => fn(on(service, db))),
     );
   }
 
@@ -217,6 +244,8 @@ export class FilesSession {
       action: string,
       target: Record<string, unknown>,
     ) => (tx: Tx) => Promise<unknown>,
+    /** Runs `fn` with the service on this principal's connection. */
+    private readonly run: <T>(fn: (service: FileService) => Promise<T>) => Promise<T>,
   ) {}
 
   get nodeId() {
@@ -228,33 +257,35 @@ export class FilesSession {
   }
 
   list(): Promise<FileInfo[]> {
-    return this.service.list();
+    return this.run((s) => s.list());
   }
 
   stat(path: string) {
-    return this.service.stat(path);
+    return this.run((s) => s.stat(path));
   }
 
   read(path: string) {
-    return this.service.read(path);
+    return this.run((s) => s.read(path));
   }
 
   history(path: string): Promise<FileVersion[] | null> {
-    return this.service.history(path);
+    return this.run((s) => s.history(path));
   }
 
   async write(path: string, bytes: Uint8Array, opts: { mime?: string } = {}) {
     this.needEditor();
-    return this.service.write(path, bytes, {
-      mime: opts.mime,
-      author: this.principal.actor,
-      authorId: this.principal.userId,
-      inTx: this.audit("file.write", { path, size: bytes.byteLength }),
-    });
+    return this.run((s) =>
+      s.write(path, bytes, {
+        mime: opts.mime,
+        author: this.principal.actor,
+        authorId: this.principal.userId,
+        inTx: this.audit("file.write", { path, size: bytes.byteLength }),
+      }),
+    );
   }
 
   async remove(path: string) {
     this.needEditor();
-    return this.service.remove(path, this.audit("file.delete", { path }));
+    return this.run((s) => s.remove(path, this.audit("file.delete", { path })));
   }
 }

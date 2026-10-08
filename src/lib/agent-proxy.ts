@@ -22,6 +22,8 @@ const FORWARDED_RESPONSE_HEADERS = [
   "last-modified",
   "x-file-author",
   "cache-control",
+  // Binary downloads may redirect to a signed object-store link.
+  "location",
 ];
 
 /** A route handler forwarding /api/<prefix>/* to AGENT_URL/<prefix>/*. */
@@ -56,6 +58,8 @@ export function agentProxy(prefix: string) {
           ? undefined
           : await req.arrayBuffer(),
         cache: "no-store",
+        // Hand redirects to the browser instead of fetching the target here.
+        redirect: "manual",
         // Closing the browser's request (e.g. an EventSource) closes ours.
         signal: req.signal,
       });

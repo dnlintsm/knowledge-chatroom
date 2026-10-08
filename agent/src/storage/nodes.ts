@@ -72,6 +72,11 @@ export class NodeService {
     private readonly workspaceId: string,
   ) {}
 
+  /** The same tree through another connection or transaction (see db.ts asUser). */
+  withSql(sql: Sql): NodeService {
+    return new NodeService(sql, this.events, this.workspaceId);
+  }
+
   async types(): Promise<NodeType[]> {
     return this.sql<NodeType[]>`
       SELECT name, depth FROM node_types

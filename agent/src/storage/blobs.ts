@@ -8,6 +8,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type { StorageConfig } from "./config";
 
@@ -18,7 +19,15 @@ import type { StorageConfig } from "./config";
 export interface BlobStore {
   put(sha256: string, bytes: Uint8Array, mime: string): Promise<void>;
   get(sha256: string): Promise<Uint8Array>;
+  /**
+   * A short-lived link browsers can download the blob from, or null when the
+   * store isn't reachable from browsers (bytes then go through the app).
+   */
+  downloadUrl(sha256: string, opts: { mime: string; filename: string }): Promise<string | null>;
 }
+
+/** How long a download link works. Access is checked when the link is made. */
+export const DOWNLOAD_LINK_SECONDS = 300;
 
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -36,22 +45,27 @@ function isNotFound(err: unknown): boolean {
 
 export class S3BlobStore implements BlobStore {
   private readonly client: S3Client;
+  /** Signs links for the address browsers use (S3_PUBLIC_URL). */
+  private readonly publicClient: S3Client | null;
   private readonly bucket: string;
 
   constructor(config: StorageConfig["s3"]) {
     this.bucket = config.bucket;
-    this.client = new S3Client({
-      endpoint: config.endpoint,
-      region: config.region,
-      forcePathStyle: config.forcePathStyle,
-      credentials:
-        config.accessKeyId && config.secretAccessKey
-          ? {
-              accessKeyId: config.accessKeyId,
-              secretAccessKey: config.secretAccessKey,
-            }
-          : undefined,
-    });
+    const client = (endpoint: string | undefined) =>
+      new S3Client({
+        endpoint,
+        region: config.region,
+        forcePathStyle: config.forcePathStyle,
+        credentials:
+          config.accessKeyId && config.secretAccessKey
+            ? {
+                accessKeyId: config.accessKeyId,
+                secretAccessKey: config.secretAccessKey,
+              }
+            : undefined,
+      });
+    this.client = client(config.endpoint);
+    this.publicClient = config.publicUrl ? client(config.publicUrl) : null;
   }
 
   private key(sha256: string) {
@@ -93,5 +107,19 @@ export class S3BlobStore implements BlobStore {
     );
     if (!res.Body) throw new Error(`Blob ${sha256} has no body`);
     return res.Body.transformToByteArray();
+  }
+
+  async downloadUrl(sha256: string, opts: { mime: string; filename: string }): Promise<string | null> {
+    if (!this.publicClient) return null;
+    return getSignedUrl(
+      this.publicClient,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.key(sha256),
+        ResponseContentType: opts.mime,
+        ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(opts.filename)}`,
+      }),
+      { expiresIn: DOWNLOAD_LINK_SECONDS },
+    );
   }
 }
