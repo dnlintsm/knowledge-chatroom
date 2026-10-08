@@ -14,6 +14,7 @@ import {
   Network,
   Package,
   Route,
+  Search,
   Sparkles,
   Trash2,
   Upload,
@@ -25,6 +26,7 @@ import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
 import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
+import { SearchPanel } from "./search-panel";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
 import { fileName, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
@@ -33,6 +35,7 @@ export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
+  { id: "search", label: "Search", icon: Search },
   { id: "runs", label: "Traverse", icon: Route },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
@@ -172,7 +175,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats" || view === "runs" || !canEdit) return;
+        if (view === "chats" || view === "search" || view === "runs" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -199,6 +202,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           <FileTree files={root ? files.filter((f) => isInRun(f.path, root)) : files} root={root} />
         )}
         {view === "runs" && <RunList />}
+        {view === "search" && <SearchPanel />}
         {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
           <FlatList
