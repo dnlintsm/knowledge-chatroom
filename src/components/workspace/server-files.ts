@@ -252,6 +252,42 @@ export const updateServerExperiment = (id: string, change: ExperimentChange) =>
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
+/** A file whose text or path matched a search (agent/src/storage/search.ts). */
+export interface SearchHit {
+  path: string;
+  kind: FileKind;
+  mime: string;
+  node: NodeId;
+  experiment: string | null;
+  /** Node names from the top down to the file's node (an experiment's node for its files). */
+  where: string[];
+  experimentTitle: string | null;
+  /** The passage that matched; "" when only the path did. */
+  snippet: string;
+  /** "meaning": no words in common, but a passage close in meaning. */
+  match: "words" | "meaning";
+  updatedAt: string;
+}
+
+/**
+ * Files you can read that match `query`, best first; those near `near` (where
+ * you are) come first, and `scope` keeps to one node and what is below it.
+ */
+export async function searchFiles(
+  query: string,
+  opts: { near?: PlaceId; scope?: string | null; signal?: AbortSignal } = {},
+): Promise<SearchHit[]> {
+  const params = new URLSearchParams({ q: query });
+  const experiment = experimentOf(opts.near ?? null);
+  if (experiment) params.set("experiment", experiment);
+  else if (opts.near) params.set("near", opts.near);
+  if (opts.scope) params.set("scope", opts.scope);
+  const res = await apiFetch(`/api/search?${params}`, { cache: "no-store", signal: opts.signal });
+  const data = (await res.json().catch(() => ({}))) as { results?: SearchHit[]; error?: string };
+  if (!res.ok || !data.results) throw new Error(data.error ?? `Search failed (${res.status})`);
+  return data.results;
+}
+
 /** Whether login is on, and who is signed in (null without login). */
 export interface Account {
   login: boolean;

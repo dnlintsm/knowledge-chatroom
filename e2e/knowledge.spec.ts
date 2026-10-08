@@ -162,3 +162,44 @@ test("experiments", async ({ page, request }) => {
   // Still in edit mode from the experiment's copy of this path.
   await expect(page.getByTestId("file-editor")).toHaveValue(/RF power: 300 W/);
 });
+
+test("search", async ({ page, request }) => {
+  // Etch › Module 3 › Endpoint › Over etch, with a note in the module and one in the process.
+  const add = async (parentId: string | null, name: string) =>
+    ((await (await request.post("/api/nodes", { data: { parentId, name } })).json()) as { id: string }).id;
+  const tech = await add(null, TECH);
+  const mod = await add(tech, MODULE);
+  const proc = await add(await add(mod, "Endpoint"), "Over etch");
+  const put = (path: string, node: string, body: string) =>
+    request.put(`/api/files/${path}?node=${node}`, { data: body, headers: { "Content-Type": "text/markdown" } });
+  await put("notes/endpoint.md", mod, "# Endpoint detection\n\nWatches the 387 nm CN emission line.");
+  await put(
+    "notes/chamber-log.md",
+    proc,
+    "# Chamber log\n\nThe 387 nm emission dropped after the wet clean.\n\nThe endpoint trace looked normal otherwise.",
+  );
+
+  await page.goto("/");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search files" }).fill("387 nm");
+  const results = page.getByTestId("search-result");
+  await expect(results).toHaveCount(2);
+  // From the workspace root, the module's note is nearer.
+  await expect(results.first()).toContainText("endpoint.md");
+  await expect(results.last()).toContainText(`${TECH} › ${MODULE} › Endpoint › Over etch`);
+  await expect(results.last().locator("mark").first()).toHaveText("387");
+  await page.mouse.move(900, 700);
+  await shot(page, "20-search");
+
+  // A result opens where it lives.
+  await results.filter({ hasText: "chamber-log.md" }).click();
+  const location = page.getByRole("navigation", { name: "Location" });
+  await expect(location).toContainText("Over etch");
+  await expect(page.getByRole("tab", { name: /chamber-log\.md/ })).toBeVisible();
+
+  // Searching only here and below leaves the module's note out.
+  await page.getByRole("checkbox", { name: /Only in Over etch/ }).check();
+  await expect(results).toHaveCount(1);
+  await expect(results).toContainText("chamber-log.md");
+});

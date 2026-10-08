@@ -4,6 +4,7 @@ import type { WorkspaceEvent } from "./events";
 import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
+import type { SearchHit, SearchOptions, SearchService } from "./search";
 
 /**
  * Everything one principal (a user, or Claude acting for one) may do in the
@@ -33,6 +34,7 @@ interface Parts {
   nodes: NodeService;
   experiments: ExperimentService;
   access: AccessService;
+  search: SearchService;
   sql: Sql;
   /** Whether queries can run as the restricted role (db.ts prepareRowSecurity). */
   rowSecurity: boolean;
@@ -213,6 +215,11 @@ export class Session {
       (action, target) => this.audit(action, { ...place, ...target }),
       (fn) => this.scoped((db) => fn(on(service, db))),
     );
+  }
+
+  /** Files this principal may read that match, best first (see search.ts). */
+  search(opts: SearchOptions): Promise<SearchHit[]> {
+    return this.scoped((db) => on(this.parts.search, db).search(this.principal.userId, opts));
   }
 
   /** Whether this principal may hear about a change. */
