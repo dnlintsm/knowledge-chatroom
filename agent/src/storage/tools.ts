@@ -14,6 +14,7 @@ import type { Storage } from "./index";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile } from "./paths";
+import { SearchError } from "./search";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
 const MAX_READ_CHARS = 200_000;
@@ -102,7 +103,8 @@ export function createFileTools(
         err instanceof NodeError ||
         err instanceof ForbiddenError ||
         err instanceof AccessError ||
-        err instanceof ExperimentError
+        err instanceof ExperimentError ||
+        err instanceof SearchError
       ) {
         return error(err.message);
       }
@@ -201,6 +203,56 @@ export function createFileTools(
           return text(
             `${info.path}${truncated ? ` (first ${MAX_READ_CHARS} characters)` : ""}\n` +
               numberLines(content.slice(0, MAX_READ_CHARS)),
+          );
+        }),
+    ),
+    tool(
+      "search_files",
+      "Search the text and paths of every workspace file the user can read: the root, all " +
+        "knowledge nodes and the experiments they can see. Matches whole words (and their " +
+        "forms: etch finds etching) and also exact text, so part numbers and phrases work. " +
+        "Each result has the place to pass to read_file (node or experiment) and the passage " +
+        "that matched. Use it to find what the workspace already knows before answering or " +
+        "writing.",
+      {
+        query: z
+          .string()
+          .describe('Words to find, e.g. etch rate drift; "quotes" for a phrase, -word to exclude.'),
+        scope: z
+          .string()
+          .optional()
+          .describe("Knowledge node id: search only it, the nodes below it and their experiments."),
+        node: z
+          .string()
+          .optional()
+          .describe("Where the user is (the context's currentNode), so nearby files rank first."),
+        experiment: experimentParam.describe(
+          "The context's currentExperiment, if any, so its node's neighborhood ranks first.",
+        ),
+        limit: z.number().int().min(1).max(50).optional().describe("Most results (default 20)."),
+      },
+      ({ query, scope, node, experiment, limit }) =>
+        run(async (session) => {
+          const hits = await session.search({
+            query,
+            scope: scope || null,
+            near: node || null,
+            nearExperiment: experiment || null,
+            limit,
+          });
+          if (!hits.length) return text(`No files match ${JSON.stringify(query)}.`);
+          return text(
+            hits.map((h) => ({
+              path: h.path,
+              node: h.node,
+              experiment: h.experiment,
+              where: [
+                ...(h.where.length ? h.where : ["(workspace root)"]),
+                ...(h.experimentTitle ? [`experiment: ${h.experimentTitle}`] : []),
+              ].join(" › "),
+              snippet: h.snippet || "(matched by path)",
+              updatedAt: h.updatedAt,
+            })),
           );
         }),
     ),

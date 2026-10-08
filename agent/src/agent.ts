@@ -61,6 +61,9 @@ const SYSTEM_PROMPT = [
         "  `experiment` to the file tools and never write to its node. Keep its",
         "  hypothesis, params and results up to date with update_experiment as the work",
         "  shows them; list_experiments compares experiments on a node.",
+        "- Search: search_files finds files by their text or path across every place the",
+        "  user can read. Search before saying the workspace has nothing on a topic, and",
+        "  pass the user's place (node / experiment) so nearby results come first.",
       ]
     : []),
 ].join("\n");
