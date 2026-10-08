@@ -11,10 +11,6 @@ const nextConfig: NextConfig = {
       ? "true"
       : "false",
   },
-  typescript: {
-    // Docker route override uses HttpAgent which has a type mismatch with CopilotRuntime
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
