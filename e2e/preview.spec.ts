@@ -126,7 +126,7 @@ const citesFiles = "Which book should I read next?";
 const fileRef = (page: Page, text: string) => page.getByTestId("file-ref").filter({ hasText: text });
 
 test("file references in answers open the cited lines", async ({ page }) => {
-  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned answer.");
+  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await openHome(page);
   await send(page, citesFiles);
   await fileRef(page, "The Pragmatic Programmer").click(reply);
@@ -152,7 +152,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
 });
 
 test("file references on a phone show the editor", async ({ page }) => {
-  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned answer.");
+  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "Files" }).last().click();

@@ -1,14 +1,9 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
 /**
- * Login and sharing. Runs only with AUTH_SECRET and server storage set
- * (playwright.config.ts then starts e2e/mock-oidc.mjs as the login provider):
- *
- *   AUTH_SECRET=$(openssl rand -hex 32) npx playwright test
- *
- * Needs a database nobody has signed in to yet, since the first person to
- * sign in becomes the workspace owner. Screenshots continue the numbering of
- * knowledge.spec.ts.
+ * Login and sharing: npm run test:e2e:login.
+ * The config supplies the test OIDC provider and public signing key.
+ * Use a fresh disposable database: the first sign-in becomes its owner.
  */
 const SCREENSHOT_DIR = "preview/screenshots";
 
@@ -16,11 +11,6 @@ async function shot(page: Page, name: string) {
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png` });
 }
-
-test.skip(
-  !process.env.AUTH_SECRET || !process.env.DATABASE_URL,
-  "Needs login (AUTH_SECRET) and server storage (DATABASE_URL).",
-);
 
 const TECH = "Lithography";
 
