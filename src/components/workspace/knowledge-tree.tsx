@@ -1,21 +1,27 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, House, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FlaskConical, House, Pencil, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { KnowledgeNode, NodeId, Role } from "./server-files";
+import { StatusBadge } from "./experiment-panel";
+import type { Experiment, KnowledgeNode, NodeId, Role } from "./server-files";
 import { FileTree } from "./sidebar";
 import { useWorkspace } from "./store";
 
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const atLeast = (role: Role | null, min: Role) => role !== null && RANK[role] >= RANK[min];
 
-type Editing = { mode: "add"; parentId: NodeId } | { mode: "rename"; id: string } | null;
+type Editing =
+  | { mode: "add"; parentId: NodeId }
+  | { mode: "rename"; id: string }
+  | { mode: "experiment"; nodeId: string }
+  | null;
 
 /**
  * The knowledge tree (tech › module › loop › process, or whatever levels the
  * deployment set up). Clicking a node moves the workspace there; that place's
- * files show under it and in the other views.
+ * files show under it and in the other views. Experiments are listed under
+ * their node with their status; anyone who can view a node can start one.
  */
 export function KnowledgeTree() {
   const ws = useWorkspace();
@@ -28,6 +34,11 @@ export function KnowledgeTree() {
     for (const n of ws.nodes) map.set(n.parentId, [...(map.get(n.parentId) ?? []), n]);
     return map;
   }, [ws.nodes]);
+  const experimentsOn = useMemo(() => {
+    const map = new Map<string, Experiment[]>();
+    for (const e of ws.experiments) map.set(e.nodeId, [...(map.get(e.nodeId) ?? []), e]);
+    return map;
+  }, [ws.experiments]);
   const typeAt = (depth: number) => ws.nodeTypes.find((t) => t.depth === depth)?.name;
 
   if (ws.storageMode !== "server") {
@@ -72,10 +83,58 @@ export function KnowledgeTree() {
 
   const here = (depth: number) => <FileTree files={ws.files} depth={depth} />;
 
+  const experimentRows = (nodeId: string, depth: number) => (
+    <>
+      {(experimentsOn.get(nodeId) ?? []).map((e) => {
+        const current = ws.experiment?.id === e.id;
+        const go = () => {
+          setError(null);
+          void ws.enterExperiment(e.id);
+        };
+        return (
+          <div key={e.id} role="group">
+            <div
+              role="treeitem"
+              aria-selected={current}
+              tabIndex={0}
+              data-testid="experiment-node"
+              title={e.mine ? undefined : `By ${e.authorName ?? "someone else"}`}
+              onClick={go}
+              onKeyDown={(ev) => ev.key === "Enter" && go()}
+              style={{ paddingLeft: 4 + depth * 12 }}
+              className={cn(
+                "flex h-7 cursor-pointer items-center gap-1 pr-2",
+                current
+                  ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                  : "hover:bg-[var(--secondary)]",
+              )}
+            >
+              <span className="flex size-4 items-center justify-center text-[var(--muted-foreground)]">
+                <FlaskConical className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{e.title}</span>
+              <StatusBadge status={e.status} />
+            </div>
+            {current && here(depth + 1)}
+          </div>
+        );
+      })}
+      {editing?.mode === "experiment" && editing.nodeId === nodeId && (
+        <NameInput
+          depth={depth}
+          placeholder="New experiment title"
+          onCancel={() => setEditing(null)}
+          onSubmit={(title) => run(() => ws.createExperiment(nodeId, title))}
+        />
+      )}
+    </>
+  );
+
   const render = (parentId: string | null, depth: number): ReactNode =>
     (children.get(parentId) ?? []).map((n) => {
       const kids = children.get(n.id) ?? [];
-      const current = ws.node === n.id;
+      const exps = experimentsOn.get(n.id) ?? [];
+      const current = ws.node === n.id && !ws.experiment;
       const isOpen = !collapsed.has(n.id);
       // Nodes you can't open are shown only as the path to ones you can.
       const open = n.role !== null;
@@ -95,7 +154,7 @@ export function KnowledgeTree() {
             <div
               role="treeitem"
               aria-selected={current}
-              aria-expanded={kids.length || current ? isOpen : undefined}
+              aria-expanded={kids.length || exps.length || current ? isOpen : undefined}
               tabIndex={0}
               data-testid="knowledge-node"
               title={open ? undefined : "You can't open this; it leads to something shared with you"}
@@ -118,7 +177,7 @@ export function KnowledgeTree() {
                 }}
                 className={cn(
                   "flex size-4 items-center justify-center text-[var(--muted-foreground)] cursor-pointer",
-                  !kids.length && !current && "invisible",
+                  !kids.length && !exps.length && !current && "invisible",
                 )}
               >
                 <Chevron className="size-4" />
@@ -145,6 +204,21 @@ export function KnowledgeTree() {
                     <Plus className="size-3.5" />
                   </RowAction>
                 )}
+                {open && (
+                  <RowAction
+                    label={`New experiment on ${n.name}`}
+                    onClick={() => {
+                      setCollapsed((s) => {
+                        const next = new Set(s);
+                        next.delete(n.id);
+                        return next;
+                      });
+                      setEditing({ mode: "experiment", nodeId: n.id });
+                    }}
+                  >
+                    <FlaskConical className="size-3.5" />
+                  </RowAction>
+                )}
                 {atLeast(n.role, "editor") && (
                   <RowAction label={`Rename ${n.name}`} onClick={() => setEditing({ mode: "rename", id: n.id })}>
                     <Pencil className="size-3.5" />
@@ -169,6 +243,7 @@ export function KnowledgeTree() {
           {isOpen && (
             <>
               {current && here(depth + 1)}
+              {experimentRows(n.id, depth + 1)}
               {render(n.id, depth + 1)}
               {addInput(n.id, depth + 1)}
             </>
