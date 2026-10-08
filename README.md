@@ -189,6 +189,18 @@ npm run dev
   parent. Each node has its own files. `GET|POST /api/nodes` lists and adds nodes,
   `GET|PATCH|DELETE /api/nodes/<id>` reads (with its ancestors), renames and deletes one
   (with everything below it), and every `/api/files` route takes `?node=<id>`.
+- **Experiments**: anyone who can view a node (usually a process) can fork it into an
+  experiment. The experiment gets its own copy of the node's file list, pointing at the same
+  stored bytes, and from then on every change, by the user or by Claude, stays in the
+  experiment. It records a hypothesis, parameters and results as JSON, so the experiments on
+  one node compare side by side. A draft is seen only by its author; shared and archived ones
+  by everyone who can view the node; only the author changes it, and an archived one is read
+  only until restored. `GET|POST /api/experiments` lists (optionally `?node=<id>`) and
+  forks, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes one, and every
+  `/api/files` route takes `?experiment=<id>`. In the Knowledge view, experiments sit under
+  their node with their status, and the Experiment tab holds the details and a comparison
+  table. Moving an experiment's results into the node comes with proposed edits (step 7 of
+  issue #4).
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
@@ -210,7 +222,8 @@ npm run dev
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
-  (`agent/src/storage/migrations/004_row_security.sql`) that apply the same grants. If a
+  (`agent/src/storage/migrations/004_row_security.sql`, and `005_experiments.sql` for
+  experiments) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
   otherwise the agent logs that row-level security is off, and an admin can enable it with
@@ -221,10 +234,12 @@ npm run dev
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
-- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file` and `write_file`
-  tools on the agent server (`agent/src/storage/tools.ts`), so it works with files even when
-  no browser tab is open. The file tools take a `node`; the chat context says which node the
-  user is in. Its writes are versions authored by the agent.
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `write_file`,
+  `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
+  (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
+  The file tools take a `node` or an `experiment`; the chat context says where the user is,
+  and inside an experiment Claude writes only there. Its writes are versions authored by the
+  agent.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this

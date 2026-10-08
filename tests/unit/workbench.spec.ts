@@ -10,7 +10,7 @@ import {
   withoutChat,
   type Layout,
   type LayoutCommand,
-} from "../src/components/workspace/layout";
+} from "../../src/components/workspace/layout";
 
 /**
  * The workbench contract's layout rules (src/components/workspace/layout.ts)
@@ -88,7 +88,7 @@ test("restores only well-formed saved values", () => {
 });
 
 test("only the workbench changes pane layout", () => {
-  const dir = path.join(__dirname, "../src");
+  const dir = path.join(__dirname, "../../src");
   const sources = readdirSync(dir, { recursive: true, encoding: "utf8" })
     .filter((f) => /\.tsx?$/.test(f));
   const owners = sources

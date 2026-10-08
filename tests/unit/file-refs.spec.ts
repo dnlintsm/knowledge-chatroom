@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { parseCsv } from "../src/components/workspace/csv";
+import { parseCsv } from "../../src/components/workspace/csv";
 import {
   blocksForLines,
   lineOffsets,
@@ -7,7 +7,7 @@ import {
   parseFileRef,
   rootRelativeLinks,
   sourceLines,
-} from "../src/components/workspace/file-refs";
+} from "../../src/components/workspace/file-refs";
 
 /**
  * The file reference contract (src/components/workspace/file-refs.ts) as plain

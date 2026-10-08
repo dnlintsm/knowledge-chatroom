@@ -25,6 +25,7 @@ import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
 import { Splitter } from "./splitter";
 import { useWorkspace, WorkspaceProvider } from "./store";
+import { EXPERIMENT_TAB } from "./types";
 import { useWorkbench, WorkbenchProvider } from "./workbench";
 
 export { WorkspaceProvider, useWorkspace };
@@ -227,9 +228,16 @@ function StorageStatus() {
 
 /** Where in the knowledge tree the workspace is; each step goes back there. */
 function PlaceBreadcrumb() {
-  const { storageMode, lineage, enterNode } = useWorkspace();
+  const { storageMode, lineage, experiment, enterNode } = useWorkspace();
+  const { editor } = useWorkbench();
   if (storageMode !== "server") return null;
-  const steps = [{ id: null as string | null, name: "Workspace" }, ...lineage];
+  const steps = [
+    { id: null as string | null, name: "Workspace", go: () => void enterNode(null) },
+    ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => void enterNode(n.id) })),
+    ...(experiment
+      ? [{ id: `x:${experiment.id}`, name: experiment.title, go: () => editor.open(EXPERIMENT_TAB) }]
+      : []),
+  ];
   return (
     <nav aria-label="Location" className="ml-3 flex min-w-0 items-center gap-1 text-xs text-[var(--muted-foreground)]">
       {steps.map((step, i) => {
@@ -240,13 +248,14 @@ function PlaceBreadcrumb() {
             <button
               type="button"
               aria-current={last ? "location" : undefined}
-              onClick={() => void enterNode(step.id)}
+              onClick={step.go}
               className={cn(
-                "truncate rounded px-1 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer",
+                "flex min-w-0 items-center gap-1 rounded px-1 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer",
                 last && "text-[var(--foreground)]",
               )}
             >
-              {step.name}
+              {experiment && last && <FlaskConical className="size-3 shrink-0" />}
+              <span className="truncate">{step.name}</span>
             </button>
           </span>
         );
