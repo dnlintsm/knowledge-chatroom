@@ -19,6 +19,8 @@ test.skip(!process.env.DATABASE_URL, "Needs server storage (DATABASE_URL).");
 
 // A local database keeps nodes between runs; start from a tree without them.
 test.beforeEach(async ({ request }) => {
+  // The agent's /health answers before storage finishes migrating (503 here).
+  await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
   const { nodes } = await (await request.get("/api/nodes")).json();
   for (const node of nodes.filter((n: { parentId: string | null; name: string }) => !n.parentId && n.name === TECH)) {
     await request.delete(`/api/nodes/${node.id}`);
