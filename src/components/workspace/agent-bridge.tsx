@@ -6,6 +6,7 @@ import { useAgentContext, useFrontendTool } from "@copilotkit/react-core/v2";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { isTextFile, TASKS_TAB } from "./types";
+import { useWorkbench } from "./workbench";
 
 /** Keeps context small: the agent can always call readWorkspaceFile for more. */
 const MAX_CONTEXT_CHARS = 20_000;
@@ -25,9 +26,12 @@ const MAX_CONTEXT_CHARS = 20_000;
  */
 export function useWorkspaceAgent() {
   const ws = useWorkspace();
-  // Tools register once and read the latest workspace through this ref.
+  const workbench = useWorkbench();
+  // Tools register once and read the latest workspace and workbench through these refs.
   const latest = useRef(ws);
   latest.current = ws;
+  const latestWorkbench = useRef(workbench);
+  latestWorkbench.current = workbench;
 
   const open = ws.activeFile;
   // Only while files are browser-only; see the comment above.
@@ -103,7 +107,7 @@ export function useWorkspaceAgent() {
     handler: async ({ path, content }) => {
       const existed = Boolean(latest.current.getFile(path));
       const file = latest.current.write(path, content, { author: "agent" });
-      latest.current.open(file.path);
+      latestWorkbench.current.editor.open(file.path);
       return { ok: true, path: file.path, created: !existed };
     },
   }, [browserFiles]);
@@ -125,7 +129,7 @@ export function useWorkspaceAgent() {
         }
       }
       if (!latest.current.getFile(path)) return { error: `No file at ${path}` };
-      latest.current.open(normalizePath(path));
+      latestWorkbench.current.editor.open(normalizePath(path));
       return { ok: true };
     },
   });
@@ -135,7 +139,7 @@ export function useWorkspaceAgent() {
     description: "Open the shared todo board in the middle pane. Do this before adding or changing todos.",
     parameters: z.object({}),
     handler: async () => {
-      latest.current.open(TASKS_TAB);
+      latestWorkbench.current.editor.open(TASKS_TAB);
       return { ok: true };
     },
   });

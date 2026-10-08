@@ -2,13 +2,14 @@
 
 import type { ComponentProps, ReactNode } from "react";
 import { FileText, MessageSquarePlus, TextSelect } from "lucide-react";
-import { CopilotChat, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
+import { CopilotChat } from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
 import { parseFileRef, rootRelativeLinks, type FileRef } from "./file-refs";
 import { useWorkspace } from "./store";
 import { fileName } from "./types";
+import { useWorkbench } from "./workbench";
 
 // Streamdown's harden step drops bare relative links such as notes/welcome.md#L12,
 // so rootRelativeLinks rewrites them into a form it keeps, just before it runs.
@@ -26,7 +27,7 @@ const MESSAGE_VIEW = {
 
 export function ChatPane() {
   const { activeFile, selection } = useWorkspace();
-  const chatConfig = useCopilotChatConfiguration();
+  const { chat } = useWorkbench();
 
   return (
     <section aria-label="Chat" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
@@ -39,7 +40,7 @@ export function ChatPane() {
           type="button"
           title="New chat"
           aria-label="New chat"
-          onClick={() => chatConfig?.startNewThread()}
+          onClick={chat.newThread}
           className="flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer"
         >
           <MessageSquarePlus className="size-4" />
@@ -99,7 +100,8 @@ function AnswerLink({ href, className, children, node: _node, ...props }: Compon
 }
 
 function FileRefLink({ fileRef: { path, lines }, children }: { fileRef: FileRef; children: ReactNode }) {
-  const { getFile, open } = useWorkspace();
+  const { getFile } = useWorkspace();
+  const { open } = useWorkbench().editor;
   const file = getFile(path);
   const where = !lines
     ? path
