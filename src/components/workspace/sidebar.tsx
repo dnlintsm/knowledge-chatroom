@@ -17,10 +17,12 @@ import {
 import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
+import type { SidebarView } from "./layout";
 import { useWorkspace } from "./store";
+import { useWorkbench } from "./workbench";
 import { fileName, isTextFile, mimeForPath, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
-export type SidebarView = "files" | "skills" | "uploads" | "artifacts" | "chats";
+export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
@@ -83,7 +85,8 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 }
 
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write, open } = useWorkspace();
+  const { files, write } = useWorkspace();
+  const { open } = useWorkbench().editor;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -238,7 +241,8 @@ function FileRow({
   label?: string;
   depth?: number;
 }) {
-  const { active, open, remove } = useWorkspace();
+  const { active, remove } = useWorkspace();
+  const { open } = useWorkbench().editor;
   const selected = active === file.path;
   return (
     <div
