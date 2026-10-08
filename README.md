@@ -52,8 +52,13 @@ Actions are entries in one registry (`src/components/workspace/actions.tsx`), ea
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
 and state for the current run, and a `run(ctx)` that acts only through the workbench
 contract and the file API. One runner serves the block and Claude: it refuses disabled,
-unauthorized or already-running actions, so a double click never runs one twice. Until
-login lands (#4) the single user has every role.
+unauthorized or already-running actions, so a double click never runs one twice.
+
+The role is the user's role where the run lives (the knowledge node, experiment or workspace
+root), as the grants give it. A viewer there sees Generate Rules disabled, with a tooltip
+saying why, and Claude acting for them gets the same refusal. The server checks again: any
+write, a read-only file included, needs editor. Without server storage the single user owns
+everything.
 
 #### Rules API
 

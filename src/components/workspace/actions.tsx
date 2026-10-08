@@ -14,6 +14,8 @@ import { ChevronDown, ChevronRight, MessageSquarePlus, type LucideIcon } from "l
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { generateRules } from "./rules-action";
+import { hasRole, roleName } from "./roles";
+import type { Role } from "./server-files";
 import { useWorkspace } from "./store";
 import { useWorkbench, type Workbench } from "./workbench";
 
@@ -25,22 +27,19 @@ import { useWorkbench, type Workbench } from "./workbench";
  * and the same runner serves the block and Claude (agentInvocable actions).
  */
 
-export type Role = "viewer" | "editor" | "owner";
-
-const ROLE_RANK: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 };
-
-export function hasRole(role: Role, required: Role) {
-  return ROLE_RANK[role] >= ROLE_RANK[required];
-}
-
-/** Single-user until login and grants land (#4 step 4): the user may do everything. */
-export const CURRENT_ROLE: Role = "owner";
+export type { Role };
+export { hasRole };
 
 export interface ActionContext {
   runDir: string;
   workbench: Workbench;
   workspace: ReturnType<typeof useWorkspace>;
-  role: Role;
+  /**
+   * The user's role where the run lives (the knowledge node, experiment or
+   * workspace root), as the server grants it; null when they have none.
+   * Without server storage the single user owns everything.
+   */
+  role: Role | null;
 }
 
 export interface ActionView {
@@ -109,7 +108,7 @@ export function ActionsProvider({
 }) {
   const workbench = useWorkbench();
   const workspace = useWorkspace();
-  const role = CURRENT_ROLE;
+  const role = workspace.placeRole;
   const { runDir } = workbench;
   const ctx = useMemo<ActionContext | null>(
     () => (runDir ? { runDir, workbench, workspace, role } : null),
@@ -136,7 +135,7 @@ export function ActionsProvider({
         ...view,
         busy: isBusy,
         enabled: view.enabled && allowed && !isBusy,
-        hint: allowed ? view.hint : `Needs the ${required} role on this run`,
+        hint: allowed ? view.hint : `Needs the ${required} role here (you are ${roleName(c.role)})`,
       };
     },
     [busy],
@@ -156,7 +155,10 @@ export function ActionsProvider({
       if (by === "agent" && !def.agentInvocable) return { ok: false, error: `Claude can't run "${id}"` };
       const required = roleFor(def, c);
       if (!hasRole(c.role, required)) {
-        return { ok: false, error: `"${id}" needs the ${required} role on this run` };
+        return {
+          ok: false,
+          error: `"${id}" needs the ${required} role here; the user is ${roleName(c.role)}`,
+        };
       }
       const repeated = Date.now() - (lastStart.current.get(id) ?? -Infinity) < REPEAT_MS;
       if (running.current.has(id) || repeated) return { ok: false, error: `"${id}" is already running` };

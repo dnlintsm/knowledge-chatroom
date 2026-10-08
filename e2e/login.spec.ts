@@ -89,6 +89,37 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.mouse.move(600, 500);
   await shot(bob, "17-read-only-viewer");
 
+  // Actions follow the role where the run lives (#13): Alice adds a run to the
+  // tech; Bob, a viewer there, can open it and start a chat but not generate
+  // its rules, while Alice, the owner, can.
+  const { nodes } = (await (await alice.request.get("/api/nodes")).json()) as {
+    nodes: { id: string; name: string }[];
+  };
+  const techId = nodes.find((n) => n.name === TECH)!.id;
+  const report = await alice.request.put(`/api/files/runs/r1/xdoe-report/report.md?node=${techId}`, {
+    headers: { "Content-Type": "text/markdown" },
+    data: "# xDOE report\n\nOverlay run.",
+  });
+  expect(report.status()).toBe(200);
+  for (const [who, page, canGenerate] of [
+    ["Bob", bob, false],
+    ["Alice", alice, true],
+  ] as const) {
+    await page.goto("/?run=runs/r1");
+    await expect(page.getByRole("navigation", { name: "Current run" }), who).toContainText("r1");
+    const actions = page.getByTestId("actions");
+    await expect(actions.getByRole("button", { name: "New Chat" }), who).toBeEnabled();
+    const generate = actions.getByRole("button", { name: "Generate Rules" });
+    if (canGenerate) {
+      await expect(generate, who).toBeEnabled();
+    } else {
+      await expect(generate, who).toBeDisabled();
+      await expect(generate, who).toHaveAttribute("title", "Needs the editor role here (you are a viewer)");
+    }
+  }
+  await bob.mouse.move(600, 500);
+  await shot(bob, "18-actions-by-role");
+
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();
   await bob.getByRole("button", { name: "Sign out" }).click();
