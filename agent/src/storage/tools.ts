@@ -99,12 +99,14 @@ export function createFileTools(files: () => FileService | null) {
       "write_file",
       "Create or overwrite a workspace file with the COMPLETE new content (no line " +
         "numbers). It opens for the user automatically. Put new generated documents " +
-        "under artifacts/ unless the user asks to change an existing file. Paths " +
+        "in the focused run's artifacts/ folder (<run>/artifacts/, see `run` in " +
+        "context), or under artifacts/ when there is no run, unless the user asks " +
+        "to change an existing file. Paths " +
         "starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide " +
         "where the file is listed. Every write is kept as a version. Read-only files " +
         "(readOnly in list_files) can't be written.",
       {
-        path: z.string().describe("e.g. artifacts/summary.md"),
+        path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
       },
       ({ path, content }) =>
