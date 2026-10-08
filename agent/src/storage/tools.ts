@@ -8,7 +8,7 @@
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
-import type { FileService } from "./files";
+import { ReadOnlyFileError, type FileService } from "./files";
 import { InvalidPathError, isTextFile } from "./paths";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
@@ -40,6 +40,9 @@ export function createFileTools(files: () => FileService | null) {
       return await fn(service);
     } catch (err) {
       if (err instanceof InvalidPathError) return error(err.message);
+      if (err instanceof ReadOnlyFileError) {
+        return error(`${err.path} is read-only: it can't be changed or deleted.`);
+      }
       console.error("[storage] tool failed:", err);
       return error("Workspace storage error.");
     }
@@ -61,6 +64,7 @@ export function createFileTools(files: () => FileService | null) {
               size: f.size,
               lastWrittenBy: f.author,
               updatedAt: f.updatedAt,
+              ...(f.readOnly ? { readOnly: true } : {}),
             })),
           ),
         ),
@@ -97,7 +101,8 @@ export function createFileTools(files: () => FileService | null) {
         "numbers). It opens for the user automatically. Put new generated documents " +
         "under artifacts/ unless the user asks to change an existing file. Paths " +
         "starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide " +
-        "where the file is listed. Every write is kept as a version.",
+        "where the file is listed. Every write is kept as a version. Read-only files " +
+        "(readOnly in list_files) can't be written.",
       {
         path: z.string().describe("e.g. artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),

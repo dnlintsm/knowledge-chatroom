@@ -22,8 +22,10 @@ import {
   type ServerFileEvent,
 } from "./server-files";
 import {
+  FileExistsError,
   kindForPath,
   mimeForPath,
+  ReadOnlyFileError,
   TASKS_TAB,
   type TabId,
   type WorkspaceFile,
@@ -82,12 +84,23 @@ interface WorkspaceValue {
   /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
   open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
-  /** Creates the file when it does not exist. */
+  /** Creates the file when it does not exist. Throws ReadOnlyFileError for a read-only file. */
   write: (
     path: string,
     content: string,
     opts?: { mime?: string; author?: WorkspaceFile["author"] },
   ) => WorkspaceFile;
+  /**
+   * Creates a new file, saved right away (not debounced). Throws
+   * FileExistsError when the path is taken, here or on the server, which
+   * decides when two tabs race. `readOnly` files can never change afterwards.
+   */
+  create: (
+    path: string,
+    content: string,
+    opts?: { mime?: string; author?: WorkspaceFile["author"]; readOnly?: boolean },
+  ) => Promise<WorkspaceFile>;
+  /** Throws ReadOnlyFileError for a read-only file. */
   remove: (path: string) => void;
   setSelection: (text: string) => void;
   /** Where files are kept; see the comment at the top of this file. */
@@ -391,6 +404,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (rawPath, content, opts) => {
       const path = normalizePath(rawPath);
       const existing = files.current.find((f) => f.path === path);
+      if (existing?.readOnly) throw new ReadOnlyFileError(path);
       const file: WorkspaceFile = {
         path,
         content,
@@ -412,8 +426,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [upsert, scheduleSave],
   );
 
+  const create = useCallback<WorkspaceValue["create"]>(
+    async (rawPath, content, opts) => {
+      const path = normalizePath(rawPath);
+      if (mode.current === "loading") throw new Error("Files are still loading");
+      if (files.current.some((f) => f.path === path)) throw new FileExistsError(path);
+      const file: WorkspaceFile = {
+        path,
+        content,
+        kind: kindForPath(path),
+        mime: opts?.mime ?? mimeForPath(path),
+        author: opts?.author ?? "user",
+        updatedAt: Date.now(),
+        ...(opts?.readOnly ? { readOnly: true } : {}),
+      };
+      if (mode.current === "server") {
+        // Counted as in flight, so the change event for this write is ignored.
+        inflight.current.set(path, (inflight.current.get(path) ?? 0) + 1);
+        try {
+          const info = await putServerFile(file, { createOnly: true, readOnly: opts?.readOnly });
+          knownSha.current.set(path, info.sha256);
+        } finally {
+          inflight.current.set(path, (inflight.current.get(path) ?? 1) - 1);
+        }
+      }
+      // A resync may have brought the new file in meanwhile; this is the same file.
+      files.current = [...files.current.filter((f) => f.path !== path), file];
+      upsert(file);
+      return file;
+    },
+    [upsert],
+  );
+
   const remove = useCallback(
     (path: string) => {
+      if (files.current.find((f) => f.path === path)?.readOnly) throw new ReadOnlyFileError(path);
       removeLocal(path);
       if (mode.current !== "server") return;
       clearTimeout(pending.current.get(path));
@@ -442,12 +489,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       open,
       close,
       write,
+      create,
       remove,
       setSelection,
       storageMode,
       syncError,
     };
-  }, [state, selection, openCount, reveal, getFile, open, close, write, remove, storageMode, syncError]);
+  }, [state, selection, openCount, reveal, getFile, open, close, write, create, remove, storageMode, syncError]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

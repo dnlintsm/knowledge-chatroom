@@ -13,6 +13,7 @@ import {
 import { ChevronDown, ChevronRight, MessageSquarePlus, type LucideIcon } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { generateRules } from "./rules-action";
 import { useWorkspace } from "./store";
 import { useWorkbench, type Workbench } from "./workbench";
 
@@ -53,7 +54,8 @@ export interface ActionView {
 
 export interface ActionDef {
   id: string;
-  requiredRole: Role;
+  /** May depend on the run, e.g. viewing a file needs less than generating it. */
+  requiredRole: Role | ((ctx: ActionContext) => Role);
   /** Whether Claude may run it (through the runAction tool). */
   agentInvocable: boolean;
   /** What it does, for Claude. */
@@ -73,7 +75,11 @@ const newChat: ActionDef = {
   run: ({ workbench }) => workbench.chat.newThread(),
 };
 
-export const ACTIONS: ActionDef[] = [newChat];
+export const ACTIONS: ActionDef[] = [newChat, generateRules];
+
+function roleFor(def: ActionDef, ctx: ActionContext): Role {
+  return typeof def.requiredRole === "function" ? def.requiredRole(ctx) : def.requiredRole;
+}
 
 export interface ActionItem {
   def: ActionDef;
@@ -117,13 +123,14 @@ export function ActionsProvider({
   const viewOf = useCallback(
     (def: ActionDef, c: ActionContext): ActionView => {
       const view = def.view(c);
-      const allowed = hasRole(c.role, def.requiredRole);
+      const required = roleFor(def, c);
+      const allowed = hasRole(c.role, required);
       const isBusy = Boolean(view.busy) || busy.has(def.id);
       return {
         ...view,
         busy: isBusy,
         enabled: view.enabled && allowed && !isBusy,
-        hint: allowed ? view.hint : `Needs the ${def.requiredRole} role on this run`,
+        hint: allowed ? view.hint : `Needs the ${required} role on this run`,
       };
     },
     [busy],
@@ -141,8 +148,9 @@ export function ActionsProvider({
       if (!def) return { ok: false, error: `No action "${id}"` };
       if (!c) return { ok: false, error: "Actions need a focused run" };
       if (by === "agent" && !def.agentInvocable) return { ok: false, error: `Claude can't run "${id}"` };
-      if (!hasRole(c.role, def.requiredRole)) {
-        return { ok: false, error: `"${id}" needs the ${def.requiredRole} role on this run` };
+      const required = roleFor(def, c);
+      if (!hasRole(c.role, required)) {
+        return { ok: false, error: `"${id}" needs the ${required} role on this run` };
       }
       if (running.current.has(id)) return { ok: false, error: `"${id}" is already running` };
       const view = viewOf(def, c);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, Eye, ListTodo, Pencil, X } from "lucide-react";
+import { Bot, Eye, ListTodo, Lock, Pencil, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
@@ -29,9 +29,13 @@ export function EditorPane() {
       ?.querySelector('[aria-selected="true"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [active]);
+  const readOnly = Boolean(activeFile?.readOnly);
+  // Read-only files that can be previewed only ever show the preview.
   const mode: Mode | null =
     activeFile && canPreview(activeFile)
-      ? (modes[activeFile.path] ?? (activeFile.content ? "preview" : "edit"))
+      ? readOnly
+        ? "preview"
+        : (modes[activeFile.path] ?? (activeFile.content ? "preview" : "edit"))
       : null;
 
   return (
@@ -92,10 +96,19 @@ export function EditorPane() {
               <Bot className="size-3" /> Written by Claude
             </span>
           )}
+          {readOnly && (
+            <span
+              data-testid="read-only-badge"
+              title="This file can't be edited or deleted"
+              className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
+            >
+              <Lock className="size-3" /> Read-only
+            </span>
+          )}
           <span className="ml-auto shrink-0 max-sm:hidden">
             {new Date(activeFile.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           </span>
-          {mode && (
+          {mode && !readOnly && (
             <div role="group" aria-label="View mode" className="flex shrink-0 rounded-md border border-[var(--border)] p-0.5">
               {(["preview", "edit"] as const).map((m) => (
                 <button
@@ -183,10 +196,13 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
       data-testid="file-editor"
       aria-label={`Edit ${file.path}`}
       value={file.content}
+      readOnly={file.readOnly}
       spellCheck={isMarkdown(file)}
       autoFocus={!file.content}
       placeholder="Start typing…"
-      onChange={(e) => write(file.path, e.target.value)}
+      onChange={(e) => {
+        if (!file.readOnly) write(file.path, e.target.value);
+      }}
       onSelect={(e) => {
         const t = e.currentTarget;
         setSelection(t.value.slice(t.selectionStart, t.selectionEnd).trim());

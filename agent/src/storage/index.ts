@@ -3,7 +3,7 @@ import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { connect, migrate, type Sql } from "./db";
 import { FileService } from "./files";
 
-export { FileService } from "./files";
+export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
 export type { FileInfo, FileVersion } from "./files";
 
 export interface Storage {

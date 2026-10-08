@@ -11,13 +11,14 @@ const AGENT_URL = (process.env.AGENT_URL || "http://localhost:8000").replace(
   "",
 );
 
-const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match"];
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-read-only"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",
   "etag",
   "last-modified",
   "x-file-author",
+  "x-file-read-only",
   "cache-control",
 ];
 
