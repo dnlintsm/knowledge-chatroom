@@ -105,6 +105,35 @@ test("a link to a missing run falls back to Traverse", async ({ page }) => {
   await expect(page).not.toHaveURL(/run=/);
 });
 
+test("the Actions block starts a new chat about the run", async ({ page }) => {
+  await openHome(page);
+  const actions = page.getByTestId("actions");
+  await expect(actions).toBeVisible();
+  await send(page, "Hello there");
+  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
+  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
+  await shot(page, "09-actions");
+
+  await actions.getByRole("button", { name: "New Chat" }).click();
+  await expect(page.getByText("Hello there")).toHaveCount(0);
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
+  await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
+
+  // The block folds away and stays folded.
+  await actions.getByRole("button", { name: "Actions" }).click();
+  await expect(actions.getByRole("button", { name: "New Chat" })).toBeHidden();
+  await page.reload();
+  await expect(page.getByTestId("actions").getByRole("button", { name: "Actions" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+
+  // Traverse mode has no run, so no actions.
+  await page.getByRole("button", { name: "Leave run" }).click();
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await expect(page.getByTestId("actions")).toHaveCount(0);
+});
+
 test("selection is dropped when its file closes", async ({ page }) => {
   await gotoRun(page);
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
@@ -136,7 +165,7 @@ test("files and layout survive a reload", async ({ page }) => {
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);
-  await shot(page, "09-dark-mode");
+  await shot(page, "10-dark-mode");
 });
 
 test("mobile layout", async ({ page }) => {
@@ -147,15 +176,15 @@ test("mobile layout", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveCount(0);
   await gotoRun(page);
   await expect(page.getByTestId("file-preview")).toBeVisible();
-  await shot(page, "10-mobile-editor");
+  await shot(page, "11-mobile-editor");
   await page.getByRole("button", { name: "Files" }).last().click();
-  await shot(page, "11-mobile-files");
+  await shot(page, "12-mobile-files");
   // Tapping a file switches to the editor.
   await page.getByRole("treeitem", { name: /report\.md/ }).click();
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
-  await shot(page, "12-mobile-chat");
+  await shot(page, "13-mobile-chat");
 });
 
 // The mock agent answers "read next" with references to notes/reading-list.md
@@ -174,7 +203,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
   const cited = page.getByTestId("file-preview").locator("[data-revealed]");
   await expect(cited).toHaveText(/The Pragmatic Programmer/);
   await expect(cited).toBeInViewport();
-  await shot(page, "13-file-reference");
+  await shot(page, "14-file-reference");
 
   // The editor selects the same line.
   await page.getByRole("button", { name: "edit", exact: true }).click();
