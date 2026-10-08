@@ -23,7 +23,7 @@ import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { initStorage, type Storage } from "./index";
-import { createFileTools, formatTree, numberLines } from "./tools";
+import { createFileTools, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const text = (s: string) => new TextEncoder().encode(s);

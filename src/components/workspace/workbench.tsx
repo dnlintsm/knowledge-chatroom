@@ -92,7 +92,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     try {
       const raw = window.localStorage.getItem(LAYOUT_KEY);
       if (raw) apply({ type: "restore", saved: JSON.parse(raw) });
-    } catch {}
+    } catch {
+      // Storage may be unavailable; retain the in-memory layout.
+    }
   }, [apply]);
   const hydrated = useHydrated();
   const saved = JSON.stringify(persistedLayout(layout));
@@ -100,7 +102,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
     try {
       window.localStorage.setItem(LAYOUT_KEY, saved);
-    } catch {}
+    } catch {
+      // Storage may be unavailable; retain the in-memory layout.
+    }
   }, [saved, hydrated]);
 
   // Opening a file from anywhere (even the one already open, or one Claude

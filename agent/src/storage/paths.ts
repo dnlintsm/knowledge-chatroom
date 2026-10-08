@@ -22,6 +22,8 @@ export function normalizePath(raw: string): string {
     path === "" ||
     path.endsWith("/") ||
     path.length > 1024 ||
+    // Reject control characters in untrusted paths.
+    // eslint-disable-next-line no-control-regex
     segments.some((s) => s === "." || s === ".." || /[\u0000-\u001f]/.test(s))
   ) {
     throw new InvalidPathError(`Invalid path: ${JSON.stringify(raw)}`);
