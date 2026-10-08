@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { expectStoredNote } from "./storage-assertions";
 
 /**
  * Server storage and the knowledge tree. Runs when the agent has storage
@@ -55,6 +56,7 @@ test("knowledge tree", async ({ page }) => {
   await page.getByRole("button", { name: "Files", exact: true }).click();
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByTestId("file-editor").fill(`# ${MODULE} notes\n\nRecipe changes for this module go here.`);
+  await expectStoredNote(page, MODULE, `# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
   await page.getByRole("button", { name: "Knowledge", exact: true }).click();
   await expect(tree.getByRole("treeitem", { name: /untitled-1\.md/ })).toBeVisible();

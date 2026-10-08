@@ -1,4 +1,5 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { expectStoredNote } from "./storage-assertions";
 
 /**
  * Login and sharing: npm run test:e2e:login.
@@ -45,6 +46,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await alice.getByRole("button", { name: "Files", exact: true }).click();
   await alice.getByRole("button", { name: "New note" }).click();
   await alice.getByTestId("file-editor").fill("# Overlay\n\nAlignment marks moved to the scribe line.");
+  await expectStoredNote(alice, TECH, "# Overlay\n\nAlignment marks moved to the scribe line.");
   await expect(alice.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 
   // Bob signs in: nothing is shared with him yet.

@@ -220,6 +220,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const knownSha = useRef(new Map<string, string>());
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inflight = useRef(new Map<string, number>());
+  // Each place/path has an ordered write chain. Capture the file before a
+  // navigation changes files.current, then send after its previous write.
+  const saveChains = useRef(new Map<string, Promise<void>>());
   /** Files whose last save failed, until one succeeds. */
   const failed = useRef(new Set<string>());
   const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
@@ -289,8 +292,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const file = files.current.find((f) => f.path === path);
     if (!file) return;
     inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
+    const previous = saveChains.current.get(k) ?? Promise.resolve();
+    const sent = previous.then(() => putServerFile(file, at));
+    // A failed request must not prevent the next edit from being saved.
+    const tail = sent.then(() => {}, () => {});
+    saveChains.current.set(k, tail);
     try {
-      const info = await putServerFile(file, at);
+      const info = await sent;
       knownSha.current.set(k, info.sha256);
       failed.current.delete(k);
       setSyncError(null);
@@ -300,6 +308,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSyncError(`Couldn't save ${path}`);
     } finally {
       inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
+      if (saveChains.current.get(k) === tail) saveChains.current.delete(k);
     }
   }, []);
 
