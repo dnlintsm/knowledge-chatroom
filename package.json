@@ -12,11 +12,15 @@
     "postinstall": "npm run install:agent",
     "dev:debug": "LOG_LEVEL=debug npm run dev",
     "typecheck": "tsc --noEmit && cd agent && npm run typecheck",
-    "test:preview": "playwright test",
+    "test:preview": "npm run test:e2e",
     "test": "npm run test:unit",
     "test:unit": "playwright test --config playwright.unit.config.ts && npm --prefix agent run test:unit",
     "test:integration": "npm --prefix agent run test:integration",
-    "check": "npm run typecheck && npm run test:unit"
+    "check": "npm run typecheck && npm run test:unit",
+    "test:e2e": "node scripts/run-e2e.mjs browser",
+    "test:e2e:storage": "node scripts/run-e2e.mjs storage",
+    "test:e2e:login": "node scripts/run-e2e.mjs login",
+    "test:live": "node scripts/run-e2e.mjs live"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",

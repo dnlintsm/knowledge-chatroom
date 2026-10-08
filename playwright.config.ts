@@ -1,34 +1,50 @@
 import { defineConfig, devices } from "@playwright/test";
 
-/**
- * UI preview run: boots the app, walks the key screens, and saves screenshots
- * (preview/screenshots) plus a video per test (test-results). CI uploads both
- * and links them from a PR comment; see .github/workflows/ui-preview.yml.
- *
- * Without ANTHROPIC_API_KEY the agent is replaced by e2e/mock-agent.mjs, a
- * canned AG-UI server, so the preview never needs a real key.
- *
- * With DATABASE_URL (and the S3_* vars) set, the real agent server also runs
- * for server storage, so knowledge.spec.ts can show the knowledge tree. With
- * no key it listens on :8001 and the mock forwards /files, /nodes and /access
- * to it.
- *
- * With AUTH_SECRET set too, login is on: e2e/mock-oidc.mjs plays the login
- * provider and only login.spec.ts runs (the other specs assume no login).
- */
-const useRealAgent = Boolean(process.env.ANTHROPIC_API_KEY);
-const withStorage = Boolean(process.env.DATABASE_URL);
-const STORAGE_PORT = 8001;
-const withLogin = Boolean(process.env.AUTH_SECRET);
-const OIDC_PORT = 9400;
+// Mode is explicit: adding credentials must not change required mock coverage.
+// Direct `playwright test` defaults to the browser-only mock suite.
+const mode = process.env.E2E_MODE ?? "browser";
+if (!["browser", "storage", "login", "live"].includes(mode)) {
+  throw new Error(`Unknown E2E_MODE: ${mode}`);
+}
+const useRealAgent = mode === "live";
+const withStorage = mode === "storage" || mode === "login" || (useRealAgent && Boolean(process.env.DATABASE_URL));
+const withLogin = mode === "login";
+if (useRealAgent && !process.env.ANTHROPIC_API_KEY) {
+  throw new Error("Live smoke tests require ANTHROPIC_API_KEY.");
+}
+if (withStorage && (!process.env.DATABASE_URL || !process.env.S3_ENDPOINT)) {
+  throw new Error(`${mode} E2E requires DATABASE_URL and S3_ENDPOINT for a disposable test workspace.`);
+}
+
+function port(name: string, fallback: number) {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) throw new Error(`Invalid ${name}`);
+  return value;
+}
+const UI_PORT = port("E2E_UI_PORT", 3000);
+const AGENT_PORT = port("E2E_AGENT_PORT", 8000);
+const STORAGE_PORT = port("E2E_STORAGE_PORT", 8001);
+const OIDC_PORT = port("E2E_OIDC_PORT", 9400);
+const baseURL = `http://localhost:${UI_PORT}`;
+process.env.AGENT_URL = `http://localhost:${AGENT_PORT}`;
+process.env.AGENT_PORT = String(AGENT_PORT);
+if (!useRealAgent) {
+  process.env.ANTHROPIC_API_KEY = "";
+  process.env.CPK_INTELLIGENCE_API_KEY = "";
+}
+if (!withStorage) process.env.DATABASE_URL = "";
+if (!withLogin) process.env.AUTH_SECRET = "";
 if (withLogin) {
-  // Inherited by the app and agent servers started below.
-  process.env.OIDC_ISSUER ||= `http://localhost:${OIDC_PORT}`;
-  process.env.OIDC_CLIENT_ID ||= "knowledge-chatroom";
+  // Always use the test provider and a public test signing key, not real login credentials.
+  process.env.AUTH_SECRET = "preview-only-secret-0123456789abcdef0123456789";
+  process.env.OIDC_ISSUER = `http://localhost:${OIDC_PORT}`;
+  process.env.OIDC_CLIENT_ID = "knowledge-chatroom";
+  process.env.OIDC_CLIENT_SECRET = "";
+  process.env.APP_URL = baseURL;
 }
 
 const agentServers = useRealAgent
-  ? [{ command: "npm --prefix agent start", url: "http://localhost:8000/health" }]
+  ? [{ command: "npm --prefix agent start", url: `http://localhost:${AGENT_PORT}/health` }]
   : [
       ...(withStorage
         ? [
@@ -42,13 +58,17 @@ const agentServers = useRealAgent
         command: withStorage
           ? `STORAGE_URL=http://localhost:${STORAGE_PORT} node e2e/mock-agent.mjs`
           : "node e2e/mock-agent.mjs",
-        url: "http://localhost:8000/health",
+        url: `http://localhost:${AGENT_PORT}/health`,
       },
     ];
 
 export default defineConfig({
   testDir: "./e2e",
-  ...(withLogin ? { testMatch: "login.spec.ts" } : { testIgnore: "login.spec.ts" }),
+  ...(withLogin
+    ? { testMatch: "login.spec.ts" }
+    : mode === "storage"
+      ? { testMatch: "knowledge.spec.ts" }
+      : { testIgnore: ["login.spec.ts", "knowledge.spec.ts"] }),
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
@@ -56,7 +76,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL,
     viewport: { width: 1440, height: 900 },
     video: { mode: "on", size: { width: 1440, height: 900 } },
     trace: "retain-on-failure",
@@ -81,14 +101,14 @@ export default defineConfig({
       : []),
     ...agentServers.map((server) => ({
       ...server,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 60_000,
     })),
     {
       // CI builds first and serves the production build; locally, dev mode.
-      command: process.env.CI ? "npx next start -p 3000" : "npm run dev:ui",
-      url: "http://localhost:3000",
-      reuseExistingServer: !process.env.CI,
+      command: process.env.CI ? `npx next start -p ${UI_PORT}` : `npm run dev:ui -- --port ${UI_PORT}`,
+      url: baseURL,
+      reuseExistingServer: false,
       timeout: 180_000,
     },
   ],
