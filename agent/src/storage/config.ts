@@ -16,8 +16,19 @@ export interface StorageConfig {
     secretAccessKey?: string;
     /** Self-hosted stores usually need path-style URLs (endpoint/bucket/key). */
     forcePathStyle: boolean;
+    /**
+     * The store's address as browsers reach it. When set, downloads of binary
+     * files go straight to the store through short-lived signed links instead
+     * of streaming through the app.
+     */
+    publicUrl?: string;
   };
   maxUploadBytes: number;
+  /**
+   * Shared with the Next.js app, which signs who is logged in (identity.ts).
+   * Unset: no login, everyone is the local user who owns the workspace.
+   */
+  authSecret?: string;
 }
 
 export function storageConfigFromEnv(
@@ -33,10 +44,20 @@ export function storageConfigFromEnv(
       accessKeyId: env.S3_ACCESS_KEY_ID || undefined,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY || undefined,
       forcePathStyle: (env.S3_FORCE_PATH_STYLE ?? "true") !== "false",
+      publicUrl: env.S3_PUBLIC_URL || undefined,
     },
     maxUploadBytes: Number.parseInt(
       env.MAX_UPLOAD_BYTES || String(50 * 1024 * 1024),
       10,
     ),
+    authSecret: authSecretFromEnv(env),
   };
+}
+
+function authSecretFromEnv(env: NodeJS.ProcessEnv) {
+  const secret = env.AUTH_SECRET || undefined;
+  if (secret && secret.length < 32) {
+    throw new Error("AUTH_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)");
+  }
+  return secret;
 }

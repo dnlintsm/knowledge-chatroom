@@ -7,11 +7,48 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Without ANTHROPIC_API_KEY the agent is replaced by e2e/mock-agent.mjs, a
  * canned AG-UI server, so the preview never needs a real key.
+ *
+ * With DATABASE_URL (and the S3_* vars) set, the real agent server also runs
+ * for server storage, so knowledge.spec.ts can show the knowledge tree. With
+ * no key it listens on :8001 and the mock forwards /files, /nodes and /access
+ * to it.
+ *
+ * With AUTH_SECRET set too, login is on: e2e/mock-oidc.mjs plays the login
+ * provider and only login.spec.ts runs (the other specs assume no login).
  */
 const useRealAgent = Boolean(process.env.ANTHROPIC_API_KEY);
+const withStorage = Boolean(process.env.DATABASE_URL);
+const STORAGE_PORT = 8001;
+const withLogin = Boolean(process.env.AUTH_SECRET);
+const OIDC_PORT = 9400;
+if (withLogin) {
+  // Inherited by the app and agent servers started below.
+  process.env.OIDC_ISSUER ||= `http://localhost:${OIDC_PORT}`;
+  process.env.OIDC_CLIENT_ID ||= "knowledge-chatroom";
+}
+
+const agentServers = useRealAgent
+  ? [{ command: "npm --prefix agent start", url: "http://localhost:8000/health" }]
+  : [
+      ...(withStorage
+        ? [
+            {
+              command: `AGENT_PORT=${STORAGE_PORT} npm --prefix agent start`,
+              url: `http://localhost:${STORAGE_PORT}/health`,
+            },
+          ]
+        : []),
+      {
+        command: withStorage
+          ? `STORAGE_URL=http://localhost:${STORAGE_PORT} node e2e/mock-agent.mjs`
+          : "node e2e/mock-agent.mjs",
+        url: "http://localhost:8000/health",
+      },
+    ];
 
 export default defineConfig({
   testDir: "./e2e",
+  ...(withLogin ? { testMatch: "login.spec.ts" } : { testIgnore: "login.spec.ts" }),
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
@@ -39,14 +76,14 @@ export default defineConfig({
     },
   ],
   webServer: [
-    {
-      command: useRealAgent
-        ? "npm --prefix agent start"
-        : "node e2e/mock-agent.mjs",
-      url: "http://localhost:8000/health",
+    ...(withLogin
+      ? [{ command: `OIDC_PORT=${OIDC_PORT} node e2e/mock-oidc.mjs`, url: `http://localhost:${OIDC_PORT}/health` }]
+      : []),
+    ...agentServers.map((server) => ({
+      ...server,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-    },
+    })),
     {
       // CI builds first and serves the production build; locally, dev mode.
       command: process.env.CI ? "npx next start -p 3000" : "npm run dev:ui",

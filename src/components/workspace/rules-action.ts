@@ -44,7 +44,9 @@ async function generateOrOpenRules({ runDir, workbench, workspace }: ActionConte
   }
   await withLock(`knowledge-chatroom:generate-rules:${path}`, async () => {
     const exists =
-      workspace.storageMode === "server" ? await serverFileExists(path) : Boolean(workspace.getFile(path));
+      workspace.storageMode === "server"
+        ? await serverFileExists(path, workspace.node)
+        : Boolean(workspace.getFile(path));
     if (exists) return alreadyGenerated();
 
     const res = await fetch(`/api/rules?run=${encodeURIComponent(runDir)}`, { cache: "no-store" });
