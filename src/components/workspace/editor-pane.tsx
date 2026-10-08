@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, Code, Eye, FlaskConical, ListTodo, Lock, Pencil, X } from "lucide-react";
+import { Bot, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
 import { ExperimentPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
+import { ReviewPanel } from "./review-panel";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
 import {
@@ -17,6 +18,7 @@ import {
   isBuiltInTab,
   isMarkdown,
   isTextFile,
+  REVIEW_TAB,
   TASKS_TAB,
   type WorkspaceFile,
 } from "./types";
@@ -24,6 +26,7 @@ import {
 const BUILT_IN_TABS = {
   [TASKS_TAB]: { label: "Task board", icon: ListTodo },
   [EXPERIMENT_TAB]: { label: "Experiment", icon: FlaskConical },
+  [REVIEW_TAB]: { label: "Proposed changes", icon: FileDiff },
 };
 
 type Mode = "preview" | "edit";
@@ -35,7 +38,11 @@ function canPreview(file: WorkspaceFile) {
 }
 
 export function EditorPane() {
-  const { tabs, active, activeFile, getFile, open, close, canEdit } = useWorkspace();
+  const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment } = useWorkspace();
+  // Changes proposed to the open file, waiting for review.
+  const pending = activeFile && !experiment
+    ? proposals.filter((p) => p.node === node && p.path === activeFile.path)
+    : [];
   // Remembered per file; empty files start in edit mode so new notes are typeable.
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -113,6 +120,18 @@ export function EditorPane() {
               <Lock className="size-3" /> Read only
             </span>
           )}
+          {pending.length > 0 && (
+            <button
+              type="button"
+              onClick={() => open(REVIEW_TAB)}
+              className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-800 hover:bg-amber-500/25 cursor-pointer dark:text-amber-300"
+            >
+              <FileDiff className="size-3" />
+              {pending.length === 1
+                ? `${pending[0].author === "agent" ? "Claude proposed a change" : "1 proposed change"} · Review`
+                : `${pending.length} proposed changes · Review`}
+            </button>
+          )}
           <span className="ml-auto shrink-0 max-sm:hidden">
             {new Date(activeFile.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           </span>
@@ -149,6 +168,8 @@ export function EditorPane() {
           <ExampleCanvas />
         ) : active === EXPERIMENT_TAB ? (
           <ExperimentPanel />
+        ) : active === REVIEW_TAB ? (
+          <ReviewPanel />
         ) : activeFile ? (
           <FileView key={activeFile.path} file={activeFile} mode={mode} />
         ) : (

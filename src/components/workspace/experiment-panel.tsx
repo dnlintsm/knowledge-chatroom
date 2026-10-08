@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, FlaskConical, Lock, Plus, RotateCcw, Share2, Trash2, X } from "lucide-react";
+import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Experiment, ExperimentChange, ExperimentStatus } from "./server-files";
+import {
+  listPromotable,
+  type Experiment,
+  type ExperimentChange,
+  type ExperimentStatus,
+  type Promotable,
+} from "./server-files";
 import { useWorkspace } from "./store";
+import { REVIEW_TAB } from "./types";
 
 const STATUS_LABEL: Record<ExperimentStatus, string> = {
   draft: "Draft",
@@ -157,8 +164,134 @@ export function ExperimentPanel() {
           onSave={(results) => save({ results })}
         />
       </Section>
+      {canChange && <Promote experiment={exp} nodeName={nodeName} />}
       <Compare current={exp} nodeName={nodeName} />
     </div>
+  );
+}
+
+/**
+ * The files this experiment changed that its node doesn't have yet, to
+ * propose to the node; someone who can edit there accepts or rejects them.
+ */
+function Promote({ experiment, nodeName }: { experiment: Experiment; nodeName: string }) {
+  const ws = useWorkspace();
+  const [files, setFiles] = useState<Promotable[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  // Changes here, and decisions on the node, change what there is to propose.
+  const filesKey = ws.files.map((f) => `${f.path}@${f.updatedAt}`).join("|");
+  const proposalsKey = ws.proposals.map((p) => `${p.id}@${p.updatedAt}`).join("|");
+
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      listPromotable(experiment.id)
+        .then((list) => {
+          if (!live) return;
+          setFiles(list);
+          // Everything not proposed yet starts ticked.
+          setChosen(new Set(list.filter((f) => !f.proposal).map((f) => f.path)));
+        })
+        .catch(() => live && setFiles([]));
+    }, 400);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [experiment.id, filesKey, proposalsKey]);
+
+  const propose = async () => {
+    setBusy(true);
+    try {
+      const made = await ws.promote(experiment.id, [...chosen], note.trim() || undefined);
+      setNote("");
+      setMessage({
+        text: `Proposed ${made.length} ${made.length === 1 ? "file" : "files"} to ${nodeName}. Someone who can edit ${nodeName} accepts or rejects them.`,
+      });
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : String(err), error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title={`Propose to ${nodeName}`}>
+      {files === null ? (
+        <p className="text-xs text-[var(--muted-foreground)]">Looking for changes…</p>
+      ) : files.length === 0 ? (
+        <p className="text-xs text-[var(--muted-foreground)]">
+          No changes yet that {nodeName} doesn&apos;t have. Files you change or add here can be
+          proposed to it.
+        </p>
+      ) : (
+        <div data-testid="promote" className="flex flex-col gap-2">
+          <ul className="flex flex-col rounded-md border border-[var(--border)]">
+            {files.map((f) => (
+              <li key={f.path} className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 last:border-b-0">
+                <input
+                  type="checkbox"
+                  aria-label={`Propose ${f.path}`}
+                  checked={chosen.has(f.path)}
+                  onChange={(e) =>
+                    setChosen((s) => {
+                      const next = new Set(s);
+                      if (e.target.checked) next.add(f.path);
+                      else next.delete(f.path);
+                      return next;
+                    })
+                  }
+                />
+                <span className="truncate font-[family-name:var(--font-code)] text-[12px]">{f.path}</span>
+                <span className="text-[11px] text-[var(--muted-foreground)]">
+                  {f.change === "new" ? "new" : "changed"}
+                </span>
+                {f.proposal && (
+                  <span className="ml-auto rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--accent-foreground)]">
+                    Proposed
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <input
+            aria-label="Why these changes"
+            placeholder={`Why these belong in ${nodeName} (optional)`}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="h-8 rounded-md border border-[var(--border)] bg-transparent px-2 text-[13px] outline-none focus:ring-2 focus:ring-[var(--ring)]"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy || chosen.size === 0}
+              onClick={() => void propose()}
+              className="flex h-7 items-center gap-1 rounded-md bg-[var(--primary)] px-2 text-xs text-[var(--primary-foreground)] cursor-pointer disabled:cursor-default disabled:opacity-50"
+            >
+              <Send className="size-3.5" />
+              Propose {chosen.size} {chosen.size === 1 ? "file" : "files"}
+            </button>
+            {files.some((f) => f.proposal) && (
+              <button
+                type="button"
+                onClick={() => ws.open(REVIEW_TAB)}
+                className="flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)]"
+              >
+                <FileDiff className="size-3.5" /> See proposals
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {message && (
+        <p role={message.error ? "alert" : "status"} className={cn("text-xs", message.error ? "text-red-500" : "text-[var(--muted-foreground)]")}>
+          {message.text}
+        </p>
+      )}
+    </Section>
   );
 }
 

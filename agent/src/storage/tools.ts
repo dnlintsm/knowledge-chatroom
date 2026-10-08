@@ -2,7 +2,9 @@
  * Workspace file tools for Claude, served by the agent itself (in-process MCP)
  * so they work whether or not a browser tab is open. Writes are recorded as
  * the agent's versions, and the UI hears about them through the /files change
- * stream (it opens files Claude writes).
+ * stream (it opens files Claude writes). In a knowledge node a write becomes a
+ * proposed version instead (proposals.ts), for someone who can edit the node
+ * to accept or reject.
  */
 
 import { tool } from "@anthropic-ai/claude-agent-sdk";
@@ -14,6 +16,7 @@ import type { Storage } from "./index";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile } from "./paths";
+import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
@@ -104,7 +107,8 @@ export function createFileTools(
         err instanceof ForbiddenError ||
         err instanceof AccessError ||
         err instanceof ExperimentError ||
-        err instanceof SearchError
+        err instanceof SearchError ||
+        err instanceof ProposalError
       ) {
         return error(err.message);
       }
@@ -264,27 +268,73 @@ export function createFileTools(
       "Create or overwrite a workspace file with the COMPLETE new content (no line " +
         "numbers), at the workspace root, in a knowledge node or in an experiment. Write " +
         "where the user is working (the context's currentExperiment, else currentNode) " +
-        "unless they say otherwise; inside an experiment, never write to its node. It opens " +
-        "for the user automatically. Put new generated documents under artifacts/ " +
-        "unless the user asks to change an existing file. Paths starting with notes/, " +
-        "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is " +
-        "listed. Every write is kept as a version.",
+        "unless they say otherwise; inside an experiment, never write to its node. At the " +
+        "root and in an experiment the file changes at once and opens for the user. In a " +
+        "knowledge node it is PROPOSED instead: the file stays as it was until someone who " +
+        "can edit the node accepts the change (writing the same file again revises your " +
+        "proposal). Put new generated documents under artifacts/ unless the user asks to " +
+        "change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, " +
+        "uploads/ or artifacts/ decide where the file is listed. Every write is kept as a " +
+        "version.",
       {
         path: z.string().describe("e.g. artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
         node: nodeParam,
         experiment: experimentParam,
+        summary: z
+          .string()
+          .optional()
+          .describe("One line on what changed and why; shown to whoever reviews a proposal."),
       },
-      ({ path, content, ...place }) =>
-        inPlace(place, async (service) => {
+      ({ path, content, summary, ...place }) =>
+        run(async (session) => {
+          const bytes = new TextEncoder().encode(content);
+          if (!place.experiment && place.node) {
+            const proposal = await session.propose(place.node, path, bytes, { note: summary });
+            return text({
+              ok: true,
+              proposed: true,
+              path: proposal.path,
+              node: proposal.node,
+              newFile: proposal.isNew,
+              note:
+                "Proposed for review, not written yet: someone who can edit this node accepts " +
+                "or rejects it in the editor. Tell the user.",
+            });
+          }
+          const service = place.experiment
+            ? await session.experimentFiles(place.experiment)
+            : await session.files(null);
           const existed = Boolean(await service.stat(path));
-          const info = await service.write(path, new TextEncoder().encode(content));
+          const info = await service.write(path, bytes);
           return text({
             ok: true,
             path: info.path,
             node: service.nodeId,
             experiment: service.experimentId,
             created: !existed,
+          });
+        }),
+    ),
+    tool(
+      "propose_experiment",
+      "Propose an experiment's work to its knowledge node: each file the experiment " +
+        "changed or added (or only those in `paths`) becomes a proposed version on the " +
+        "node, for someone who can edit the node to accept or reject. Only when the user " +
+        "asks to bring an experiment's results back to its node; only its author can.",
+      {
+        experiment: z.string().describe("Experiment id"),
+        paths: z.array(z.string()).optional().describe("Only these files; omit for every changed file."),
+        note: z.string().optional().describe("Why these changes belong in the node, in a line or two."),
+      },
+      ({ experiment, paths, note }) =>
+        run(async (session) => {
+          const proposals = await session.promote(experiment, paths, note);
+          return text({
+            ok: true,
+            proposed: proposals.map((p) => ({ path: p.path, newFile: p.isNew })),
+            node: proposals[0]?.node,
+            note: "Waiting for someone who can edit the node to accept or reject them.",
           });
         }),
     ),

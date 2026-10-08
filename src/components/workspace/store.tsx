@@ -15,6 +15,7 @@ import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import {
   createServerExperiment,
   createServerNode,
+  decideProposal as decideServerProposal,
   deleteServerExperiment,
   deleteServerFile,
   deleteServerNode,
@@ -24,8 +25,10 @@ import {
   getAccount,
   listExperiments,
   listNodes,
+  listProposals,
   listServerFiles,
   loadServerFile,
+  promoteExperiment,
   putServerFile,
   renameServerNode,
   updateServerExperiment,
@@ -38,6 +41,7 @@ import {
   type NodeId,
   type NodeType,
   type PlaceId,
+  type Proposal,
   type Role,
   type ServerEvent,
   type ServerFile,
@@ -47,6 +51,7 @@ import {
   isBuiltInTab,
   kindForPath,
   mimeForPath,
+  REVIEW_TAB,
   type TabId,
   type WorkspaceFile,
 } from "./types";
@@ -71,6 +76,11 @@ import {
  *
  * With login on, what the user may do in each place comes from their role
  * there (`placeRole`); `canEdit` says whether this place's files can change.
+ *
+ * `proposals` are the open proposed versions the user can see: Claude's edits
+ * to a node, and experiments promoted to theirs, waiting for an editor to
+ * accept or reject them (the Review tab). When Claude proposes a change for
+ * this user, the workspace goes there and opens the Review tab.
  */
 
 const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
@@ -160,6 +170,12 @@ interface WorkspaceValue {
   createExperiment: (nodeId: string, title: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
+  /** Open proposals you can see, anywhere, newest first. */
+  proposals: Proposal[];
+  /** Accept, reject or withdraw a proposal; throws with a message. */
+  decideProposal: (id: string, decision: "accept" | "reject" | "withdraw") => Promise<Proposal>;
+  /** Proposes an experiment's changed files (all, or `paths`) to its node; throws with a message. */
+  promote: (experimentId: string, paths?: string[], note?: string) => Promise<Proposal[]>;
   /** These throw with a message for the user, e.g. a duplicate name. */
   createNode: (parentId: NodeId, name: string) => Promise<KnowledgeNode>;
   renameNode: (id: string, name: string) => Promise<void>;
@@ -212,6 +228,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const placeRef = useRef<PlaceId>(null);
   const [tree, setTree] = useState<KnowledgeTree>({ types: [], rootRole: null, nodes: [] });
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
   const [account, setAccount] = useState<Account>({ login: false, user: null });
   // Server sync bookkeeping, per place and path: the content hash we last saw
   // on the server, edits waiting to save, and saves on the wire. Change events
@@ -386,6 +403,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
+  const refreshProposals = useCallback(async () => {
+    const next = await listProposals();
+    if (next) setProposals(next);
+    return next;
+  }, []);
+
   /** The tree and the experiments on it; null when the tree can't be read. */
   const refreshTree = useCallback(async () => {
     const [next, list] = await Promise.all([listNodes(), refreshExperiments()]);
@@ -429,7 +452,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let treeTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onEvent = async (event: ServerEvent) => {
+      if (event.op === "proposal") {
+        const list = await refreshProposals();
+        // Claude proposed a change for you: show it where it would land.
+        const mine = list?.find((p) => p.id === event.id && p.mine && p.author === "agent");
+        if (mine && (event.change === "create" || event.change === "update")) {
+          if (mine.node === placeRef.current || (await enterNode(mine.node))) open(REVIEW_TAB);
+        }
+        return;
+      }
       if (event.op === "node") {
+        void refreshProposals();
         const now = await refreshTree();
         // Deleted, or under a deleted node: go back to the root.
         const here = placeRef.current;
@@ -539,7 +572,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       await resync(list, placeRef.current === null ? new Set(failed) : new Set());
       // Roles come with the tree; load it first so edit controls are right from the start.
-      await refreshTree();
+      await Promise.all([refreshTree(), refreshProposals()]);
       if (cancelled) return;
       mode.current = "server";
       setStorageMode("server");
@@ -553,6 +586,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!dropped) return;
         dropped = false;
         void refreshTree();
+        void refreshProposals();
         const at = placeRef.current;
         void listServerFiles(at).then((l) => {
           if (Array.isArray(l) && placeRef.current === at) void resync(l);
@@ -713,6 +747,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [experiments, enterNode, refreshExperiments],
   );
 
+  const decideProposal = useCallback(
+    async (id: string, decision: "accept" | "reject" | "withdraw") => {
+      const decided = await decideServerProposal(id, decision);
+      setProposals((list) => list.filter((p) => p.id !== id));
+      void refreshProposals();
+      return decided;
+    },
+    [refreshProposals],
+  );
+  const promote = useCallback(
+    async (experimentId: string, paths?: string[], note?: string) => {
+      // Proposals take what the server has, so recent edits go first.
+      const here = experimentPlace(experimentId);
+      if (placeRef.current === here) await settleSaves(here);
+      const made = await promoteExperiment(experimentId, paths, note);
+      await refreshProposals();
+      return made;
+    },
+    [settleSaves, refreshProposals],
+  );
+
   const experimentId = experimentOf(place);
   const experiment = experimentId ? (experiments.find((e) => e.id === experimentId) ?? null) : null;
   const node: NodeId = experimentId ? (experiment?.nodeId ?? null) : place;
@@ -769,12 +824,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createExperiment,
       updateExperiment,
       deleteExperiment,
+      proposals,
+      decideProposal,
+      promote,
     };
   }, [
     state, selection, openCount, reveal, getFile, open, close, write, remove, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
-    updateExperiment, deleteExperiment,
+    updateExperiment, deleteExperiment, proposals, decideProposal, promote,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

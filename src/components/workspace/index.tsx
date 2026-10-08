@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CloudAlert,
   CloudCheck,
+  FileDiff,
   FlaskConical,
   FolderTree,
   HardDrive,
@@ -24,7 +25,7 @@ import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
 import { Splitter } from "./splitter";
 import { useWorkspace, WorkspaceProvider } from "./store";
-import { EXPERIMENT_TAB } from "./types";
+import { EXPERIMENT_TAB, REVIEW_TAB } from "./types";
 import { useWorkbench, WorkbenchProvider } from "./workbench";
 
 export { WorkspaceProvider, useWorkspace };
@@ -190,9 +191,10 @@ function StorageStatus() {
 
 /** Where in the knowledge tree the workspace is; each step goes back there. */
 function PlaceBreadcrumb() {
-  const { storageMode, lineage, experiment, enterNode } = useWorkspace();
+  const { storageMode, lineage, experiment, enterNode, proposals, node } = useWorkspace();
   const { editor } = useWorkbench();
   if (storageMode !== "server") return null;
+  const toReview = experiment ? 0 : proposals.filter((p) => p.node === node && p.canDecide).length;
   const steps = [
     { id: null as string | null, name: "Workspace", go: () => void enterNode(null) },
     ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => void enterNode(n.id) })),
@@ -222,6 +224,16 @@ function PlaceBreadcrumb() {
           </span>
         );
       })}
+      {toReview > 0 && (
+        <button
+          type="button"
+          onClick={() => editor.open(REVIEW_TAB)}
+          className="ml-2 flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-800 hover:bg-amber-500/25 cursor-pointer dark:text-amber-300"
+        >
+          <FileDiff className="size-3" />
+          {toReview} to review
+        </button>
+      )}
     </nav>
   );
 }
