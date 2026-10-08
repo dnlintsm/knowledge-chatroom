@@ -182,8 +182,18 @@ npm run dev
   forks, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes one, and every
   `/api/files` route takes `?experiment=<id>`. In the Knowledge view, experiments sit under
   their node with their status, and the Experiment tab holds the details and a comparison
-  table. Moving an experiment's results into the node comes with proposed edits (step 7 of
-  issue #4).
+  table. Its author brings its results to the node by proposing them (below).
+- **Proposed changes**: a change to a node's file can wait for review instead of landing at
+  once (`007_proposals.sql`). Claude's edits in a node arrive this way, and so does an
+  experiment's work when its author proposes it from the Experiment tab (only files the
+  experiment changed, so a proposal never undoes someone else's later work on the node).
+  Anyone who can view a node may propose; editors there accept or reject in the Proposed
+  changes tab, which shows each one as a diff against the file as it is now, and accepting
+  writes it as the file's next version, credited to whoever proposed it. Proposing again
+  revises your open proposal. `GET /api/proposals` lists open ones (`?node=`,
+  `?experiment=`, `?status=`), `PUT /api/files/<path>?node=<id>&propose` proposes, `POST
+  /api/proposals {experimentId, paths?, note?}` promotes an experiment, and `POST
+  /api/proposals/<id>/accept|reject|withdraw` decides.
 - **Search**: every text file is indexed when it is written (`006_search.sql`): its text is
   split into passages and stored once per distinct content, so versions, experiment copies and
   duplicates share one entry. `GET /api/search?q=<text>` finds the files you can read whose
@@ -235,11 +245,12 @@ npm run dev
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
-  `write_file`, `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
+  `write_file`, `list_experiments`, `create_experiment`, `update_experiment` and
+  `propose_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. Its writes are versions authored by the
-  agent.
+  agent; in a knowledge node they are proposed changes until someone accepts them.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this

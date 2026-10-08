@@ -4,6 +4,14 @@ import type { WorkspaceEvent } from "./events";
 import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
+import {
+  ProposalError,
+  type Decision,
+  type ListOptions as ProposalListOptions,
+  type Promotable,
+  type Proposal,
+  type ProposalService,
+} from "./proposals";
 import type { SearchHit, SearchOptions, SearchService } from "./search";
 
 /**
@@ -35,6 +43,7 @@ interface Parts {
   experiments: ExperimentService;
   access: AccessService;
   search: SearchService;
+  proposals: ProposalService;
   sql: Sql;
   /** Whether queries can run as the restricted role (db.ts prepareRowSecurity). */
   rowSecurity: boolean;
@@ -217,6 +226,142 @@ export class Session {
     );
   }
 
+  // Proposed versions (see proposals.ts): anyone who can read a place may
+  // propose a change to its files, and editors there accept or reject it.
+
+  /** Proposals you can see: on places you can read, and your own. */
+  proposals(opts: ProposalListOptions = {}): Promise<Proposal[]> {
+    const userId = this.principal.userId;
+    return this.scoped((db) => on(this.parts.proposals, db).list(userId, opts));
+  }
+
+  async proposal(id: string): Promise<Proposal> {
+    const userId = this.principal.userId;
+    const found = await this.scoped((db) => on(this.parts.proposals, db).get(userId, id));
+    if (!found) throw new NodeNotFoundError("Proposal not found");
+    return found;
+  }
+
+  /** A proposal and its proposed bytes. */
+  async proposalContent(id: string): Promise<{ proposal: Proposal; bytes: Uint8Array }> {
+    const proposal = await this.proposal(id);
+    return { proposal, bytes: await this.parts.proposals.content(proposal) };
+  }
+
+  /** Proposes new content for a file at the root (null) or in a node; returns the proposal. */
+  async propose(
+    nodeId: string | null,
+    path: string,
+    bytes: Uint8Array,
+    opts: { mime?: string; note?: string } = {},
+  ): Promise<Proposal> {
+    await this.need(nodeId, "viewer");
+    const { userId, actor } = this.principal;
+    const id = await this.scoped((db) =>
+      on(this.parts.proposals, db).propose(
+        { node: nodeId, path, content: bytes, mime: opts.mime, author: actor, authorId: userId, note: opts.note },
+        (tx, proposal) => this.audit("proposal.create", { proposal, node: nodeId, path })(tx),
+      ),
+    );
+    return this.proposal(id);
+  }
+
+  /** What promoting an experiment would propose to its node. */
+  async promotable(experimentId: string): Promise<Promotable[]> {
+    await this.experiment(experimentId);
+    return this.scoped((db) => on(this.parts.proposals, db).promotable(experimentId));
+  }
+
+  /**
+   * Proposes an experiment's changed files (all of them, or those in `paths`)
+   * to its node, for someone who can edit there to accept. Only its author
+   * promotes it, and not once it is archived.
+   */
+  async promote(experimentId: string, paths?: string[], note?: string): Promise<Proposal[]> {
+    const experiment = await this.experiment(experimentId);
+    this.needAuthor(experiment);
+    if (experiment.access !== "writer") {
+      throw new ForbiddenError("This experiment is archived; restore it to propose its files");
+    }
+    const candidates = await this.promotable(experimentId);
+    const chosen = paths ? candidates.filter((c) => paths.includes(c.path)) : candidates;
+    const missing = paths?.filter((p) => !candidates.some((c) => c.path === p)) ?? [];
+    if (missing.length) {
+      throw new ProposalError(
+        `Nothing to propose for ${missing.join(", ")}: the experiment didn't change it, or its node already has it`,
+      );
+    }
+    if (!chosen.length) throw new ProposalError("This experiment has no changes its node doesn't have");
+    const { userId, actor } = this.principal;
+    const ids: string[] = [];
+    for (const c of chosen) {
+      const id = await this.scoped(async (db) => {
+        const proposals = on(this.parts.proposals, db);
+        const file = await proposals.experimentFile(experimentId, c.path);
+        if (!file) throw new ProposalError(`${c.path} is no longer in this experiment`);
+        return proposals.propose(
+          {
+            node: experiment.nodeId,
+            path: c.path,
+            content: file,
+            mime: file.mime,
+            author: actor,
+            authorId: userId,
+            experimentId,
+            note,
+          },
+          (tx, proposal) =>
+            this.audit("proposal.create", { proposal, node: experiment.nodeId, path: c.path, experiment: experimentId })(tx),
+        );
+      });
+      ids.push(id);
+    }
+    return Promise.all(ids.map((id) => this.proposal(id)));
+  }
+
+  /**
+   * Accepts (writes it as the file's next version, credited to its proposer),
+   * rejects, or withdraws a proposal. Accepting and rejecting need editor on
+   * its place; withdrawing is for its proposer.
+   */
+  async decide(id: string, decision: Decision): Promise<Proposal> {
+    const proposal = await this.proposal(id);
+    if (proposal.status !== "open") {
+      throw new ProposalError(`This proposal was already ${proposal.status}`);
+    }
+    if (decision === "withdraw") {
+      if (!proposal.mine) throw new ForbiddenError("Only its proposer can withdraw a proposal");
+    } else {
+      await this.need(proposal.node, "editor");
+    }
+    const userId = this.principal.userId;
+    const audit = this.audit(`proposal.${decision}`, { proposal: id, node: proposal.node, path: proposal.path });
+    if (decision !== "accept") {
+      await this.scoped((db) => on(this.parts.proposals, db).decide(id, decision, userId, audit));
+      return this.proposal(id);
+    }
+    const files = await this.parts.files.inNode(proposal.node);
+    if (!files) throw new NodeNotFoundError("Node not found");
+    const bytes = await this.parts.proposals.content(proposal);
+    await this.scoped(async (db) => {
+      const proposals = on(this.parts.proposals, db);
+      let decided = false;
+      await on(files, db).write(proposal.path, bytes, {
+        mime: proposal.mime,
+        author: proposal.author,
+        authorId: proposal.authorId,
+        inTx: async (tx) => {
+          await proposals.decideIn(tx, id, "accept", userId);
+          await audit(tx);
+          decided = true;
+        },
+      });
+      // The file already had these bytes, so no version was added.
+      if (!decided) await proposals.decide(id, "accept", userId, audit);
+    });
+    return this.proposal(id);
+  }
+
   /** Files this principal may read that match, best first (see search.ts). */
   search(opts: SearchOptions): Promise<SearchHit[]> {
     return this.scoped((db) => on(this.parts.search, db).search(this.principal.userId, opts));
@@ -228,6 +373,7 @@ export class Session {
     // Hidden nodes stay hidden: not even their ids go out.
     if (event.op === "node") return this.parts.access.seesNode(userId, event.id);
     if (event.op === "experiment") return this.parts.experiments.hears(userId, event.id, event.change);
+    if (event.op === "proposal") return event.authorId === userId || (await this.role(event.node)) !== null;
     if (event.experiment) return (await this.parts.experiments.access(userId, event.experiment)) !== null;
     return (await this.role(event.node)) !== null;
   }

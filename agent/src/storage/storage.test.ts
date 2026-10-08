@@ -22,6 +22,7 @@ import { createStorageHandler } from "./http";
 import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
+import { ProposalError } from "./proposals";
 import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
@@ -967,6 +968,154 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     });
   });
 
+  describe("proposals", () => {
+    const as = (userId: string, actor: Principal["actor"] = "user") =>
+      storage.session({ userId, actor });
+    let alice: string, bob: string, carol: string, dave: string;
+    let anneal: string;
+    const read = async (path: string) => {
+      const file = await (await as(alice).files(anneal)).read(path);
+      return file && new TextDecoder().decode(file.bytes);
+    };
+
+    before(async () => {
+      alice = await storage.access.userForSubject("test|p-alice");
+      bob = await storage.access.userForSubject("test|p-bob");
+      carol = await storage.access.userForSubject("test|p-carol");
+      dave = await storage.access.userForSubject("test|p-dave");
+      const local = await storage.access.localUserId();
+      const tech = await as(local).createNode(null, "Thermal");
+      await as(local).setGrant(tech.id, "user", alice, "owner");
+      const mod = await as(alice).createNode(tech.id, "Furnace");
+      const loop = await as(alice).createNode(mod.id, "Ramp");
+      anneal = (await as(alice).createNode(loop.id, "Anneal")).id;
+      const files = await as(alice).files(anneal);
+      await files.write("notes/recipe.md", text("temp 400"));
+      await files.write("notes/keep.md", text("keep 1"));
+      // Bob edits the anneal, Carol only views it, Dave has no role.
+      await as(alice).setGrant(anneal, "user", bob, "editor");
+      await as(alice).setGrant(anneal, "user", carol, "viewer");
+    });
+
+    test("Claude's edit waits for review; accepting writes it as Claude's version", async () => {
+      const claude = as(carol, "agent");
+      const first = await claude.propose(anneal, "notes/recipe.md", text("temp 390"), { note: "Lower peak" });
+      assert.deepEqual(
+        [first.status, first.author, first.authorId, first.mine, first.canDecide, first.isNew, first.note],
+        ["open", "agent", carol, true, false, false, "Lower peak"],
+      );
+      assert.equal(await read("notes/recipe.md"), "temp 400");
+
+      // Proposing again revises the same proposal.
+      const again = await claude.propose(anneal, "notes/recipe.md", text("temp 380"));
+      assert.equal(again.id, first.id);
+      const seen = await as(bob).proposals({ node: anneal });
+      assert.deepEqual(
+        seen.map((p) => [p.id, p.mine, p.canDecide]),
+        [[first.id, false, true]],
+      );
+      const { bytes } = await as(bob).proposalContent(first.id);
+      assert.equal(new TextDecoder().decode(bytes), "temp 380");
+
+      // Only an editor there decides.
+      await assert.rejects(as(carol).decide(first.id, "accept"), ForbiddenError);
+      const accepted = await as(bob).decide(first.id, "accept");
+      assert.equal(accepted.status, "accepted");
+      assert.equal(await read("notes/recipe.md"), "temp 380");
+      const [head] = (await (await as(bob).files(anneal)).history("notes/recipe.md"))!;
+      assert.deepEqual([head.author, head.authorId], ["agent", carol]);
+      await assert.rejects(as(bob).decide(first.id, "reject"), ProposalError);
+      assert.deepEqual(await as(bob).proposals({ node: anneal }), []);
+      assert.equal((await as(bob).proposals({ node: anneal, status: "accepted" })).length, 1);
+
+      // Nothing to propose when the file already has it.
+      await assert.rejects(claude.propose(anneal, "notes/recipe.md", text("temp 380")), ProposalError);
+      const audit = await as(await storage.access.localUserId()).auditLog(20);
+      assert.ok(audit.some((e) => e.action === "proposal.accept" && e.target.proposal === first.id));
+    });
+
+    test("reject, withdraw, and who sees what", async () => {
+      const added = await as(carol).propose(anneal, "notes/idea.md", text("try N2 purge"));
+      assert.equal(added.isNew, true);
+      assert.equal(await as(dave).canSee({
+        op: "proposal", change: "create", id: added.id, node: anneal, path: "notes/idea.md", author: "user", authorId: carol,
+      }), false);
+      assert.equal(await as(bob).canSee({
+        op: "proposal", change: "create", id: added.id, node: anneal, path: "notes/idea.md", author: "user", authorId: carol,
+      }), true);
+      assert.deepEqual(await as(dave).proposals(), []);
+      await assert.rejects(as(dave).proposal(added.id), NodeNotFoundError);
+      await assert.rejects(as(dave).propose(anneal, "notes/x.md", text("x")), NodeNotFoundError);
+
+      await assert.rejects(as(bob).decide(added.id, "withdraw"), ForbiddenError);
+      assert.equal((await as(bob).decide(added.id, "reject")).status, "rejected");
+      assert.equal(await read("notes/idea.md"), null);
+
+      const second = await as(carol).propose(anneal, "notes/idea.md", text("try Ar purge"));
+      assert.notEqual(second.id, added.id);
+      assert.equal((await as(carol).decide(second.id, "withdraw")).status, "withdrawn");
+      assert.deepEqual(await as(carol).proposals({ node: anneal }), []);
+    });
+
+    test("an experiment's author promotes what it changed to the node", async () => {
+      const exp = await as(carol).createExperiment(anneal, { title: "Slower ramp" });
+      const inExp = await as(carol).experimentFiles(exp.id);
+      await inExp.write("notes/recipe.md", text("temp 380\nramp 5 C/min"));
+      await inExp.write("notes/run-1.md", text("no slip lines"));
+      // The node moves on in a file the experiment left alone: not proposed back.
+      await (await as(bob).files(anneal)).write("notes/keep.md", text("keep 2"));
+
+      const promotable = await as(carol).promotable(exp.id);
+      assert.deepEqual(
+        promotable.map((c) => [c.path, c.change, c.proposal]),
+        [["notes/recipe.md", "changed", null], ["notes/run-1.md", "new", null]],
+      );
+      await assert.rejects(as(bob).promote(exp.id), NodeNotFoundError); // a draft Bob can't see
+      await assert.rejects(as(carol).promote(exp.id, ["notes/keep.md"]), ProposalError);
+
+      const [run] = await as(carol).promote(exp.id, ["notes/run-1.md"], "Results of run 1");
+      assert.deepEqual([run.path, run.experiment, run.experimentTitle, run.isNew], [
+        "notes/run-1.md", exp.id, "Slower ramp", true,
+      ]);
+      const all = await as(carol).promote(exp.id);
+      assert.deepEqual(all.map((p) => p.path), ["notes/recipe.md", "notes/run-1.md"]);
+      assert.equal(all[1].id, run.id);
+      // Bob reviews without seeing the draft's title.
+      const forBob = await as(bob).proposals({ experiment: exp.id });
+      assert.equal(forBob.length, 2);
+      assert.equal(forBob[0].experimentTitle, null);
+
+      const recipe = all.find((p) => p.path === "notes/recipe.md")!;
+      await as(bob).decide(recipe.id, "accept");
+      assert.equal(await read("notes/recipe.md"), "temp 380\nramp 5 C/min");
+      assert.equal(await read("notes/keep.md"), "keep 2");
+      assert.deepEqual(
+        (await as(carol).promotable(exp.id)).map((c) => [c.path, c.proposal]),
+        [["notes/run-1.md", run.id]],
+      );
+      await as(carol).updateExperiment(exp.id, { status: "archived" });
+      await assert.rejects(as(carol).promote(exp.id), ForbiddenError);
+    });
+
+    test("row-level security keeps proposals to their place", async () => {
+      assert.equal(storage.rowSecurity, true, "the test database user should be able to use knowledge_user");
+      const p = await as(carol).propose(anneal, "notes/rls.md", text("rls"));
+      const count = (userId: string) =>
+        asDbUser(storage.sql, userId, async (db) => {
+          const [row] = await db<{ n: string }[]>`SELECT count(*) AS n FROM proposals WHERE id = ${p.id}`;
+          return Number(row.n);
+        });
+      assert.equal(await count(dave), 0);
+      assert.equal(await count(bob), 1);
+      // Carol may withdraw hers but not accept it.
+      await assert.rejects(
+        asDbUser(storage.sql, carol, (db) =>
+          db`UPDATE proposals SET status = 'accepted' WHERE id = ${p.id}`),
+      );
+      await as(carol).decide(p.id, "withdraw");
+    });
+  });
+
   describe("Claude's file tools", () => {
     type Tool = ReturnType<typeof createFileTools>[number];
     let tools: Record<string, Tool>;
@@ -1047,7 +1196,16 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.ok(tree.includes(`- CMP [tech] id=${created.id} (0 files, owner)`));
       assert.ok(tree.includes(`  - Pad wear [module] id=${child.id} (0 files, owner)`));
 
-      await call("write_file", { node: child.id, path: "notes/wear.md", content: "worn" });
+      // In a node, Claude's write is a proposal until someone accepts it.
+      const proposed = JSON.parse(
+        (await call("write_file", { node: child.id, path: "notes/wear.md", content: "worn", summary: "Pad life" })).text,
+      ) as { proposed: boolean; newFile: boolean };
+      assert.deepEqual([proposed.proposed, proposed.newFile], [true, true]);
+      assert.equal((await call("read_file", { node: child.id, path: "notes/wear.md" })).isError, true);
+      const local = storage.session({ userId: await storage.access.localUserId(), actor: "user" });
+      const [proposal] = await local.proposals({ node: child.id });
+      assert.deepEqual([proposal.author, proposal.note], ["agent", "Pad life"]);
+      await local.decide(proposal.id, "accept");
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
       const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
       assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
@@ -1058,7 +1216,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
 
     test("Claude starts an experiment, works in it and records results", async () => {
       const tech = JSON.parse((await call("create_node", { name: "Sputtering" })).text) as { id: string };
-      await call("write_file", { node: tech.id, path: "notes/base.md", content: "base" });
+      await (await storage.files.inNode(tech.id))!.write("notes/base.md", text("base"));
       const exp = JSON.parse(
         (await call("create_experiment", { node: tech.id, title: "Thinner film", params: { nm: 50 } })).text,
       ) as { id: string; files: number };
@@ -1084,6 +1242,13 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       );
       const bad = await call("update_experiment", { id: exp.id, results: "great" });
       assert.equal(bad.isError, true);
+
+      // Bringing the work back to the node proposes it there.
+      const promoted = JSON.parse((await call("propose_experiment", { experiment: exp.id })).text) as {
+        proposed: { path: string; newFile: boolean }[];
+      };
+      assert.deepEqual(promoted.proposed, [{ path: "notes/base.md", newFile: false }]);
+      assert.equal((await call("propose_experiment", { experiment: exp.id, paths: ["notes/none.md"] })).isError, true);
     });
 
     test("binary files are described, not dumped", async () => {
@@ -1312,6 +1477,46 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await fetch(`${base}/experiments/${exp.id}`, { method: "DELETE" })).status, 200);
       assert.equal((await fetch(`${base}/experiments/${exp.id}`)).status, 404);
       assert.equal((await fetch(`${base}/files?experiment=${exp.id}`)).status, 404);
+    });
+
+    test("proposals API", async () => {
+      const node = (await (
+        await fetch(`${base}/nodes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: null, name: "Implant" }),
+        })
+      ).json()) as { id: string };
+      await fetch(`${base}/files/notes/dose.md?node=${node.id}`, { method: "PUT", body: "dose 1e15" });
+      const proposed = await fetch(`${base}/files/notes/dose.md?node=${node.id}&propose&note=Halve%20it`, {
+        method: "PUT",
+        body: "dose 5e14",
+      });
+      assert.equal(proposed.status, 201);
+      const proposal = (await proposed.json()) as { id: string; note: string; status: string };
+      assert.deepEqual([proposal.note, proposal.status], ["Halve it", "open"]);
+
+      const listed = (await (await fetch(`${base}/proposals?node=${node.id}`)).json()) as {
+        proposals: { id: string }[];
+      };
+      assert.deepEqual(listed.proposals.map((p) => p.id), [proposal.id]);
+      assert.equal(await (await fetch(`${base}/proposals/${proposal.id}/content`)).text(), "dose 5e14");
+      assert.equal((await fetch(`${base}/proposals/${proposal.id}/accept`)).status, 405);
+      const accepted = await fetch(`${base}/proposals/${proposal.id}/accept`, { method: "POST" });
+      assert.equal(((await accepted.json()) as { status: string }).status, "accepted");
+      assert.equal(await (await fetch(`${base}/files/notes/dose.md?node=${node.id}`)).text(), "dose 5e14");
+      assert.equal((await fetch(`${base}/proposals/${proposal.id}/accept`, { method: "POST" })).status, 400);
+
+      assert.equal((await fetch(`${base}/proposals?status=maybe`)).status, 400);
+      assert.equal((await fetch(`${base}/proposals/promotable`)).status, 400);
+      assert.equal((await fetch(`${base}/proposals/nope`)).status, 404);
+      assert.equal((await fetch(`${base}/proposals/${proposal.id}/merge`, { method: "POST" })).status, 404);
+      const badPromote = await fetch(`${base}/proposals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ experimentId: 5 }),
+      });
+      assert.equal(badPromote.status, 400);
     });
 
     test("rejects oversize uploads and bad paths", async () => {

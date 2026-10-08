@@ -42,7 +42,16 @@ export type ServerEvent =
       author?: WorkspaceFile["author"];
     }
   | { op: "node"; change: "create" | "rename" | "delete"; id: string }
-  | { op: "experiment"; change: "create" | "update" | "status" | "delete"; id: string; node: string };
+  | { op: "experiment"; change: "create" | "update" | "status" | "delete"; id: string; node: string }
+  | {
+      op: "proposal";
+      change: "create" | "update" | "accepted" | "rejected" | "withdrawn";
+      id: string;
+      node: NodeId;
+      path: string;
+      author: WorkspaceFile["author"];
+      authorId: string;
+    };
 
 /** The place a file event is about. */
 export const eventPlace = (event: { node: NodeId; experiment?: string | null }): PlaceId =>
@@ -251,6 +260,94 @@ export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
+
+export type ProposalStatus = "open" | "accepted" | "rejected" | "withdrawn";
+
+/**
+ * A proposed version of a file in a node (or at the root), waiting for someone
+ * who can edit there to accept or reject it (agent/src/storage/proposals.ts).
+ */
+export interface Proposal {
+  id: string;
+  node: NodeId;
+  path: string;
+  sha256: string;
+  size: number;
+  mime: string;
+  /** agent: Claude proposed it, acting for authorName. */
+  author: WorkspaceFile["author"];
+  authorId: string;
+  authorName: string | null;
+  /** The experiment it was promoted from, if any (and its title, if you may see it). */
+  experiment: string | null;
+  experimentTitle: string | null;
+  note: string;
+  status: ProposalStatus;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Accepting creates the file. */
+  isNew: boolean;
+  /** The file changed after this was proposed. */
+  fileChanged: boolean;
+  /** You proposed it, so you may withdraw it. */
+  mine: boolean;
+  /** You may accept or reject it. */
+  canDecide: boolean;
+}
+
+/** A file an experiment changed that its node doesn't have yet. */
+export interface Promotable {
+  path: string;
+  change: "new" | "changed";
+  size: number;
+  mime: string;
+  /** This experiment's open proposal with exactly this content, if any. */
+  proposal: string | null;
+}
+
+/** Open proposals you can see, everywhere; null when they can't be read. */
+export async function listProposals(): Promise<Proposal[] | null> {
+  try {
+    const res = await apiFetch("/api/proposals", { cache: "no-store" });
+    return res.ok ? ((await res.json()) as { proposals: Proposal[] }).proposals : null;
+  } catch {
+    return null;
+  }
+}
+
+async function proposalRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await apiFetch(`/api/proposals${path}`, {
+    method,
+    cache: "no-store",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `${method} proposal: ${res.status}`);
+  return data;
+}
+
+/** The proposed content as text. */
+export async function proposalText(id: string): Promise<string> {
+  const res = await apiFetch(`/api/proposals/${encodeURIComponent(id)}/content`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Couldn't load the proposed version (${res.status})`);
+  return res.text();
+}
+
+export const decideProposal = (id: string, decision: "accept" | "reject" | "withdraw") =>
+  proposalRequest<Proposal>("POST", `/${encodeURIComponent(id)}/${decision}`);
+
+/** Proposes an experiment's changed files (all, or `paths`) to its node. */
+export const promoteExperiment = (experimentId: string, paths?: string[], note?: string) =>
+  proposalRequest<{ proposals: Proposal[] }>("POST", "", { experimentId, paths, note }).then((r) => r.proposals);
+
+export const listPromotable = (experimentId: string) =>
+  proposalRequest<{ files: Promotable[] }>(
+    "GET",
+    `/promotable?experiment=${encodeURIComponent(experimentId)}`,
+  ).then((r) => r.files);
 
 /** A file whose text or path matched a search (agent/src/storage/search.ts). */
 export interface SearchHit {

@@ -201,3 +201,65 @@ test("search", async ({ page, request }) => {
   await expect(results).toHaveCount(1);
   await expect(results).toContainText("chamber-log.md");
 });
+
+test("proposed changes", async ({ page, request }) => {
+  // Etch › Module 3 › Endpoint › Main etch, with a recipe, and an experiment that changed it.
+  const add = async (parentId: string | null, name: string) =>
+    ((await (await request.post("/api/nodes", { data: { parentId, name } })).json()) as { id: string }).id;
+  const proc = await add(await add(await add(await add(null, TECH), MODULE), "Endpoint"), "Main etch");
+  const md = { "Content-Type": "text/markdown" };
+  await request.put(`/api/files/notes/recipe.md?node=${proc}`, {
+    data: "# Main etch recipe\n\nRF power: 300 W\nPressure: 30 mTorr",
+    headers: md,
+  });
+  const exp = (await (
+    await request.post("/api/experiments", { data: { nodeId: proc, title: "Higher RF power" } })
+  ).json()) as { id: string };
+  await request.put(`/api/files/notes/recipe.md?experiment=${exp.id}`, {
+    data: "# Main etch recipe\n\nRF power: 350 W\nPressure: 30 mTorr",
+    headers: md,
+  });
+
+  // The experiment's author proposes its change to the process.
+  await page.goto("/");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  const tree = page.getByRole("tree", { name: "Knowledge tree" });
+  await tree.getByTestId("experiment-node").filter({ hasText: "Higher RF power" }).click();
+  const promote = page.getByTestId("promote");
+  await expect(promote).toContainText("notes/recipe.md");
+  await promote.getByLabel("Why these changes").fill("350 W raised the etch rate to 412 nm/min");
+  await promote.getByRole("button", { name: "Propose 1 file" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Proposed 1 file to Main etch" })).toBeVisible();
+
+  // Someone else suggests a new file there too (as Claude does from a chat).
+  await request.put(`/api/files/notes/purge.md?node=${proc}&propose&note=${encodeURIComponent("Add a purge step")}`, {
+    data: "# Purge\n\nN2, 30 s before ignition",
+    headers: md,
+  });
+
+  // On the process, both wait for review; nothing has changed yet.
+  const location = page.getByRole("navigation", { name: "Location" });
+  await location.getByRole("button", { name: "Main etch" }).click();
+  await location.getByRole("button", { name: "2 to review" }).click();
+  const review = page.getByTestId("review-panel");
+  const recipe = review.getByRole("article", { name: "Proposed change to notes/recipe.md" });
+  await expect(recipe).toContainText("350 W raised the etch rate");
+  await expect(recipe).toContainText("Higher RF power");
+  await expect(recipe.locator('[data-change="removed"]')).toContainText("RF power: 300 W");
+  await expect(recipe.locator('[data-change="added"]')).toContainText("RF power: 350 W");
+  const purge = review.getByRole("article", { name: "Proposed change to notes/purge.md" });
+  await expect(purge).toContainText("New file");
+  await page.mouse.move(900, 700);
+  await shot(page, "21-review");
+
+  // Accepting writes the change; rejecting leaves the file out.
+  await recipe.getByRole("button", { name: "Accept" }).click();
+  await expect(recipe).toHaveCount(0);
+  await purge.getByRole("button", { name: "Reject" }).click();
+  await expect(review).toContainText("Nothing waiting for review.");
+  await expect(location.getByRole("button", { name: /to review/ })).toHaveCount(0);
+  await tree.getByRole("treeitem", { name: /recipe\.md/ }).click();
+  await expect(page.getByTestId("file-preview")).toContainText("RF power: 350 W");
+  await expect(tree.getByRole("treeitem", { name: /purge\.md/ })).toHaveCount(0);
+});
