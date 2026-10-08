@@ -10,6 +10,8 @@ import { isInRun, normalizeRunDir, RUN_REPORT } from "./runs";
 import { isTextFile, TASKS_TAB } from "./types";
 import { useWorkbench } from "./workbench";
 
+const FILES_LOADING = "The workspace files are still loading; try again in a moment.";
+
 /** Keeps context small: the agent can always call readWorkspaceFile for more. */
 const MAX_CONTEXT_CHARS = 20_000;
 
@@ -182,6 +184,7 @@ export function useWorkspaceAgent() {
       "List every experiment run (RUN_DIR) in the workspace, and which one the user is focused on.",
     parameters: z.object({}),
     handler: async () => {
+      if (latest.current.storageMode === "loading") return { error: FILES_LOADING };
       const { runs, runDir } = latestWorkbench.current;
       return {
         current: runDir,
@@ -196,6 +199,8 @@ export function useWorkspaceAgent() {
       "Focus the workspace on another run (path from listRuns): the panes and this chat then work on it, and its report opens.",
     parameters: z.object({ path: z.string().describe("Run folder, e.g. runs/etch-2026-10-01") }),
     handler: async ({ path }) => {
+      // Until the files load, the run list is the samples, not the user's runs.
+      if (latest.current.storageMode === "loading") return { error: FILES_LOADING };
       const wb = latestWorkbench.current;
       const run = wb.runs.find((r) => r.path === normalizeRunDir(path));
       if (!run) return { error: `No run at ${path}. Call listRuns for the runs there are.` };
