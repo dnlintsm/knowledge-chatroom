@@ -3,6 +3,7 @@ import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { AccessService, type Principal } from "./access";
 import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
 import { EventHub } from "./events";
+import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
 import { Session } from "./session";
@@ -10,6 +11,8 @@ import { Session } from "./session";
 export { FileService } from "./files";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
+export { ExperimentService } from "./experiments";
+export type { Experiment, ExperimentStatus } from "./experiments";
 export type { KnowledgeNode, NodeType } from "./nodes";
 export type { Principal, Role } from "./access";
 export { Session } from "./session";
@@ -17,9 +20,10 @@ export { Session } from "./session";
 export interface Storage {
   config: StorageConfig;
   sql: Sql;
-  /** Files at the workspace root; .inNode(id) for a knowledge node's files. */
+  /** Files at the workspace root; .inNode(id) / .inExperiment(id) for others. */
   files: FileService;
   nodes: NodeService;
+  experiments: ExperimentService;
   access: AccessService;
   events: EventHub;
   blobs: BlobStore;
@@ -60,17 +64,19 @@ export async function initStorage(
     const events = new EventHub(sql, ws.id);
     const files = new FileService(sql, blobs, events, ws.id);
     const nodes = new NodeService(sql, events, ws.id);
+    const experiments = new ExperimentService(sql, events, ws.id);
     const access = new AccessService(sql, ws.id);
     return {
       config,
       sql,
       files,
       nodes,
+      experiments,
       access,
       events,
       blobs,
       rowSecurity,
-      session: (principal) => new Session({ files, nodes, access, sql, rowSecurity }, principal),
+      session: (principal) => new Session({ files, nodes, experiments, access, sql, rowSecurity }, principal),
       close: () => sql.end(),
     };
   } catch (err) {

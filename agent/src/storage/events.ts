@@ -7,6 +7,8 @@ export interface FileEvent {
   op: "write" | "delete";
   /** The knowledge node the file belongs to; null at the workspace root. */
   node: string | null;
+  /** The experiment it belongs to instead (node is then null). */
+  experiment?: string | null;
   path: string;
   /** Present for writes. */
   sha256?: string;
@@ -20,7 +22,15 @@ export interface NodeEvent {
   id: string;
 }
 
-export type WorkspaceEvent = FileEvent | NodeEvent;
+/** A committed change to an experiment on `node`; clients refetch /experiments. */
+export interface ExperimentEvent {
+  op: "experiment";
+  change: "create" | "update" | "status" | "delete";
+  id: string;
+  node: string;
+}
+
+export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent;
 
 const CHANNEL = "workspace_files";
 
