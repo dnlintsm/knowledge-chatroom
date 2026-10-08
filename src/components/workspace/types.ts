@@ -22,6 +22,10 @@ export interface WorkspaceFile {
 /** A tab in the middle pane: a file path, or the built-in task board. */
 export type TabId = string;
 export const TASKS_TAB: TabId = "::tasks";
+/** The current experiment's hypothesis, params and results. */
+export const EXPERIMENT_TAB: TabId = "::experiment";
+/** Tabs that aren't files. */
+export const isBuiltInTab = (tab: TabId) => tab === TASKS_TAB || tab === EXPERIMENT_TAB;
 
 export const KIND_FOLDERS: Record<FileKind, string> = {
   note: "notes",
