@@ -12,6 +12,8 @@ import {
 } from "react";
 import type { LineRange } from "./file-refs";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
+import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
+import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace } from "./local-persistence";
 import {
   createServerExperiment,
   createServerNode,
@@ -73,30 +75,12 @@ import {
  * there (`placeRole`); `canEdit` says whether this place's files can change.
  */
 
-const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
-/** Tabs at the workspace root, from before the knowledge tree. */
-const SERVER_UI_KEY = "knowledge-chatroom.workspace.server-ui.v1";
-/** Tabs per place: {"": root, "<node id>": that node, "x:<id>": that experiment}. */
-const PLACE_UI_KEY = "knowledge-chatroom.workspace.place-ui.v1";
-/** The place the user was last in, so a reload returns there. */
-const NODE_KEY = "knowledge-chatroom.workspace.node.v1";
-/**
- * "1" once this browser has filled an empty server workspace, or a JSON list of
- * paths whose upload failed and is retried on the next load.
- */
-const SERVER_SEEDED_KEY = "knowledge-chatroom.workspace.server-seeded.v1";
 const SAVE_DELAY_MS = 600;
 /** How long to wait for storage that is still starting before using the browser. */
 const STARTUP_RETRY_MS = 2_000;
 const STARTUP_RETRIES = 30;
 
 export type StorageMode = "loading" | "server" | "local";
-
-interface Persisted {
-  files: WorkspaceFile[];
-  tabs: TabId[];
-  active: TabId | null;
-}
 
 /** Lines the middle pane scrolls to and highlights, from open(path, lines). */
 export interface Reveal {
@@ -166,19 +150,6 @@ interface WorkspaceValue {
   deleteNode: (id: string) => Promise<void>;
 }
 
-type PlaceUi = Record<string, Pick<Persisted, "tabs" | "active">>;
-
-function readPlaceUi(): PlaceUi {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(PLACE_UI_KEY) ?? "null") as PlaceUi | null;
-    if (all) return all;
-    const root = JSON.parse(window.localStorage.getItem(SERVER_UI_KEY) ?? "null");
-    return root ? { "": root } : {};
-  } catch {
-    return {};
-  }
-}
-
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 
 export function normalizePath(path: string) {
@@ -234,8 +205,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // seed is never written over saved work, even when Strict Mode replays effects.
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setState(JSON.parse(raw) as Persisted);
+      const restored = restoreWorkspace(window.localStorage);
+      if (restored) setState(restored);
     } catch {
       // Private mode or corrupt data: keep the seed.
     }
@@ -244,38 +215,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated || storageMode === "loading") return;
     try {
-      if (storageMode === "local") {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } else {
-        const ui = readPlaceUi();
-        ui[place ?? ""] = { tabs: state.tabs, active: state.active };
-        window.localStorage.setItem(PLACE_UI_KEY, JSON.stringify(ui));
-        if (place) window.localStorage.setItem(NODE_KEY, place);
-        else window.localStorage.removeItem(NODE_KEY);
-      }
+      persistWorkspace(window.localStorage, state, storageMode, place);
     } catch {
       // Quota exceeded (large uploads): the session still works in memory.
     }
   }, [state, hydrated, storageMode, place]);
 
   const upsert = useCallback((file: WorkspaceFile) => {
-    setState((s) => ({
-      ...s,
-      files: s.files.some((f) => f.path === file.path)
-        ? s.files.map((f) => (f.path === file.path ? file : f))
-        : [...s.files, file],
-    }));
+    setState((s) => reduceWorkspace(s, { type: "upsert", file }));
   }, []);
 
   const removeLocal = useCallback((path: string) => {
-    setState((s) => {
-      const tabs = s.tabs.filter((t) => t !== path);
-      return {
-        files: s.files.filter((f) => f.path !== path),
-        tabs,
-        active: s.active === path ? (tabs[tabs.length - 1] ?? null) : s.active,
-      };
-    });
+    setState((s) => reduceWorkspace(s, { type: "remove", path }));
   }, []);
 
   const save = useCallback(async (path: string, at: PlaceId): Promise<void> => {
@@ -412,7 +363,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       flushSaves();
       placeRef.current = id;
       setPlace(id);
-      const ui = readPlaceUi()[id ?? ""] ?? {
+      const ui = readPlaceUi(window.localStorage)[id ?? ""] ?? {
         // An experiment opens on its details the first time.
         tabs: experimentOf(id) ? [EXPERIMENT_TAB] : [],
         active: experimentOf(id) ? EXPERIMENT_TAB : null,
@@ -541,7 +492,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setPlace(lastNode);
         list = there;
       }
-      const ui = readPlaceUi()[placeRef.current ?? ""];
+      const ui = readPlaceUi(window.localStorage)[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
       await resync(list, placeRef.current === null ? new Set(failed) : new Set());
@@ -600,21 +551,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setOpenCount((n) => n + 1);
     // A new object every time, so citing the same lines again scrolls back to them.
     setReveal(lines ? { path: tab, lines } : null);
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.includes(tab) ? s.tabs : [...s.tabs, tab],
-      active: tab,
-    }));
+    setState((s) => reduceWorkspace(s, { type: "open", tab }));
   }, []);
 
   const close = useCallback((tab: TabId) => {
-    setState((s) => {
-      const index = s.tabs.indexOf(tab);
-      const tabs = s.tabs.filter((t) => t !== tab);
-      const active =
-        s.active === tab ? (tabs[Math.min(index, tabs.length - 1)] ?? null) : s.active;
-      return { ...s, tabs, active };
-    });
+    setState((s) => reduceWorkspace(s, { type: "close", tab }));
   }, []);
 
   const write = useCallback<WorkspaceValue["write"]>(
