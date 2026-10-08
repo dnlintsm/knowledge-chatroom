@@ -2,8 +2,8 @@
  * Workspace model: a flat list of files keyed by path. The top-level folder of
  * a path decides what kind of item it is, which the left rail groups by.
  *
- * Storage is browser-only for now (see store.tsx); swap it for an agent-backed
- * file system once the backend design settles.
+ * Files use optional agent-backed storage, with a browser-local fallback
+ * (see store.tsx and docs/architecture.md).
  */
 
 export type FileKind = "note" | "skill" | "upload" | "artifact";
