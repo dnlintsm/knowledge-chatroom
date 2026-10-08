@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { z } from "zod";
-import { useAgentContext, useFrontendTool } from "@copilotkit/react-core/v2";
+import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilotkit/react-core/v2";
 import { useActions } from "./actions";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
@@ -50,13 +50,26 @@ export function useWorkspaceAgent() {
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `currentNode` is where in the knowledge tree the user is (null = the workspace root); `files` are the files there. `run` is the experiment run (RUN_DIR, a folder among those files) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder. `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment on that node the user is working in; `files` are the files where the user is. `run` is the experiment run (RUN_DIR, a folder among those files) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder.",
     value: {
       currentNode: ws.node
         ? {
             id: ws.node,
             path: ws.lineage.map((n) => `${n.name} (${n.type})`).join(" › "),
             ancestors: ws.lineage.slice(0, -1).map((n) => ({ id: n.id, name: n.name, type: n.type })),
+          }
+        : null,
+      currentExperiment: ws.experiment
+        ? {
+            id: ws.experiment.id,
+            title: ws.experiment.title,
+            status: ws.experiment.status,
+            author: ws.experiment.mine ? "the user" : ws.experiment.authorName,
+            canChange: ws.experiment.access === "writer",
+            hypothesis: ws.experiment.hypothesis,
+            // Plain JSON from the server.
+            params: ws.experiment.params as JsonSerializable,
+            results: ws.experiment.results as JsonSerializable,
           }
         : null,
       run: runDir
@@ -145,14 +158,20 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "openWorkspaceFile",
     description:
-      "Open a workspace file in the middle pane so the user can see it. Give `node` to open a file in another knowledge node; the user's view moves there.",
+      "Open a workspace file in the middle pane so the user can see it. Give `node` or `experiment` to open a file in another knowledge node or experiment; the user's view moves there.",
     parameters: z.object({
       path: z.string(),
       node: z.string().optional().describe("Knowledge node id; omit for where the user is now."),
+      experiment: z.string().optional().describe("Experiment id; takes precedence over node."),
     }),
-    handler: async ({ path, node }) => {
-      if (node !== undefined && node !== latest.current.node) {
-        if (!(await latest.current.enterNode(node || null))) return { error: `No knowledge node ${node}` };
+    handler: async ({ path, node, experiment }) => {
+      const ws = latest.current;
+      const moving = experiment
+        ? experiment !== ws.experiment?.id
+        : node !== undefined && (node !== ws.node || ws.experiment !== null);
+      if (moving) {
+        const entered = experiment ? await ws.enterExperiment(experiment) : await ws.enterNode(node || null);
+        if (!entered) return { error: experiment ? `No experiment ${experiment}` : `No knowledge node ${node}` };
         // The new place's files reach `latest` on the next render.
         for (let i = 0; i < 20 && !latest.current.getFile(path); i++) {
           await new Promise((r) => setTimeout(r, 50));

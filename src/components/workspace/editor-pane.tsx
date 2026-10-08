@@ -1,15 +1,30 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, Code, Eye, ListTodo, Lock, Pencil, X } from "lucide-react";
+import { Bot, Code, Eye, FlaskConical, ListTodo, Lock, Pencil, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
+import { ExperimentPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
-import { extension, fileName, isMarkdown, isTextFile, TASKS_TAB, type WorkspaceFile } from "./types";
+import {
+  EXPERIMENT_TAB,
+  extension,
+  fileName,
+  isBuiltInTab,
+  isMarkdown,
+  isTextFile,
+  TASKS_TAB,
+  type WorkspaceFile,
+} from "./types";
+
+const BUILT_IN_TABS = {
+  [TASKS_TAB]: { label: "Task board", icon: ListTodo },
+  [EXPERIMENT_TAB]: { label: "Experiment", icon: FlaskConical },
+};
 
 type Mode = "preview" | "edit";
 
@@ -43,7 +58,8 @@ export function EditorPane() {
       <div className="flex h-10 shrink-0 items-stretch border-b border-[var(--border)] bg-[var(--secondary)]">
         <div ref={tabsRef} role="tablist" className="flex min-w-0 flex-1 overflow-x-auto">
           {tabs.map((tab) => {
-            const file = tab === TASKS_TAB ? null : getFile(tab);
+            const builtIn = isBuiltInTab(tab) ? BUILT_IN_TABS[tab] : null;
+            const file = builtIn ? null : getFile(tab);
             const selected = tab === active;
             return (
               <div
@@ -51,7 +67,7 @@ export function EditorPane() {
                 role="tab"
                 aria-selected={selected}
                 tabIndex={0}
-                title={tab === TASKS_TAB ? "Task board" : tab}
+                title={builtIn?.label ?? tab}
                 onClick={() => open(tab)}
                 onKeyDown={(e) => e.key === "Enter" && open(tab)}
                 onAuxClick={(e) => e.button === 1 && close(tab)}
@@ -62,12 +78,12 @@ export function EditorPane() {
                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
                 )}
               >
-                {tab === TASKS_TAB ? (
-                  <ListTodo className="size-3.5" />
+                {builtIn ? (
+                  <builtIn.icon className="size-3.5" />
                 ) : file ? (
                   <FileIcon file={file} className="size-3.5" />
                 ) : null}
-                <span className="max-w-[180px] truncate">{tab === TASKS_TAB ? "Task board" : fileName(tab)}</span>
+                <span className="max-w-[180px] truncate">{builtIn?.label ?? fileName(tab)}</span>
                 <button
                   type="button"
                   aria-label="Close tab"
@@ -144,6 +160,8 @@ export function EditorPane() {
       <div className="min-h-0 flex-1 overflow-auto">
         {active === TASKS_TAB ? (
           <ExampleCanvas />
+        ) : active === EXPERIMENT_TAB ? (
+          <ExperimentPanel />
         ) : activeFile ? (
           <FileView key={activeFile.path} file={activeFile} mode={mode} />
         ) : (

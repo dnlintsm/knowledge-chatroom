@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { findRunDirs, isInRun, parseMarkers, runFromSearch, searchWithRun } from "../src/components/workspace/runs";
+import { findRunDirs, isInRun, parseMarkers, runFromSearch, searchWithRun } from "../../src/components/workspace/runs";
 
 /** Run discovery and the ?run= URL (src/components/workspace/runs.ts), no browser needed. */
 

@@ -20,16 +20,34 @@ export interface ServerFile {
 /** A knowledge node id, or null for the workspace root. */
 export type NodeId = string | null;
 
+/**
+ * Where a set of files lives: the workspace root (null), a knowledge node (its
+ * id), or an experiment (experimentPlace(id)).
+ */
+export type PlaceId = string | null;
+const EXPERIMENT_PREFIX = "x:";
+export const experimentPlace = (id: string): PlaceId => `${EXPERIMENT_PREFIX}${id}`;
+/** The experiment a place is, or null for the root and nodes. */
+export const experimentOf = (place: PlaceId) =>
+  place?.startsWith(EXPERIMENT_PREFIX) ? place.slice(EXPERIMENT_PREFIX.length) : null;
+
 /** One committed change, from the /api/files?watch event stream. */
 export type ServerEvent =
   | {
       op: "write" | "delete";
       node: NodeId;
+      /** Set for an experiment's files (node is then null). */
+      experiment?: string | null;
       path: string;
       sha256?: string;
       author?: WorkspaceFile["author"];
     }
-  | { op: "node"; change: "create" | "rename" | "delete"; id: string };
+  | { op: "node"; change: "create" | "rename" | "delete"; id: string }
+  | { op: "experiment"; change: "create" | "update" | "status" | "delete"; id: string; node: string };
+
+/** The place a file event is about. */
+export const eventPlace = (event: { node: NodeId; experiment?: string | null }): PlaceId =>
+  event.experiment ? experimentPlace(event.experiment) : event.node;
 
 export const WATCH_URL = "/api/files?watch";
 
@@ -76,10 +94,14 @@ export async function apiFetch(input: string, init?: RequestInit): Promise<Respo
   return res;
 }
 
-const nodeQuery = (node: NodeId) => (node ? `?node=${encodeURIComponent(node)}` : "");
+function placeQuery(place: PlaceId) {
+  if (!place) return "";
+  const experiment = experimentOf(place);
+  return experiment ? `?experiment=${encodeURIComponent(experiment)}` : `?node=${encodeURIComponent(place)}`;
+}
 
-export function fileUrl(path: string, node: NodeId = null) {
-  return `/api/files/${path.split("/").map(encodeURIComponent).join("/")}${nodeQuery(node)}`;
+export function fileUrl(path: string, place: PlaceId = null) {
+  return `/api/files/${path.split("/").map(encodeURIComponent).join("/")}${placeQuery(place)}`;
 }
 
 /**
@@ -89,10 +111,10 @@ export function fileUrl(path: string, node: NodeId = null) {
  * A place you have no access to lists as empty.
  */
 export async function listServerFiles(
-  node: NodeId = null,
+  place: PlaceId = null,
 ): Promise<ServerFile[] | "starting" | null> {
   try {
-    const res = await apiFetch(`/api/files${nodeQuery(node)}`, { cache: "no-store" });
+    const res = await apiFetch(`/api/files${placeQuery(place)}`, { cache: "no-store" });
     if (res.ok) return ((await res.json()) as { files: ServerFile[] }).files;
     // Signed in, but nothing here is shared with you (e.g. the workspace root).
     if (res.status === 403) return [];
@@ -107,7 +129,7 @@ export async function listServerFiles(
  * at their URL (versioned by hash so caches never show stale bytes), which
  * works anywhere the UI used a data: URL, like <img src>.
  */
-export async function loadServerFile(info: ServerFile, node: NodeId = null): Promise<WorkspaceFile> {
+export async function loadServerFile(info: ServerFile, place: PlaceId = null): Promise<WorkspaceFile> {
   const base = {
     path: info.path,
     kind: info.kind,
@@ -116,7 +138,7 @@ export async function loadServerFile(info: ServerFile, node: NodeId = null): Pro
     updatedAt: Date.parse(info.updatedAt),
     ...(info.readOnly ? { readOnly: true } : {}),
   };
-  const url = fileUrl(info.path, node);
+  const url = fileUrl(info.path, place);
   if (!isTextFile(info)) {
     return { ...base, content: `${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}` };
   }
@@ -132,7 +154,7 @@ export async function loadServerFile(info: ServerFile, node: NodeId = null): Pro
  */
 export async function putServerFile(
   file: Pick<WorkspaceFile, "path" | "mime" | "content" | "readOnly">,
-  node: NodeId = null,
+  place: PlaceId = null,
   opts: { createOnly?: boolean; readOnly?: boolean } = {},
 ): Promise<ServerFile> {
   // Binary uploads arrive as data: URLs; send their bytes.
@@ -144,7 +166,7 @@ export async function putServerFile(
   if (opts.createOnly) headers["If-None-Match"] = "*";
   // A read-only browser file stays read-only when it first moves to the server.
   if (opts.readOnly ?? file.readOnly) headers["X-Read-Only"] = "true";
-  const res = await apiFetch(fileUrl(file.path, node), { method: "PUT", headers, body });
+  const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
   if (res.status === 412) throw new FileExistsError(file.path);
   if (res.status === 403) {
     const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
@@ -156,16 +178,16 @@ export async function putServerFile(
 }
 
 /** Asks the server itself, not the local copy of the file list. */
-export async function serverFileExists(path: string, node: NodeId = null): Promise<boolean> {
-  const res = await apiFetch(fileUrl(path, node), { method: "GET", cache: "no-store" });
+export async function serverFileExists(path: string, place: PlaceId = null): Promise<boolean> {
+  const res = await apiFetch(fileUrl(path, place), { method: "GET", cache: "no-store" });
   await res.body?.cancel();
   if (res.ok) return true;
   if (res.status === 404) return false;
   throw new Error(`GET ${path}: ${res.status}`);
 }
 
-export async function deleteServerFile(path: string, node: NodeId = null): Promise<void> {
-  const res = await apiFetch(fileUrl(path, node), { method: "DELETE" });
+export async function deleteServerFile(path: string, place: PlaceId = null): Promise<void> {
+  const res = await apiFetch(fileUrl(path, place), { method: "DELETE" });
   if (res.status === 403) {
     const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
     if (answer?.readOnly) throw new ReadOnlyFileError(path);
@@ -201,6 +223,60 @@ export const renameServerNode = (id: string, name: string) =>
   nodeRequest("PATCH", `/${encodeURIComponent(id)}`, { name });
 export const deleteServerNode = (id: string) =>
   nodeRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
+
+export type ExperimentStatus = "draft" | "shared" | "archived";
+
+/** A sandbox on a knowledge node, with its own copy of the node's files. */
+export interface Experiment {
+  id: string;
+  nodeId: string;
+  authorId: string;
+  authorName: string | null;
+  title: string;
+  hypothesis: string;
+  params: Record<string, unknown>;
+  results: Record<string, unknown>;
+  status: ExperimentStatus;
+  forkedAt: string;
+  updatedAt: string;
+  fileCount: number;
+  /** writer: you are its author and it isn't archived. */
+  access: "writer" | "reader";
+  /** You are its author: you may share, archive, restore or delete it. */
+  mine: boolean;
+}
+
+export type ExperimentChange = Partial<
+  Pick<Experiment, "title" | "hypothesis" | "params" | "results" | "status">
+>;
+
+/** Experiments you can see, anywhere in the tree; null when they can't be read. */
+export async function listExperiments(): Promise<Experiment[] | null> {
+  try {
+    const res = await apiFetch("/api/experiments", { cache: "no-store" });
+    return res.ok ? ((await res.json()) as { experiments: Experiment[] }).experiments : null;
+  } catch {
+    return null;
+  }
+}
+
+async function experimentRequest(method: string, path: string, body?: unknown): Promise<Experiment> {
+  const res = await apiFetch(`/api/experiments${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = (await res.json().catch(() => ({}))) as Experiment & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `${method} experiment: ${res.status}`);
+  return data;
+}
+
+export const createServerExperiment = (nodeId: string, title: string) =>
+  experimentRequest("POST", "", { nodeId, title });
+export const updateServerExperiment = (id: string, change: ExperimentChange) =>
+  experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
+export const deleteServerExperiment = (id: string) =>
+  experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
 /** Whether login is on, and who is signed in (null without login). */
 export interface Account {
