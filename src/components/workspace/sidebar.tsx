@@ -9,6 +9,7 @@ import {
   FilePlus,
   ListTodo,
   MessagesSquare,
+  Network,
   Package,
   Sparkles,
   Trash2,
@@ -17,6 +18,7 @@ import {
 import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
+import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
@@ -26,6 +28,7 @@ export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
+  { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
   { id: "artifacts", label: "Artifacts", icon: Package },
@@ -85,7 +88,7 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 }
 
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write } = useWorkspace();
+  const { files, write, canEdit } = useWorkspace();
   const { open } = useWorkbench().editor;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -119,7 +122,8 @@ export function SidePanel({ view }: { view: SidebarView }) {
   };
 
   const title = VIEWS.find((v) => v.id === view)?.label ?? "";
-  const actions: ReactNode = (
+  // Viewers see the files but get no controls that change them.
+  const actions: ReactNode = canEdit && (
     <>
       {(view === "files" || view === "uploads") && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
@@ -148,7 +152,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats") return;
+        if (view === "chats" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -172,6 +176,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
         {view === "files" && <FileTree files={files} />}
+        {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
           <FlatList
             files={files.filter((f) => f.kind === "skill")}
@@ -182,7 +187,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         {view === "uploads" && (
           <FlatList
             files={files.filter((f) => f.kind === "upload")}
-            empty="Drop files here or use the upload button."
+            empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
           />
         )}
         {view === "artifacts" && (
@@ -241,7 +246,7 @@ function FileRow({
   label?: string;
   depth?: number;
 }) {
-  const { active, remove } = useWorkspace();
+  const { active, remove, canEdit } = useWorkspace();
   const { open } = useWorkbench().editor;
   const selected = active === file.path;
   return (
@@ -263,6 +268,7 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
+      {canEdit && (
       <button
         type="button"
         aria-label={`Delete ${file.path}`}
@@ -274,6 +280,7 @@ function FileRow({
       >
         <Trash2 className="size-3.5" />
       </button>
+      )}
     </div>
   );
 }
@@ -331,7 +338,7 @@ function buildTree(files: WorkspaceFile[]): Folder {
   return root;
 }
 
-function FileTree({ files }: { files: WorkspaceFile[] }) {
+export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) =>
@@ -369,5 +376,6 @@ function FileTree({ files }: { files: WorkspaceFile[] }) {
     </>
   );
 
-  return <div role="tree">{render(tree, 0)}</div>;
+  // Nested in the knowledge tree, this is a group inside that tree.
+  return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
 }
