@@ -220,6 +220,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const knownSha = useRef(new Map<string, string>());
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inflight = useRef(new Map<string, number>());
+  /** Files whose last save failed, until one succeeds. */
+  const failed = useRef(new Set<string>());
   const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
   const busy = (path: string, at: PlaceId = placeRef.current) =>
     pending.current.has(key(path, at)) || (inflight.current.get(key(path, at)) ?? 0) > 0;
@@ -290,9 +292,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       const info = await putServerFile(file, at);
       knownSha.current.set(k, info.sha256);
+      failed.current.delete(k);
       setSyncError(null);
     } catch (err) {
       console.error("[workspace] save failed:", err);
+      failed.current.add(k);
       setSyncError(`Couldn't save ${path}`);
     } finally {
       inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
@@ -319,13 +323,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [save]);
 
-  /** Sends waiting edits and resolves once no save is on the wire (or after a few seconds). */
-  const settleSaves = useCallback(async () => {
-    flushSaves();
-    for (let i = 0; i < 100 && [...inflight.current.values()].some((n) => n > 0); i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }, [flushSaves]);
+  /**
+   * Sends waiting edits and waits for the saves of `at`'s files; throws if one
+   * of them didn't make it, so a step that relies on the server's copy (a fork,
+   * archiving) doesn't go ahead without the user's latest edits.
+   */
+  const settleSaves = useCallback(
+    async (at: PlaceId) => {
+      flushSaves();
+      const prefix = `${at ?? ""}\n`;
+      const mine = (keys: Iterable<string>) => [...keys].filter((k) => k.startsWith(prefix));
+      const onWire = () => mine(inflight.current.keys()).some((k) => (inflight.current.get(k) ?? 0) > 0);
+      for (let i = 0; i < 200 && onWire(); i++) await new Promise((r) => setTimeout(r, 50));
+      if (onWire() || mine(pending.current.keys()).length || mine(failed.current).length) {
+        throw new Error("Your latest edits here haven't saved yet; try again once they are saved");
+      }
+    },
+    [flushSaves],
+  );
 
   // Brings local files in line with the server's list: fetches what changed,
   // drops what was deleted, and leaves files with unsaved edits alone, also
@@ -669,7 +684,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const createExperiment = useCallback(
     async (nodeId: string, title: string) => {
       // The fork copies what the server has, so recent edits go first.
-      await settleSaves();
+      if (placeRef.current === nodeId) await settleSaves(nodeId);
       const created = await createServerExperiment(nodeId, title);
       await refreshExperiments();
       await enterExperiment(created.id);
@@ -677,11 +692,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment, settleSaves],
   );
-  const updateExperiment = useCallback(async (id: string, change: ExperimentChange) => {
-    const updated = await updateServerExperiment(id, change);
-    setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
-    return updated;
-  }, []);
+  const updateExperiment = useCallback(
+    async (id: string, change: ExperimentChange) => {
+      // Archived is read only, so edits still on their way would be refused.
+      const here = experimentPlace(id);
+      if (change.status === "archived" && placeRef.current === here) await settleSaves(here);
+      const updated = await updateServerExperiment(id, change);
+      setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
+      return updated;
+    },
+    [settleSaves],
+  );
   const deleteExperiment = useCallback(
     async (id: string) => {
       const doomed = experiments.find((e) => e.id === id);

@@ -190,13 +190,8 @@ export class ExperimentService {
     // can't be read back in the statement that adds it.
     const id = randomUUID();
     await this.sql.begin(async (tx) => {
-      // No row lock here: viewers fork too, and locking needs write access.
-      // If the node is deleted meanwhile, the experiment goes with it (its
-      // access requires a live node).
-      const [node] = await tx`
-        SELECT 1 FROM nodes
-        WHERE id = ${nodeId} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL`;
-      if (!node) throw new NodeNotFoundError("Node not found");
+      // The insert also checks and holds the node (experiments_place in
+      // 005_experiments.sql), so a delete of it can't slip in between.
       await tx`
         INSERT INTO experiments (id, workspace_id, node_id, author_id, title, hypothesis, params, results)
         VALUES (${id}, ${this.workspaceId}, ${nodeId}, ${userId}, ${fields.title!},
@@ -220,8 +215,14 @@ export class ExperimentService {
         WHERE v.file_id = f.id AND f.experiment_id = ${id}`;
       await inTx?.(tx, id);
       await this.events.notify(tx, { op: "experiment", change: "create", id, node: nodeId });
+    }).catch((err: { code?: string; message?: string }) => {
+      if (err.code === "P0001" && err.message === "Node not found") throw new NodeNotFoundError("Node not found");
+      throw err;
     });
-    return (await this.get(userId, id))!;
+    const created = await this.get(userId, id);
+    // Deleted right after this commit.
+    if (!created) throw new NodeNotFoundError("Node not found");
+    return created;
   }
 
   /** Sets the given fields; false if the experiment is gone. */

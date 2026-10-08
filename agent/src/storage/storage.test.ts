@@ -613,6 +613,31 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(Number(rows.live), 0);
     });
 
+    test("an experiment can't be started on a node being deleted", async () => {
+      const tech = await as(alice).createNode(null, "Racing tech");
+      // Straight to the service, without Session's check: a deleted node is refused.
+      const gone = await as(alice).createNode(null, "Gone tech");
+      await as(alice).deleteNode(gone.id);
+      await assert.rejects(storage.experiments.create(alice, gone.id, { title: "x" }), NodeNotFoundError);
+
+      // The delete holds the node; a fork started meanwhile waits, then fails.
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      const deleting = storage.sql.begin(async (tx) => {
+        await tx`UPDATE nodes SET deleted_at = now() WHERE id = ${tech.id}`;
+        await held;
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      const forking = storage.experiments.create(alice, tech.id, { title: "Too late" });
+      await new Promise((r) => setTimeout(r, 100));
+      release();
+      await deleting;
+      await assert.rejects(forking, NodeNotFoundError);
+      const [row] = await storage.sql<{ n: string }[]>`
+        SELECT count(*) AS n FROM experiments WHERE node_id = ${tech.id} AND deleted_at IS NULL`;
+      assert.equal(Number(row.n), 0);
+    });
+
     test("Postgres keeps drafts private and archived ones read only", async () => {
       const draft = await as(carol).createExperiment(leveling, { title: "RLS draft" });
       const inDraft = (await storage.files.inExperiment(draft.id))!;

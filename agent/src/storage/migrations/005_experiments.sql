@@ -39,6 +39,25 @@ CREATE UNIQUE INDEX files_live_path ON files (workspace_id, node_id, experiment_
   NULLS NOT DISTINCT WHERE deleted_at IS NULL;
 CREATE INDEX files_by_experiment ON files (experiment_id) WHERE deleted_at IS NULL;
 
+-- An experiment needs a live node. The row lock makes a concurrent delete of
+-- the node wait for this insert (and then take the experiment with it), or
+-- this insert fail if the delete came first. It runs with the owner's rights,
+-- since a viewer may fork but can't lock a node row themselves.
+CREATE FUNCTION experiments_place() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
+BEGIN
+  PERFORM 1 FROM nodes
+  WHERE id = NEW.node_id AND workspace_id = NEW.workspace_id AND deleted_at IS NULL
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Node not found';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER experiments_place BEFORE INSERT ON experiments
+  FOR EACH ROW EXECUTE FUNCTION experiments_place();
+
 -- What `uid` may do in an experiment: 'writer' (its author, while it isn't
 -- archived), 'reader', or NULL for nothing.
 CREATE FUNCTION experiment_access(uid uuid, exp uuid) RETURNS text
