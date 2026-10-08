@@ -372,6 +372,10 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(await bobSession.canSee({ op: "write", node: moduleX, path: "a" }), true);
       assert.equal(await bobSession.canSee({ op: "write", node: techY, path: "a" }), false);
       assert.equal(await bobSession.canSee({ op: "delete", node: null, path: "a" }), false);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techX }), true);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techY }), false);
+      // Carol only sees Module X, so Tech X is the path to it.
+      assert.equal(await as(carol).canSee({ op: "node", change: "rename", id: techX }), true);
     });
 
     test("signed identities", () => {

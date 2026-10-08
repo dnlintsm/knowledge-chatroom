@@ -131,6 +131,20 @@ export class AccessService {
     return row.role;
   }
 
+  /**
+   * Whether the user can see a node at all: a role on it, or on something
+   * below it (then it shows as the path there). Also answers for a node that
+   * was just deleted, from the grants it had.
+   */
+  async seesNode(userId: string, nodeId: string): Promise<boolean> {
+    if (!isUuid(nodeId)) return false;
+    const [row] = await this.sql<{ sees: boolean | null }[]>`
+      SELECT bool_or(effective_role(${this.workspaceId}, ${userId}, d.id) IS NOT NULL) AS sees
+      FROM nodes n JOIN nodes d ON d.path <@ n.path AND d.workspace_id = n.workspace_id
+      WHERE n.id = ${nodeId} AND n.workspace_id = ${this.workspaceId}`;
+    return Boolean(row?.sees);
+  }
+
   /** The user's role on every live node, keyed by node id. */
   async nodeRoles(userId: string): Promise<Map<string, Role | null>> {
     const rows = await this.sql<{ id: string; role: Role | null }[]>`

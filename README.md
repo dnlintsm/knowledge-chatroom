@@ -155,8 +155,9 @@ npm run dev
   (with everything below it), and every `/api/files` route takes `?node=<id>`.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
-  workspace. Roles are additive: viewer reads, editor also writes and adds nodes, owner
-  also deletes and manages grants. A grant to a group covers members of its sub-groups too.
+  workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
+  file keeps its history) and adds and renames nodes; owner also deletes nodes and manages
+  grants. A grant to a group covers members of its sub-groups too.
   The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
   check access in one place (`agent/src/storage/session.ts`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is

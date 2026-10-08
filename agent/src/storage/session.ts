@@ -118,8 +118,8 @@ export class Session {
 
   /** Whether this principal may hear about a change. */
   async canSee(event: WorkspaceEvent): Promise<boolean> {
-    // Node events carry only an id; clients refetch the (filtered) tree.
-    if (event.op === "node") return true;
+    // Hidden nodes stay hidden: not even their ids go out.
+    if (event.op === "node") return this.parts.access.seesNode(this.principal.userId, event.id);
     return (await this.role(event.node)) !== null;
   }
 
@@ -203,7 +203,11 @@ export class Session {
   }
 }
 
-/** One place's files, as one principal. Reads need viewer, changes editor. */
+/**
+ * One place's files, as one principal. Reads need viewer; writes and deletes
+ * need editor, like in a shared folder (a deleted file keeps its history, so
+ * nothing is lost). Deleting a whole node, and sharing, need owner.
+ */
 export class FilesSession {
   constructor(
     private readonly service: FileService,

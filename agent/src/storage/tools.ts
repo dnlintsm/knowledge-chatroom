@@ -109,7 +109,7 @@ export function createFileTools(
       "list_nodes",
       "Show the knowledge tree: its levels (e.g. tech › module › loop › process) and " +
         "the nodes the user can see, with id, number of files and the user's role " +
-        "(viewer can read, editor can also write, owner can also delete). Files live " +
+        "(viewer can read, editor can also write files and add nodes, owner can also delete nodes). Files live " +
         "at the workspace root or in a node.",
       {},
       () =>
