@@ -13,12 +13,17 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 
+import { S3BlobStore } from "./blobs";
 import { storageConfigFromEnv } from "./config";
-import { connect } from "./db";
-import { createFilesHandler } from "./http";
-import { FileExistsError, ReadOnlyFileError, type FileEvent } from "./files";
+import { asUser as asDbUser, connect } from "./db";
+import type { WorkspaceEvent } from "./events";
+import { AccessError, ForbiddenError, type Principal } from "./access";
+import { createStorageHandler } from "./http";
+import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
+import { NodeNotFoundError } from "./nodes";
+import { FileExistsError, ReadOnlyFileError } from "./files";
 import { initStorage, type Storage } from "./index";
-import { createFileTools, numberLines } from "./tools";
+import { createFileTools, formatTree, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const text = (s: string) => new TextEncoder().encode(s);
@@ -163,8 +168,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
   });
 
   test("subscribers hear committed writes and deletes", async () => {
-    const events: FileEvent[] = [];
-    const unsubscribe = await storage.files.subscribe((e) => events.push(e));
+    const events: WorkspaceEvent[] = [];
+    const unsubscribe = await storage.events.subscribe((e) => events.push(e));
     await storage.files.write("notes/watched.md", text("hi"), { author: "agent" });
     await storage.files.remove("notes/watched.md");
     await storage.files.remove("notes/never-existed.md");
@@ -174,10 +179,343 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     assert.equal(events.length, 2);
     assert.deepEqual(
       { ...events[0], sha256: undefined },
-      { op: "write", path: "notes/watched.md", author: "agent", sha256: undefined },
+      { op: "write", node: null, path: "notes/watched.md", author: "agent", sha256: undefined },
     );
-    assert.match(events[0].sha256!, /^[0-9a-f]{64}$/);
-    assert.deepEqual(events[1], { op: "delete", path: "notes/watched.md" });
+    assert.match((events[0] as { sha256: string }).sha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(events[1], { op: "delete", node: null, path: "notes/watched.md" });
+  });
+
+  describe("knowledge tree", () => {
+    test("levels go tech › module › loop › process, one at a time", async () => {
+      assert.deepEqual(
+        (await storage.nodes.types()).map((t) => t.name),
+        ["tech", "module", "loop", "process"],
+      );
+      const tech = await storage.nodes.create(null, "  Etch  ");
+      assert.equal(tech.name, "Etch");
+      assert.equal(tech.type, "tech");
+      const mod = await storage.nodes.create(tech.id, "Module 3");
+      const loop = await storage.nodes.create(mod.id, "Endpoint");
+      const proc = await storage.nodes.create(loop.id, "Recipe tuning");
+      assert.equal(proc.type, "process");
+      assert.equal(proc.parentId, loop.id);
+
+      await assert.rejects(storage.nodes.create(proc.id, "Too deep"), /below a process/);
+      await assert.rejects(storage.nodes.create(tech.id, "module 3"), /already exists/);
+      await assert.rejects(storage.nodes.create(null, " "), /needs a name/);
+      await assert.rejects(
+        storage.nodes.create("00000000-0000-0000-0000-000000000000", "x"),
+        /Parent node not found/,
+      );
+      // The same name is fine under another parent.
+      const other = await storage.nodes.create(null, "Litho");
+      await storage.nodes.create(other.id, "Module 3");
+
+      const lineage = await storage.nodes.lineage(proc.id);
+      assert.deepEqual(lineage!.map((n) => n.name), ["Etch", "Module 3", "Endpoint", "Recipe tuning"]);
+    });
+
+    test("the database refuses a node at the wrong level", async () => {
+      const tech = await storage.nodes.create(null, "Deposition");
+      await assert.rejects(
+        storage.sql`
+          INSERT INTO nodes (workspace_id, parent_id, type_id, name)
+          SELECT n.workspace_id, n.id, t.id, 'skips a level'
+          FROM nodes n JOIN node_types t ON t.workspace_id = n.workspace_id AND t.depth = 3
+          WHERE n.id = ${tech.id}`,
+        /exactly one level below/,
+      );
+    });
+
+    test("each node has its own files; deleting a node removes its subtree", async () => {
+      const tech = await storage.nodes.create(null, "Implant");
+      const mod = await storage.nodes.create(tech.id, "Beamline");
+      const techFiles = (await storage.files.inNode(tech.id))!;
+      const modFiles = (await storage.files.inNode(mod.id))!;
+
+      await storage.files.write("notes/overview.md", text("root"));
+      await techFiles.write("notes/overview.md", text("tech"));
+      await modFiles.write("notes/overview.md", text("module"));
+      const read = async (files: typeof techFiles) =>
+        new TextDecoder().decode((await files.read("notes/overview.md"))!.bytes);
+      assert.equal(await read(storage.files), "root");
+      assert.equal(await read(techFiles), "tech");
+      assert.equal(await read(modFiles), "module");
+      assert.deepEqual((await modFiles.list()).map((f) => f.path), ["notes/overview.md"]);
+      assert.equal((await storage.nodes.get(tech.id))!.fileCount, 1);
+
+      // Renaming changes nothing else.
+      await storage.nodes.rename(tech.id, "Ion implant");
+      assert.equal(await read(techFiles), "tech");
+
+      assert.equal(await storage.nodes.remove(tech.id), true);
+      assert.equal(await storage.nodes.get(mod.id), null);
+      assert.equal(await modFiles.read("notes/overview.md"), null);
+      assert.equal(await storage.files.inNode(mod.id), null);
+      await assert.rejects(modFiles.write("notes/late.md", text("x")), /Node not found/);
+      assert.equal(await read(storage.files), "root");
+      assert.equal(await storage.nodes.remove(tech.id), false);
+    });
+
+    test("events name the node", async () => {
+      const events: WorkspaceEvent[] = [];
+      const unsubscribe = await storage.events.subscribe((e) => events.push(e));
+      const tech = await storage.nodes.create(null, "Metrology");
+      await (await storage.files.inNode(tech.id))!.write("notes/a.md", text("x"));
+      await waitFor(() => events.length >= 2);
+      unsubscribe();
+      assert.deepEqual(events[0], { op: "node", change: "create", id: tech.id });
+      assert.equal(events[1].op, "write");
+      assert.equal((events[1] as { node: string }).node, tech.id);
+    });
+  });
+
+  describe("access control", () => {
+    const as = (userId: string, actor: Principal["actor"] = "user") =>
+      storage.session({ userId, actor });
+    let alice: string, bob: string, carol: string;
+    let techX: string, moduleX: string, techY: string;
+    let dept: string;
+
+    before(async () => {
+      // The first person to sign in owns the workspace; later ones get nothing.
+      alice = await storage.access.userForSubject("test|alice", { name: "Alice" });
+      bob = await storage.access.userForSubject("test|bob", { name: "Bob", email: "bob@example.com" });
+      carol = await storage.access.userForSubject("test|carol");
+
+      const owner = as(alice);
+      techX = (await owner.createNode(null, "Tech X")).id;
+      moduleX = (await owner.createNode(techX, "Module X")).id;
+      techY = (await owner.createNode(null, "Tech Y")).id;
+      await (await owner.files(moduleX)).write("notes/x.md", text("x"));
+
+      // company › etch dept › team; bob is in the team.
+      const company = await owner.createGroup(null, "Company");
+      dept = await owner.createGroup(company, "Etch dept");
+      const team = await owner.createGroup(dept, "Endpoint team");
+      await owner.setMember(team, bob, true);
+      await owner.setGrant(techX, "group", dept, "editor");
+    });
+
+    test("the first signed-in user owns the workspace", async () => {
+      assert.equal(await as(alice).role(null), "owner");
+      assert.equal(await as(bob).role(null), null);
+      assert.equal(await as(await storage.access.localUserId()).role(null), "owner");
+      // Signing in again finds the same user.
+      assert.equal(await storage.access.userForSubject("test|bob"), bob);
+    });
+
+    test("grants inherit down both trees", async () => {
+      // Granted to the dept on Tech X; bob is in a team under the dept.
+      assert.equal(await as(bob).role(techX), "editor");
+      assert.equal(await as(bob).role(moduleX), "editor");
+      assert.equal(await as(bob).role(techY), null);
+      assert.equal(await as(carol).role(moduleX), null);
+    });
+
+    test("roles are additive: the best grant wins", async () => {
+      const grant = await as(alice).setGrant(moduleX, "user", bob, "viewer");
+      assert.equal(await as(bob).role(moduleX), "editor");
+      await as(alice).setGrant(moduleX, "user", bob, "owner"); // replaces the viewer grant
+      assert.equal(await as(bob).role(moduleX), "owner");
+      assert.equal(await as(bob).role(techX), "editor");
+      assert.equal(await as(alice).revoke(grant), true);
+      assert.equal(await as(bob).role(moduleX), "editor");
+    });
+
+    test("the tree shows only what you can see, and the path to it", async () => {
+      const bobTree = await as(bob).tree();
+      assert.equal(bobTree.rootRole, null);
+      assert.deepEqual(bobTree.nodes.map((n) => [n.name, n.role]), [
+        ["Tech X", "editor"],
+        ["Module X", "editor"],
+      ]);
+
+      await as(alice).setGrant(moduleX, "user", carol, "viewer");
+      const carolTree = await as(carol).tree();
+      assert.deepEqual(carolTree.nodes.map((n) => [n.name, n.role, n.fileCount]), [
+        ["Tech X", null, 0],
+        ["Module X", "viewer", 1],
+      ]);
+      await assert.rejects(as(carol).files(techX), NodeNotFoundError);
+      await assert.rejects(as(carol).lineage(techY), NodeNotFoundError);
+    });
+
+    test("viewers read, editors write, owners delete", async () => {
+      const carolFiles = await as(carol).files(moduleX);
+      assert.ok(await carolFiles.read("notes/x.md"));
+      await assert.rejects(carolFiles.write("notes/x.md", text("no")), ForbiddenError);
+      await assert.rejects(carolFiles.remove("notes/x.md"), ForbiddenError);
+      await assert.rejects(as(carol).createNode(moduleX, "Loop"), ForbiddenError);
+
+      const bobFiles = await as(bob).files(moduleX);
+      const info = await bobFiles.write("notes/bob.md", text("from bob"));
+      assert.equal(info.author, "user");
+      const [version] = (await bobFiles.history("notes/bob.md"))!;
+      assert.equal(version.authorId, bob);
+      await as(bob).createNode(moduleX, "Loop B");
+      await assert.rejects(as(bob).deleteNode(moduleX), ForbiddenError);
+      await assert.rejects(as(bob).files(null), ForbiddenError);
+      await assert.rejects(as(bob).createNode(null, "Tech Z"), ForbiddenError);
+      await assert.rejects(as(bob).createGroup(null, "Mine"), ForbiddenError);
+      await assert.rejects(as(bob).setGrant(techX, "user", bob, "owner"), ForbiddenError);
+    });
+
+    test("Claude acts with the user's access and is recorded as the agent", async () => {
+      const claude = as(bob, "agent");
+      const info = await (await claude.files(moduleX)).write("artifacts/claude.md", text("hi"));
+      assert.equal(info.author, "agent");
+      await assert.rejects(claude.files(techY), NodeNotFoundError);
+    });
+
+    test("the workspace always keeps an owner who can sign in", async () => {
+      const ownGrant = (await as(alice).grants(null)).find(
+        (g) => g.principalType === "user" && g.principalId === alice,
+      )!;
+      await assert.rejects(as(alice).revoke(ownGrant.id), AccessError);
+      await assert.rejects(as(alice).setGrant(null, "user", alice, "editor"), AccessError);
+      await as(alice).setGrant(null, "user", carol, "owner");
+      assert.equal(await as(alice).revoke(ownGrant.id), true);
+      assert.equal(await as(alice).role(null), null);
+      // Put things back for the other tests.
+      await as(carol).setGrant(null, "user", alice, "owner");
+      await as(alice).revoke((await as(alice).grants(null)).find((g) => g.principalId === carol)!.id);
+    });
+
+    test("deleting a group removes its grants", async () => {
+      const temp = await as(alice).createGroup(null, "Temp");
+      await as(alice).setMember(temp, carol, true);
+      await as(alice).setGrant(techY, "group", temp, "viewer");
+      assert.equal(await as(carol).role(techY), "viewer");
+      assert.equal(await as(alice).deleteGroup(temp), true);
+      assert.equal(await as(carol).role(techY), null);
+      assert.equal((await as(alice).grants(techY)).length, 0);
+    });
+
+    test("changes are audited with who made them", async () => {
+      const log = await as(alice).auditLog(500);
+      const bobWrite = log.find((e) => e.action === "file.write" && e.target.path === "notes/bob.md")!;
+      assert.equal(bobWrite.actorId, bob);
+      assert.equal(bobWrite.actorType, "user");
+      assert.equal(bobWrite.target.node, moduleX);
+      const claudeWrite = log.find((e) => e.target.path === "artifacts/claude.md")!;
+      assert.equal(claudeWrite.actorType, "agent");
+      assert.equal(claudeWrite.actorId, bob);
+      assert.ok(log.some((e) => e.action === "grant.set" && e.target.principalId === dept));
+      await assert.rejects(as(bob).auditLog(), ForbiddenError);
+    });
+
+    test("watchers only hear about places they can see", async () => {
+      const bobSession = as(bob);
+      assert.equal(await bobSession.canSee({ op: "write", node: moduleX, path: "a" }), true);
+      assert.equal(await bobSession.canSee({ op: "write", node: techY, path: "a" }), false);
+      assert.equal(await bobSession.canSee({ op: "delete", node: null, path: "a" }), false);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techX }), true);
+      assert.equal(await bobSession.canSee({ op: "node", change: "rename", id: techY }), false);
+      // Carol only sees Module X, so Tech X is the path to it.
+      assert.equal(await as(carol).canSee({ op: "node", change: "rename", id: techX }), true);
+    });
+
+    test("signed identities", () => {
+      const secret = "s".repeat(32);
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const token = signIdentity({ sub: "test|bob", exp }, secret);
+      assert.equal(verifyIdentity(token, secret)?.sub, "test|bob");
+      assert.equal(verifyIdentity(token, "t".repeat(32)), null);
+      assert.equal(verifyIdentity(token.replace(/\.[^.]+\./, ".e30."), secret), null);
+      assert.equal(verifyIdentity(signIdentity({ sub: "test|bob", exp: 1 }, secret), secret), null);
+      assert.equal(verifyIdentity(signIdentity({ sub: "local", exp }, secret), secret), null);
+    });
+
+    test("with login on, the API answers as the signed-in user", async () => {
+      const secret = "k".repeat(32);
+      const signed = { ...storage, config: { ...storage.config, authSecret: secret } };
+      const handle = createStorageHandler(() => signed, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const asUser = (sub: string) => ({ [IDENTITY_HEADER]: signIdentity({ sub, exp }, secret) });
+      try {
+        assert.equal((await fetch(`${url}/nodes`)).status, 401);
+        assert.equal((await fetch(`${url}/files`, { headers: { [IDENTITY_HEADER]: "v1.bad.sig" } })).status, 401);
+
+        const tree = (await (await fetch(`${url}/nodes`, { headers: asUser("test|bob") })).json()) as {
+          nodes: { name: string }[];
+        };
+        assert.deepEqual(tree.nodes.map((n) => n.name).slice(0, 2), ["Tech X", "Module X"]);
+        assert.equal((await fetch(`${url}/files`, { headers: asUser("test|bob") })).status, 403);
+        assert.equal((await fetch(`${url}/files?node=${techY}`, { headers: asUser("test|bob") })).status, 404);
+        const put = await fetch(`${url}/files/notes/api.md?node=${moduleX}`, {
+          method: "PUT",
+          headers: asUser("test|carol"),
+          body: "x",
+        });
+        assert.equal(put.status, 403);
+
+        const me = (await (await fetch(`${url}/access`, { headers: asUser("test|alice") })).json()) as {
+          me: { id: string };
+          rootRole: string;
+        };
+        assert.deepEqual([me.me.id, me.rootRole], [alice, "owner"]);
+        const grant = await fetch(`${url}/access/grants`, {
+          method: "POST",
+          headers: { ...asUser("test|alice"), "Content-Type": "application/json" },
+          body: JSON.stringify({ node: techY, principalType: "user", principalId: carol, role: "viewer" }),
+        });
+        assert.equal(grant.status, 200);
+        assert.equal(await as(carol).role(techY), "viewer");
+        assert.equal((await fetch(`${url}/access/audit`, { headers: asUser("test|bob") })).status, 403);
+        const groups = (await (await fetch(`${url}/access/groups`, { headers: asUser("test|bob") })).json()) as {
+          groups: { name: string }[];
+        };
+        assert.ok(groups.groups.some((g) => g.name === "Etch dept"));
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
+    });
+
+    test("Postgres enforces access too, even with the app's checks skipped", async () => {
+      assert.equal(storage.rowSecurity, true, "the test database user should be able to use knowledge_user");
+      await (await as(alice).files(techY)).write("notes/y.md", text("secret"));
+      const filesIn = async (node: string | null) => (await storage.files.inNode(node))!;
+
+      // Straight to the services as bob, without Session's checks.
+      await asDbUser(storage.sql, bob, async (db) => {
+        const nodes = await storage.nodes.withSql(db).list();
+        assert.ok(nodes.some((n) => n.id === techX));
+        assert.ok(!nodes.some((n) => n.id === techY));
+        const inY = (await filesIn(techY)).withSql(db);
+        assert.deepEqual(await inY.list(), []);
+        assert.equal(await inY.remove("notes/y.md"), false);
+        assert.equal(await storage.nodes.withSql(db).rename(techY, "Mine now"), null);
+      });
+      // Bob edits Tech X, so he may rename it, but deleting it needs owner.
+      await assert.rejects(
+        asDbUser(storage.sql, bob, (db) => storage.nodes.withSql(db).remove(techX)),
+        /row-level security/,
+      );
+      assert.ok(await storage.nodes.get(techX));
+      await assert.rejects(
+        asDbUser(storage.sql, bob, async (db) =>
+          (await filesIn(techY)).withSql(db).write("notes/z.md", text("z")),
+        ),
+      );
+      // No role at the root: nothing can be added there.
+      await assert.rejects(
+        asDbUser(storage.sql, carol, async (db) => (await filesIn(null)).withSql(db).write("x.md", text("x"))),
+        /row-level security/,
+      );
+      await assert.rejects(
+        asDbUser(storage.sql, carol, (db) => storage.nodes.withSql(db).create(null, "Carol's")),
+        /row-level security/,
+      );
+
+      const y = await filesIn(techY);
+      assert.equal((await y.read("notes/y.md"))?.bytes.length, 6);
+      assert.equal(await y.stat("notes/z.md"), null);
+      assert.equal((await storage.nodes.get(techY))?.name, "Tech Y");
+    });
   });
 
   describe("Claude's file tools", () => {
@@ -192,7 +530,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     };
 
     before(() => {
-      tools = Object.fromEntries(createFileTools(() => storage.files).map((t) => [t.name, t]));
+      tools = Object.fromEntries(createFileTools(() => storage).map((t) => [t.name, t]));
     });
 
     test("write_file records an agent version, read_file numbers lines", async () => {
@@ -203,6 +541,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual(JSON.parse(written.text), {
         ok: true,
         path: "artifacts/tool.md",
+        node: null,
         created: true,
       });
       assert.equal((await storage.files.stat("artifacts/tool.md"))!.author, "agent");
@@ -231,6 +570,51 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(listed.find((f) => f.path === "runs/r2/models/general_rules.md")?.readOnly, true);
     });
 
+    test("tools made for a user can do only what that user can", async () => {
+      const local = await storage.access.localUserId();
+      const viewer = await storage.access.userForSubject("test|tool-viewer");
+      await storage.access.setGrant(null, "user", viewer, "viewer", local);
+      assert.equal(await storage.access.role(viewer, null), "viewer");
+      const toolsFor = (user: string | null) =>
+        Object.fromEntries(createFileTools(() => storage, async () => user).map((t) => [t.name, t]));
+      const run = async (user: string | null, name: string, args: Record<string, unknown>) =>
+        (await toolsFor(user)[name].handler(args as never, {})) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
+
+      assert.equal((await run(viewer, "list_files", {})).isError, undefined);
+      const denied = await run(viewer, "write_file", { path: "notes/viewer.md", content: "no" });
+      assert.equal(denied.isError, true);
+      assert.match(denied.content[0].text, /editor access/);
+      assert.equal(await storage.files.stat("notes/viewer.md"), null);
+      // No user (login on, but the run carried none): nothing at all.
+      assert.equal((await run(null, "list_files", {})).isError, true);
+    });
+
+    test("list_nodes shows the tree; file tools work inside a node", async () => {
+      const created = JSON.parse(
+        (await call("create_node", { name: "CMP" })).text,
+      ) as { id: string; type: string };
+      assert.equal(created.type, "tech");
+      const child = JSON.parse(
+        (await call("create_node", { parentId: created.id, name: "Pad wear" })).text,
+      ) as { id: string };
+
+      const tree = (await call("list_nodes")).text;
+      assert.match(tree, /^Levels: tech › module › loop › process/);
+      assert.ok(tree.includes(`- CMP [tech] id=${created.id} (0 files, owner)`));
+      assert.ok(tree.includes(`  - Pad wear [module] id=${child.id} (0 files, owner)`));
+
+      await call("write_file", { node: child.id, path: "notes/wear.md", content: "worn" });
+      assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
+      const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
+      assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
+      const missing = await call("list_files", { node: "not-a-node" });
+      assert.equal(missing.isError, true);
+      assert.match(missing.text, /list_nodes/);
+    });
+
     test("binary files are described, not dumped", async () => {
       await storage.files.write("uploads/pic.png", new Uint8Array([137, 80, 78, 71]));
       const read = JSON.parse((await call("read_file", { path: "uploads/pic.png" })).text);
@@ -244,7 +628,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     let base: string;
 
     before(async () => {
-      const handle = createFilesHandler(() => storage.files, 1024);
+      const handle = createStorageHandler(() => storage, 1024);
       server = http.createServer((req, res) =>
         handle(req, res, new URL(req.url!, "http://localhost")),
       );
@@ -307,9 +691,90 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(event.author, "user");
     });
 
+    test("nodes API and ?node= file routes", async () => {
+      const send = (path: string, method: string, body?: unknown) =>
+        fetch(`${base}${path}`, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      const created = await send("/nodes", "POST", { parentId: null, name: "Wet clean" });
+      assert.equal(created.status, 201);
+      const tech = (await created.json()) as { id: string };
+      const mod = (await (await send("/nodes", "POST", { parentId: tech.id, name: "SC1" })).json()) as {
+        id: string;
+      };
+
+      const { types, nodes } = (await (await fetch(`${base}/nodes`)).json()) as {
+        types: { name: string }[];
+        nodes: { id: string }[];
+      };
+      assert.equal(types[0].name, "tech");
+      assert.ok(nodes.some((n) => n.id === mod.id));
+
+      const { lineage } = (await (await fetch(`${base}/nodes/${mod.id}`)).json()) as {
+        lineage: { name: string }[];
+      };
+      assert.deepEqual(lineage.map((n) => n.name), ["Wet clean", "SC1"]);
+
+      assert.equal((await send(`/nodes/${tech.id}`, "PATCH", { name: "Wet" })).status, 200);
+      assert.equal((await send("/nodes", "POST", { parentId: tech.id, name: "sc1" })).status, 400);
+      assert.equal((await send("/nodes", "POST", { name: 3 })).status, 400);
+
+      const put = await fetch(`${base}/files/notes/bath.md?node=${mod.id}`, { method: "PUT", body: "hot" });
+      assert.equal(put.status, 200);
+      assert.equal(await (await fetch(`${base}/files/notes/bath.md?node=${mod.id}`)).text(), "hot");
+      assert.equal((await fetch(`${base}/files/notes/bath.md`)).status, 404);
+      const listed = (await (await fetch(`${base}/files?node=${mod.id}`)).json()) as {
+        files: { path: string }[];
+      };
+      assert.deepEqual(listed.files.map((f) => f.path), ["notes/bath.md"]);
+
+      assert.equal((await send(`/nodes/${tech.id}`, "DELETE")).status, 200);
+      assert.equal((await fetch(`${base}/files?node=${mod.id}`)).status, 404);
+      assert.equal((await fetch(`${base}/files?node=nope`)).status, 404);
+      assert.equal((await fetch(`${base}/nodes/${mod.id}`)).status, 404);
+    });
+
+    test("binary downloads redirect to a signed store link when S3_PUBLIC_URL is set", async () => {
+      const publicUrl = storage.config.s3.endpoint;
+      if (!publicUrl) return; // AWS: nothing local to point browsers at.
+      const linked = { ...storage, blobs: new S3BlobStore({ ...storage.config.s3, publicUrl }) };
+      const handle = createStorageHandler(() => linked, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      try {
+        const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+        await fetch(`${url}/files/uploads/pic.png`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/png" },
+          body: png,
+        });
+        const res = await fetch(`${url}/files/uploads/pic.png`, { redirect: "manual" });
+        assert.equal(res.status, 302);
+        const link = res.headers.get("location")!;
+        assert.ok(link.startsWith(publicUrl), link);
+        assert.match(link, /X-Amz-Expires=300/);
+        const fromStore = await fetch(link);
+        assert.equal(fromStore.status, 200);
+        assert.equal(fromStore.headers.get("content-type"), "image/png");
+        assert.deepEqual(new Uint8Array(await fromStore.arrayBuffer()), png);
+
+        // Text is still served here (the UI fetches it from this origin).
+        await fetch(`${url}/files/notes/plain.md`, { method: "PUT", body: "plain" });
+        const text = await fetch(`${url}/files/notes/plain.md`, { redirect: "manual" });
+        assert.equal(text.status, 200);
+        assert.equal(await text.text(), "plain");
+        assert.equal((await fetch(`${url}/files/uploads/missing.png`, { redirect: "manual" })).status, 404);
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
+    });
+
     test("without storage, says whether it is off, starting or failed", async () => {
       const statusFor = async (state: "off" | "starting" | "failed") => {
-        const handle = createFilesHandler(() => null, 1024, () => state);
+        const handle = createStorageHandler(() => null, 1024, () => state);
         const srv = http.createServer((req, res) =>
           handle(req, res, new URL(req.url!, "http://localhost")),
         );

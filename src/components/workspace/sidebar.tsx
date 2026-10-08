@@ -11,6 +11,7 @@ import {
   ListTodo,
   Lock,
   MessagesSquare,
+  Network,
   Package,
   Route,
   Sparkles,
@@ -21,6 +22,7 @@ import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
+import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
 import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
 import { useWorkspace } from "./store";
@@ -32,6 +34,7 @@ export type { SidebarView };
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
   { id: "runs", label: "Traverse", icon: Route },
+  { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
   { id: "artifacts", label: "Artifacts", icon: Package },
@@ -91,7 +94,7 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 }
 
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write } = useWorkspace();
+  const { files, write, canEdit } = useWorkspace();
   const { editor, runDir, notify } = useWorkbench();
   const { open } = editor;
   // In Focus mode the Files view shows the run, and new files go into it.
@@ -139,7 +142,8 @@ export function SidePanel({ view }: { view: SidebarView }) {
 
   const label = VIEWS.find((v) => v.id === view)?.label ?? "";
   const title = root ? `${label} · ${root.split("/").pop()}` : label;
-  const actions: ReactNode = (
+  // Viewers see the files but get no controls that change them.
+  const actions: ReactNode = canEdit && (
     <>
       {(view === "files" || view === "uploads") && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
@@ -168,7 +172,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats" || view === "runs") return;
+        if (view === "chats" || view === "runs" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -195,6 +199,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           <FileTree files={root ? files.filter((f) => isInRun(f.path, root)) : files} root={root} />
         )}
         {view === "runs" && <RunList />}
+        {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
           <FlatList
             files={files.filter((f) => f.kind === "skill")}
@@ -205,7 +210,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         {view === "uploads" && (
           <FlatList
             files={files.filter((f) => f.kind === "upload")}
-            empty="Drop files here or use the upload button."
+            empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
           />
         )}
         {view === "artifacts" && (
@@ -265,7 +270,7 @@ function FileRow({
   label?: string;
   depth?: number;
 }) {
-  const { active, remove } = useWorkspace();
+  const { active, remove, canEdit } = useWorkspace();
   const { open } = useWorkbench().editor;
   const selected = active === file.path;
   return (
@@ -290,17 +295,19 @@ function FileRow({
       {file.readOnly ? (
         <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
       ) : (
-        <button
-          type="button"
-          aria-label={`Delete ${file.path}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
-          }}
-          className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        canEdit && (
+          <button
+            type="button"
+            aria-label={`Delete ${file.path}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
+            }}
+            className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )
       )}
     </div>
   );
@@ -360,7 +367,15 @@ function buildTree(files: WorkspaceFile[], base: string | null): Folder {
   return root;
 }
 
-function FileTree({ files, root }: { files: WorkspaceFile[]; root: string | null }) {
+export function FileTree({
+  files,
+  root = null,
+  depth: start = 0,
+}: {
+  files: WorkspaceFile[];
+  root?: string | null;
+  depth?: number;
+}) {
   const tree = useMemo(() => buildTree(files, root), [files, root]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) =>
@@ -398,7 +413,8 @@ function FileTree({ files, root }: { files: WorkspaceFile[]; root: string | null
     </>
   );
 
-  return <div role="tree">{render(tree, 0)}</div>;
+  // Nested in the knowledge tree, this is a group inside that tree.
+  return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
 }
 
 /** Traverse view: every run in the workspace; picking one focuses it. */

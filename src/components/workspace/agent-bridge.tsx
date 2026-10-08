@@ -50,8 +50,15 @@ export function useWorkspaceAgent() {
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `run` is the experiment run (RUN_DIR) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder. `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
+      "The user's knowledge workspace (shown beside the chat). `currentNode` is where in the knowledge tree the user is (null = the workspace root); `files` are the files there. `run` is the experiment run (RUN_DIR, a folder among those files) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder. `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these.",
     value: {
+      currentNode: ws.node
+        ? {
+            id: ws.node,
+            path: ws.lineage.map((n) => `${n.name} (${n.type})`).join(" › "),
+            ancestors: ws.lineage.slice(0, -1).map((n) => ({ id: n.id, name: n.name, type: n.type })),
+          }
+        : null,
       run: runDir
         ? {
             path: runDir,
@@ -137,9 +144,20 @@ export function useWorkspaceAgent() {
 
   useFrontendTool({
     name: "openWorkspaceFile",
-    description: "Open a workspace file in the middle pane so the user can see it.",
-    parameters: z.object({ path: z.string() }),
-    handler: async ({ path }) => {
+    description:
+      "Open a workspace file in the middle pane so the user can see it. Give `node` to open a file in another knowledge node; the user's view moves there.",
+    parameters: z.object({
+      path: z.string(),
+      node: z.string().optional().describe("Knowledge node id; omit for where the user is now."),
+    }),
+    handler: async ({ path, node }) => {
+      if (node !== undefined && node !== latest.current.node) {
+        if (!(await latest.current.enterNode(node || null))) return { error: `No knowledge node ${node}` };
+        // The new place's files reach `latest` on the next render.
+        for (let i = 0; i < 20 && !latest.current.getFile(path); i++) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
       if (!latest.current.getFile(path)) return { error: `No file at ${path}` };
       latestWorkbench.current.editor.open(normalizePath(path));
       return { ok: true };
