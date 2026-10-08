@@ -31,6 +31,12 @@ CREATE INDEX blob_chunks_trgm ON blob_chunks USING gin (body gin_trgm_ops);
 CREATE INDEX files_path_trgm ON files USING gin (path gin_trgm_ops) WHERE deleted_at IS NULL;
 CREATE INDEX file_versions_by_blob ON file_versions (blob_sha256);
 
+-- One tsvector for a whole text from its passages, so a query is checked
+-- against the file as a whole (an excluded word anywhere rules it out).
+CREATE AGGREGATE tsvector_agg(tsvector) (
+  SFUNC = tsvector_concat, STYPE = tsvector, INITCOND = ''
+);
+
 -- Steps between two places in the knowledge tree (node paths; '' = root), so
 -- results near where the user is working rank first.
 CREATE FUNCTION tree_distance(a ltree, b ltree) RETURNS integer

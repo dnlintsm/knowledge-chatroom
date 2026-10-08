@@ -1,4 +1,4 @@
-import type { BlobStore } from "./blobs";
+import { isNotFound, type BlobStore } from "./blobs";
 import type { Sql, Tx } from "./db";
 import type { AuthorType } from "./events";
 import { isNodeId } from "./nodes";
@@ -128,6 +128,18 @@ interface HitRow {
   author_type: AuthorType;
 }
 
+/**
+ * The query's wanted words joined with `or`, for finding the passages that
+ * could be part of a match (words to exclude and quotes dropped).
+ */
+export function anyWords(query: string): string {
+  return (query.match(/-?"[^"]*"?|\S+/g) ?? [])
+    .filter((token) => !token.startsWith("-"))
+    .flatMap((token) => token.replace(/"/g, " ").split(/\s+/))
+    .filter((word) => word && word.toLowerCase() !== "or")
+    .join(" or ");
+}
+
 /** Plain words of a query, for picking the passage to show. */
 function queryTerms(query: string): string[] {
   return query
@@ -202,32 +214,59 @@ export class SearchService {
       opts.nearExperiment && isNodeId(opts.nearExperiment) ? opts.nearExperiment : null;
     // Substring match too, for what full-text search doesn't split into words.
     const pattern = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    // A file matches when its whole text satisfies the query (so -word and
+    // words in different passages count across the file), its text contains
+    // the query as written, or its path does. `any` (one of the wanted words)
+    // finds candidate passages fast and picks the one to show.
     const rows = await this.sql<HitRow[]>`
-      WITH hits AS (
-        SELECT DISTINCT ON (f.id)
-          f.path, f.kind, f.mime, f.node_id, f.experiment_id, f.updated_at, v.author_type,
-          e.title AS experiment_title, c.body,
-          coalesce(n.path, en.path, ''::ltree) AS place_path,
-          (CASE WHEN c.sha256 IS NULL THEN 0 ELSE ts_rank(c.tsv, q.tsq) + 0.1 END
-           + CASE WHEN f.path ILIKE ${pattern} THEN 1 ELSE 0 END) AS score
+      WITH q AS (
+        SELECT websearch_to_tsquery('english', ${query}) AS tsq,
+               websearch_to_tsquery('english', ${anyWords(query)}) AS anyq
+      ),
+      candidates AS (
+        SELECT f.id, f.path, f.kind, f.mime, f.node_id, f.experiment_id, f.updated_at,
+               v.author_type, v.blob_sha256, e.title AS experiment_title,
+               coalesce(n.path, en.path, ''::ltree) AS place_path
         FROM files f
-        CROSS JOIN (SELECT websearch_to_tsquery('english', ${query}) AS tsq) q
         JOIN file_versions v ON v.id = f.current_version_id
         LEFT JOIN nodes n ON n.id = f.node_id
         LEFT JOIN file_versions fv ON fv.id = f.forked_from
         LEFT JOIN experiments e ON e.id = f.experiment_id
         LEFT JOIN nodes en ON en.id = e.node_id
-        LEFT JOIN blob_chunks c
-          ON c.sha256 = v.blob_sha256 AND (c.tsv @@ q.tsq OR c.body ILIKE ${pattern})
+        CROSS JOIN q
         WHERE f.workspace_id = ${this.workspaceId} AND f.deleted_at IS NULL
-          AND (c.sha256 IS NOT NULL OR f.path ILIKE ${pattern})
+          AND (f.path ILIKE ${pattern} OR EXISTS (
+                SELECT 1 FROM blob_chunks c
+                WHERE c.sha256 = v.blob_sha256 AND (c.tsv @@ q.anyq OR c.body ILIKE ${pattern})))
           AND place_rank(f.workspace_id, ${userId}, f.node_id, f.experiment_id) >= 1
           -- An experiment's unchanged copy of a node file would only repeat the
           -- node's, except for someone working in that experiment.
           AND NOT (fv.blob_sha256 IS NOT DISTINCT FROM v.blob_sha256
                    AND f.experiment_id IS DISTINCT FROM ${workingIn}::uuid)
           ${scope === null ? this.sql`` : this.sql`AND coalesce(n.path, en.path) <@ ${scope}::ltree`}
-        ORDER BY f.id, score DESC, c.ord
+      ),
+      hits AS (
+        SELECT h.*, passage.body,
+          (CASE WHEN doc.tsv @@ q.tsq THEN ts_rank(doc.tsv, q.tsq) + 0.1
+                WHEN passage.literal THEN 0.1 ELSE 0 END
+           + CASE WHEN h.path ILIKE ${pattern} THEN 1 ELSE 0 END) AS score
+        FROM candidates h
+        CROSS JOIN q
+        CROSS JOIN LATERAL (
+          SELECT tsvector_agg(c.tsv ORDER BY c.ord) AS tsv
+          FROM blob_chunks c WHERE c.sha256 = h.blob_sha256
+        ) doc
+        LEFT JOIN LATERAL (
+          SELECT c.body, c.body ILIKE ${pattern} AS literal
+          FROM blob_chunks c
+          WHERE c.sha256 = h.blob_sha256 AND (c.tsv @@ q.anyq OR c.body ILIKE ${pattern})
+          ORDER BY c.tsv @@ q.tsq DESC, c.body ILIKE ${pattern} DESC,
+                   ts_rank(c.tsv, q.anyq) DESC, c.ord
+          LIMIT 1
+        ) passage ON true
+        WHERE doc.tsv @@ q.tsq OR h.path ILIKE ${pattern}
+           OR EXISTS (SELECT 1 FROM blob_chunks c
+                      WHERE c.sha256 = h.blob_sha256 AND c.body ILIKE ${pattern})
       ),
       best AS (
         SELECT * FROM hits
@@ -259,35 +298,55 @@ export class SearchService {
 
   /**
    * Indexes current file versions written before search existed (or whose
-   * indexing was missed), a batch at a time. Returns how many blobs it did.
+   * indexing was missed), a batch at a time, leaving out `skip`. Returns the
+   * blobs it indexed and those it couldn't read this time (a store error
+   * other than "not there"); those stay pending for a later try.
    * Runs with the server's own connection, outside any user's rights.
    */
-  async indexPending(batch = 20): Promise<number> {
+  async indexPending(
+    batch = 20,
+    skip: ReadonlySet<string> = new Set(),
+  ): Promise<{ indexed: number; failed: string[] }> {
     const rows = await this.sql<{ sha256: string }[]>`
       SELECT DISTINCT v.blob_sha256 AS sha256
       FROM files f
       JOIN file_versions v ON v.id = f.current_version_id
       LEFT JOIN blob_texts t ON t.sha256 = v.blob_sha256
       WHERE f.deleted_at IS NULL AND t.sha256 IS NULL
+        AND NOT (v.blob_sha256 = ANY(${[...skip]}::text[]))
       LIMIT ${batch}`;
+    const failed: string[] = [];
     for (const { sha256 } of rows) {
       let bytes: Uint8Array;
       try {
         bytes = await this.blobs.get(sha256);
       } catch (err) {
-        // Recorded as no text, so a missing blob isn't retried forever.
-        console.warn(`[search] could not read blob ${sha256} to index it:`, err);
+        if (!isNotFound(err)) {
+          console.warn(`[search] could not read blob ${sha256} to index it, will retry:`, err);
+          failed.push(sha256);
+          continue;
+        }
+        // Gone from the store: recorded as no text, so it isn't retried forever.
+        console.warn(`[search] blob ${sha256} is missing from the store; indexed as empty`);
         bytes = new Uint8Array();
       }
       await this.sql.begin((tx) => indexBlob(tx, sha256, bytes));
     }
-    return rows.length;
+    return { indexed: rows.length - failed.length, failed };
   }
 
-  /** indexPending() until nothing is left. */
-  async indexAll(): Promise<number> {
-    let total = 0;
-    for (let n = await this.indexPending(); n > 0; n = await this.indexPending()) total += n;
-    return total;
+  /**
+   * indexPending() until nothing is left but blobs that failed in this pass.
+   * Returns how many it indexed and how many failed.
+   */
+  async indexAll(): Promise<{ indexed: number; failed: number }> {
+    const skip = new Set<string>();
+    let indexed = 0;
+    for (;;) {
+      const batch = await this.indexPending(20, skip);
+      indexed += batch.indexed;
+      for (const sha of batch.failed) skip.add(sha);
+      if (batch.indexed === 0 && batch.failed.length === 0) return { indexed, failed: skip.size };
+    }
   }
 }

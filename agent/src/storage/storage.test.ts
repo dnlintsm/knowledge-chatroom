@@ -23,7 +23,7 @@ import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { initStorage, type Storage } from "./index";
-import { chunkText, extractText, snippetFor } from "./search";
+import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { createFileTools, formatTree, numberLines } from "./tools";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -750,6 +750,25 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual(paths(phrase), ["notes/overview.md"]);
     });
 
+    test("a query applies to the whole file, not one passage", async () => {
+      // Two passages: the words sit in different ones.
+      const filler = "Routine check, nothing to report. ".repeat(40);
+      const long = `Bellows leak found.\n\n${filler}\n\n${filler}\n\nGasket replaced.`;
+      const files = await as(alice).files(wet);
+      await files.write("notes/maintenance.md", text(long));
+      const n = await storage.sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM blob_chunks c JOIN blob_texts t USING (sha256)
+        WHERE c.body LIKE 'Bellows%' OR c.body LIKE '%Gasket replaced.'`;
+      assert.ok(n[0].n >= 2, "the test needs the words in separate passages");
+      assert.deepEqual(paths(await as(alice).search({ query: "bellows gasket" })), [
+        "notes/maintenance.md",
+      ]);
+      assert.deepEqual(paths(await as(alice).search({ query: "bellows -gasket" })), []);
+      assert.match((await as(alice).search({ query: "gasket" }))[0].snippet, /Gasket replaced/);
+      await files.remove("notes/maintenance.md");
+      assert.equal(anyWords('"zircon liner" -flaking -"wet clean" or rinse'), "zircon or liner or rinse");
+    });
+
     test("nearby files rank first, and a scope keeps to one subtree", async () => {
       const nearRecipe = await as(alice).search({ query: "zircon liner", near: recipe });
       assert.equal(nearRecipe[0].path, "notes/steps.md");
@@ -822,9 +841,19 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         WHERE t.sha256 = v.blob_sha256 AND v.id = f.current_version_id
           AND f.path = 'notes/legacy.md'`;
       assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), []);
-      assert.ok((await storage.search.indexAll()) >= 1);
+      const [{ id: ws }] = await storage.sql<{ id: string }[]>`
+        SELECT id FROM workspaces WHERE slug = 'default'`;
+      const failing = (err: unknown) =>
+        new SearchService(storage.sql, { ...storage.blobs, get: () => Promise.reject(err) }, ws);
+      // A store hiccup leaves it pending for a later try...
+      const flaky = await failing(new Error("socket hang up")).indexAll();
+      assert.ok(flaky.failed >= 1);
+      assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), []);
+      // ...and the real store then indexes it.
+      const done = await storage.search.indexAll();
+      assert.ok(done.indexed >= 1 && done.failed === 0);
       assert.deepEqual(paths(await as(alice).search({ query: "quartz" })), ["notes/legacy.md"]);
-      assert.equal(await storage.search.indexPending(), 0);
+      assert.deepEqual(await storage.search.indexPending(), { indexed: 0, failed: [] });
     });
 
     test("Claude's search_files tool", async () => {
