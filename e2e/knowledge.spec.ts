@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 /**
  * Server storage and the knowledge tree. Runs when the agent has storage
- * (DATABASE_URL and the S3_* vars, as in CI); see playwright.config.ts.
+ * (npm run test:e2e:storage); prerequisites are enforced by the config.
  * Screenshots continue the numbering of preview.spec.ts.
  */
 const SCREENSHOT_DIR = "preview/screenshots";
@@ -15,7 +15,6 @@ async function shot(page: Page, name: string) {
 const TECH = "Etch";
 const MODULE = "Module 3";
 
-test.skip(!process.env.DATABASE_URL, "Needs server storage (DATABASE_URL).");
 
 // A local database keeps nodes between runs; start from a tree without them.
 test.beforeEach(async ({ request }) => {
