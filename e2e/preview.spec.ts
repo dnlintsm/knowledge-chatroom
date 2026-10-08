@@ -98,6 +98,18 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
 });
 
+test("links and back/forward show the focused run's own report", async ({ page }) => {
+  await gotoRun(page);
+  const preview = page.getByTestId("file-preview");
+  await expect(preview).toContainText("xDOE report: etch rate");
+  await page.getByRole("button", { name: "Traverse", exact: true }).click();
+  await page.getByRole("button", { name: /litho-2026-10-03/ }).click();
+  await expect(preview).toContainText("xDOE report: CD vs. dose and focus");
+  await page.goBack();
+  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
+  await expect(preview).toContainText("xDOE report: etch rate");
+});
+
 test("a link to a missing run falls back to Traverse", async ({ page }) => {
   await page.goto("/?run=runs/nope");
   await expect(page.getByTestId("notices")).toContainText("There is no run at runs/nope.");
