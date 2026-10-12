@@ -118,12 +118,13 @@ test("skills: modes, the / menu and the status bar", async ({ page }) => {
   await expect(writeSkill.getByRole("radio", { name: "Auto" })).toBeDisabled();
   await expect(page.getByTestId("skill-status")).toContainText("1 auto · 1 manual skills");
 
-  // Off takes it out of the / menu; back to Auto brings it back.
+  // Off takes it out of the / menu; back to the default brings it back.
   await tldr.getByRole("radio", { name: "Off" }).click();
   await expect(page.getByTestId("skill-status")).toContainText("0 auto · 1 manual skills");
   await page.getByTestId("copilot-chat-textarea").fill("/");
   await expect(page.getByTestId("skill-menu")).not.toContainText("/tldr");
-  await tldr.getByRole("radio", { name: "Auto" }).click();
+  await tldr.getByTestId("skill-use-default").click();
+  await expect(tldr.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("copilot-chat-textarea").fill("");
 
   // Typing / lists the skills; Enter picks one and leaves room for its input.
@@ -141,6 +142,52 @@ test("skills: modes, the / menu and the status bar", async ({ page }) => {
   await expect(page.getByTestId("skill-status")).toContainText("Used:");
   await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("TL;DR", reply);
   await shot(page, "05c-skill-status");
+});
+
+test("skills: defaults for everyone, your choice, and one chat's own", async ({ page }) => {
+  await openHome(page);
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  const tldr = page.getByTestId("skills-panel").locator('[data-skill="tldr"]');
+  const status = page.getByTestId("skill-status");
+
+  // An editor sets Manual for everyone; with no choice of your own, you get it too.
+  await tldr.getByTestId("skill-workspace-mode").selectOption("manual");
+  await expect(tldr.getByRole("radio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
+  await expect(tldr).toContainText("Workspace default");
+  // Your own choice wins until you go back to the default.
+  await tldr.getByRole("radio", { name: "Auto" }).click();
+  await expect(tldr.getByTestId("skill-use-default")).toBeVisible();
+  await expect(status).toContainText("1 auto · 1 manual skills");
+  await shot(page, "05d-skill-defaults");
+
+  // Off in this chat only: the / command no longer runs it here.
+  await page.getByTestId("chat-skills-toggle").click();
+  const chat = page.getByTestId("chat-skills").locator('[data-skill="tldr"]');
+  await expect(chat.getByTestId("skill-chat-mode")).toHaveValue("");
+  await chat.getByTestId("skill-chat-mode").selectOption("off");
+  await expect(page.getByTestId("chat-skills-toggle")).toHaveText("This chat · 1 changed");
+  await expect(status).toContainText("0 auto · 1 manual skills");
+  await shot(page, "05e-skill-this-chat");
+  await page.getByTestId("chat-skills-toggle").click();
+  // Your choice in the panel is unchanged.
+  await expect(tldr.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
+
+  if (process.env.E2E_MODE !== "live") {
+    // The mock agent runs /tldr only where it is on for the run's chat, so
+    // this also checks that the chat's choices reach its runs.
+    await page.getByTestId("copilot-chat-textarea").fill("/tldr RF power");
+    await page.getByTestId("copilot-send-button").click();
+    await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("mock agent", reply);
+    await expect(page.getByTestId("skill-used")).toHaveCount(0);
+  }
+
+  // Back to yours, and the skills go back to how they were.
+  await page.getByTestId("chat-skills-toggle").click();
+  await chat.getByTestId("skill-chat-mode").selectOption("");
+  await tldr.getByTestId("skill-use-default").click();
+  await tldr.getByTestId("skill-workspace-mode").selectOption("");
+  await expect(page.getByTestId("chat-skills-toggle")).toHaveText("This chat");
+  await expect(tldr).toContainText("Default");
 });
 
 test("links and back/forward show the focused run's own report", async ({ page }) => {

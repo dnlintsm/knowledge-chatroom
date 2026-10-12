@@ -2,17 +2,23 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { identify } from "../storage/identity";
 import type { Storage, StorageState } from "../storage";
-import { InvalidModeError, UnknownSkillError, type SkillService } from "./service";
+import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillService } from "./service";
 
 /**
  * Skills API, mounted on the agent server next to the storage API:
  *
- *   GET /skills          {skills}: every skill you can use, each with name,
- *                        description, argumentHint, source (builtin |
- *                        workspace), path (its SKILL.md in the workspace),
- *                        mode (auto | manual | off), defaultMode,
- *                        modelInvocable, userInvocable, needsExecution
- *   PUT /skills/<name>   {mode} → that skill, in its new mode, for you
+ *   GET /skills          {skills, canSetDefaults}: every skill you can use,
+ *                        each with name, description, argumentHint, source
+ *                        (builtin | workspace), path (its SKILL.md in the
+ *                        workspace), mode (the one that applies: auto |
+ *                        manual | off), defaultMode, workspaceMode, userMode,
+ *                        chatMode, modelInvocable, userInvocable,
+ *                        needsExecution. ?thread=<id> includes that chat's
+ *                        modes. canSetDefaults: you are an editor of the root
+ *   PUT /skills/<name>   {mode, scope?, thread?} → that skill as you now see
+ *                        it. scope: user (default, yours), workspace (for
+ *                        everyone; editors only, else 403) or chat (yours,
+ *                        in `thread`). mode null clears that level
  *
  * Works without storage too: then only the built-in skills, for the local
  * user, with modes kept until the server restarts.
@@ -47,23 +53,25 @@ export function createSkillsHandler(
         return send(res, 400, { error: "Invalid skill name" });
       }
       if (req.method === "GET" && !name) {
-        return send(res, 200, { skills: await skills.list(userId) });
+        return send(res, 200, await skills.list(userId, url.searchParams.get("thread") || undefined));
       }
       if (req.method === "PUT" && name && !name.includes("/")) {
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(chunk as Buffer);
-        let body: { mode?: unknown };
+        let body: { mode?: unknown; scope?: unknown; thread?: unknown };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
         } catch {
           return send(res, 400, { error: "Invalid JSON body" });
         }
-        return send(res, 200, await skills.setMode(userId, name, body?.mode));
+        const thread = typeof body?.thread === "string" ? body.thread : undefined;
+        return send(res, 200, await skills.setMode(userId, name, body?.mode, body?.scope ?? "user", thread));
       }
       return send(res, 405, { error: "Method not allowed" });
     } catch (err) {
       if (err instanceof InvalidModeError) return send(res, 400, { error: err.message });
       if (err instanceof UnknownSkillError) return send(res, 404, { error: err.message });
+      if (err instanceof SkillForbiddenError) return send(res, 403, { error: err.message });
       console.error("[skills] request failed:", err);
       return send(res, 500, { error: "Skills request failed" });
     }

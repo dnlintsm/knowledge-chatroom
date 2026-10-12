@@ -30,5 +30,6 @@ decides when it is used.
    ```
 
    Keep it instructions only: skills here can't run scripts.
-4. Tell the user in one line that it is saved, that `/<name>` runs it, and
-   that they can switch it to Auto, Manual or Off in the Skills panel.
+4. Writing it proposes the skill rather than adding it. Tell the user in one
+   line that it waits for review under Proposed changes, and that once
+   accepted `/<name>` runs it and the Skills panel sets it to Auto, Manual or Off.

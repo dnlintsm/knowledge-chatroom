@@ -78,27 +78,48 @@ const SKILLS = [
     modelInvocable: false,
     defaultMode: "manual",
   },
-].map((s) => ({ ...s, source: "builtin", path: null, userInvocable: true, needsExecution: false, mode: s.defaultMode }));
+].map((s) => ({ ...s, source: "builtin", path: null, userInvocable: true, needsExecution: false }));
+
+// Modes chosen for everyone, by the (one) user, and per chat: name → mode.
+const skillModes = { workspace: new Map(), user: new Map(), chat: new Map() };
+
+/** A skill as GET /skills shows it, in a chat; the agent's precedence and clamping. */
+function skillInfo(skill, thread) {
+  const workspaceMode = skillModes.workspace.get(skill.name) ?? null;
+  const userMode = skillModes.user.get(skill.name) ?? null;
+  const chatMode = (thread && skillModes.chat.get(thread)?.get(skill.name)) ?? null;
+  let mode = chatMode ?? userMode ?? workspaceMode ?? skill.defaultMode;
+  if (mode === "auto" && !skill.modelInvocable) mode = "manual";
+  return { ...skill, mode, workspaceMode, userMode, chatMode };
+}
 
 const SKILL_REPLY =
   "**TL;DR:** RF power drives etch rate; pressure and gas flow matter far less.\n\n" +
   "- RF power has the largest effect on etch rate.\n- Pressure is a distant second.\n- Gas flow barely moves it.";
 
-async function handleSkills(req, res, pathname) {
-  const name = decodeURIComponent(pathname.slice("/skills".length).replace(/^\/+/, ""));
-  if (req.method === "GET" && !name) {
+async function handleSkills(req, res, url) {
+  const name = decodeURIComponent(url.pathname.slice("/skills".length).replace(/^\/+/, ""));
+  const json = (body) => {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ skills: SKILLS }));
-    return;
+    res.end(JSON.stringify(body));
+  };
+  if (req.method === "GET" && !name) {
+    const thread = url.searchParams.get("thread");
+    return json({ skills: SKILLS.map((s) => skillInfo(s, thread)), canSetDefaults: true });
   }
   const skill = SKILLS.find((s) => s.name === name);
   if (req.method === "PUT" && skill) {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
-    skill.mode = JSON.parse(Buffer.concat(chunks).toString("utf-8")).mode;
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(skill));
-    return;
+    const { mode, scope = "user", thread } = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    let map = skillModes[scope];
+    if (scope === "chat") {
+      if (!skillModes.chat.has(thread)) skillModes.chat.set(thread, new Map());
+      map = skillModes.chat.get(thread);
+    }
+    if (mode === null) map.delete(name);
+    else map.set(name, mode);
+    return json(skillInfo(skill, scope === "chat" ? thread : null));
   }
   res.writeHead(404).end();
 }
@@ -109,7 +130,8 @@ const textOf = (message) =>
     : (message?.content ?? []).map((part) => part.text ?? "").join("");
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  const { pathname } = url;
 
   if (req.method === "GET" && pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -123,7 +145,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === "/skills" || pathname.startsWith("/skills/")) {
-    await handleSkills(req, res, pathname);
+    await handleSkills(req, res, url);
     return;
   }
 
@@ -168,8 +190,9 @@ const server = http.createServer(async (req, res) => {
     .filter((m) => m.role === "assistant")
     .flatMap((m) => m.toolCalls ?? [])
     .pop()?.function?.name;
-  // "/<name> ..." runs that skill, as the agent's slash commands do.
-  const slashSkill = last?.role === "user" ? /^\/([a-z0-9-]+)/.exec(asked)?.[1] : undefined;
+  // "/<name> ..." runs that skill, as the agent's slash commands do, unless it is off in this chat.
+  const slashName = last?.role === "user" ? /^\/([a-z0-9-]+)/.exec(asked)?.[1] : undefined;
+  const slashSkill = SKILLS.find((s) => s.name === slashName && skillInfo(s, input.threadId).mode !== "off")?.name;
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")

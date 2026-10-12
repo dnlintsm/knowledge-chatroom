@@ -16,7 +16,7 @@ import type { Storage } from "./index";
 import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
-import { InvalidPathError, isTextFile } from "./paths";
+import { InvalidPathError, isTextFile, kindForPath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
 
@@ -275,9 +275,9 @@ export function createFileTools(
         "where the user is working (the context's currentExperiment, else currentNode) " +
         "unless they say otherwise; inside an experiment, never write to its node. At the " +
         "root and in an experiment the file changes at once and opens for the user. In a " +
-        "knowledge node it is PROPOSED instead: the file stays as it was until someone who " +
-        "can edit the node accepts the change (writing the same file again revises your " +
-        "proposal). Put new generated documents in the focused run's artifacts/ folder " +
+        "knowledge node, and for skills (skills/<name>/... at the root), it is PROPOSED " +
+        "instead: the file stays as it was until someone who can edit there accepts the " +
+        "change (writing the same file again revises your proposal). Put new generated documents in the focused run's artifacts/ folder " +
         "(<run>/artifacts/, see `run` in context), or under artifacts/ when there is no run, " +
         "unless the user asks to change an existing file. Paths starting with notes/, " +
         "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed. " +
@@ -296,8 +296,12 @@ export function createFileTools(
       ({ path, content, summary, ...place }) =>
         run(async (session) => {
           const bytes = new TextEncoder().encode(content);
-          if (!place.experiment && place.node) {
-            const proposal = await session.propose(place.node, path, bytes, { note: summary });
+          // Claude may suggest skills but not add or change them itself: the
+          // workspace's skills shape every later run (issue #7).
+          const skillFile =
+            !place.experiment && !place.node && kindForPath(path.trim().replace(/^\/+/, "")) === "skill";
+          if (!place.experiment && (place.node || skillFile)) {
+            const proposal = await session.propose(place.node || null, path, bytes, { note: summary });
             return text({
               ok: true,
               proposed: true,
@@ -305,8 +309,9 @@ export function createFileTools(
               node: proposal.node,
               newFile: proposal.isNew,
               note:
-                "Proposed for review, not written yet: someone who can edit this node accepts " +
-                "or rejects it in the editor. Tell the user.",
+                "Proposed for review, not written yet: someone who can edit " +
+                (skillFile ? "the workspace" : "this node") +
+                " accepts or rejects it in the editor. Tell the user.",
             });
           }
           const service = place.experiment

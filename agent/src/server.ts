@@ -43,13 +43,17 @@ const handleStorage = createStorageHandler(
 const skills = new SkillService(currentStorage);
 const handleSkills = createSkillsHandler(skills, currentStorage, storageState);
 
-/** The run's skills: built-in ones, plus the workspace's when storage is up. */
-async function prepareSkills(storage: Storage | null, userId: string | null | undefined): Promise<RunSkills | null> {
+/** The run's skills: built-in ones, plus the workspace's when storage is up, in this chat's modes. */
+async function prepareSkills(
+  storage: Storage | null,
+  userId: string | null | undefined,
+  threadId: string | undefined,
+): Promise<RunSkills | null> {
   // With storage but nobody allowed (login without a user): no skills either.
   if (storage && !userId) return null;
   const owner = storage ? userId! : null;
   try {
-    return await materialize(owner ?? "local", await skills.forRun(owner));
+    return await materialize(owner ?? "local", await skills.forRun(owner, threadId));
   } catch (err) {
     console.error(`[skills] couldn't prepare skills; running without them: ${err instanceof Error ? err.message : err}`);
     return null;
@@ -123,7 +127,7 @@ const server = http.createServer(async (req, res) => {
       "X-Accel-Buffering": "no",
     });
 
-    const runSkills = await prepareSkills(storage, userId);
+    const runSkills = await prepareSkills(storage, userId, input.threadId);
     // Each skill the run uses goes to the browser as an AG-UI custom event
     // ("skill_used"), after RUN_STARTED, and into the usage history.
     let started = false;
