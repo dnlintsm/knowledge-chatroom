@@ -58,7 +58,7 @@ export async function initStorage(
     const blobs = new S3BlobStore(config.s3);
     await blobs.ensureBucket();
 
-    // Single workspace until login and memberships arrive (issue #4, step 4).
+    // Login and access grants share the current single default workspace.
     const [ws] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
     if (!ws) throw new Error("Workspace default not found");
     const events = new EventHub(sql, ws.id);
