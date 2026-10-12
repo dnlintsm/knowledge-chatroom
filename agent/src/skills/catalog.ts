@@ -39,8 +39,8 @@ export interface Skill {
   /** It ships scripts or asks for a shell, which skills here can't run (yet). */
   needsExecution: boolean;
   files: SkillFile[];
-  /** For a hub skill: the installed version and the newest one published. */
-  hub?: { version: number; latest: number };
+  /** For a hub skill: where its installed version stands on the hub. */
+  hub?: HubPin;
 }
 
 /** Where a mode was chosen: for everyone, for one user, or for one of their chats. */
@@ -61,7 +61,19 @@ export interface SkillInfo extends Omit<Skill, "files" | "hub"> {
   userMode: SkillMode | null;
   /** This chat's choice (only when asked for a chat); null = the user's. */
   chatMode: SkillMode | null;
-  hub: { version: number; latest: number } | null;
+  hub: HubPin | null;
+}
+
+/** An installed hub skill's version, the newest one to update to, and their standing. */
+export interface HubPin {
+  version: number;
+  /** The newest version that isn't yanked (the installed one if all are). */
+  latest: number;
+  /** A hub admin checked the installed version. */
+  verified: boolean;
+  /** Its publisher or an admin withdrew the installed version; it still works. */
+  yanked: boolean;
+  yankReason: string | null;
 }
 
 export const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -85,7 +97,7 @@ export function parseFrontMatter(text: string): Record<string, string> {
   return fields;
 }
 
-const SCRIPT_FILE = /(^|\/)scripts\/|\.(py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)$/i;
+export const SCRIPT_FILE = /(^|\/)scripts\/|\.(py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)$/i;
 const isFalse = (value: string | undefined) => value?.toLowerCase() === "false";
 const isTrue = (value: string | undefined) => value?.toLowerCase() === "true";
 

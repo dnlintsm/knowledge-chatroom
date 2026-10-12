@@ -35,6 +35,11 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *   PUT /hub/<name>/install     {version?} installs or moves the pin (editors)
  *   DELETE /hub/<name>/install  uninstalls
  *   POST /hub/<name>/fork       copies it into the workspace's skills/
+ *   GET /hub/<name>/diff?from=&to=   what changed between two versions
+ *   POST /hub/<name>/verify     {version, verified} (hub admins)
+ *   POST /hub/<name>/yank       {version, yanked, reason?} (publisher, hub admins)
+ *   POST /hub/<name>/reports    {reason, version?} reports it (anyone)
+ *   DELETE /hub/<name>/reports?id=   dismisses a report (hub admins)
  *
  * /skills works without storage too: then only the built-in skills, for the
  * local user, with modes kept until the server restarts.
@@ -76,6 +81,11 @@ export function createSkillsHandler(
     if (value === undefined || value === null || value === "") return undefined;
     const n = Number(value);
     if (!Number.isInteger(n) || n < 1) throw new HubError("version must be a positive whole number");
+    return n;
+  };
+  const required = (value: unknown, what = "version") => {
+    const n = version(value);
+    if (n === undefined) throw new HubError(`Say which ${what}`);
     return n;
   };
 
@@ -135,6 +145,29 @@ export function createSkillsHandler(
     }
     if (req.method === "POST" && name && action === "fork" && parts.length === 2) {
       return send(res, 201, await hub.fork(userId, name));
+    }
+    if (req.method === "GET" && name && action === "diff") {
+      const from = required(url.searchParams.get("from"), "version to compare from");
+      const to = required(url.searchParams.get("to"), "version to compare to");
+      return send(res, 200, await hub.diff(userId, name, from, to));
+    }
+    if (req.method === "POST" && name && (action === "verify" || action === "yank")) {
+      const input = await json(req);
+      if (!input) return send(res, 400, { error: "Invalid JSON body" });
+      const v = required(input.version);
+      if (action === "verify") return send(res, 200, await hub.verify(userId, name, v, input.verified !== false));
+      const reason = typeof input.reason === "string" ? input.reason : null;
+      return send(res, 200, await hub.yank(userId, name, v, input.yanked !== false, reason));
+    }
+    if (name && action === "reports") {
+      if (req.method === "POST") {
+        const input = await json(req);
+        if (!input) return send(res, 400, { error: "Invalid JSON body" });
+        return send(res, 201, await hub.report(userId, name, input.reason, version(input.version)));
+      }
+      if (req.method === "DELETE") {
+        return send(res, 200, await hub.dismissReport(userId, name, url.searchParams.get("id") ?? ""));
+      }
     }
     return send(res, 405, { error: "Method not allowed" });
   }

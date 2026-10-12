@@ -65,11 +65,32 @@ With file storage, a deployment has one skill hub (`011_skill_hub.sql`), opened 
   which Claude Code reads too; **Import .zip** (editors) adds one as `skills/<name>/`, asking
   before it replaces a folder that exists. A skill may have up to 200 files and 5 MB.
 
+Trust (`012_hub_trust.sql`) helps people decide what to install:
+
+- **Publish check**: each version is scanned as it's published (`agent/src/skills/scan.ts`) for
+  scripts, links and network commands, large or binary files, hidden text (invisible characters,
+  HTML comments, long encoded runs) and instructions such as "ignore previous instructions" or
+  "don't tell the user". Flags show on the hub and before an update; they warn, they don't block,
+  and a clean check doesn't mean a skill is safe.
+- **Verified**: hub admins mark a version as checked. Admins are the users listed in
+  `HUB_ADMINS` (emails or login subjects), plus the built-in user when there is no login. A new
+  version starts unverified.
+- **Reports**: anyone can report a skill; its publisher and the hub admins see open reports, and
+  admins dismiss them. Each person has one open report per skill.
+- **Yank**: a skill's publisher or an admin can yank a version. It can't be newly installed,
+  and "latest" skips it; workspaces that have it keep it working, with a warning to update or
+  remove it.
+- **Update diffs**: **Update to vN** first shows the file-by-file diff and the new version's
+  flags, and updates only when confirmed.
+
 Claude has no tools for the hub: installing, publishing and forking are the user's own
 actions. `GET /api/hub?q=` lists and searches, `GET /api/hub/<name>?version=` shows a version's
 SKILL.md, `POST /api/hub {skill}` publishes, `PUT|DELETE /api/hub/<name>/install` installs
 (`{version?}`) or removes, `POST /api/hub/<name>/fork` forks, and `GET /api/skills/<name>/export`
-and `POST /api/skills/import?replace=1` move `.zip` files.
+and `POST /api/skills/import?replace=1` move `.zip` files. For trust:
+`GET /api/hub/<name>/diff?from=&to=`, `POST /api/hub/<name>/verify {version, verified}`,
+`POST /api/hub/<name>/yank {version, yanked, reason?}`, `POST /api/hub/<name>/reports
+{reason, version?}` and `DELETE /api/hub/<name>/reports?id=`.
 
 ### Runs: Focus and Traverse modes
 

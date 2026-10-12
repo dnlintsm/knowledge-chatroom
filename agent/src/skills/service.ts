@@ -9,6 +9,7 @@ import {
   SKILL_MODES,
   workspaceSkills,
   skillFromFiles,
+  type HubPin,
   type Skill,
   type ModeLayers,
   type SkillInfo,
@@ -242,9 +243,21 @@ export class SkillService {
   private async installed(userId: string | null): Promise<Skill[]> {
     const storage = this.storage();
     if (!storage || !userId || !(await storage.access.role(userId, null))) return [];
-    const rows = await storage.sql<{ name: string; version: number; latest: number; files: HubFile[] }[]>`
-      SELECT h.name, v.version, v.files,
-             (SELECT max(version) FROM hub_skill_versions WHERE hub_skill_id = h.id) AS latest
+    const rows = await storage.sql<
+      {
+        name: string;
+        version: number;
+        latest: number | null;
+        files: HubFile[];
+        verified: boolean;
+        yanked: boolean;
+        yank_reason: string | null;
+      }[]
+    >`
+      SELECT h.name, v.version, v.files, v.verified_at IS NOT NULL AS verified,
+             v.yanked_at IS NOT NULL AS yanked, v.yank_reason,
+             (SELECT max(version) FROM hub_skill_versions
+              WHERE hub_skill_id = h.id AND yanked_at IS NULL) AS latest
       FROM skill_installs i
       JOIN hub_skills h ON h.id = i.hub_skill_id
       JOIN hub_skill_versions v ON v.id = i.version_id
@@ -256,7 +269,15 @@ export class SkillService {
           row.files.map(async (f) => ({ path: f.path, bytes: await this.blob(f.sha256) })),
         );
         const skill = skillFromFiles(row.name, files, "hub", null);
-        return skill ? ({ ...skill, name: row.name, hub: { version: row.version, latest: row.latest } } as Skill) : null;
+        if (!skill) return null;
+        const hub: HubPin = {
+          version: row.version,
+          latest: row.latest ?? row.version,
+          verified: row.verified,
+          yanked: row.yanked,
+          yankReason: row.yank_reason,
+        };
+        return { ...skill, name: row.name, hub } as Skill;
       }),
     );
     return skills.filter((s): s is Skill => s !== null);
