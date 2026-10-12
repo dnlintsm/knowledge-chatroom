@@ -348,3 +348,12 @@ Local workspace/tab payloads are structurally validated. Invalid local file data
 is rejected and preserved under `knowledge-chatroom.workspace.v1.invalid` before
 replacement; if that backup cannot be written, the original value is retained.
 Valid existing v1 files/tabs and optional read-only fields remain compatible.
+
+`workspace/save-scheduler.ts` owns debounce timers, ordered per-place/path write
+chains, in-flight/failed protection and observed server hashes. The provider injects
+its current mode/place/files and the PUT transport; the scheduler has no React or
+HTTP imports. Pure tests use a controlled clock and delayed/failing writes. The
+provider retains storage bootstrap, SSE routing and reconciliation, which depend
+on navigation and the current UI state. `flush()` captures pending content before
+navigation; `settle()` additionally waits and rejects unresolved/failed saves
+before fork/archive/promote operations.

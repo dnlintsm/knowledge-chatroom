@@ -14,6 +14,7 @@ import { parseWorkspaceEvent } from "../../../shared/storage-contract";
 import { normalizePath } from "../../../shared/files";
 export { normalizePath } from "../../../shared/files";
 import type { LineRange } from "./file-refs";
+import { SaveScheduler, type StorageMode } from "./save-scheduler";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
 import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace } from "./local-persistence";
@@ -90,12 +91,11 @@ import {
  * this user, the workspace goes there and opens the Review tab.
  */
 
-const SAVE_DELAY_MS = 600;
 /** How long to wait for storage that is still starting before using the browser. */
 const STARTUP_RETRY_MS = 2_000;
 const STARTUP_RETRIES = 30;
 
-export type StorageMode = "loading" | "server" | "local";
+export type { StorageMode } from "./save-scheduler";
 
 /** Lines the middle pane scrolls to and highlights, from open(path, lines). */
 export interface Reveal {
@@ -213,22 +213,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [account, setAccount] = useState<Account>({ login: false, user: null });
-  // Server sync bookkeeping, per place and path: the content hash we last saw
-  // on the server, edits waiting to save, and saves on the wire. Change events
-  // for a file with local edits pending are ignored, so they can't overwrite
-  // typing.
-  const knownSha = useRef(new Map<string, string>());
-  const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const inflight = useRef(new Map<string, number>());
-  // Each place/path has an ordered write chain. Capture the file before a
-  // navigation changes files.current, then send after its previous write.
-  const saveChains = useRef(new Map<string, Promise<void>>());
-  /** Files whose last save failed, until one succeeds. */
-  const failed = useRef(new Set<string>());
-  const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
-  const busy = (path: string, at: PlaceId = placeRef.current) =>
-    pending.current.has(key(path, at)) || (inflight.current.get(key(path, at)) ?? 0) > 0 ||
-    failed.current.has(key(path, at));
+  const [sync] = useState(() => new SaveScheduler({
+    getMode: () => mode.current,
+    getPlace: () => placeRef.current,
+    getFile: (path) => files.current.find((file) => file.path === path),
+    put: putServerFile,
+    onError: setSyncError,
+  }));
+  const { busy, schedule: scheduleSave, flush: flushSaves, settle: settleSaves } = sync;
 
   // Restore after mount so server and client render the same seed first.
   // Saving waits for `hydrated` (set in the same commit as the restore), so the
@@ -259,77 +251,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setState((s) => reduceWorkspace(s, { type: "remove", path }));
   }, []);
 
-  const save = useCallback(async (path: string, at: PlaceId): Promise<void> => {
-    const k = key(path, at);
-    // Edits made while storage is still being picked wait for the decision.
-    if (mode.current === "loading") {
-      pending.current.set(k, setTimeout(() => void save(path, at), SAVE_DELAY_MS));
-      return;
-    }
-    pending.current.delete(k);
-    if (mode.current === "local") return; // localStorage already has it.
-    // Leaving a place flushes its saves first, so its files are still loaded here.
-    if (at !== placeRef.current) return;
-    const file = files.current.find((f) => f.path === path);
-    if (!file) return;
-    inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
-    const previous = saveChains.current.get(k) ?? Promise.resolve();
-    const sent = previous.then(() => putServerFile(file, at));
-    // A failed request must not prevent the next edit from being saved.
-    const tail = sent.then(() => {}, () => {});
-    saveChains.current.set(k, tail);
-    try {
-      const info = await sent;
-      knownSha.current.set(k, info.sha256);
-      failed.current.delete(k);
-      if (!failed.current.size) setSyncError(null);
-    } catch (err) {
-      console.error("[workspace] save failed:", err);
-      failed.current.add(k);
-      setSyncError(`Couldn't save ${path}`);
-    } finally {
-      inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
-      if (saveChains.current.get(k) === tail) saveChains.current.delete(k);
-    }
-  }, []);
-
-  const scheduleSave = useCallback(
-    (path: string) => {
-      const at = placeRef.current;
-      clearTimeout(pending.current.get(key(path, at)));
-      pending.current.set(key(path, at), setTimeout(() => void save(path, at), SAVE_DELAY_MS));
-    },
-    [save],
-  );
-
-  /** Sends every edit still waiting to save, now. */
-  const flushSaves = useCallback(() => {
-    for (const [k, timer] of [...pending.current]) {
-      clearTimeout(timer);
-      const split = k.indexOf("\n");
-      void save(k.slice(split + 1), k.slice(0, split) || null);
-    }
-  }, [save]);
-
-  /**
-   * Sends waiting edits and waits for the saves of `at`'s files; throws if one
-   * of them didn't make it, so a step that relies on the server's copy (a fork,
-   * archiving) doesn't go ahead without the user's latest edits.
-   */
-  const settleSaves = useCallback(
-    async (at: PlaceId) => {
-      flushSaves();
-      const prefix = `${at ?? ""}\n`;
-      const mine = (keys: Iterable<string>) => [...keys].filter((k) => k.startsWith(prefix));
-      const onWire = () => mine(inflight.current.keys()).some((k) => (inflight.current.get(k) ?? 0) > 0);
-      for (let i = 0; i < 200 && onWire(); i++) await new Promise((r) => setTimeout(r, 50));
-      if (onWire() || mine(pending.current.keys()).length || mine(failed.current).length) {
-        throw new Error("Your latest edits here haven't saved yet; try again once they are saved");
-      }
-    },
-    [flushSaves],
-  );
-
   // Brings local files in line with the server's list: fetches what changed,
   // drops what was deleted, and leaves files with unsaved edits alone, also
   // when the user starts editing while the fetches are in flight. `keep` names
@@ -340,11 +261,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const next = await Promise.all(
       list.map(async (info) => {
         const mine = local.get(info.path);
-        if (mine && (busy(info.path) || knownSha.current.get(key(info.path)) === info.sha256)) {
+        if (mine && (busy(info.path) || sync.hash(info.path) === info.sha256)) {
           return mine;
         }
         const file = await loadServerFile(info, at);
-        knownSha.current.set(key(info.path, at), info.sha256);
+        sync.remember(info.path, info.sha256, at);
         return file;
       }),
     );
@@ -470,18 +391,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       if (busy(path)) return;
       if (event.op === "delete") {
-        knownSha.current.delete(key(path));
+        sync.forget(path);
         removeLocal(path);
         return;
       }
-      if (knownSha.current.get(key(path)) === event.sha256) return; // Our own save.
+      if (sync.hash(path) === event.sha256) return; // Our own save.
       const list = await listServerFiles(at);
       const info = Array.isArray(list) ? list.find((f) => f.path === path) : undefined;
       if (!info || busy(path) || placeRef.current !== at) return;
       const file = await loadServerFile(info, at);
       // The user may have started editing this file, or moved, while it loaded.
       if (busy(path) || placeRef.current !== at) return;
-      knownSha.current.set(key(path), info.sha256);
+      sync.remember(path, info.sha256);
       upsert(file);
       if (info.author === "agent") open(path);
     };
@@ -650,18 +571,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
       if (mode.current === "server") {
         const at = placeRef.current;
-        const k = key(path, at);
         // Counted as in flight, so the change event for this write is ignored.
-        inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
+        sync.beginWrite(path, at);
         let lost = false;
         try {
           const info = await putServerFile(file, at, { createOnly: true, readOnly: opts?.readOnly });
-          knownSha.current.set(k, info.sha256);
+          sync.remember(path, info.sha256, at);
         } catch (err) {
           if (!(err instanceof FileExistsError)) throw err;
           lost = true;
         } finally {
-          inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
+          sync.endWrite(path, at);
         }
         if (lost) {
           // Another tab or browser won. Its change event was ignored while this
@@ -678,7 +598,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       upsert(file);
       return file;
     },
-    [upsert, resync],
+    [upsert, resync, sync],
   );
 
   const remove = useCallback(
@@ -686,16 +606,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (files.current.find((f) => f.path === path)?.readOnly) throw new ReadOnlyFileError(path);
       removeLocal(path);
       if (mode.current !== "server") return;
-      const k = key(path);
-      clearTimeout(pending.current.get(k));
-      pending.current.delete(k);
-      knownSha.current.delete(k);
+      sync.cancel(path);
       deleteServerFile(path, placeRef.current).catch((err) => {
         console.error("[workspace] delete failed:", err);
         setSyncError(`Couldn't delete ${path}`);
       });
     },
-    [removeLocal],
+    [removeLocal, sync],
   );
 
   const createNode = useCallback(
