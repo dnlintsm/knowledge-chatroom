@@ -40,6 +40,11 @@ avoids reserving separate SeaweedFS volume collections for each suite. Test blob
 are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testing;
 integration does not fall back to `DATABASE_URL`.
 
+The normal integration suite tests vector search using a deterministic embedder.
+Set `EMBEDDING_TEST=1` to also run the real model-download test; it needs network
+access and caches roughly 120 MB. For local UI tests, `EMBEDDING_MODEL=off` keeps
+keyword-search coverage without downloading the model.
+
 ## Browser, storage and login
 
 ```bash
@@ -74,7 +79,8 @@ mock coverage. It is not run by required CI.
 ## CI and failures
 
 - `quality.yml`: locked root/agent install, lint/types/units, unchanged lockfiles.
-- `storage.yml`: real PostgreSQL/S3 integration for storage-related changes.
+- `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
+  including the cached real embedding-model test (`EMBEDDING_TEST=1`).
 - `ui-preview.yml`: production build, explicit browser/storage/login runs,
   artifacts and the combined outcome in the preview comment.
 

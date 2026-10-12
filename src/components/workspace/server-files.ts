@@ -1,4 +1,4 @@
-import { isTextFile, type FileKind, type WorkspaceFile } from "./types";
+import { FileExistsError, isTextFile, ReadOnlyFileError, type FileKind, type WorkspaceFile } from "./types";
 
 /**
  * Client for the server file API (/api/files, forwarded to the agent's
@@ -14,6 +14,7 @@ export interface ServerFile {
   sha256: string;
   updatedAt: string;
   author: WorkspaceFile["author"];
+  readOnly?: boolean;
 }
 
 /** A knowledge node id, or null for the workspace root. */
@@ -135,6 +136,7 @@ export async function loadServerFile(info: ServerFile, place: PlaceId = null): P
     mime: info.mime,
     author: info.author,
     updatedAt: Date.parse(info.updatedAt),
+    ...(info.readOnly ? { readOnly: true } : {}),
   };
   const url = fileUrl(info.path, place);
   if (!isTextFile(info)) {
@@ -145,27 +147,51 @@ export async function loadServerFile(info: ServerFile, place: PlaceId = null): P
   return { ...base, content: await res.text() };
 }
 
+/**
+ * Saves a file. With `createOnly` the server refuses to replace an existing
+ * file (FileExistsError); `readOnly` makes a newly created file read-only.
+ * Writing a read-only file throws ReadOnlyFileError.
+ */
 export async function putServerFile(
-  file: Pick<WorkspaceFile, "path" | "mime" | "content">,
+  file: Pick<WorkspaceFile, "path" | "mime" | "content" | "readOnly">,
   place: PlaceId = null,
+  opts: { createOnly?: boolean; readOnly?: boolean } = {},
 ): Promise<ServerFile> {
   // Binary uploads arrive as data: URLs; send their bytes.
   const body =
     !isTextFile(file) && file.content.startsWith("data:")
       ? await (await fetch(file.content)).blob()
       : file.content;
-  const res = await apiFetch(fileUrl(file.path, place), {
-    method: "PUT",
-    headers: { "Content-Type": file.mime },
-    body,
-  });
-  if (res.status === 403) throw new Error(`You can't change files here (${file.path})`);
+  const headers: Record<string, string> = { "Content-Type": file.mime };
+  if (opts.createOnly) headers["If-None-Match"] = "*";
+  // A read-only browser file stays read-only when it first moves to the server.
+  if (opts.readOnly ?? file.readOnly) headers["X-Read-Only"] = "true";
+  const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
+  if (res.status === 412) throw new FileExistsError(file.path);
+  if (res.status === 403) {
+    const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
+    if (answer?.readOnly) throw new ReadOnlyFileError(file.path);
+    throw new Error(`You can't change files here (${file.path})`);
+  }
   if (!res.ok) throw new Error(`PUT ${file.path}: ${res.status}`);
   return (await res.json()) as ServerFile;
 }
 
+/** Asks the server itself, not the local copy of the file list. */
+export async function serverFileExists(path: string, place: PlaceId = null): Promise<boolean> {
+  const res = await apiFetch(fileUrl(path, place), { method: "GET", cache: "no-store" });
+  await res.body?.cancel();
+  if (res.ok) return true;
+  if (res.status === 404) return false;
+  throw new Error(`GET ${path}: ${res.status}`);
+}
+
 export async function deleteServerFile(path: string, place: PlaceId = null): Promise<void> {
   const res = await apiFetch(fileUrl(path, place), { method: "DELETE" });
+  if (res.status === 403) {
+    const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
+    if (answer?.readOnly) throw new ReadOnlyFileError(path);
+  }
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
 }
 
@@ -251,6 +277,42 @@ export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
+
+/** A file whose text or path matched a search (agent/src/storage/search.ts). */
+export interface SearchHit {
+  path: string;
+  kind: FileKind;
+  mime: string;
+  node: NodeId;
+  experiment: string | null;
+  /** Node names from the top down to the file's node (an experiment's node for its files). */
+  where: string[];
+  experimentTitle: string | null;
+  /** The passage that matched; "" when only the path did. */
+  snippet: string;
+  /** "meaning": no words in common, but a passage close in meaning. */
+  match: "words" | "meaning";
+  updatedAt: string;
+}
+
+/**
+ * Files you can read that match `query`, best first; those near `near` (where
+ * you are) come first, and `scope` keeps to one node and what is below it.
+ */
+export async function searchFiles(
+  query: string,
+  opts: { near?: PlaceId; scope?: string | null; signal?: AbortSignal } = {},
+): Promise<SearchHit[]> {
+  const params = new URLSearchParams({ q: query });
+  const experiment = experimentOf(opts.near ?? null);
+  if (experiment) params.set("experiment", experiment);
+  else if (opts.near) params.set("near", opts.near);
+  if (opts.scope) params.set("scope", opts.scope);
+  const res = await apiFetch(`/api/search?${params}`, { cache: "no-store", signal: opts.signal });
+  const data = (await res.json().catch(() => ({}))) as { results?: SearchHit[]; error?: string };
+  if (!res.ok || !data.results) throw new Error(data.error ?? `Search failed (${res.status})`);
+  return data.results;
+}
 
 /** Whether login is on, and who is signed in (null without login). */
 export interface Account {

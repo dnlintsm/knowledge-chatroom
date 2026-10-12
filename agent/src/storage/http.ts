@@ -5,13 +5,15 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
+import { FileExistsError, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile } from "./paths";
+import { SearchError } from "./search";
 import type { Session } from "./session";
 
 /**
- * REST API for workspace files and the knowledge tree, mounted at /files and
- * /nodes on the agent server:
+ * REST API for workspace files, the knowledge tree, experiments, search and
+ * access, mounted on the agent server:
  *
  *   GET    /files                   list live files (JSON)
  *   GET    /files?watch             change stream (Server-Sent Events), one
@@ -23,8 +25,14 @@ import type { Session } from "./session";
  *                                   when S3_PUBLIC_URL is set)
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
- *                                   Content-Type = mime (optional)
+ *                                   Content-Type = mime (optional).
+ *                                   `If-None-Match: *` only creates (412 when
+ *                                   the file exists); `X-Read-Only: true`
+ *                                   makes a new file read-only
  *   DELETE /files/<path>            soft delete
+ *
+ *   Read-only files answer 403 to PUT and DELETE, and carry
+ *   `X-File-Read-Only: true` on GET.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
  *   ?experiment=<id> for an experiment's; without either, files at the
@@ -52,6 +60,17 @@ import type { Session } from "./session";
  *   DELETE /experiments/<id>        soft delete, with its files
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
+ *
+ *   GET    /search?q=<text>         {results}: files you can read whose text
+ *                                   or path matches, best first, each with
+ *                                   path, node, experiment, where (node names
+ *                                   from the top), the matching snippet and
+ *                                   match: "words", or "meaning" for a passage
+ *                                   only close in meaning (semantic.ts).
+ *                                   &scope=<node id> searches only that node,
+ *                                   the nodes below it and their experiments;
+ *                                   &near=<node id> or &experiment=<id> ranks
+ *                                   files near there first; &limit= (≤ 50)
  *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
@@ -310,6 +329,26 @@ async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL,
   json(res, 404, { error: "Not found" });
 }
 
+async function handleSearch(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  if (!/^\/search\/?$/.test(url.pathname)) {
+    json(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "GET") {
+    json(res, 405, { error: "Method not allowed" });
+    return;
+  }
+  const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  const results = await session.search({
+    query: url.searchParams.get("q") ?? "",
+    scope: url.searchParams.get("scope") || null,
+    near: url.searchParams.get("near") || null,
+    nearExperiment: url.searchParams.get("experiment") || null,
+    limit: Number.isNaN(limit) ? undefined : limit,
+  });
+  json(res, 200, { results });
+}
+
 export function createStorageHandler(
   storage: () => Storage | null,
   maxUploadBytes: number,
@@ -341,6 +380,7 @@ export function createStorageHandler(
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
       else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
+      else if (/^\/search(\/|$)/.test(url.pathname)) await handleSearch(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
     } catch (err) {
       if (err instanceof NodeNotFoundError) {
@@ -351,11 +391,20 @@ export function createStorageHandler(
         json(res, 403, { error: err.message });
         return;
       }
+      if (err instanceof ReadOnlyFileError) {
+        json(res, 403, { error: err.message, readOnly: true });
+        return;
+      }
+      if (err instanceof FileExistsError) {
+        json(res, 412, { error: err.message, exists: true });
+        return;
+      }
       if (
         err instanceof InvalidPathError ||
         err instanceof NodeError ||
         err instanceof AccessError ||
-        err instanceof ExperimentError
+        err instanceof ExperimentError ||
+        err instanceof SearchError
       ) {
         json(res, 400, { error: err.message });
         return;
@@ -437,6 +486,7 @@ export function createStorageHandler(
           ETag: etag,
           "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
           "X-File-Author": file.info.author,
+          ...(file.info.readOnly ? { "X-File-Read-Only": "true" } : {}),
           "Cache-Control": "no-cache",
         });
         res.end(file.bytes);
@@ -451,6 +501,8 @@ export function createStorageHandler(
         const mime = req.headers["content-type"]?.split(";")[0].trim();
         const info = await service.write(path, bytes, {
           mime: mime && mime !== "application/octet-stream" ? mime : undefined,
+          createOnly: req.headers["if-none-match"]?.trim() === "*",
+          readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
         });
         json(res, 200, info);
         return;

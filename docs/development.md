@@ -31,6 +31,19 @@ Without `DATABASE_URL`, files stay in localStorage and the title bar says
 UI. To isolate storage tests from personal files, create disposable databases as
 shown in [Testing](testing.md).
 
+## Runs, rules and semantic search
+
+`RUN_DIR_MARKERS` is a comma-separated list of marker folders (default
+`xdoe-report`) used to discover runs. Choose a run in Traverse to enter Focus.
+`RULES_API_URL` configures the server-side rules provider; when unset, the built-in
+mock answers. Actions use the user's role where the run lives, and generated
+rules files are read-only. See [Architecture](architecture.md).
+
+With pgvector, semantic search downloads a local embedding model on first use
+and caches it under `EMBEDDING_CACHE_DIR` or `~/.cache/knowledge-chatroom/models`.
+`EMBEDDING_MODEL=off` disables embeddings while retaining keyword search.
+Changing the model re-embeds the corpus. See `.env.example` for the default model.
+
 ## Optional login
 
 Set the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.

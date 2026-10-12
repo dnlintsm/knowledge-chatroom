@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, ReactNode } from "react";
-import { FileText, MessageSquarePlus, TextSelect } from "lucide-react";
+import { FileText, FlaskConical, MessageSquarePlus, TextSelect } from "lucide-react";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ const MESSAGE_VIEW = {
 
 export function ChatPane() {
   const { activeFile, selection } = useWorkspace();
-  const { chat } = useWorkbench();
+  const { chat, runDir } = useWorkbench();
 
   return (
     <section aria-label="Chat" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
@@ -53,6 +53,16 @@ export function ChatPane() {
         className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]"
       >
         <span>Claude sees:</span>
+        {runDir && (
+          <span
+            data-testid="chat-context-run"
+            title={`Run ${runDir}: its files and report`}
+            className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
+          >
+            <FlaskConical className="size-3 shrink-0" />
+            <span className="truncate">{runDir.split("/").pop()}</span>
+          </span>
+        )}
         {activeFile ? (
           <span className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]">
             <FileText className="size-3 shrink-0" />

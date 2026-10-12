@@ -81,6 +81,8 @@ async function storage(page: Page) {
   });
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  // The current workbench starts in Traverse; choose the file view explicitly.
+  await page.getByRole("button", { name: "Files", exact: true }).click();
   await page.getByRole("treeitem", { name: /sync\.md/ }).click();
   await expect(page.getByTestId("file-preview")).toContainText("Original");
   await page.getByRole("button", { name: "edit", exact: true }).click();

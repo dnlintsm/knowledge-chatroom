@@ -33,7 +33,8 @@ export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function isNotFound(err: unknown): boolean {
+/** Whether a store error means the object (or bucket) isn't there, as opposed to a failure. */
+export function isNotFound(err: unknown): boolean {
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
   return (
     e?.name === "NotFound" ||

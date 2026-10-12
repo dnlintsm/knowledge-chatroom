@@ -23,6 +23,65 @@ root installs both. The starter's charts, meeting picker and A2UI examples remai
 under `src/app/declarative-generative-ui` and `src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
+### Runs: Focus and Traverse modes
+
+A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. Any folder that
+contains a marker folder is a run, `xdoe-report/` by default (set `RUN_DIR_MARKERS`,
+comma-separated, to add more). The workspace works in one of two modes:
+
+- **Traverse** (`/`): the **Traverse** view on the icon rail lists every run. There is no chat.
+- **Focus** (`/?run=runs/etch-2026-10-01`): the panes work on that run. The Files view is
+  rooted at it (new notes and uploads land in it), the title bar shows where you are with a
+  button to leave, and Claude gets the run as context (its path, files and
+  `xdoe-report/report.md`). Picking a run opens its report.
+
+The URL is the source of truth, so links open a run directly and back/forward move between
+runs. A link to a run that isn't there falls back to Traverse with a notice.
+
+### Actions
+
+In Focus mode the Files view ends with a foldable **Actions** block (like VS Code's Outline
+and Timeline sections), whose buttons act on the current run:
+
+| Action | Role | Does |
+| --- | --- | --- |
+| **New Chat** | viewer | starts an empty conversation, still about the same run |
+| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without `<run>/models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
+
+Actions are entries in one registry (`src/components/workspace/actions.tsx`), each with an
+id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
+and state for the current run, and a `run(ctx)` that acts only through the workbench
+contract and the file API. One runner serves the block and Claude: it refuses disabled,
+unauthorized or already-running actions, so a double click never runs one twice.
+
+The role is the user's role where the run lives (the knowledge node, experiment or workspace
+root), as the grants give it. A viewer there sees Generate Rules disabled, with a tooltip
+saying why, and Claude acting for them gets the same refusal. The server checks again: any
+write, a read-only file included, needs editor. Without server storage the single user owns
+everything.
+
+#### Rules API
+
+Generate Rules gets JSON from `GET /api/rules?run=<run>`. The Next.js server forwards that to
+`RULES_API_URL` (`GET <url>?run=<run>`), so the API's address stays off the browser. Without
+`RULES_API_URL` it answers with a built-in mock (`src/lib/rules-mock.ts`), which is also served
+at `/api/mock/rules`. The answer looks like this:
+
+```json
+{ "run": "runs/etch-2026-10-01", "generatedAt": "2026-10-08T00:00:00.000Z",
+  "rules": [{ "id": "R1", "title": "…", "condition": "…", "action": "…", "confidence": 0.93 }] }
+```
+
+A fixed transform (`src/components/workspace/rules.ts`, unit tested) turns it into a markdown
+table. The file is written once and is read-only for everyone, Claude included: the editor
+only previews it, and the file API refuses to change or delete it.
+
+The API is called at most once per run. The button is disabled while it works, and a lock
+shared by the browser's tabs, plus a check with the server just before the call, stops a
+second tab from asking again. The write only creates (`If-None-Match: *`), so even two
+browsers can't overwrite the file. Without server storage, files live in each tab separately,
+so only the first two guards apply.
+
 ### Workbench contract
 
 Everything that moves panes goes through one typed API, `useWorkbench()`
@@ -31,12 +90,20 @@ switcher, file references in answers, and Claude's open-file tools.
 
 | Part | Does |
 | --- | --- |
+| `mode`, `runDir`, `runs` | Focus or Traverse, the focused run, every run in the workspace |
+| `run.focus(path) / leave()` | moves to a run (a new history entry) or back to Traverse |
 | `panes.isOpen / show / hide / toggle(pane)` | `"explorer"`, `"editor"` or `"chat"`; on phones `show` switches to that pane |
 | `panes.resize / resetSize(pane, width)` | splitter drags, clamped to each pane's range |
 | `sidebar.select / show(view)` | the icon rail (`select` on the active view collapses the panel) |
 | `editor.open(path, lines?)` | opens a file or the task board, optionally at cited lines |
-| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat |
+| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat (Focus mode only) |
 | `notify(message, level)` | a short notice in the corner |
+
+Claude drives the same contract through frontend tools: `showPane` / `hidePane`,
+`listRuns` / `focusRun`, `openWorkspaceFile`, and `listActions` / `runAction`. `runAction`
+goes through the Actions block's runner with the user's role, and only runs actions marked
+`agentInvocable` (Generate Rules is; New Chat isn't, since it would end Claude's own
+conversation). Claude can't leave the run, because Traverse mode has no chat.
 
 The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit
 tested (`tests/unit/workbench.spec.ts`), and a test fails if anything outside the workbench starts
@@ -101,6 +168,23 @@ For local setup, see [Development](development.md).
   their node with their status, and the Experiment tab holds the details and a comparison
   table. Moving an experiment's results into the node comes with proposed edits (step 7 of
   issue #4).
+- **Search**: every text file is indexed when it is written (`006_search.sql`): its text is
+  split into passages and stored once per distinct content, so versions, experiment copies and
+  duplicates share one entry. `GET /api/search?q=<text>` finds the files you can read whose
+  words (with their forms, so etch finds etching) or exact text (part numbers, CJK) or path
+  match, with the passage that matched. `&scope=<node id>` keeps to one node and everything
+  below it, and `&near=<node id>` or `&experiment=<id>` ranks files near there first. Files
+  stored before search existed are indexed in the background when the agent starts. The
+  Search view in the left rail searches as you type and opens a result where it lives.
+- **Search by meaning**: with pgvector in Postgres (the `docker compose` image has it), a
+  small multilingual embedding model (`Xenova/multilingual-e5-small`, MIT) runs inside the
+  agent, so nothing leaves your server. It downloads once (about 120 MB, to
+  `~/.cache/knowledge-chatroom/models` or `EMBEDDING_CACHE_DIR`), then embeds every passage
+  in the background, and search also finds passages close in meaning ("chamber wall
+  buildup" finds "polymer deposition on the liner"), marked "Similar meaning". Word
+  matches still rank first; "quotes" or -word ask for exact words only. Without pgvector,
+  or with `EMBEDDING_MODEL=off`, search matches words. Changing `EMBEDDING_MODEL` re-embeds
+  everything.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
@@ -134,7 +218,7 @@ For local setup, see [Development](development.md).
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
-- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `write_file`,
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`, `write_file`,
   `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
@@ -160,6 +244,6 @@ key a pending save only by file path. Navigation must flush the place being left
 and late network responses must not overwrite another place's files. Local edits
 and in-flight writes take priority over incoming SSE updates.
 
-Experiments are persisted forks of a node's file list. Workbench runs discussed in
-issue #13 describe UI/workflow traversal; they do not replace experiment storage.
+Experiments are persisted forks of a node's file list. Workbench runs describe UI/workflow traversal in Focus/Traverse modes; they do not
+replace experiment storage.
 Coordinate changes with the feature PR stack before introducing new semantics.

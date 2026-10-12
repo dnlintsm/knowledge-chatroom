@@ -7,7 +7,8 @@ agent over [AG-UI](https://docs.ag-ui.com), using [CopilotKit](https://copilotki
 Files can stay in this browser or sync through PostgreSQL and S3-compatible
 storage. Optional OpenID Connect login supports sharing and read-only access.
 The left pane explores knowledge/files, the middle pane previews or edits them,
-and the right pane chats with Claude using the open file and selection as context.
+and, in Focus mode, the right pane chats with Claude using the focused run, open
+file and selection as context. Traverse mode lists runs; choosing a run enters Focus.
 
 ## Quick start
 
@@ -21,14 +22,15 @@ npm ci                         # also installs agent/ from its lockfile
 npm run dev                    # UI :3000, agent :8000
 ```
 
-Open <http://localhost:3000>. Enable server storage and login using the instructions
+Open <http://localhost:3000> and choose a run in Traverse to open its report and chat.
+Enable server storage and login using the instructions
 in [Development](docs/development.md). Keep local credentials in `.env`.
 
 ## Contributor guide
 
 - [Development](docs/development.md): dependencies, local services and environment variables.
 - [Testing](docs/testing.md): fast checks, integration, E2E and CI coverage.
-- [Architecture](docs/architecture.md): component boundaries, file APIs, access and experiments.
+- [Architecture](docs/architecture.md): runs, actions/rules, file APIs, search, access and experiments.
 - [Deployment](docs/deployment.md): production build, private agent, login and storage.
 
 Before opening a PR:
