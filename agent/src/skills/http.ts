@@ -32,15 +32,20 @@ export function createSkillsHandler(
     if (!s && state() !== "off") {
       return send(res, state() === "failed" ? 500 : 503, { error: "Storage is not available" });
     }
-    let userId: string | null = null;
-    if (s) {
-      const principal = await identify(req, s);
-      if (!principal) return send(res, 401, { error: "Sign in first" });
-      userId = principal.userId;
-    }
-
-    const name = decodeURIComponent(url.pathname.slice("/skills".length).replace(/^\/+/, ""));
     try {
+      let userId: string | null = null;
+      if (s) {
+        const principal = await identify(req, s);
+        if (!principal) return send(res, 401, { error: "Sign in first" });
+        userId = principal.userId;
+      }
+
+      let name: string;
+      try {
+        name = decodeURIComponent(url.pathname.slice("/skills".length).replace(/^\/+/, ""));
+      } catch {
+        return send(res, 400, { error: "Invalid skill name" });
+      }
       if (req.method === "GET" && !name) {
         return send(res, 200, { skills: await skills.list(userId) });
       }

@@ -38,6 +38,9 @@ export interface SkillUse {
 
 const ROOT = process.env.SKILLS_RUN_DIR || path.join(os.tmpdir(), "knowledge-chatroom-skills");
 
+/** Writes per run folder, one after another, so two runs starting together don't race. */
+const writing = new Map<string, Promise<unknown>>();
+
 /** Writes the user's skills to their run folder (if they changed) and returns it. */
 export async function materialize(
   userKey: string,
@@ -45,6 +48,17 @@ export async function materialize(
   root = ROOT,
 ): Promise<RunSkills> {
   const cwd = path.join(root, createHash("sha256").update(userKey).digest("hex").slice(0, 16));
+  const previous = writing.get(cwd) ?? Promise.resolve();
+  const done = previous.catch(() => {}).then(() => write(cwd, skills));
+  writing.set(cwd, done);
+  try {
+    return await done;
+  } finally {
+    if (writing.get(cwd) === done) writing.delete(cwd);
+  }
+}
+
+async function write(cwd: string, skills: UserSkill[]): Promise<RunSkills> {
   const dir = path.join(cwd, ".claude", "skills");
   const fingerprint = createHash("sha256");
   for (const { skill } of skills) {

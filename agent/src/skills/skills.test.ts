@@ -123,6 +123,15 @@ test("materialize writes the run's skills once per set, in a folder per user", a
   assert.notEqual(bob.cwd, a.cwd);
 });
 
+test("runs starting together for one user all get their skills", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "skills-test-"));
+  const sets = [[userSkill("one", "auto")], [userSkill("two", "auto")], [userSkill("one", "auto")]];
+  const runs = await Promise.all(sets.map((set) => materialize("carol", set, root)));
+  assert.equal(new Set(runs.map((r) => r.cwd)).size, 1);
+  // The last one written wins, and each run returned without an error.
+  assert.deepEqual((await readdir(path.join(runs[0].cwd, ".claude", "skills"))).sort(), [".fingerprint", "one"]);
+});
+
 test("skill options: modes become SDK overrides, uses are reported", async () => {
   const run = { cwd: "/tmp/x", skills: [userSkill("one", "auto"), userSkill("two", "manual")] };
   const uses: SkillUse[] = [];
