@@ -12,18 +12,21 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, Sparkles } from "lucide-react";
-import { CopilotChatInput, useAgent } from "@copilotkit/react-core/v2";
+import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "./store";
 
 /**
- * Skill management in the workspace (issue #7, step 1):
+ * Skill management in the workspace (issue #7):
  * - the Skills panel lists every skill Claude can have (built-in + the
- *   workspace's skills/<name>/SKILL.md) and sets each to Auto, Manual or Off;
+ *   workspace's skills/<name>/SKILL.md) and sets each to Auto, Manual or Off
+ *   for you; editors of the workspace also set the default for everyone;
  * - typing "/" in the chat opens a menu of the skills you can run by name;
  * - under the chat input, a status bar says which skills are on and which
- *   ones the current turn used (the agent sends a "skill_used" event for each).
- * Modes are kept per user by the agent server (/api/skills).
+ *   ones the current turn used (the agent sends a "skill_used" event for
+ *   each), and opens this chat's own choices.
+ * The agent server keeps the modes (/api/skills); the most specific of
+ * chat › you › everyone › the skill's default applies.
  */
 
 export type SkillMode = "auto" | "manual" | "off";
@@ -35,8 +38,15 @@ export interface SkillInfo {
   source: "builtin" | "workspace";
   /** Its SKILL.md in the workspace; null for built-in skills. */
   path: string | null;
+  /** The mode that applies here (in the current chat). */
   mode: SkillMode;
   defaultMode: SkillMode;
+  /** Chosen for everyone; null = the skill's default. */
+  workspaceMode: SkillMode | null;
+  /** Your choice; null = the workspace's. */
+  userMode: SkillMode | null;
+  /** This chat's choice; null = yours. */
+  chatMode: SkillMode | null;
   modelInvocable: boolean;
   userInvocable: boolean;
   needsExecution: boolean;
@@ -54,10 +64,25 @@ interface Turn {
   used: SkillUse[];
 }
 
+export type ModeScope = "workspace" | "user" | "chat";
+
+const SCOPE_FIELD = { workspace: "workspaceMode", user: "userMode", chat: "chatMode" } as const;
+
+/** The mode that applies with the chosen levels (as the agent decides it). */
+export function resolveMode(skill: SkillInfo, levels: ModeScope[] = ["chat", "user", "workspace"]): SkillMode {
+  let mode = levels.map((l) => skill[SCOPE_FIELD[l]]).find((m) => m !== null) ?? skill.defaultMode;
+  if (mode === "auto" && !skill.modelInvocable) mode = "manual";
+  if (mode === "manual" && !skill.userInvocable) mode = "off";
+  return mode;
+}
+
 interface Skills {
   skills: SkillInfo[];
   status: "loading" | "ready" | "unavailable";
-  setMode: (name: string, mode: SkillMode) => Promise<void>;
+  /** You may set the defaults for everyone (editor or owner of the workspace). */
+  canSetDefaults: boolean;
+  /** Sets a skill's mode at one level; null clears it there. */
+  setMode: (name: string, mode: SkillMode | null, scope?: ModeScope) => Promise<void>;
   /** The current (or last) turn of the chat. */
   turn: Turn;
 }
@@ -74,6 +99,8 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   const ws = useWorkspace();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [status, setStatus] = useState<Skills["status"]>("loading");
+  const [canSetDefaults, setCanSetDefaults] = useState(false);
+  const threadId = useCopilotChatConfiguration()?.threadId;
 
   // Workspace skills are the root's skills/ files: reload when those change.
   const atRoot = ws.node === null && !ws.experiment;
@@ -86,14 +113,17 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/skills", { cache: "no-store" });
+      const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
+      const res = await fetch(`/api/skills${query}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      setSkills(((await res.json()) as { skills: SkillInfo[] }).skills);
+      const list = (await res.json()) as { skills: SkillInfo[]; canSetDefaults?: boolean };
+      setSkills(list.skills);
+      setCanSetDefaults(Boolean(list.canSetDefaults));
       setStatus("ready");
     } catch {
       setStatus("unavailable");
     }
-  }, []);
+  }, [threadId]);
 
   useEffect(() => {
     if (ws.storageMode === "loading") return;
@@ -103,27 +133,33 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   }, [load, skillFiles, ws.storageMode]);
 
   const setMode = useCallback(
-    async (name: string, mode: SkillMode) => {
-      setSkills((list) => list.map((s) => (s.name === name ? { ...s, mode } : s)));
+    async (name: string, mode: SkillMode | null, scope: ModeScope = "user") => {
+      setSkills((list) =>
+        list.map((s) => {
+          if (s.name !== name) return s;
+          const next = { ...s, [SCOPE_FIELD[scope]]: mode };
+          return { ...next, mode: resolveMode(next) };
+        }),
+      );
       try {
         const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode }),
+          body: JSON.stringify({ mode, scope, ...(scope === "chat" ? { thread: threadId } : {}) }),
         });
         if (!res.ok) throw new Error(String(res.status));
-        const updated = (await res.json()) as SkillInfo;
-        setSkills((list) => list.map((s) => (s.name === name ? updated : s)));
-      } catch {
+      } finally {
+        // The server's answer for every level, this chat's included.
         await load();
       }
     },
-    [load],
+    [load, threadId],
   );
 
   // Which skills the current turn used, from the agent's "skill_used" events.
   const { agent } = useAgent();
   const [turn, setTurn] = useState<Turn>({ running: false, used: [] });
+  useEffect(() => setTurn({ running: false, used: [] }), [threadId]);
   useEffect(() => {
     const sub = agent.subscribe({
       onRunStartedEvent: () => setTurn({ running: true, used: [] }),
@@ -139,7 +175,10 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
     return () => sub.unsubscribe();
   }, [agent]);
 
-  const value = useMemo(() => ({ skills, status, setMode, turn }), [skills, status, setMode, turn]);
+  const value = useMemo(
+    () => ({ skills, status, canSetDefaults, setMode, turn }),
+    [skills, status, canSetDefaults, setMode, turn],
+  );
   return <SkillsContext.Provider value={value}>{children}</SkillsContext.Provider>;
 }
 
@@ -149,9 +188,50 @@ const MODES: { mode: SkillMode; label: string; title: string }[] = [
   { mode: "off", label: "Off", title: "Not available to Claude" },
 ];
 
+const MODE_LABEL: Record<SkillMode, string> = { auto: "Auto", manual: "Manual", off: "Off" };
+
+/** Whether a skill's SKILL.md allows this mode. */
+const allows = (skill: SkillInfo, mode: SkillMode) =>
+  !(mode === "auto" && !skill.modelInvocable) && !(mode === "manual" && !skill.userInvocable);
+
+/** A select for one level's choice; "" means no choice there (the level above applies). */
+function ModeSelect({
+  skill,
+  value,
+  inherit,
+  onChange,
+  label,
+  testId,
+}: {
+  skill: SkillInfo;
+  value: SkillMode | null;
+  /** What applies with no choice here, e.g. "Default (Auto)". */
+  inherit: string;
+  onChange: (mode: SkillMode | null) => void;
+  label: string;
+  testId: string;
+}) {
+  return (
+    <select
+      aria-label={label}
+      data-testid={testId}
+      value={value ?? ""}
+      onChange={(e) => onChange((e.target.value || null) as SkillMode | null)}
+      className="rounded border border-[var(--border)] bg-[var(--background)] px-1 py-0.5 text-xs"
+    >
+      <option value="">{inherit}</option>
+      {MODES.map(({ mode, label }) => (
+        <option key={mode} value={mode} disabled={!allows(skill, mode)}>
+          {label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** The Skills view of the side panel. `fallback` (the skill files here) shows when skills can't be loaded, and below them with browser-only files. */
 export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
-  const { skills, status, setMode } = useSkills();
+  const { skills, status, canSetDefaults, setMode } = useSkills();
   const ws = useWorkspace();
   const atRoot = ws.node === null && !ws.experiment;
 
@@ -163,7 +243,8 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
   return (
     <div data-testid="skills-panel" className="flex flex-col">
       <p className="px-3 pb-2 text-xs text-[var(--muted-foreground)]">
-        Auto: Claude uses it when it fits. Manual: only when you type /name in the chat.
+        Auto: Claude uses it when it fits. Manual: only when you type /name in the chat. Your choice
+        applies to all your chats; the bar under the chat sets one chat's own.
       </p>
       {ws.storageMode === "server" && !atRoot && (
         <p className="mx-3 mb-2 rounded bg-[var(--secondary)] px-2 py-1.5 text-xs text-[var(--muted-foreground)]">
@@ -175,75 +256,108 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
           No skills yet. Skills are SKILL.md files that teach Claude a workflow.
         </p>
       )}
-      {skills.map((skill) => (
-        <div
-          key={skill.name}
-          data-testid="skill-row"
-          data-skill={skill.name}
-          className="border-b border-[var(--border)] px-3 py-2 last:border-b-0"
-        >
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="size-3.5 shrink-0 text-amber-500" />
-            {skill.path && atRoot ? (
-              <button
-                type="button"
-                title={`Open ${skill.path}`}
-                onClick={() => ws.open(skill.path!)}
-                className="min-w-0 truncate font-medium hover:underline cursor-pointer"
-              >
-                {skill.name}
-              </button>
-            ) : (
-              <span className="min-w-0 truncate font-medium">{skill.name}</span>
-            )}
-            <span className="shrink-0 rounded bg-[var(--secondary)] px-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
-              {skill.source === "builtin" ? "Built-in" : "Workspace"}
-            </span>
-            {skill.needsExecution && (
-              <span
-                title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
-                className="shrink-0 text-amber-600"
-              >
-                <AlertTriangle className="size-3.5" />
-              </span>
-            )}
-          </div>
-          {skill.description && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-[var(--muted-foreground)]">{skill.description}</p>
-          )}
+      {skills.map((skill) => {
+        // Yours (or what you get without a choice); a chat's own choice shows in the status bar.
+        const yours = resolveMode(skill, ["user", "workspace"]);
+        const everyone = resolveMode(skill, ["workspace"]);
+        return (
           <div
-            role="radiogroup"
-            aria-label={`${skill.name} mode`}
-            className="mt-1.5 inline-flex overflow-hidden rounded border border-[var(--border)] text-xs"
+            key={skill.name}
+            data-testid="skill-row"
+            data-skill={skill.name}
+            className="border-b border-[var(--border)] px-3 py-2 last:border-b-0"
           >
-            {MODES.map(({ mode, label, title }) => {
-              const disabled =
-                (mode === "auto" && !skill.modelInvocable) ||
-                (mode === "manual" && !skill.userInvocable);
-              const active = skill.mode === mode;
-              return (
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="size-3.5 shrink-0 text-amber-500" />
+              {skill.path && atRoot ? (
                 <button
-                  key={mode}
                   type="button"
-                  role="radio"
-                  aria-checked={active}
-                  disabled={disabled}
-                  title={disabled ? "This skill's SKILL.md doesn't allow this" : title}
-                  onClick={() => void setMode(skill.name, mode)}
-                  className={cn(
-                    "px-2 py-0.5 border-r border-[var(--border)] last:border-r-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
-                    active
-                      ? "bg-[var(--accent)] text-[var(--accent-foreground)] font-medium"
-                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
-                  )}
+                  title={`Open ${skill.path}`}
+                  onClick={() => ws.open(skill.path!)}
+                  className="min-w-0 truncate font-medium hover:underline cursor-pointer"
                 >
-                  {label}
+                  {skill.name}
                 </button>
-              );
-            })}
+              ) : (
+                <span className="min-w-0 truncate font-medium">{skill.name}</span>
+              )}
+              <span className="shrink-0 rounded bg-[var(--secondary)] px-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                {skill.source === "builtin" ? "Built-in" : "Workspace"}
+              </span>
+              {skill.needsExecution && (
+                <span
+                  title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
+                  className="shrink-0 text-amber-600"
+                >
+                  <AlertTriangle className="size-3.5" />
+                </span>
+              )}
+            </div>
+            {skill.description && (
+              <p className="mt-0.5 line-clamp-2 text-xs text-[var(--muted-foreground)]">{skill.description}</p>
+            )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <div
+                role="radiogroup"
+                aria-label={`${skill.name} mode`}
+                className="inline-flex overflow-hidden rounded border border-[var(--border)]"
+              >
+                {MODES.map(({ mode, label, title }) => {
+                  const disabled = !allows(skill, mode);
+                  const active = yours === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      disabled={disabled}
+                      title={disabled ? "This skill's SKILL.md doesn't allow this" : title}
+                      onClick={() => void setMode(skill.name, mode, "user")}
+                      className={cn(
+                        "px-2 py-0.5 border-r border-[var(--border)] last:border-r-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
+                        active
+                          ? "bg-[var(--accent)] text-[var(--accent-foreground)] font-medium"
+                          : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {skill.userMode !== null ? (
+                <button
+                  type="button"
+                  data-testid="skill-use-default"
+                  title={`Go back to what everyone gets (${MODE_LABEL[everyone]})`}
+                  onClick={() => void setMode(skill.name, null, "user")}
+                  className="text-[var(--muted-foreground)] underline-offset-2 hover:underline cursor-pointer"
+                >
+                  Use default
+                </button>
+              ) : (
+                <span className="text-[var(--muted-foreground)]">
+                  {skill.workspaceMode !== null ? "Workspace default" : "Default"}
+                </span>
+              )}
+            </div>
+            {canSetDefaults && (
+              <label className="mt-1 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                For everyone:
+                <ModeSelect
+                  skill={skill}
+                  value={skill.workspaceMode}
+                  inherit={`Skill default (${MODE_LABEL[resolveMode(skill, [])]})`}
+                  onChange={(mode) => void setMode(skill.name, mode, "workspace")}
+                  label={`${skill.name} mode for everyone`}
+                  testId="skill-workspace-mode"
+                />
+              </label>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
       {ws.storageMode === "local" && (
         <>
           <p className="mx-3 mt-3 mb-1 rounded bg-[var(--secondary)] px-2 py-1.5 text-xs text-[var(--muted-foreground)]">
@@ -381,38 +495,75 @@ export function SkillChatInput(props: ChatInputProps) {
   );
 }
 
-/** One line under the input: the skills that are on, then what this turn used. */
+/** One line under the input: the skills that are on, then what this turn used; and this chat's own choices. */
 function SkillStatusBar({ skills, turn }: { skills: SkillInfo[]; turn: Turn }) {
+  const { setMode } = useSkills();
+  const [open, setOpen] = useState(false);
   const auto = skills.filter((s) => s.mode === "auto").length;
   const manual = skills.filter((s) => s.mode === "manual").length;
+  const changed = skills.filter((s) => s.chatMode !== null).length;
   return (
-    <div
-      data-testid="skill-status"
-      className="pointer-events-auto mx-auto flex max-w-3xl flex-wrap items-center gap-1.5 px-5 pt-1.5 pb-3 text-xs text-[var(--muted-foreground)]"
-    >
-      <Sparkles className="size-3 shrink-0 text-amber-500" />
-      {turn.used.length > 0 ? (
-        <>
-          <span>{turn.running ? "Using" : "Used"}:</span>
-          {turn.used.map((use) => (
-            <span
-              key={use.skill}
-              data-testid="skill-used"
-              title={use.trigger === "slash" ? "You ran it with /" : "Claude chose it"}
-              className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[var(--accent-foreground)]"
-            >
-              {use.trigger === "slash" ? "/" : ""}
-              {use.skill}
-              {use.trigger === "model" && <span className="opacity-70"> · auto</span>}
-            </span>
+    <div className="relative mx-auto max-w-3xl">
+      {open && (
+        <div
+          data-testid="chat-skills"
+          className="absolute inset-x-4 bottom-full z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 text-xs shadow-lg @3xl:inset-x-0"
+        >
+          <p className="px-1 pb-1.5 text-[var(--muted-foreground)]">
+            Skills in this chat only. &ldquo;Yours&rdquo; follows your choice in the Skills panel.
+          </p>
+          {skills.map((skill) => (
+            <div key={skill.name} data-skill={skill.name} className="flex items-center gap-2 px-1 py-1">
+              <span className="min-w-0 flex-1 truncate font-medium">{skill.name}</span>
+              <ModeSelect
+                skill={skill}
+                value={skill.chatMode}
+                inherit={`Yours (${MODE_LABEL[resolveMode(skill, ["user", "workspace"])]})`}
+                onChange={(mode) => void setMode(skill.name, mode, "chat")}
+                label={`${skill.name} mode in this chat`}
+                testId="skill-chat-mode"
+              />
+            </div>
           ))}
-        </>
-      ) : (
-        <span title="Auto: Claude may use them. Manual: only with /name.">
-          {turn.running ? "No skills used yet" : `${auto} auto · ${manual} manual skills`}
-          {" · type / to run one"}
-        </span>
+        </div>
       )}
+      <div
+        data-testid="skill-status"
+        className="pointer-events-auto flex flex-wrap items-center gap-1.5 px-5 pt-1.5 pb-3 text-xs text-[var(--muted-foreground)]"
+      >
+        <Sparkles className="size-3 shrink-0 text-amber-500" />
+        {turn.used.length > 0 ? (
+          <>
+            <span>{turn.running ? "Using" : "Used"}:</span>
+            {turn.used.map((use) => (
+              <span
+                key={use.skill}
+                data-testid="skill-used"
+                title={use.trigger === "slash" ? "You ran it with /" : "Claude chose it"}
+                className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[var(--accent-foreground)]"
+              >
+                {use.trigger === "slash" ? "/" : ""}
+                {use.skill}
+                {use.trigger === "model" && <span className="opacity-70"> · auto</span>}
+              </span>
+            ))}
+          </>
+        ) : (
+          <span title="Auto: Claude may use them. Manual: only with /name.">
+            {turn.running ? "No skills used yet" : `${auto} auto · ${manual} manual skills`}
+            {" · type / to run one"}
+          </span>
+        )}
+        <button
+          type="button"
+          data-testid="chat-skills-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="ml-auto rounded px-1.5 py-0.5 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
+        >
+          This chat{changed > 0 ? ` · ${changed} changed` : ""}
+        </button>
+      </div>
     </div>
   );
 }

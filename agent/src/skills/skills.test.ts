@@ -87,11 +87,16 @@ test("the built-in skills load", () => {
 
 test("without storage: built-in skills, modes kept in memory", async () => {
   const service = new SkillService(() => null);
-  const before = await service.list(null);
+  const before = (await service.list(null)).skills;
   assert.equal(before.find((s) => s.name === "tldr")?.mode, "auto");
   const updated = await service.setMode(null, "tldr", "off");
   assert.equal(updated.mode, "off");
-  assert.equal((await service.list(null)).find((s) => s.name === "tldr")?.mode, "off");
+  assert.equal((await service.list(null)).skills.find((s) => s.name === "tldr")?.mode, "off");
+  // The local user also sets the defaults and per-chat modes, kept in memory too.
+  assert.equal((await service.list(null)).canSetDefaults, true);
+  await service.setMode(null, "tldr", "auto", "chat", "t1");
+  assert.equal((await service.list(null, "t1")).skills.find((s) => s.name === "tldr")?.mode, "auto");
+  assert.ok((await service.forRun(null, "t1")).some((s) => s.skill.name === "tldr"));
   assert.ok(!(await service.forRun(null)).some((s) => s.skill.name === "tldr"));
   await assert.rejects(service.setMode(null, "tldr", "sometimes"), InvalidModeError);
   await assert.rejects(service.setMode(null, "nope", "auto"), UnknownSkillError);

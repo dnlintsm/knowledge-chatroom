@@ -29,7 +29,7 @@ import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./s
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
 import { createSkillsHandler } from "../skills/http";
-import { SkillService } from "../skills/service";
+import { InvalidModeError, SkillForbiddenError, SkillService } from "../skills/service";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -1260,6 +1260,25 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
       const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
       assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
+      // Skills at the root are proposed too: Claude doesn't add skills itself.
+      const skill = JSON.parse(
+        (await call("write_file", { path: "skills/recap/SKILL.md", content: "---\nname: recap\n---\nRecap." })).text,
+      ) as { proposed: boolean; node: string | null };
+      assert.deepEqual([skill.proposed, skill.node], [true, null]);
+      assert.equal((await call("read_file", { path: "skills/recap/SKILL.md" })).isError, true);
+      const [skillProposal] = await local.proposals({ node: null });
+      assert.equal(skillProposal.path, "skills/recap/SKILL.md");
+      await local.decide(skillProposal.id, "reject");
+      // However the path is spelled.
+      for (const spelled of ["skills\\recap\\SKILL.md", " //skills//recap/SKILL.md"]) {
+        const again = JSON.parse((await call("write_file", { path: spelled, content: "Recap." })).text) as {
+          proposed: boolean;
+        };
+        assert.equal(again.proposed, true, spelled);
+      }
+      assert.equal((await call("read_file", { path: "skills/recap/SKILL.md" })).isError, true);
+      for (const open of await local.proposals({ node: null })) await local.decide(open.id, "reject");
+
       const missing = await call("list_files", { node: "not-a-node" });
       assert.equal(missing.isError, true);
       assert.match(missing.text, /list_nodes/);
@@ -1613,7 +1632,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await storage.files.write("skills/standup/template.md", text("Yesterday / Today"));
       const skills = new SkillService(() => storage);
 
-      const mine = await skills.list(local);
+      const mine = (await skills.list(local)).skills;
       const standup = mine.find((s) => s.name === "standup");
       assert.equal(standup?.source, "workspace");
       assert.equal(standup?.path, "skills/standup/SKILL.md");
@@ -1626,21 +1645,59 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       );
 
       // Someone who can't read the workspace root gets the built-in skills only.
-      assert.ok(!(await skills.list(stranger)).some((s) => s.source === "workspace"));
+      assert.ok(!(await skills.list(stranger)).skills.some((s) => s.source === "workspace"));
 
       // Modes are per user.
       await skills.setMode(local, "standup", "manual");
       await skills.setMode(local, "tldr", "off");
       await skills.setMode(stranger, "tldr", "manual");
-      const after = await skills.list(local);
+      const after = (await skills.list(local)).skills;
       assert.equal(after.find((s) => s.name === "standup")?.mode, "manual");
       assert.equal(after.find((s) => s.name === "tldr")?.mode, "off");
-      assert.equal((await skills.list(stranger)).find((s) => s.name === "tldr")?.mode, "manual");
+      assert.equal((await skills.list(stranger)).skills.find((s) => s.name === "tldr")?.mode, "manual");
       assert.ok(!(await skills.forRun(local)).some((s) => s.skill.name === "tldr"));
 
       await skills.record(local, { threadId: "t1", runId: "r1", skill: "standup", source: "workspace", trigger: "slash" });
       const [use] = await storage.sql`SELECT skill, trigger FROM skill_invocations WHERE thread_id = 't1'`;
       assert.deepEqual({ ...use }, { skill: "standup", trigger: "slash" });
+    });
+
+    test("defaults for everyone, set by editors; per-chat choices win", async () => {
+      const owner = await storage.access.localUserId();
+      const viewer = await storage.access.userForSubject("test|skills-viewer");
+      await storage.session({ userId: owner, actor: "user" }).setGrant(null, "user", viewer, "viewer");
+      const skills = new SkillService(() => storage);
+      const tldr = async (user: string, thread?: string) =>
+        (await skills.list(user, thread)).skills.find((s) => s.name === "tldr")!;
+
+      assert.equal((await skills.list(owner)).canSetDefaults, true);
+      assert.equal((await skills.list(viewer)).canSetDefaults, false);
+      await assert.rejects(skills.setMode(viewer, "tldr", "off", "workspace"), SkillForbiddenError);
+
+      // The owner's default applies to the viewer until they choose for themselves.
+      await skills.setMode(owner, "tldr", "manual", "workspace");
+      assert.deepEqual(
+        [(await tldr(viewer)).mode, (await tldr(viewer)).workspaceMode, (await tldr(viewer)).userMode],
+        ["manual", "manual", null],
+      );
+      await skills.setMode(viewer, "tldr", "auto");
+      assert.equal((await tldr(viewer)).mode, "auto");
+
+      // One chat can differ; other chats and the run without a thread don't.
+      const inChat = await skills.setMode(viewer, "tldr", "off", "chat", "thread-1");
+      assert.deepEqual([inChat.mode, inChat.chatMode], ["off", "off"]);
+      assert.equal((await tldr(viewer, "thread-2")).mode, "auto");
+      assert.ok(!(await skills.forRun(viewer, "thread-1")).some((s) => s.skill.name === "tldr"));
+      assert.ok((await skills.forRun(viewer, "thread-2")).some((s) => s.skill.name === "tldr"));
+      await assert.rejects(skills.setMode(viewer, "tldr", "off", "chat"), InvalidModeError);
+
+      // Clearing a level falls back to the one above.
+      await skills.setMode(viewer, "tldr", null, "chat", "thread-1");
+      assert.equal((await tldr(viewer, "thread-1")).mode, "auto");
+      await skills.setMode(viewer, "tldr", null);
+      assert.equal((await tldr(viewer)).mode, "manual");
+      await skills.setMode(owner, "tldr", null, "workspace");
+      assert.equal((await tldr(viewer)).mode, "auto");
     });
 
     test("HTTP: list and set modes for the signed-in user", async () => {
@@ -1658,6 +1715,15 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         assert.equal(bad.status, 400);
         const missing = await fetch(`${base}/skills/nope`, { method: "PUT", body: JSON.stringify({ mode: "off" }) });
         assert.equal(missing.status, 404);
+        const chat = await fetch(`${base}/skills/write-skill`, {
+          method: "PUT",
+          body: JSON.stringify({ mode: "manual", scope: "chat", thread: "http-thread" }),
+        });
+        assert.equal(((await chat.json()) as { chatMode: string }).chatMode, "manual");
+        const inThread = (await (await fetch(`${base}/skills?thread=http-thread`)).json()) as {
+          skills: { name: string; mode: string }[];
+        };
+        assert.equal(inThread.skills.find((s) => s.name === "write-skill")?.mode, "manual");
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

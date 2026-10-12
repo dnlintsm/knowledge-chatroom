@@ -13,8 +13,8 @@ work easier to find, understand, and reuse.
   Focus mode with its files, report, and chat together.
 - **Work with Claude in context** — discuss the open file or selected lines; follow
   file citations back to the editor and let Claude work with accessible files.
-- **Reuse skills** — choose Auto, Manual, or Off for each skill, invoke it with
-  `/name`, and see which skills a conversation used.
+- **Reuse skills** — choose Auto, Manual, or Off for each skill (for everyone, for
+  yourself, or one chat), invoke it with `/name`, and see which skills a conversation used.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

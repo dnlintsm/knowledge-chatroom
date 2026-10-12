@@ -40,10 +40,24 @@ export interface Skill {
   files: SkillFile[];
 }
 
+/** Where a mode was chosen: for everyone, for one user, or for one of their chats. */
+export interface ModeLayers {
+  workspace?: SkillMode;
+  user?: SkillMode;
+  chat?: SkillMode;
+}
+
 /** What the API and the UI see: a skill without its files, plus its modes. */
 export interface SkillInfo extends Omit<Skill, "files"> {
+  /** The mode that applies (the chat's, else the user's, else the workspace's, else the default). */
   mode: SkillMode;
   defaultMode: SkillMode;
+  /** Set for everyone at the workspace root by an editor; null = the default. */
+  workspaceMode: SkillMode | null;
+  /** This user's own choice; null = the workspace's. */
+  userMode: SkillMode | null;
+  /** This chat's choice (only when asked for a chat); null = the user's. */
+  chatMode: SkillMode | null;
 }
 
 export const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -190,7 +204,12 @@ export function effectiveMode(skill: Skill, chosen: SkillMode | undefined): Skil
   return mode;
 }
 
-export function describe(skill: Skill, chosen: SkillMode | undefined): SkillInfo {
+/** The most specific choice: the chat's, else the user's, else the workspace's. */
+export function chosenMode(layers: ModeLayers | undefined): SkillMode | undefined {
+  return layers?.chat ?? layers?.user ?? layers?.workspace;
+}
+
+export function describe(skill: Skill, layers: ModeLayers = {}): SkillInfo {
   return {
     name: skill.name,
     description: skill.description,
@@ -200,7 +219,10 @@ export function describe(skill: Skill, chosen: SkillMode | undefined): SkillInfo
     modelInvocable: skill.modelInvocable,
     userInvocable: skill.userInvocable,
     needsExecution: skill.needsExecution,
-    mode: effectiveMode(skill, chosen),
+    mode: effectiveMode(skill, chosenMode(layers)),
     defaultMode: defaultMode(skill),
+    workspaceMode: layers.workspace ?? null,
+    userMode: layers.user ?? null,
+    chatMode: layers.chat ?? null,
   };
 }

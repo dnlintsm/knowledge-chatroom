@@ -34,7 +34,14 @@ one is set to:
 - **Manual:** only when you type `/name` in the chat.
 - **Off:** not available.
 
-Modes are per user. Typing `/` in the chat lists the skills you can run; the line under the
+A mode can be chosen at three levels, and the most specific one applies: **for everyone**
+(set in the Skills view by editors and owners of the workspace root), **yours** (the Skills
+view's Auto / Manual / Off, with "Use default" to go back), and **this chat** (the "This chat"
+button under the input). Anyone who can read a skill can use it; adding or changing one
+takes edit access to the workspace's `skills/` folder. When Claude writes a skill, it becomes a
+proposed change that someone with edit access accepts, and Claude never turns skills on or off.
+
+Typing `/` in the chat lists the skills you can run; the line under the
 input says which skills are on and which ones the current turn used. Skills are instructions
 only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies each
 user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp folder),
@@ -187,7 +194,8 @@ For local setup, see [Development](development.md).
   their node with their status, and the Experiment tab holds the details and a comparison
   table. Its author brings its results to the node by proposing them (below).
 - **Proposed changes**: a change to a node's file can wait for review instead of landing at
-  once (`008_proposals.sql`). Claude's edits in a node arrive this way, and so does an
+  once (`008_proposals.sql`). Claude's edits in a node arrive this way, as do the skills
+  Claude writes at the workspace root (`skills/<name>/`), and so does an
   experiment's work when its author proposes it from the Experiment tab (only files the
   experiment changed, so a proposal never undoes someone else's later work on the node).
   Anyone who can view a node may propose; editors there accept or reject in the Proposed
