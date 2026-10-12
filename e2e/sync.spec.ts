@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import type { ServerEvent, ServerFile } from "../src/components/workspace/server-files";
+import type { Role, ServerEvent, ServerFile } from "../src/components/workspace/server-files";
 
 const PATH = "notes/sync.md";
 const otherNode = "other-node";
@@ -30,6 +30,8 @@ async function storage(page: Page) {
     beforeWrite: async (_content: string) => {},
     beforeRead: async () => {},
     failWrite: false,
+    rootRole: "owner" as Role,
+    listUnavailable: false,
     reads: 0,
   };
   await page.addInitScript(() => {
@@ -58,12 +60,13 @@ async function storage(page: Page) {
     if (url.pathname === "/api/auth/me") return route.fulfill({ json: { login: false, user: null } });
     if (url.pathname === "/api/experiments") return route.fulfill({ json: { experiments: [] } });
     if (url.pathname === "/api/nodes") return route.fulfill({ json: {
-      types: [{ name: "tech", depth: 1 }], rootRole: "owner",
+      types: [{ name: "tech", depth: 1 }], rootRole: transport.rootRole,
       nodes: [{ id: otherNode, parentId: null, type: "tech", depth: 1, name: "Other",
         fileCount: 1, updatedAt: new Date().toISOString(), role: "owner" }],
     } });
     if (url.pathname === "/api/files") {
       transport.reads++;
+      if (transport.listUnavailable) return route.fulfill({ status: 503, json: { error: "Storage unavailable" } });
       return route.fulfill({ json: { files: [...files].filter(([key]) => key.startsWith(`${node}\n`)).map(([, file]) => file.info) } });
     }
     const path = decodeURIComponent(url.pathname.slice("/api/files/".length));
@@ -71,6 +74,7 @@ async function storage(page: Page) {
       const content = route.request().postData() ?? "";
       writes.push(content);
       await transport.beforeWrite(content);
+      if (transport.rootRole === "viewer") return route.fulfill({ status: 403, json: { error: "Permission revoked" } });
       if (transport.failWrite) return route.fulfill({ status: 500, json: { error: "Controlled write failure" } });
       return route.fulfill({ json: put(content, node, path) });
     }
@@ -174,4 +178,80 @@ test("a remote response from the previous place cannot replace the current file"
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     await expect(page.getByTestId("file-editor")).toHaveValue("# Other place");
   } finally { read.release(); }
+});
+
+async function reconnect(page: Page) {
+  const response = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/files");
+  await page.evaluate(() => window.dispatchEvent(new Event("test-storage-reconnect")));
+  await (await response).finished();
+}
+
+test("storage outage and reconnect preserve a failed draft until a new edit saves", async ({ page }) => {
+  const backend = await storage(page);
+  backend.transport.failWrite = true;
+  await page.getByTestId("file-editor").fill("# My offline draft");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+  backend.transport.listUnavailable = true;
+  await reconnect(page);
+  await expect(page.getByTestId("file-editor")).toHaveValue("# My offline draft");
+  backend.transport.listUnavailable = false;
+  backend.put("# Remote while offline");
+  backend.put("# Reconnect marker", "", "notes/reconnected.md");
+  await reconnect(page);
+  // A new file appears only after the entire reconnect resync has committed.
+  await expect(page.getByRole("treeitem", { name: /reconnected\.md/ })).toBeVisible();
+  await expect(page.getByTestId("file-editor")).toHaveValue("# My offline draft");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+  backend.transport.failWrite = false;
+  await page.getByTestId("file-editor").fill("# Recovered draft");
+  await expect.poll(() => backend.files.get(`\n${PATH}`)?.content).toBe("# Recovered draft");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+});
+
+test("permission revoked during a save keeps the failed draft through reconnect", async ({ page }) => {
+  const backend = await storage(page);
+  const held = gate();
+  backend.transport.beforeWrite = async () => held.ready;
+  try {
+    await page.getByTestId("file-editor").fill("# Draft before revocation");
+    await expect.poll(() => backend.writes.length).toBe(1);
+    backend.transport.rootRole = "viewer";
+    await event(page, { op: "node", change: "rename", id: otherNode });
+    await expect(page.getByTestId("file-editor")).toHaveAttribute("readonly", "");
+    held.release();
+    await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+    expect(backend.files.get(`\n${PATH}`)?.content).toBe("# Original");
+    backend.put("# Updated by another editor");
+    backend.put("# Reconnect marker", "", "notes/reconnected.md");
+    await reconnect(page);
+    await expect(page.getByRole("treeitem", { name: /reconnected\.md/ })).toBeVisible();
+    await expect(page.getByTestId("file-editor")).toHaveValue("# Draft before revocation");
+    backend.transport.rootRole = "owner";
+    backend.transport.beforeWrite = async () => {};
+    await event(page, { op: "node", change: "rename", id: otherNode });
+    await expect(page.getByTestId("file-editor")).not.toHaveAttribute("readonly", "");
+    await page.getByTestId("file-editor").fill("# Draft after access restored");
+    await expect.poll(() => backend.files.get(`\n${PATH}`)?.content).toBe("# Draft after access restored");
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  } finally { held.release(); }
+});
+
+test("saving another file does not clear a failed file's error or draft", async ({ page }) => {
+  const backend = await storage(page);
+  backend.transport.failWrite = true;
+  await page.getByTestId("file-editor").fill("# Unsaved first file");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+  backend.transport.failWrite = false;
+  const info = backend.put("# Second file", "", "notes/second.md");
+  await event(page, { op: "write", node: null, path: info.path, sha256: info.sha256 });
+  await page.getByRole("treeitem", { name: /second\.md/ }).click();
+  await page.getByRole("button", { name: "edit", exact: true }).click();
+  await page.getByTestId("file-editor").fill("# Saved second file");
+  await expect.poll(() => backend.files.get("\nnotes/second.md")?.content).toBe("# Saved second file");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+  await page.getByRole("tab", { name: /sync\.md/ }).click();
+  await expect(page.getByTestId("file-editor")).toHaveValue("# Unsaved first file");
+  await page.getByTestId("file-editor").fill("# Saved first file");
+  await expect.poll(() => backend.files.get(`\n${PATH}`)?.content).toBe("# Saved first file");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 });
