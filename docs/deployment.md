@@ -34,3 +34,8 @@ login E2E, and review the migration/runtime impact in a separate PR.
 or bucket access have finished. Verify authenticated storage operations after
 startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
+
+Skill scripts are off unless the agent has `SKILL_SCRIPTS=on`. Turning them on needs
+bubblewrap on the agent host (and, in a container, permission to create user
+namespaces) plus whatever interpreters the skills use; a run with scripts fails
+when the sandbox can't start. See [Skill scripts](architecture.md#skill-scripts).

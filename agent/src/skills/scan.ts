@@ -79,7 +79,7 @@ export function scanSkill(files: SkillFile[]): ScanFlag[] {
       if (n <= PER_FILE) flags.push({ kind, path: file.path, line, detail });
     };
 
-    if (SCRIPT_FILE.test(file.path)) add("scripts", null, "a script file; skills here don't run scripts yet");
+    if (SCRIPT_FILE.test(file.path)) add("scripts", null, "a script file; it runs only where scripts are on, in a sandbox");
     if (file.bytes.byteLength > LARGE_FILE_BYTES) {
       add("large", null, `${Math.round(file.bytes.byteLength / 1024)} KB`);
     }

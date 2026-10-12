@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { AlertTriangle, Sparkles } from "lucide-react";
+import { AlertTriangle, Sparkles, SquareTerminal } from "lucide-react";
 import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
@@ -95,6 +95,8 @@ interface Skills {
   canPublish: boolean;
   /** There is a skill hub (the workspace is stored on the server). */
   hub: boolean;
+  /** Skills' scripts run here, in a sandbox (SKILL_SCRIPTS=on on the server). */
+  scripts: boolean;
   /** Loads the skills again, e.g. after installing one. */
   reload: () => Promise<void>;
   /** Sets a skill's mode at one level; null clears it there. */
@@ -118,6 +120,7 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   const [canSetDefaults, setCanSetDefaults] = useState(false);
   const [canPublish, setCanPublish] = useState(false);
   const [hub, setHub] = useState(false);
+  const [scripts, setScripts] = useState(false);
   const threadId = useCopilotChatConfiguration()?.threadId;
 
   // Workspace skills are the root's skills/ files: reload when those change.
@@ -139,11 +142,13 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
         canSetDefaults?: boolean;
         canPublish?: boolean;
         hub?: boolean;
+        scripts?: boolean;
       };
       setSkills(list.skills);
       setCanSetDefaults(Boolean(list.canSetDefaults));
       setCanPublish(Boolean(list.canPublish));
       setHub(Boolean(list.hub));
+      setScripts(Boolean(list.scripts));
       setStatus("ready");
     } catch {
       setStatus("unavailable");
@@ -201,10 +206,34 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   }, [agent]);
 
   const value = useMemo(
-    () => ({ skills, status, canSetDefaults, canPublish, hub, reload: load, setMode, turn }),
-    [skills, status, canSetDefaults, canPublish, hub, load, setMode, turn],
+    () => ({ skills, status, canSetDefaults, canPublish, hub, scripts, reload: load, setMode, turn }),
+    [skills, status, canSetDefaults, canPublish, hub, scripts, load, setMode, turn],
   );
   return <SkillsContext.Provider value={value}>{children}</SkillsContext.Provider>;
+}
+
+/** On a skill that ships scripts: whether they run here. */
+export function ScriptsBadge() {
+  const { scripts } = useSkills();
+  return scripts ? (
+    <span
+      data-testid="skill-scripts"
+      data-runs="true"
+      title="It ships scripts, which run in a sandbox: no network, and they only see their own folder."
+      className="shrink-0 text-[var(--muted-foreground)]"
+    >
+      <SquareTerminal className="size-3.5" />
+    </span>
+  ) : (
+    <span
+      data-testid="skill-scripts"
+      data-runs="false"
+      title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
+      className="shrink-0 text-amber-600"
+    >
+      <AlertTriangle className="size-3.5" />
+    </span>
+  );
 }
 
 const MODES: { mode: SkillMode; label: string; title: string }[] = [
@@ -336,14 +365,7 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
                 {skill.source === "builtin" ? "Built-in" : skill.hub ? `Hub v${skill.hub.version}` : "Workspace"}
               </span>
               {skill.hub && <TrustBadges {...skill.hub} />}
-              {skill.needsExecution && (
-                <span
-                  title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
-                  className="shrink-0 text-amber-600"
-                >
-                  <AlertTriangle className="size-3.5" />
-                </span>
-              )}
+              {skill.needsExecution && <ScriptsBadge />}
             </div>
             {skill.description && (
               <p className="mt-0.5 line-clamp-2 text-xs text-[var(--muted-foreground)]">{skill.description}</p>

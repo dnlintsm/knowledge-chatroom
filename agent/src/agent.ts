@@ -24,12 +24,13 @@ import { generateA2ui } from "./a2ui_dynamic_schema";
 import { currentStorage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
-import { guardSlashCommand, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
+import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+const APP_ROOT = path.resolve(__dirname, "../..");
+dotenv.config({ path: path.join(APP_ROOT, ".env") });
 dotenv.config();
 
 // With storage configured (DATABASE_URL), workspace files live on the server.
@@ -159,12 +160,15 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
     const options = super.buildOptions(input);
     const ctx = runContext.getStore();
     if (!ctx) return options;
+    // Skills' scripts, when on, run in Bash inside the SDK's sandbox.
+    const scripts = ctx.skills && scriptOptions(ctx.skills, APP_ROOT);
     const withSkills = ctx.skills
       ? {
           ...options,
           ...skillOptions(ctx.skills, ctx.onSkillUse),
-          allowedTools: [...(options.allowedTools ?? []), "Skill"],
+          allowedTools: [...(options.allowedTools ?? []), "Skill", ...(scripts ? ["Bash"] : [])],
           tools: ["Skill"],
+          ...scripts,
         }
       : options;
     const userId = ctx.userId;

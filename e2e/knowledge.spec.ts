@@ -356,3 +356,28 @@ test("skill hub", async ({ page, request }) => {
 
   await clear();
 });
+
+test("skill scripts", async ({ page, request }) => {
+  const NAME = "csv-summary";
+  const files = {
+    [`skills/${NAME}/SKILL.md`]: `---\nname: ${NAME}\ndescription: Summarize a CSV with a script\n---\n\nRun scripts/summary.py on the file.`,
+    [`skills/${NAME}/scripts/summary.py`]: "import csv, sys\nprint(sum(1 for _ in csv.reader(open(sys.argv[1]))))\n",
+  };
+  for (const [file, text] of Object.entries(files)) {
+    expect((await request.put(`/api/files/${file}`, {
+      data: text,
+      headers: { "Content-Type": file.endsWith(".md") ? "text/markdown" : "text/plain" },
+    })).ok()).toBe(true);
+  }
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Skills", exact: true }).click();
+    const row = page.getByTestId("skills-panel").locator(`[data-skill="${NAME}"]`);
+    // This agent has SKILL_SCRIPTS=on: the scripts run, in the sandbox.
+    const badge = row.getByTestId("skill-scripts");
+    await expect(badge).toHaveAttribute("data-runs", "true");
+    await shot(page, "25-skill-scripts");
+  } finally {
+    for (const file of Object.keys(files)) await request.delete(`/api/files/${file}`);
+  }
+});

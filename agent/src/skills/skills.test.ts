@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -13,7 +15,8 @@ import {
   mergeSkills,
   type Skill,
 } from "./catalog";
-import { guardSlashCommand, materialize, skillOptions, type SkillUse } from "./run";
+import { startKeyProxy } from "./keyproxy";
+import { guardSlashCommand, materialize, scriptOptions, skillOptions, type SkillUse } from "./run";
 import { scanSkill } from "./scan";
 import { InvalidModeError, SkillService, UnknownSkillError } from "./service";
 
@@ -162,6 +165,88 @@ test("skill options: modes become SDK overrides, uses are reported", async () =>
     { skill: "one", source: "builtin", trigger: "model" },
     { skill: "two", source: "builtin", trigger: "slash" },
   ]);
+});
+
+test("script options: only when turned on, for a run with scripts, sandboxed, no secrets", () => {
+  const keys = { baseUrl: "http://127.0.0.1:1", apiKey: "sk-ant-run-x" };
+  const run = { cwd: "/runs/abc", skills: [userSkill("one", "auto", { needsExecution: true })], keys };
+  const saved = { ...process.env };
+  try {
+    delete process.env.SKILL_SCRIPTS;
+    assert.equal(scriptOptions(run, "/app", "/runs"), null);
+    process.env.SKILL_SCRIPTS = "on";
+    assert.equal(scriptOptions({ ...run, skills: [userSkill("one", "auto")] }, "/app", "/runs"), null);
+    assert.equal(scriptOptions({ ...run, keys: undefined }, "/app", "/runs"), null);
+
+    Object.assign(process.env, {
+      ANTHROPIC_API_KEY: "sk-real",
+      ANTHROPIC_AUTH_TOKEN: "tok",
+      ANTHROPIC_MODEL: "claude-x",
+      DATABASE_URL: "postgres://secret",
+      HTTPS_PROXY: "http://user:pass@proxy",
+      PATH: "/usr/bin",
+    });
+    const options = scriptOptions(run, "/app", "/runs")!;
+    assert.deepEqual(options.tools, ["Skill", "Bash"]);
+    assert.equal(options.env!.ANTHROPIC_API_KEY, "sk-ant-run-x");
+    assert.equal(options.env!.ANTHROPIC_BASE_URL, "http://127.0.0.1:1");
+    assert.equal(options.env!.ANTHROPIC_MODEL, "claude-x");
+    assert.equal(options.env!.PATH, "/usr/bin");
+    for (const key of ["ANTHROPIC_AUTH_TOKEN", "DATABASE_URL", "HTTPS_PROXY", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]) {
+      assert.equal(options.env![key], undefined, key);
+    }
+    const sandbox = options.sandbox!;
+    assert.equal(sandbox.enabled, true);
+    assert.equal(sandbox.failIfUnavailable, true);
+    assert.equal(sandbox.allowUnsandboxedCommands, false);
+    assert.deepEqual(sandbox.network?.allowedDomains, []);
+    assert.deepEqual(sandbox.filesystem?.denyWrite, ["/runs/abc/.claude"]);
+    assert.deepEqual(sandbox.filesystem?.denyRead, ["/app", "/runs", os.homedir()]);
+    assert.deepEqual(sandbox.filesystem?.allowRead, ["/runs/abc"]);
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  }
+});
+
+test("key proxy: passes requests on with the real key, only for its own stand-in", async () => {
+  const seen: { url?: string; key?: string; auth?: string } = {};
+  let calls = 0;
+  const upstream = http.createServer((req, res) => {
+    calls++;
+    seen.url = req.url;
+    seen.key = req.headers["x-api-key"] as string;
+    seen.auth = req.headers.authorization;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("event: a\n\n");
+    res.end("event: b\n\n");
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const saved = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "sk-real";
+  const proxy = await startKeyProxy(`http://127.0.0.1:${(upstream.address() as AddressInfo).port}/`);
+  try {
+    const ok = await fetch(`${proxy.baseUrl}/v1/messages?beta=true`, {
+      method: "POST",
+      headers: { "x-api-key": proxy.apiKey, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(await ok.text(), "event: a\n\nevent: b\n\n");
+    assert.deepEqual(seen, { url: "/v1/messages?beta=true", key: "sk-real", auth: undefined });
+
+    const tries: Record<string, string>[] = [{}, { "x-api-key": "sk-real" }, { authorization: "Bearer nope" }];
+    for (const headers of tries) {
+      const denied = await fetch(`${proxy.baseUrl}/v1/messages`, { method: "POST", headers, body: "{}" });
+      assert.equal(denied.status, 401);
+    }
+    assert.equal(calls, 1);
+  } finally {
+    if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = saved;
+    await proxy.close();
+    upstream.close();
+  }
 });
 
 test("slash commands: only the run's own skills", () => {
