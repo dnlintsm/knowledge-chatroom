@@ -28,7 +28,15 @@ jobs:
             agent/package-lock.json
       - name: Install locked dependencies
         run: npm ci
-      - name: Check frontend and agent types and unit tests
-        run: npm run check
+      - name: Check lint and frontend/agent types
+        run: npm run lint && npm run typecheck
+      - name: Frontend unit tests
+        run: node scripts/ci-tests.mjs run "Frontend units" playwright -- npx playwright test --config playwright.unit.config.ts --reporter=list,json
+      - name: Agent unit tests
+        if: always()
+        run: node scripts/ci-tests.mjs run "Agent units" tap -- npm --prefix agent run test:unit
+      - name: Summarize test suites
+        if: always()
+        run: node scripts/ci-tests.mjs summary "Frontend units" "Agent units"
       - name: Verify lockfiles are unchanged
         run: git diff --exit-code -- package-lock.json agent/package-lock.json
