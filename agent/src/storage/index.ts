@@ -6,6 +6,7 @@ import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
 import { NodeService } from "./nodes";
+import { ProposalService } from "./proposals";
 import { SearchService } from "./search";
 import { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 import { Session } from "./session";
@@ -15,6 +16,8 @@ export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
 export { ExperimentService } from "./experiments";
 export type { Experiment, ExperimentStatus } from "./experiments";
+export { ProposalService } from "./proposals";
+export type { Proposal, ProposalStatus, Promotable } from "./proposals";
 export type { KnowledgeNode, NodeType } from "./nodes";
 export type { Principal, Role } from "./access";
 export { Session } from "./session";
@@ -31,6 +34,8 @@ export interface Storage {
   experiments: ExperimentService;
   access: AccessService;
   search: SearchService;
+  /** Proposed versions of files, waiting for review. */
+  proposals: ProposalService;
   /** Search by meaning; null when no embedding model is set. Not ready until prepared. */
   semantic: SemanticIndex | null;
   events: EventHub;
@@ -78,6 +83,7 @@ export async function initStorage(
     const access = new AccessService(sql, ws.id);
     const semantic = embedder && new SemanticIndex(sql, embedder);
     const search = new SearchService(sql, blobs, ws.id, semantic);
+    const proposals = new ProposalService(sql, blobs, events, ws.id);
     return {
       config,
       sql,
@@ -86,11 +92,13 @@ export async function initStorage(
       experiments,
       access,
       search,
+      proposals,
       semantic,
       events,
       blobs,
       rowSecurity,
-      session: (principal) => new Session({ files, nodes, experiments, access, search, sql, rowSecurity }, principal),
+      session: (principal) =>
+        new Session({ files, nodes, experiments, access, search, proposals, sql, rowSecurity }, principal),
       close: () => {
         semantic?.stop();
         return sql.end();
