@@ -326,6 +326,11 @@ test("skill hub", async ({ page, request }) => {
   const newest = panel.getByTestId("hub-version").first();
   await newest.getByTestId("hub-verify").click();
   await expect(newest.getByTestId("skill-verified")).toBeVisible();
+  // Moving the install to another version from here shows the diff first, too.
+  await panel.getByTestId("hub-version").last().getByTestId("hub-install-version").click();
+  await expect(panel.getByTestId("skill-update-review")).toContainText("→ v1");
+  await panel.getByTestId("skill-update-review").getByRole("button", { name: "Cancel" }).click();
+  await expect(panel.getByTestId("skill-update-review")).toHaveCount(0);
   page.once("dialog", (dialog) => void dialog.accept("It posts our notes to an outside chat"));
   await panel.getByTestId("hub-report").click();
   await expect(panel.getByTestId("hub-reports")).toContainText("outside chat");

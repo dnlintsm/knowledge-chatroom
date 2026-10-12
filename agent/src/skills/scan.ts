@@ -60,7 +60,7 @@ const clip = (text: string) => (text.length > 80 ? `${text.slice(0, 77)}…` : t
 
 /** Whether the bytes look like text: valid UTF-8 with no NUL bytes. */
 function asText(bytes: Uint8Array): string | null {
-  if (bytes.subarray(0, 8192).includes(0)) return null;
+  if (bytes.includes(0)) return null;
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {

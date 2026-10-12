@@ -167,31 +167,37 @@ function FlagList({ flags }: { flags: ScanFlag[] }) {
   );
 }
 
-/** The changes an update brings, to confirm before updating. */
+/**
+ * What moving an installed hub skill from one version to another changes, to
+ * confirm before it happens (from the skill's row and from the hub alike).
+ */
 function UpdateReview({
-  skill,
+  name,
+  from: version,
+  to: latest,
   onUpdate,
   onCancel,
   busy,
 }: {
-  skill: SkillInfo;
+  name: string;
+  from: number;
+  to: number;
   onUpdate: () => void;
   onCancel: () => void;
   busy: boolean;
 }) {
   const [diff, setDiff] = useState<HubDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { version, latest } = skill.hub!;
 
   useEffect(() => {
     let live = true;
-    call<HubDiff>(`/api/hub/${encodeURIComponent(skill.name)}/diff?from=${version}&to=${latest}`)
+    call<HubDiff>(`/api/hub/${encodeURIComponent(name)}/diff?from=${version}&to=${latest}`)
       .then((d) => live && setDiff(d))
       .catch((err) => live && setError(message(err)));
     return () => {
       live = false;
     };
-  }, [skill.name, version, latest]);
+  }, [name, version, latest]);
 
   return (
     <div data-testid="skill-update-review" className="mt-2 rounded border border-[var(--border)] text-xs">
@@ -233,7 +239,7 @@ function UpdateReview({
           onClick={onUpdate}
           className="rounded border border-[var(--border)] px-2 py-0.5 font-medium hover:bg-[var(--secondary)] cursor-pointer disabled:opacity-50"
         >
-          Update to v{latest}
+          {latest > version ? "Update" : "Switch"} to v{latest}
         </button>
       </div>
     </div>
@@ -415,7 +421,9 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
       </div>
       {reviewing && skill.hub && (
         <UpdateReview
-          skill={skill}
+          name={skill.name}
+          from={skill.hub.version}
+          to={skill.hub.latest}
           busy={busy}
           onCancel={() => setReviewing(false)}
           onUpdate={() =>
@@ -439,6 +447,8 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
   const [open, setOpen] = useState<HubDetail | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  /** A version change waiting on the user's look at the diff. */
+  const [reviewing, setReviewing] = useState<{ name: string; from: number; to: number } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -459,7 +469,13 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
     };
   }, [query, tick]);
 
-  const install = async (name: string, version?: number) => {
+  /** Installs; moving an existing install to another version shows its diff first. */
+  const install = async (name: string, version: number, installed: number | null, reviewed = false) => {
+    if (installed !== null && installed !== version && !reviewed) {
+      setReviewing({ name, from: installed, to: version });
+      return;
+    }
+    setReviewing(null);
     setBusy(name);
     try {
       const out = await call<{ version: number }>(`/api/hub/${encodeURIComponent(name)}/install`, json("PUT", { version }));
@@ -474,7 +490,20 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
     }
   };
 
+  const review = (name: string) =>
+    reviewing?.name === name && (
+      <UpdateReview
+        name={name}
+        from={reviewing.from}
+        to={reviewing.to}
+        busy={busy === name}
+        onCancel={() => setReviewing(null)}
+        onUpdate={() => void install(name, reviewing.to, reviewing.from, true)}
+      />
+    );
+
   const details = async (name: string, version?: number) => {
+    setReviewing(null);
     try {
       const query = version ? `?version=${version}` : "";
       setOpen(await call<HubDetail>(`/api/hub/${encodeURIComponent(name)}${query}`));
@@ -621,7 +650,8 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
                       <button
                         type="button"
                         disabled={busy === open.name}
-                        onClick={() => void install(open.name, v.version)}
+                        data-testid="hub-install-version"
+                        onClick={() => void install(open.name, v.version, open.installed)}
                         className={linkButton}
                       >
                         Install v{v.version}
@@ -631,6 +661,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
               </li>
             ))}
           </ul>
+          {review(open.name)}
           {open.openReports && open.openReports.length > 0 && (
             <div data-testid="hub-reports" className="mt-3">
               <p className="mb-1 font-medium text-amber-700 dark:text-amber-500">
@@ -710,7 +741,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
                     type="button"
                     data-testid="hub-install"
                     disabled={busy === skill.name}
-                    onClick={() => void install(skill.name)}
+                    onClick={() => void install(skill.name, skill.latest, skill.installed)}
                     className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--secondary)] cursor-pointer disabled:opacity-50"
                   >
                     {skill.installed === null ? "Install" : `Update to v${skill.latest}`}
@@ -721,6 +752,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
             {skill.description && (
               <p className="mt-0.5 line-clamp-2 text-xs text-[var(--muted-foreground)]">{skill.description}</p>
             )}
+            {review(skill.name)}
             <p className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
               By {skill.mine ? "you" : (skill.publisher ?? "someone")}
               {!!skill.reports && (

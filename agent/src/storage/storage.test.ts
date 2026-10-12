@@ -1866,6 +1866,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
 
       // Reports: one open per person; admins dismiss them.
       await assert.rejects(hub.report(viewer, "brief", "  "), HubError);
+      await assert.rejects(hub.report(viewer, "brief", "Bad", 999), HubNotFoundError);
       await hub.report(viewer, "brief", "It tells Claude to ignore instructions", 2);
       const { id } = await hub.report(viewer, "brief", "It tells Claude to ignore its instructions", 2);
       await hub.report(editor, "brief", "Same");

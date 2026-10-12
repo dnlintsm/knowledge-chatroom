@@ -207,6 +207,11 @@ test("hub scan: flags scripts, network, hidden text, odd instructions, big and b
   assert.ok(lines.some(([k, l]) => k === "hidden-text" && l === 11));
   assert.ok(flags.some((f) => f.detail === "links to example.com"));
 
+  // A NUL anywhere makes it binary, not only near the start.
+  const late = new Uint8Array(9000).fill(97);
+  late[8999] = 0;
+  assert.deepEqual(scanSkill([{ path: "notes.txt", bytes: late }]).map((f) => f.kind), ["binary"]);
+
   // Ordinary instructions come back clean, and repeats are capped per file.
   assert.deepEqual(scanSkill([{ path: "SKILL.md", bytes: skillMd("name: ok\ndescription: d", "Summarize the file in five bullets.") }]), []);
   const many = scanSkill([{ path: "links.md", bytes: enc(Array.from({ length: 6 }, (_, i) => `https://a${i}.test`).join("\n")) }]);

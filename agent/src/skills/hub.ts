@@ -282,7 +282,7 @@ export class SkillHub {
     const text = async (file: HubFile | undefined) => {
       if (!file || file.size > LARGE_FILE_BYTES) return null;
       const bytes = await this.skills.blob(file.sha256);
-      if (bytes.subarray(0, 8192).includes(0)) return null;
+      if (bytes.includes(0)) return null;
       try {
         return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       } catch {
@@ -366,8 +366,13 @@ export class SkillHub {
     const why = typeof reason === "string" ? reason.trim() : "";
     if (!why) throw new HubError("Say what's wrong with it");
     if (why.length > 2000) throw new HubError("Keep the report under 2000 characters");
-    const [hub] = await storage.sql<{ id: string }[]>`SELECT id FROM hub_skills WHERE name = ${name}`;
+    const [hub] = await storage.sql<{ id: string; has_version: boolean }[]>`
+      SELECT id, EXISTS (
+        SELECT 1 FROM hub_skill_versions WHERE hub_skill_id = hub_skills.id AND version = ${version ?? 0}
+      ) AS has_version
+      FROM hub_skills WHERE name = ${name}`;
     if (!hub) throw new HubNotFoundError(`No skill named ${name} on the hub`);
+    if (version !== undefined && !hub.has_version) throw new HubNotFoundError(`${name} has no version ${version}`);
     return storage.sql.begin(async (tx) => {
       const [row] = await tx<{ id: string }[]>`
         INSERT INTO hub_skill_reports (hub_skill_id, version, reporter_id, reason)
