@@ -165,6 +165,18 @@ export class SkillHub {
           : `${name} is built in; only the workspace's own skills can be published`,
       );
     }
+    // The catalog leaves out files over the limits; refuse rather than publish part of the folder.
+    const folder = skill.path!.slice(0, -"SKILL.md".length);
+    const listed = (await (await storage.session({ userId: userId!, actor: "agent" }).files(null)).list()).filter((f) =>
+      f.path.startsWith(folder),
+    );
+    const total = listed.reduce((sum, f) => sum + f.size, 0);
+    if (listed.length > MAX_FILES || total > MAX_SKILL_BYTES || listed.some((f) => f.size > MAX_SKILL_FILE_BYTES)) {
+      throw new HubError(
+        `${name} is too big to publish: a skill may have at most ${MAX_FILES} files and ` +
+          `${MAX_SKILL_BYTES / 1024 / 1024} MB, each file ${MAX_SKILL_FILE_BYTES / 1024 / 1024} MB`,
+      );
+    }
     const files: HubFile[] = [];
     for (const file of [...skill.files].sort((a, b) => a.path.localeCompare(b.path))) {
       const sha256 = sha256Hex(file.bytes);
@@ -207,6 +219,10 @@ export class SkillHub {
       WHERE h.name = ${name} ${version === undefined ? storage.sql`` : storage.sql`AND v.version = ${version}`}
       ORDER BY v.version DESC LIMIT 1`;
     if (!row) throw new HubNotFoundError(version === undefined ? `No skill named ${name} on the hub` : `${name} has no version ${version}`);
+    // A workspace skill of that name would hide the install (forking is what replaces one with the other).
+    if ((await this.skills.find(userId, name))?.source === "workspace") {
+      throw new HubConflictError(`The workspace already has a skill named ${name}; rename or remove it to install this one`);
+    }
     await storage.sql.begin(async (tx) => {
       await tx`
         INSERT INTO skill_installs (workspace_id, hub_skill_id, version_id, installed_by)

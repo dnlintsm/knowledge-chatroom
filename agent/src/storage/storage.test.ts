@@ -1758,6 +1758,10 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await hub.publish(owner, "digest")).version, 2);
       // The name belongs to whoever published it first.
       await assert.rejects(hub.publish(other, "digest"), SkillForbiddenError);
+      // A file over the limits would be left out of the version, so publishing refuses.
+      await storage.files.write("skills/digest/data.bin", new Uint8Array(1024 * 1024 + 1));
+      await assert.rejects(hub.publish(owner, "digest"), /too big to publish/);
+      await storage.files.remove("skills/digest/data.bin");
 
       const listed = await hub.list(viewer, "weekly");
       assert.deepEqual(
@@ -1771,7 +1775,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.match(detail.skillMd, /v1$/);
 
       // Installs are pinned and start Manual; the workspace's own skill of the
-      // same name wins, so move that out of the way first.
+      // same name would hide one, so installing refuses until it's moved away.
+      await assert.rejects(hub.install(editor, "digest", 1), HubConflictError);
       await storage.files.remove("skills/digest/SKILL.md");
       await storage.files.remove("skills/digest/ref/style.md");
       await assert.rejects(hub.install(viewer, "digest", 1), SkillForbiddenError);
