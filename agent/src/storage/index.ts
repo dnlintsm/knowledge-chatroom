@@ -28,6 +28,8 @@ export { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 export interface Storage {
   config: StorageConfig;
   sql: Sql;
+  /** The one workspace this deployment serves. */
+  workspaceId: string;
   /** Files at the workspace root; .inNode(id) / .inExperiment(id) for others. */
   files: FileService;
   nodes: NodeService;
@@ -87,6 +89,7 @@ export async function initStorage(
     return {
       config,
       sql,
+      workspaceId: ws.id,
       files,
       nodes,
       experiments,

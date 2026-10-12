@@ -23,6 +23,23 @@ Panes resize by dragging and collapse from the title bar; below 1024px one pane 
 time. With [file storage](#file-storage) running, files are saved on the server (the title bar
 says "Saved"); without it they stay in this browser's localStorage ("This browser").
 
+### Skills
+
+Skills are `SKILL.md` folders in the [Claude Code / Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
+layout. Claude gets the built-in ones (`agent/skills/`) plus the workspace's own
+`skills/<name>/` at the root (with [file storage](#file-storage)). In the **Skills** view each
+one is set to:
+
+- **Auto:** Claude uses it when it fits, and `/name` runs it.
+- **Manual:** only when you type `/name` in the chat.
+- **Off:** not available.
+
+Modes are per user. Typing `/` in the chat lists the skills you can run; the line under the
+input says which skills are on and which ones the current turn used. Skills are instructions
+only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies each
+user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp folder),
+and only `/name` for one of those skills reaches the SDK as a command.
+
 ### Runs: Focus and Traverse modes
 
 A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. Any folder that

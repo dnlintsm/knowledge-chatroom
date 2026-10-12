@@ -27,3 +27,13 @@ test("each run gets file tools for its own user", () => {
   // Outside a run the shared server stays as configured.
   assert.equal(adapter.buildOptions(input).mcpServers?.copilotkit, shared);
 });
+
+test("a run with skills gets them, the Skill tool and its own working folder", () => {
+  const skills = { cwd: "/tmp/skills-run", skills: [] };
+  const options = runAs("alice", () => adapter.buildOptions(input), skills);
+  assert.equal(options.cwd, "/tmp/skills-run");
+  assert.deepEqual(options.tools, ["Skill"]);
+  assert.ok(options.allowedTools?.includes("Skill"));
+  // Without skills the run keeps no built-in tools.
+  assert.deepEqual(runAs("alice", () => adapter.buildOptions(input)).tools, []);
+});
