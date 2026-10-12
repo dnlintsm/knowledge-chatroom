@@ -9,7 +9,7 @@
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "tsx --test src/agent.test.ts",
+    "test:unit": "tsx --test src/agent.test.ts src/skills/skills.test.ts",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "dependencies": {

@@ -17,8 +17,13 @@
  * and one naming the "litho" run calls focusRun, so the preview shows Claude
  * driving the workbench too.
  *
+ * A message starting with "/<skill>" runs that skill: the run reports it with
+ * a "skill_used" event (as the real agent does), so the preview shows the
+ * skills status bar. Without STORAGE_URL, /skills answers with the built-in
+ * skills and keeps their modes in memory.
+ *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
- * storage routes /files, /nodes, /access, /experiments, /search and /proposals are
+ * storage routes /files, /nodes, /access, /experiments, /search, /proposals and /skills are
  * forwarded there, so the preview can show server storage and the knowledge
  * tree without an API key.
  */
@@ -55,6 +60,49 @@ const TOOL_REPLIES = {
   focusRun: "Switched to the litho-2026-10-03 run.",
 };
 
+// The agent's built-in skills (agent/skills/), as GET /skills lists them.
+const SKILLS = [
+  {
+    name: "tldr",
+    description:
+      "Summarize the open file (or the user's selection) as a TL;DR line plus a few bullets. Use when the user asks for a summary, gist or recap of a document.",
+    argumentHint: "[what to focus on]",
+    modelInvocable: true,
+    defaultMode: "auto",
+  },
+  {
+    name: "write-skill",
+    description:
+      "Turn a workflow from this conversation, or one the user describes, into a reusable workspace skill (skills/<name>/SKILL.md). Use when the user asks to save, capture or automate how something was done.",
+    argumentHint: "[what the skill should do]",
+    modelInvocable: false,
+    defaultMode: "manual",
+  },
+].map((s) => ({ ...s, source: "builtin", path: null, userInvocable: true, needsExecution: false, mode: s.defaultMode }));
+
+const SKILL_REPLY =
+  "**TL;DR:** RF power drives etch rate; pressure and gas flow matter far less.\n\n" +
+  "- RF power has the largest effect on etch rate.\n- Pressure is a distant second.\n- Gas flow barely moves it.";
+
+async function handleSkills(req, res, pathname) {
+  const name = decodeURIComponent(pathname.slice("/skills".length).replace(/^\/+/, ""));
+  if (req.method === "GET" && !name) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ skills: SKILLS }));
+    return;
+  }
+  const skill = SKILLS.find((s) => s.name === name);
+  if (req.method === "PUT" && skill) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    skill.mode = JSON.parse(Buffer.concat(chunks).toString("utf-8")).mode;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(skill));
+    return;
+  }
+  res.writeHead(404).end();
+}
+
 const textOf = (message) =>
   typeof message?.content === "string"
     ? message.content
@@ -69,8 +117,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals)(\/|$)/.test(pathname)) {
+  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals|skills)(\/|$)/.test(pathname)) {
     forward(req, res);
+    return;
+  }
+
+  if (pathname === "/skills" || pathname.startsWith("/skills/")) {
+    await handleSkills(req, res, pathname);
     return;
   }
 
@@ -115,14 +168,21 @@ const server = http.createServer(async (req, res) => {
     .filter((m) => m.role === "assistant")
     .flatMap((m) => m.toolCalls ?? [])
     .pop()?.function?.name;
+  // "/<name> ..." runs that skill, as the agent's slash commands do.
+  const slashSkill = last?.role === "user" ? /^\/([a-z0-9-]+)/.exec(asked)?.[1] : undefined;
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")
-      : asked.includes("read next")
-        ? CITING_REPLY
-        : REPLY;
+      : slashSkill
+        ? SKILL_REPLY
+        : asked.includes("read next")
+          ? CITING_REPLY
+          : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
+  if (slashSkill) {
+    send({ type: "CUSTOM", name: "skill_used", value: { skill: slashSkill, source: "builtin", trigger: "slash" } });
+  }
   if (toolCall) {
     const toolCallId = randomUUID();
     send({

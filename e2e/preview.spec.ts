@@ -105,6 +105,44 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
 });
 
+test("skills: modes, the / menu and the status bar", async ({ page }) => {
+  await openHome(page);
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  const panel = page.getByTestId("skills-panel");
+  const tldr = panel.locator('[data-skill="tldr"]');
+  await expect(tldr).toContainText("Built-in");
+  await expect(tldr.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
+  // write-skill may only run by name, so Auto is not offered.
+  const writeSkill = panel.locator('[data-skill="write-skill"]');
+  await expect(writeSkill.getByRole("radio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
+  await expect(writeSkill.getByRole("radio", { name: "Auto" })).toBeDisabled();
+  await expect(page.getByTestId("skill-status")).toContainText("1 auto · 1 manual skills");
+
+  // Off takes it out of the / menu; back to Auto brings it back.
+  await tldr.getByRole("radio", { name: "Off" }).click();
+  await expect(page.getByTestId("skill-status")).toContainText("0 auto · 1 manual skills");
+  await page.getByTestId("copilot-chat-textarea").fill("/");
+  await expect(page.getByTestId("skill-menu")).not.toContainText("/tldr");
+  await tldr.getByRole("radio", { name: "Auto" }).click();
+  await page.getByTestId("copilot-chat-textarea").fill("");
+
+  // Typing / lists the skills; Enter picks one and leaves room for its input.
+  await page.getByTestId("copilot-chat-textarea").fill("/t");
+  await expect(page.getByTestId("skill-menu")).toContainText("/tldr");
+  await expect(page.getByTestId("skill-menu")).toContainText("[what to focus on]");
+  await shot(page, "05b-skill-menu");
+  await page.getByTestId("copilot-chat-textarea").press("Enter");
+  await expect(page.getByTestId("copilot-chat-textarea")).toHaveValue("/tldr ");
+  await expect(page.getByTestId("skill-menu")).toBeHidden();
+
+  await page.getByTestId("copilot-chat-textarea").pressSequentially("RF power");
+  await page.getByTestId("copilot-send-button").click();
+  await expect(page.getByTestId("skill-used")).toHaveText("/tldr", reply);
+  await expect(page.getByTestId("skill-status")).toContainText("Used:");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("TL;DR", reply);
+  await shot(page, "05c-skill-status");
+});
+
 test("links and back/forward show the focused run's own report", async ({ page }) => {
   await gotoRun(page);
   const preview = page.getByTestId("file-preview");

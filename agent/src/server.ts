@@ -7,7 +7,8 @@
  * `/files`, the knowledge tree under `/nodes`, experiments under `/experiments`,
  * search under `/search`, proposed versions under `/proposals` and groups
  * and grants under `/access` (see
- * src/storage/http.ts).
+ * src/storage/http.ts). `/skills` lists the user's skills and their modes
+ * (src/skills/http.ts), with or without storage.
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -20,10 +21,13 @@ import type { RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 
 import { adapter, runAs } from "./agent";
-import { currentStorage, startStorage, storageState } from "./storage";
+import { currentStorage, startStorage, storageState, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
 import { IDENTITY_HEADER, identify, verifyIdentity } from "./storage/identity";
+import { createSkillsHandler } from "./skills/http";
+import { materialize, type RunSkills, type SkillUse } from "./skills/run";
+import { SkillService } from "./skills/service";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
@@ -36,6 +40,21 @@ const handleStorage = createStorageHandler(
   storageConfig?.maxUploadBytes ?? 0,
   storageState,
 );
+const skills = new SkillService(currentStorage);
+const handleSkills = createSkillsHandler(skills, currentStorage, storageState);
+
+/** The run's skills: built-in ones, plus the workspace's when storage is up. */
+async function prepareSkills(storage: Storage | null, userId: string | null | undefined): Promise<RunSkills | null> {
+  // With storage but nobody allowed (login without a user): no skills either.
+  if (storage && !userId) return null;
+  const owner = storage ? userId! : null;
+  try {
+    return await materialize(owner ?? "local", await skills.forRun(owner));
+  } catch (err) {
+    console.error(`[skills] couldn't prepare skills; running without them: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -44,6 +63,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  if (pathname === "/skills" || pathname.startsWith("/skills/")) {
+    await handleSkills(req, res, url);
     return;
   }
 
@@ -99,20 +123,50 @@ const server = http.createServer(async (req, res) => {
       "X-Accel-Buffering": "no",
     });
 
+    const runSkills = await prepareSkills(storage, userId);
+    // Each skill the run uses goes to the browser as an AG-UI custom event
+    // ("skill_used"), after RUN_STARTED, and into the usage history.
+    let started = false;
+    const pending: SkillUse[] = [];
+    const emitSkill = (use: SkillUse) =>
+      res.write(encoder.encode({ type: EventType.CUSTOM, name: "skill_used", value: use } as never));
+    const onSkillUse = (use: SkillUse) => {
+      if (res.writableEnded) return;
+      if (started) emitSkill(use);
+      else pending.push(use);
+      void skills.record(storage ? (userId ?? null) : null, {
+        threadId: input.threadId ?? "",
+        runId: input.runId ?? "",
+        ...use,
+      });
+    };
+
     // The adapter emits RUN_STARTED/RUN_FINISHED/RUN_ERROR itself; the error
     // callback surfaces the message as a clean RUN_ERROR (never a broken stream).
-    runAs(userId, () => adapter.run(input).subscribe({
-      next: (event) => res.write(encoder.encode(event)),
-      error: (err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[agent] run error: ${message}`);
-        res.write(
-          encoder.encode({ type: EventType.RUN_ERROR, message } as never),
-        );
-        res.end();
-      },
-      complete: () => res.end(),
-    }));
+    runAs(
+      userId,
+      () =>
+        adapter.run(input).subscribe({
+          next: (event) => {
+            res.write(encoder.encode(event));
+            if (!started && event.type === EventType.RUN_STARTED) {
+              started = true;
+              pending.splice(0).forEach(emitSkill);
+            }
+          },
+          error: (err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`[agent] run error: ${message}`);
+            res.write(
+              encoder.encode({ type: EventType.RUN_ERROR, message } as never),
+            );
+            res.end();
+          },
+          complete: () => res.end(),
+        }),
+      runSkills,
+      onSkillUse,
+    );
     return;
   }
 
