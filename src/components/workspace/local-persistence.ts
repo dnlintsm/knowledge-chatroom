@@ -1,6 +1,7 @@
 import type { PlaceId } from "./server-files";
-import type { PersistedWorkspace } from "./workspace-state";
+import { parsePersistedWorkspace, parseTabState, type PersistedWorkspace } from "./workspace-state";
 
+export const INVALID_STORAGE_KEY = "knowledge-chatroom.workspace.v1.invalid";
 export const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
 const SERVER_UI_KEY = "knowledge-chatroom.workspace.server-ui.v1";
 export const PLACE_UI_KEY = "knowledge-chatroom.workspace.place-ui.v1";
@@ -15,9 +16,15 @@ type PlaceUi = Record<string, Pick<PersistedWorkspace, "tabs" | "active">>;
 export function readPlaceUi(storage: BrowserStorage): PlaceUi {
   try {
     const all = JSON.parse(storage.getItem(PLACE_UI_KEY) ?? "null") as PlaceUi | null;
-    if (all) return all;
+    if (all && typeof all === "object" && !Array.isArray(all)) {
+      return Object.fromEntries(Object.entries(all).flatMap(([place, saved]) => {
+        const ui = parseTabState(saved);
+        return ui ? [[place, ui]] : [];
+      }));
+    }
     const root = JSON.parse(storage.getItem(SERVER_UI_KEY) ?? "null");
-    return root ? { "": root } : {};
+    const ui = parseTabState(root);
+    return ui ? { "": ui } : {};
   } catch {
     return {};
   }
@@ -26,7 +33,10 @@ export function readPlaceUi(storage: BrowserStorage): PlaceUi {
 export function restoreWorkspace(storage: BrowserStorage): PersistedWorkspace | null {
   try {
     const raw = storage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) as PersistedWorkspace : null;
+    if (!raw) return null;
+    const restored = parsePersistedWorkspace(JSON.parse(raw));
+    if (!restored) storage.setItem(INVALID_STORAGE_KEY, raw);
+    return restored;
   } catch {
     return null;
   }
@@ -40,6 +50,13 @@ export function persistWorkspace(
   place: PlaceId,
 ) {
   if (mode === "local") {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (raw) {
+      let valid = false;
+      try { valid = parsePersistedWorkspace(JSON.parse(raw)) !== null; }
+      catch { /* Preserve unreadable data before replacing it. */ }
+      if (!valid) storage.setItem(INVALID_STORAGE_KEY, raw);
+    }
     storage.setItem(STORAGE_KEY, JSON.stringify(state));
     return;
   }

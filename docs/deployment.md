@@ -4,7 +4,7 @@ Use Node 22 for build and runtime. Install with `npm ci`, run `npm run check`,
 then `npm run build`. The build includes TypeScript checks. `npm start` serves the
 production build; the configured standalone output can also be packaged by a
 deployment host with its `.next/static` assets. Deploy the agent separately with
-its dependencies and run `npm --prefix agent start`.
+its dependencies and the sibling `shared/` directory and run `npm --prefix agent start`.
 
 Configure `AGENT_URL` on Next.js to reach the agent over a private network. Expose
 the Next.js UI through HTTPS. Keep the agent HTTP port private: Next.js signs

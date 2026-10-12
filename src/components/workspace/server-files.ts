@@ -1,3 +1,6 @@
+import { parseFileInfo, parseFileList, StorageContractError } from "../../../shared/storage-contract";
+import type { FileInfo as ServerFile } from "../../../shared/storage-contract";
+export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "../../../shared/storage-contract";
 import { FileExistsError, isTextFile, ReadOnlyFileError, type FileKind, type WorkspaceFile } from "./types";
 
 /**
@@ -5,17 +8,6 @@ import { FileExistsError, isTextFile, ReadOnlyFileError, type FileKind, type Wor
  * storage service). When it answers, workspace files live on the server;
  * otherwise the workspace keeps them in the browser (see store.tsx).
  */
-
-export interface ServerFile {
-  path: string;
-  kind: FileKind;
-  mime: string;
-  size: number;
-  sha256: string;
-  updatedAt: string;
-  author: WorkspaceFile["author"];
-  readOnly?: boolean;
-}
 
 /** A knowledge node id, or null for the workspace root. */
 export type NodeId = string | null;
@@ -30,29 +22,6 @@ export const experimentPlace = (id: string): PlaceId => `${EXPERIMENT_PREFIX}${i
 /** The experiment a place is, or null for the root and nodes. */
 export const experimentOf = (place: PlaceId) =>
   place?.startsWith(EXPERIMENT_PREFIX) ? place.slice(EXPERIMENT_PREFIX.length) : null;
-
-/** One committed change, from the /api/files?watch event stream. */
-export type ServerEvent =
-  | {
-      op: "write" | "delete";
-      node: NodeId;
-      /** Set for an experiment's files (node is then null). */
-      experiment?: string | null;
-      path: string;
-      sha256?: string;
-      author?: WorkspaceFile["author"];
-    }
-  | { op: "node"; change: "create" | "rename" | "delete"; id: string }
-  | { op: "experiment"; change: "create" | "update" | "status" | "delete"; id: string; node: string }
-  | {
-      op: "proposal";
-      change: "create" | "update" | "accepted" | "rejected" | "withdrawn";
-      id: string;
-      node: NodeId;
-      path: string;
-      author: WorkspaceFile["author"];
-      authorId: string;
-    };
 
 /** The place a file event is about. */
 export const eventPlace = (event: { node: NodeId; experiment?: string | null }): PlaceId =>
@@ -124,11 +93,15 @@ export async function listServerFiles(
 ): Promise<ServerFile[] | "starting" | null> {
   try {
     const res = await apiFetch(`/api/files${placeQuery(place)}`, { cache: "no-store" });
-    if (res.ok) return ((await res.json()) as { files: ServerFile[] }).files;
+    if (res.ok) {
+      try { return parseFileList(await res.json()); }
+      catch { throw new StorageContractError("Storage returned invalid file metadata"); }
+    }
     // Signed in, but nothing here is shared with you (e.g. the workspace root).
     if (res.status === 403) return [];
     return res.status === 503 || res.status === 502 ? "starting" : null;
-  } catch {
+  } catch (error) {
+    if (error instanceof StorageContractError) throw error;
     return "starting";
   }
 }
@@ -183,7 +156,7 @@ export async function putServerFile(
     throw new Error(`You can't change files here (${file.path})`);
   }
   if (!res.ok) throw new Error(`PUT ${file.path}: ${res.status}`);
-  return (await res.json()) as ServerFile;
+  return parseFileInfo(await res.json());
 }
 
 /** Asks the server itself, not the local copy of the file list. */

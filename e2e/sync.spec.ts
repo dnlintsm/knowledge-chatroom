@@ -18,7 +18,7 @@ async function storage(page: Page) {
   const put = (content: string, node = "", path = PATH) => {
     const info: ServerFile = {
       path, kind: "note", mime: "text/markdown", size: content.length,
-      sha256: String(++revision), updatedAt: new Date().toISOString(), author: "user",
+      sha256: (++revision).toString(16).padStart(64, "0"), updatedAt: new Date().toISOString(), author: "user", readOnly: false,
     };
     files.set(`${node}\n${path}`, { info, content });
     return info;

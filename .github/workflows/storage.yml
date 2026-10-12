@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "agent/**"
+      - "shared/**"
       - "scripts/ci-*.mjs"
       - "docker-compose.yml"
       - "deploy/**"

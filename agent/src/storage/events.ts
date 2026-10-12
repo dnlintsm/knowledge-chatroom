@@ -1,48 +1,7 @@
 import type { Sql, Tx } from "./db";
 
-export type AuthorType = "user" | "agent";
-
-/** A committed file change. */
-export interface FileEvent {
-  op: "write" | "delete";
-  /** The knowledge node the file belongs to; null at the workspace root. */
-  node: string | null;
-  /** The experiment it belongs to instead (node is then null). */
-  experiment?: string | null;
-  path: string;
-  /** Present for writes. */
-  sha256?: string;
-  author?: AuthorType;
-}
-
-/** A committed change to the knowledge tree; clients refetch /nodes. */
-export interface NodeEvent {
-  op: "node";
-  change: "create" | "rename" | "delete";
-  id: string;
-}
-
-/** A committed change to an experiment on `node`; clients refetch /experiments. */
-export interface ExperimentEvent {
-  op: "experiment";
-  change: "create" | "update" | "status" | "delete";
-  id: string;
-  node: string;
-}
-
-/** A committed change to a proposed version of a file in `node` (null = the root). */
-export interface ProposalEvent {
-  op: "proposal";
-  change: "create" | "update" | "accepted" | "rejected" | "withdrawn";
-  id: string;
-  node: string | null;
-  path: string;
-  /** Who proposed it: the user, or Claude acting for authorId. */
-  author: AuthorType;
-  authorId: string;
-}
-
-export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent | ProposalEvent;
+import type { WorkspaceEvent } from "../../../shared/storage-contract";
+export type { AuthorType, FileEvent, NodeEvent, ExperimentEvent, ProposalEvent, WorkspaceEvent } from "../../../shared/storage-contract";
 
 const CHANNEL = "workspace_files";
 
