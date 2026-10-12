@@ -68,7 +68,7 @@ const MAX_SKILL_BYTES = 5 * 1024 * 1024;
 
 /** Reads the simple `key: value` front matter of a SKILL.md. */
 export function parseFrontMatter(text: string): Record<string, string> {
-  const match = /^﻿?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  const match = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
   if (!match) return {};
   const fields: Record<string, string> = {};
   for (const line of match[1].split(/\r?\n/)) {
@@ -102,7 +102,7 @@ export function skillFromFiles(
   const name = SKILL_NAME.test(meta.name ?? "") ? meta.name : folder;
   if (!SKILL_NAME.test(name)) return null;
   const firstLine = text
-    .replace(/^﻿?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
+    .replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
     .split(/\r?\n/)
     .map((line) => line.replace(/^#+\s*/, "").trim())
     .find(Boolean);
@@ -210,9 +210,15 @@ export function chosenMode(layers: ModeLayers | undefined): SkillMode | undefine
 }
 
 export function describe(skill: Skill, layers: ModeLayers = {}): SkillInfo {
-  const { files: _files, ...info } = skill;
   return {
-    ...info,
+    name: skill.name,
+    description: skill.description,
+    argumentHint: skill.argumentHint,
+    source: skill.source,
+    path: skill.path,
+    modelInvocable: skill.modelInvocable,
+    userInvocable: skill.userInvocable,
+    needsExecution: skill.needsExecution,
     mode: effectiveMode(skill, chosenMode(layers)),
     defaultMode: defaultMode(skill),
     workspaceMode: layers.workspace ?? null,

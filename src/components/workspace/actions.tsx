@@ -202,13 +202,17 @@ export function ActionsBlock() {
   useEffect(() => {
     try {
       setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
-    } catch {}
+    } catch {
+      // Storage may be unavailable; keep the default expanded state.
+    }
   }, []);
   const toggle = () =>
     setCollapsed((c) => {
       try {
         window.localStorage.setItem(COLLAPSED_KEY, c ? "0" : "1");
-      } catch {}
+      } catch {
+        // The toggle still works in memory when persistence is unavailable.
+      }
       return !c;
     });
 

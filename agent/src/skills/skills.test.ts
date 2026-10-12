@@ -25,6 +25,7 @@ test("front matter: plain and quoted values, keys lowercased", () => {
     { name: "pdf", description: "Fill forms: fast", "argument-hint": "[file]" },
   );
   assert.deepEqual(parseFrontMatter("# no front matter"), {});
+  assert.equal(parseFrontMatter("\uFEFF---\nname: tldr\n---\nBody").name, "tldr");
 });
 
 test("a skill takes its name from the front matter, else its folder", () => {
