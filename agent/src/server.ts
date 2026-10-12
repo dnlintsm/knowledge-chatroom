@@ -5,7 +5,8 @@
  * `adapter.run(input)`, `GET /health` reports status. Runs on port 8000.
  * When DATABASE_URL is set it also serves the workspace file API under
  * `/files`, the knowledge tree under `/nodes`, experiments under `/experiments`,
- * search under `/search` and groups and grants under `/access` (see
+ * search under `/search`, proposed versions under `/proposals` and groups
+ * and grants under `/access` (see
  * src/storage/http.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
@@ -46,7 +47,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (/^\/(files|nodes|access|experiments|search)(\/|$)/.test(pathname)) {
+  if (/^\/(files|nodes|access|experiments|search|proposals)(\/|$)/.test(pathname)) {
     await handleStorage(req, res, url);
     return;
   }

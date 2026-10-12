@@ -75,13 +75,13 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     const role = APP_ROLE;
     await tx.unsafe(`GRANT USAGE ON SCHEMA "${schema.replace(/"/g, '""')}" TO ${role}`);
     await tx.unsafe(
-      `GRANT SELECT ON workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks TO ${role}`,
+      `GRANT SELECT ON workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals TO ${role}`,
     );
     await tx.unsafe(
-      `GRANT INSERT ON blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks TO ${role}`,
+      `GRANT INSERT ON blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals TO ${role}`,
     );
     // UPDATE also covers the row locks (FOR SHARE / FOR UPDATE) the services take.
-    await tx.unsafe(`GRANT UPDATE ON nodes, files, experiments TO ${role}`);
+    await tx.unsafe(`GRANT UPDATE ON nodes, files, experiments, proposals TO ${role}`);
     await tx.unsafe(`GRANT USAGE ON SEQUENCE audit_log_id_seq TO ${role}`);
     return true;
   }) as Promise<boolean>;

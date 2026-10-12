@@ -8,6 +8,7 @@ import type { Storage, StorageState } from "./index";
 import { FileExistsError, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile } from "./paths";
+import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
 import { SearchError } from "./search";
 import type { Session } from "./session";
 
@@ -29,6 +30,9 @@ import type { Session } from "./session";
  *                                   `If-None-Match: *` only creates (412 when
  *                                   the file exists); `X-Read-Only: true`
  *                                   makes a new file read-only
+ *   PUT    /files/<path>?propose    propose that content instead, for an
+ *                                   editor to accept (see /proposals); a
+ *                                   viewer may propose too. ?note= says why
  *   DELETE /files/<path>            soft delete
  *
  *   Read-only files answer 403 to PUT and DELETE, and carry
@@ -71,6 +75,26 @@ import type { Session } from "./session";
  *                                   the nodes below it and their experiments;
  *                                   &near=<node id> or &experiment=<id> ranks
  *                                   files near there first; &limit= (≤ 50)
+ *
+ *   GET    /proposals               {proposals}: open proposed versions of
+ *                                   files you can read, and your own, newest
+ *                                   first; ?node=<id> one node's (root for
+ *                                   the workspace root), ?experiment=<id> those
+ *                                   promoted from it, ?status=open|accepted|
+ *                                   rejected|withdrawn|all
+ *   POST   /proposals               {experimentId, paths?, note?} → {proposals}:
+ *                                   promote an experiment's changed files (all,
+ *                                   or those paths) to its node
+ *   GET    /proposals/promotable?experiment=<id>
+ *                                   {files}: what promoting it would propose
+ *   GET    /proposals/<id>          one proposal
+ *   GET    /proposals/<id>/content  the proposed bytes
+ *   POST   /proposals/<id>/accept   write it as the file's next version
+ *                                   (credited to its proposer); editor
+ *   POST   /proposals/<id>/reject   editor
+ *   POST   /proposals/<id>/withdraw its proposer
+ *   Changes arrive on the /files change stream as
+ *   {"op":"proposal","change","id","node","path","author","authorId"}.
  *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
@@ -329,6 +353,73 @@ async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL,
   json(res, 404, { error: "Not found" });
 }
 
+const PROPOSAL_STATUSES = ["open", "accepted", "rejected", "withdrawn", "all"];
+const DECISIONS: Decision[] = ["accept", "reject", "withdraw"];
+
+async function handleProposals(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+  const [id, action] = url.pathname.split("/").slice(2).map(decodeURIComponent); // after /proposals
+  const method = req.method ?? "GET";
+
+  if (!id) {
+    if (method === "GET") {
+      const node = url.searchParams.get("node");
+      const status = url.searchParams.get("status") ?? "open";
+      if (!PROPOSAL_STATUSES.includes(status)) {
+        return json(res, 400, { error: `status must be one of ${PROPOSAL_STATUSES.join(", ")}` });
+      }
+      const proposals = await session.proposals({
+        node: node === null ? undefined : node === "root" || node === "" ? null : node,
+        experiment: url.searchParams.get("experiment") || undefined,
+        status: status as ProposalStatus | "all",
+      });
+      return json(res, 200, { proposals });
+    }
+    if (method === "POST") {
+      const body = await readJson(req);
+      const paths = body?.paths;
+      if (
+        !body ||
+        typeof body.experimentId !== "string" ||
+        (paths !== undefined && (!Array.isArray(paths) || paths.some((p) => typeof p !== "string"))) ||
+        (body.note !== undefined && typeof body.note !== "string")
+      ) {
+        return json(res, 400, { error: "Expected {experimentId: string, paths?: string[], note?: string}" });
+      }
+      const proposals = await session.promote(body.experimentId, paths as string[] | undefined, body.note as string | undefined);
+      return json(res, 201, { proposals });
+    }
+    return json(res, 405, { error: "Method not allowed" });
+  }
+
+  if (id === "promotable" && !action) {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    const experiment = url.searchParams.get("experiment");
+    if (!experiment) return json(res, 400, { error: "Expected ?experiment=<id>" });
+    return json(res, 200, { files: await session.promotable(experiment) });
+  }
+
+  if (!action) {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    return json(res, 200, await session.proposal(id));
+  }
+  if (action === "content") {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    const { proposal, bytes } = await session.proposalContent(id);
+    res.writeHead(200, {
+      "Content-Type": proposal.mime,
+      "Content-Length": bytes.byteLength,
+      "Cache-Control": "no-cache",
+    });
+    res.end(bytes);
+    return;
+  }
+  if (DECISIONS.includes(action as Decision)) {
+    if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    return json(res, 200, await session.decide(id, action as Decision));
+  }
+  json(res, 404, { error: "Not found" });
+}
+
 async function handleSearch(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   if (!/^\/search\/?$/.test(url.pathname)) {
     json(res, 404, { error: "Not found" });
@@ -381,6 +472,7 @@ export function createStorageHandler(
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
       else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
       else if (/^\/search(\/|$)/.test(url.pathname)) await handleSearch(req, res, url, session);
+      else if (/^\/proposals(\/|$)/.test(url.pathname)) await handleProposals(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
     } catch (err) {
       if (err instanceof NodeNotFoundError) {
@@ -404,7 +496,8 @@ export function createStorageHandler(
         err instanceof NodeError ||
         err instanceof AccessError ||
         err instanceof ExperimentError ||
-        err instanceof SearchError
+        err instanceof SearchError ||
+        err instanceof ProposalError
       ) {
         json(res, 400, { error: err.message });
         return;
@@ -498,9 +591,19 @@ export function createStorageHandler(
           json(res, 413, { error: `File exceeds ${maxUploadBytes} bytes` });
           return;
         }
-        const mime = req.headers["content-type"]?.split(";")[0].trim();
+        const header = req.headers["content-type"]?.split(";")[0].trim();
+        const mime = header && header !== "application/octet-stream" ? header : undefined;
+        if (url.searchParams.has("propose")) {
+          if (experiment) {
+            json(res, 400, { error: "An experiment's files change directly; promote it to propose them" });
+            return;
+          }
+          const note = url.searchParams.get("note") ?? undefined;
+          json(res, 201, await session.propose(service.nodeId, path, bytes, { mime, note }));
+          return;
+        }
         const info = await service.write(path, bytes, {
-          mime: mime && mime !== "application/octet-stream" ? mime : undefined,
+          mime,
           createOnly: req.headers["if-none-match"]?.trim() === "*",
           readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
         });

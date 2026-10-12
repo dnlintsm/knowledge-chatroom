@@ -30,7 +30,19 @@ export interface ExperimentEvent {
   node: string;
 }
 
-export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent;
+/** A committed change to a proposed version of a file in `node` (null = the root). */
+export interface ProposalEvent {
+  op: "proposal";
+  change: "create" | "update" | "accepted" | "rejected" | "withdrawn";
+  id: string;
+  node: string | null;
+  path: string;
+  /** Who proposed it: the user, or Claude acting for authorId. */
+  author: AuthorType;
+  authorId: string;
+}
+
+export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent | ProposalEvent;
 
 const CHANNEL = "workspace_files";
 
