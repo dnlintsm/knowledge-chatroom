@@ -14,7 +14,7 @@ import {
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
-import { HubBrowser, SkillActions, SkillsToolbar, type Notice } from "./skill-hub";
+import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 
 /**
@@ -49,8 +49,14 @@ export interface SkillInfo {
   userMode: SkillMode | null;
   /** This chat's choice; null = yours. */
   chatMode: SkillMode | null;
-  /** For a skill installed from the hub: its pinned version and the newest one. */
-  hub: { version: number; latest: number } | null;
+  /** For a skill installed from the hub: its pinned version, the newest one, and their standing. */
+  hub: {
+    version: number;
+    latest: number;
+    verified: boolean;
+    yanked: boolean;
+    yankReason: string | null;
+  } | null;
   modelInvocable: boolean;
   userInvocable: boolean;
   needsExecution: boolean;
@@ -329,6 +335,7 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
               <span className="shrink-0 rounded bg-[var(--secondary)] px-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                 {skill.source === "builtin" ? "Built-in" : skill.hub ? `Hub v${skill.hub.version}` : "Workspace"}
               </span>
+              {skill.hub && <TrustBadges {...skill.hub} />}
               {skill.needsExecution && (
                 <span
                   title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."

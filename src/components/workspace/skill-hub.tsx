@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, Download, Search, Store, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Diff } from "./review-panel";
 import { useSkills, type SkillInfo } from "./skills";
 
 /**
- * The skill hub in the Skills panel (issue #7, step 3): browse and install
- * skills published on this deployment, publish the workspace's own, update
- * or fork installed ones, and move skills in and out as .zip files. The
- * agent server checks every action against the user's role.
+ * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
+ * install skills published on this deployment, publish the workspace's own,
+ * update (after reviewing the diff) or fork installed ones, and move skills
+ * in and out as .zip files. Each version shows what the publish check
+ * flagged, whether a hub admin verified it, and whether it was yanked;
+ * anyone can report a skill. The agent server checks every action.
  */
 
 export interface Notice {
@@ -19,6 +22,13 @@ export interface Notice {
 
 type Notify = (notice: Notice) => void;
 
+interface ScanFlag {
+  kind: "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
+  path: string;
+  line: number | null;
+  detail: string;
+}
+
 interface HubListing {
   name: string;
   description: string;
@@ -26,16 +36,53 @@ interface HubListing {
   needsExecution: boolean;
   publisher: string | null;
   mine: boolean;
+  /** The newest version that isn't yanked; `verified`, `yanked` and `flags` are about it. */
   latest: number;
+  verified: boolean;
+  yanked: boolean;
+  flags: number;
   updatedAt: string;
   installed: number | null;
+  /** Open reports, shown to hub admins and the publisher. */
+  reports: number | null;
+}
+
+interface HubVersion {
+  version: number;
+  publishedAt: string;
+  publishedBy: string | null;
+  files: number;
+  size: number;
+  verified: boolean;
+  yanked: boolean;
+  yankReason: string | null;
+  flags: ScanFlag[];
 }
 
 interface HubDetail extends HubListing {
-  versions: { version: number; publishedAt: string; publishedBy: string | null; files: number; size: number }[];
+  versions: HubVersion[];
   version: number;
   skillMd: string;
+  canModerate: boolean;
+  canYank: boolean;
+  openReports: { id: string; version: number | null; reason: string; reporter: string | null; createdAt: string }[] | null;
 }
+
+interface HubDiff {
+  from: number;
+  to: number;
+  files: { path: string; change: "added" | "removed" | "changed"; before: string | null; after: string | null; binary: boolean }[];
+  flags: ScanFlag[];
+}
+
+const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
+  scripts: "Script",
+  network: "Network",
+  large: "Large file",
+  binary: "Binary file",
+  "hidden-text": "Hidden text",
+  instructions: "Odd instruction",
+};
 
 /** Calls the skills or hub API; throws the server's error message. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,6 +103,142 @@ const json = (method: string, body: unknown): RequestInit => ({
 });
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** A version's standing: verified by a hub admin, yanked, and how many things the publish check flagged. */
+export function TrustBadges({
+  verified,
+  yanked,
+  yankReason,
+  flags,
+}: {
+  verified: boolean;
+  yanked: boolean;
+  yankReason?: string | null;
+  flags?: number;
+}) {
+  return (
+    <>
+      {verified && (
+        <span
+          data-testid="skill-verified"
+          title="A hub admin checked this version"
+          className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+        >
+          <BadgeCheck className="size-3.5" /> Verified
+        </span>
+      )}
+      {yanked && (
+        <span
+          data-testid="skill-yanked"
+          title={`Its publisher withdrew this version${yankReason ? `: ${yankReason}` : ""}`}
+          className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-red-600"
+        >
+          <Ban className="size-3.5" /> Yanked
+        </span>
+      )}
+      {!!flags && (
+        <span
+          data-testid="skill-flags"
+          title={`The publish check flagged ${flags} thing${flags === 1 ? "" : "s"} to look at`}
+          className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-amber-600"
+        >
+          <ShieldAlert className="size-3.5" /> {flags}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** What the publish check found, one line per flag. */
+function FlagList({ flags }: { flags: ScanFlag[] }) {
+  if (!flags.length) return <p className="text-[var(--muted-foreground)]">The publish check flagged nothing.</p>;
+  return (
+    <ul data-testid="hub-flags" className="flex flex-col gap-0.5">
+      {flags.map((f, i) => (
+        <li key={i} className="flex gap-1.5">
+          <span className="shrink-0 font-medium text-amber-700 dark:text-amber-500">{FLAG_LABEL[f.kind]}</span>
+          <span className="min-w-0 break-words text-[var(--muted-foreground)]">
+            {f.path}
+            {f.line !== null && `:${f.line}`} · {f.detail}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The changes an update brings, to confirm before updating. */
+function UpdateReview({
+  skill,
+  onUpdate,
+  onCancel,
+  busy,
+}: {
+  skill: SkillInfo;
+  onUpdate: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [diff, setDiff] = useState<HubDiff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { version, latest } = skill.hub!;
+
+  useEffect(() => {
+    let live = true;
+    call<HubDiff>(`/api/hub/${encodeURIComponent(skill.name)}/diff?from=${version}&to=${latest}`)
+      .then((d) => live && setDiff(d))
+      .catch((err) => live && setError(message(err)));
+    return () => {
+      live = false;
+    };
+  }, [skill.name, version, latest]);
+
+  return (
+    <div data-testid="skill-update-review" className="mt-2 rounded border border-[var(--border)] text-xs">
+      <p className="border-b border-[var(--border)] px-2 py-1 font-medium">
+        v{version} → v{latest}
+      </p>
+      {error && <p className="px-2 py-1 text-red-600">{error}</p>}
+      {diff && (
+        <>
+          <div className="px-2 py-1.5">
+            <FlagList flags={diff.flags} />
+          </div>
+          {diff.files.length === 0 && <p className="px-2 pb-1.5 text-[var(--muted-foreground)]">No file changes.</p>}
+          {/* The pane is narrow: let long words (links) wrap instead of widening the table. */}
+          <div className="max-h-80 overflow-auto [&_td]:[overflow-wrap:anywhere]">
+            {diff.files.map((f) => (
+              <div key={f.path} className="border-t border-[var(--border)]">
+                <p className="px-2 py-1 font-mono text-[11px]">
+                  {f.path} <span className="text-[var(--muted-foreground)]">({f.change})</span>
+                </p>
+                {f.binary ? (
+                  <p className="px-2 pb-1 text-[var(--muted-foreground)]">Not text, so not shown.</p>
+                ) : (
+                  <Diff before={f.before ?? ""} after={f.after ?? ""} />
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="flex justify-end gap-2 border-t border-[var(--border)] px-2 py-1.5">
+        <button type="button" onClick={onCancel} className={linkButton}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          data-testid="skill-update-confirm"
+          disabled={busy || !diff}
+          onClick={onUpdate}
+          className="rounded border border-[var(--border)] px-2 py-0.5 font-medium hover:bg-[var(--secondary)] cursor-pointer disabled:opacity-50"
+        >
+          Update to v{latest}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const linkButton =
   "text-[var(--muted-foreground)] underline-offset-2 hover:text-[var(--foreground)] hover:underline cursor-pointer disabled:cursor-wait disabled:opacity-50";
@@ -132,11 +315,13 @@ export function SkillsToolbar({ onBrowse, notify }: { onBrowse: () => void; noti
 export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Notify }) {
   const { hub, canSetDefaults, canPublish, reload } = useSkills();
   const [busy, setBusy] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const run = async (action: () => Promise<string>) => {
     setBusy(true);
     try {
       notify({ kind: "ok", text: await action() });
+      setReviewing(false);
       await reload();
     } catch (err) {
       notify({ kind: "error", text: message(err) });
@@ -147,84 +332,101 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
   const name = encodeURIComponent(skill.name);
 
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs">
-      <a
-        href={`/api/skills/${name}/export`}
-        download={`${skill.name}.zip`}
-        title="Download as a .zip (works in Claude Code too)"
-        className={cn(linkButton, "inline-flex items-center gap-0.5")}
-      >
-        <Download className="size-3" /> Export
-      </a>
-      {hub && skill.source === "workspace" && canPublish && (
-        <button
-          type="button"
-          data-testid="skill-publish"
-          disabled={busy}
-          title="Publish this version to the hub, for anyone on this deployment to install"
-          onClick={() =>
-            void run(async () => {
-              const out = await call<{ version: number; unchanged: boolean }>("/api/hub", json("POST", { skill: skill.name }));
-              return out.unchanged
-                ? `${skill.name} hasn't changed since v${out.version} on the hub.`
-                : `Published ${skill.name} v${out.version} to the hub.`;
-            })
-          }
-          className={linkButton}
-        >
-          Publish
-        </button>
+    <>
+      {skill.hub?.yanked && (
+        <p className="mt-1 text-xs text-red-600">
+          This version was yanked{skill.hub.yankReason ? `: ${skill.hub.yankReason}` : ""}. It still works; update or remove
+          it.
+        </p>
       )}
-      {skill.hub && canSetDefaults && (
-        <>
-          {skill.hub.latest > skill.hub.version && (
+      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs">
+        <a
+          href={`/api/skills/${name}/export`}
+          download={`${skill.name}.zip`}
+          title="Download as a .zip (works in Claude Code too)"
+          className={cn(linkButton, "inline-flex items-center gap-0.5")}
+        >
+          <Download className="size-3" /> Export
+        </a>
+        {hub && skill.source === "workspace" && canPublish && (
+          <button
+            type="button"
+            data-testid="skill-publish"
+            disabled={busy}
+            title="Publish this version to the hub, for anyone on this deployment to install"
+            onClick={() =>
+              void run(async () => {
+                const out = await call<{ version: number; unchanged: boolean }>("/api/hub", json("POST", { skill: skill.name }));
+                return out.unchanged
+                  ? `${skill.name} hasn't changed since v${out.version} on the hub.`
+                  : `Published ${skill.name} v${out.version} to the hub.`;
+              })
+            }
+            className={linkButton}
+          >
+            Publish
+          </button>
+        )}
+        {skill.hub && canSetDefaults && (
+          <>
+            {skill.hub.latest > skill.hub.version && (
+              <button
+                type="button"
+                data-testid="skill-update"
+                disabled={busy}
+                title="See what changes first"
+                onClick={() => setReviewing((r) => !r)}
+                className={cn(linkButton, "text-[var(--foreground)] font-medium")}
+              >
+                Update to v{skill.hub.latest}
+              </button>
+            )}
             <button
               type="button"
-              data-testid="skill-update"
+              data-testid="skill-fork"
+              disabled={busy}
+              title="Copy it into the workspace's skills/ to change it there"
+              onClick={() =>
+                void run(async () => {
+                  await call(`/api/hub/${name}/fork`, { method: "POST" });
+                  return `Forked ${skill.name} into skills/${skill.name}/.`;
+                })
+              }
+              className={linkButton}
+            >
+              Fork
+            </button>
+            <button
+              type="button"
+              data-testid="skill-uninstall"
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  await call(`/api/hub/${name}/install`, json("PUT", { version: skill.hub!.latest }));
-                  return `Updated ${skill.name} to v${skill.hub!.latest}.`;
+                  await call(`/api/hub/${name}/install`, { method: "DELETE" });
+                  return `Removed ${skill.name}.`;
                 })
               }
-              className={cn(linkButton, "text-[var(--foreground)] font-medium")}
+              className={linkButton}
             >
-              Update to v{skill.hub.latest}
+              Remove
             </button>
-          )}
-          <button
-            type="button"
-            data-testid="skill-fork"
-            disabled={busy}
-            title="Copy it into the workspace's skills/ to change it there"
-            onClick={() =>
-              void run(async () => {
-                await call(`/api/hub/${name}/fork`, { method: "POST" });
-                return `Forked ${skill.name} into skills/${skill.name}/.`;
-              })
-            }
-            className={linkButton}
-          >
-            Fork
-          </button>
-          <button
-            type="button"
-            data-testid="skill-uninstall"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await call(`/api/hub/${name}/install`, { method: "DELETE" });
-                return `Removed ${skill.name}.`;
-              })
-            }
-            className={linkButton}
-          >
-            Remove
-          </button>
-        </>
+          </>
+        )}
+      </div>
+      {reviewing && skill.hub && (
+        <UpdateReview
+          skill={skill}
+          busy={busy}
+          onCancel={() => setReviewing(false)}
+          onUpdate={() =>
+            void run(async () => {
+              await call(`/api/hub/${name}/install`, json("PUT", { version: skill.hub!.latest }));
+              return `Updated ${skill.name} to v${skill.hub!.latest}.`;
+            })
+          }
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -281,6 +483,23 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
     }
   };
 
+  /** Verify, yank, report or dismiss on the open skill, then show it again. */
+  const moderate = async (done: string, path: string, init: RequestInit) => {
+    if (!open) return;
+    setBusy(open.name);
+    try {
+      await call(`/api/hub/${encodeURIComponent(open.name)}/${path}`, init);
+      notify({ kind: "ok", text: done });
+      await details(open.name, open.version);
+      setTick((t) => t + 1);
+      await reload();
+    } catch (err) {
+      notify({ kind: "error", text: message(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div data-testid="hub-browser" className="flex flex-col">
       <div className="flex items-center gap-1.5 px-3 pb-2">
@@ -321,13 +540,29 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
       {open ? (
         <div className="px-3 text-xs">
           <p className="text-[var(--muted-foreground)]">{open.description}</p>
-          <p className="mt-1 text-[var(--muted-foreground)]">
-            By {open.publisher ?? "someone"} · v{open.latest}
-            {open.installed !== null && ` · installed v${open.installed}`}
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[var(--muted-foreground)]">
+            <span>
+              By {open.publisher ?? "someone"} · v{open.latest}
+              {open.installed !== null && ` · installed v${open.installed}`}
+            </span>
+            <button
+              type="button"
+              data-testid="hub-report"
+              disabled={busy === open.name}
+              onClick={() => {
+                const reason = prompt(`What's wrong with ${open.name}? Its publisher and the hub admins will see this.`);
+                if (reason?.trim()) {
+                  void moderate("Reported. Thanks for flagging it.", "reports", json("POST", { reason, version: open.version }));
+                }
+              }}
+              className={cn(linkButton, "ml-auto inline-flex items-center gap-0.5")}
+            >
+              <Flag className="size-3" /> Report
+            </button>
           </p>
           <ul className="mt-2 flex flex-col gap-1" aria-label="Versions">
             {open.versions.map((v) => (
-              <li key={v.version} className="flex items-center gap-2">
+              <li key={v.version} data-testid="hub-version" data-version={v.version} className="flex flex-wrap items-center gap-x-2">
                 <button
                   type="button"
                   onClick={() => void details(open.name, v.version)}
@@ -335,25 +570,104 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
                 >
                   v{v.version}
                 </button>
-                <span className="min-w-0 flex-1 truncate text-[var(--muted-foreground)]">
+                <span className="min-w-0 truncate text-[var(--muted-foreground)]">
                   {new Date(v.publishedAt).toLocaleDateString()} · {v.files} file{v.files === 1 ? "" : "s"}
                 </span>
-                {state?.canInstall &&
-                  (open.installed === v.version ? (
-                    <span className="text-[var(--muted-foreground)]">Installed</span>
-                  ) : (
+                <TrustBadges verified={v.verified} yanked={v.yanked} yankReason={v.yankReason} flags={v.flags.length} />
+                <span className="ml-auto flex items-center gap-2">
+                  {open.canModerate && (
                     <button
                       type="button"
+                      data-testid="hub-verify"
                       disabled={busy === open.name}
-                      onClick={() => void install(open.name, v.version)}
+                      title={v.verified ? "Take back the verification" : "Mark this version as checked by a hub admin"}
+                      onClick={() =>
+                        void moderate(
+                          v.verified ? `v${v.version} is no longer verified.` : `Verified v${v.version}.`,
+                          "verify",
+                          json("POST", { version: v.version, verified: !v.verified }),
+                        )
+                      }
                       className={linkButton}
                     >
-                      Install v{v.version}
+                      {v.verified ? "Unverify" : "Verify"}
                     </button>
-                  ))}
+                  )}
+                  {open.canYank && (
+                    <button
+                      type="button"
+                      data-testid="hub-yank"
+                      disabled={busy === open.name}
+                      title={v.yanked ? "Let it be installed again" : "Stop new installs of this version; installs of it keep working"}
+                      onClick={() => {
+                        if (v.yanked) {
+                          void moderate(`Restored v${v.version}.`, "yank", json("POST", { version: v.version, yanked: false }));
+                          return;
+                        }
+                        const reason = prompt(`Why yank v${v.version}? Workspaces that have it will see this.`);
+                        if (reason !== null) {
+                          void moderate(`Yanked v${v.version}.`, "yank", json("POST", { version: v.version, yanked: true, reason }));
+                        }
+                      }}
+                      className={linkButton}
+                    >
+                      {v.yanked ? "Restore" : "Yank"}
+                    </button>
+                  )}
+                  {state?.canInstall &&
+                    (open.installed === v.version ? (
+                      <span className="text-[var(--muted-foreground)]">Installed</span>
+                    ) : v.yanked ? null : (
+                      <button
+                        type="button"
+                        disabled={busy === open.name}
+                        onClick={() => void install(open.name, v.version)}
+                        className={linkButton}
+                      >
+                        Install v{v.version}
+                      </button>
+                    ))}
+                </span>
               </li>
             ))}
           </ul>
+          {open.openReports && open.openReports.length > 0 && (
+            <div data-testid="hub-reports" className="mt-3">
+              <p className="mb-1 font-medium text-amber-700 dark:text-amber-500">
+                Open reports ({open.openReports.length})
+              </p>
+              <ul className="flex flex-col gap-1">
+                {open.openReports.map((r) => (
+                  <li key={r.id} className="flex gap-2">
+                    <span className="min-w-0 flex-1 break-words">
+                      {r.reason}
+                      <span className="text-[var(--muted-foreground)]">
+                        {" "}
+                        · {r.reporter ?? "someone"}
+                        {r.version !== null && `, on v${r.version}`}
+                      </span>
+                    </span>
+                    {open.canModerate && (
+                      <button
+                        type="button"
+                        disabled={busy === open.name}
+                        onClick={() =>
+                          void moderate("Dismissed the report.", `reports?id=${encodeURIComponent(r.id)}`, {
+                            method: "DELETE",
+                          })
+                        }
+                        className={cn(linkButton, "shrink-0")}
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="mt-3 mb-1 text-[var(--muted-foreground)]">Publish check (v{open.version})</p>
+          <FlagList flags={open.versions.find((v) => v.version === open.version)?.flags ?? []} />
           <p className="mt-3 mb-1 text-[var(--muted-foreground)]">SKILL.md (v{open.version})</p>
           <pre
             data-testid="hub-skill-md"
@@ -379,6 +693,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
                 {skill.name}
               </button>
               <span className="shrink-0 text-xs text-[var(--muted-foreground)]">v{skill.latest}</span>
+              <TrustBadges verified={skill.verified} yanked={skill.yanked} flags={skill.flags} />
               {skill.needsExecution && (
                 <span
                   title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
@@ -390,7 +705,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
               <span className="ml-auto shrink-0 text-xs">
                 {skill.installed === skill.latest ? (
                   <span className="text-[var(--muted-foreground)]">Installed</span>
-                ) : state.canInstall ? (
+                ) : skill.yanked ? null : state.canInstall ? (
                   <button
                     type="button"
                     data-testid="hub-install"
@@ -408,6 +723,12 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
             )}
             <p className="mt-0.5 text-[11px] text-[var(--muted-foreground)]">
               By {skill.mine ? "you" : (skill.publisher ?? "someone")}
+              {!!skill.reports && (
+                <span className="text-amber-700 dark:text-amber-500">
+                  {" "}
+                  · {skill.reports} open report{skill.reports === 1 ? "" : "s"}
+                </span>
+              )}
             </p>
           </div>
         ))

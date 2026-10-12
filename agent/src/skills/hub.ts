@@ -12,6 +12,7 @@ import {
   type Skill,
   type SkillFile,
 } from "./catalog";
+import { scanSkill, LARGE_FILE_BYTES, type ScanFlag } from "./scan";
 import { SkillForbiddenError, type HubFile, type SkillService } from "./service";
 
 /**
@@ -21,6 +22,11 @@ import { SkillForbiddenError, type HubFile, type SkillService } from "./service"
  * version, update it, or fork it into the workspace's skills/ to change it.
  * Skills also move in and out as .zip files in the standard Agent Skills
  * layout (<name>/SKILL.md + files), so they work with Claude Code too.
+ *
+ * Trust (step 4): each version is scanned when it's published (scan.ts);
+ * hub admins (HUB_ADMINS, or the local user without login) verify versions
+ * and handle reports; a publisher can yank a version, which can then no
+ * longer be installed, though installs of it keep working.
  *
  * Everything here is the user's own doing over HTTP: Claude has no tools for
  * the hub, so a document can't talk it into installing a skill.
@@ -46,10 +52,17 @@ export interface HubListing extends HubManifest {
   publisher: string | null;
   /** Whether you published it, and so may publish new versions. */
   mine: boolean;
+  /** The newest version that isn't yanked (the newest of all if every one is). */
   latest: number;
+  /** About `latest`: an admin verified it; it's yanked; how many scan flags it has. */
+  verified: boolean;
+  yanked: boolean;
+  flags: number;
   updatedAt: string;
   /** The version installed in this workspace, or null. */
   installed: number | null;
+  /** Open reports, for hub admins and the publisher; null for everyone else. */
+  reports: number | null;
 }
 
 export interface HubVersion {
@@ -59,6 +72,18 @@ export interface HubVersion {
   files: number;
   size: number;
   needsExecution: boolean;
+  verified: boolean;
+  yanked: boolean;
+  yankReason: string | null;
+  flags: ScanFlag[];
+}
+
+export interface HubReport {
+  id: string;
+  version: number | null;
+  reason: string;
+  reporter: string | null;
+  createdAt: string;
 }
 
 export interface HubDetail extends HubListing {
@@ -66,12 +91,38 @@ export interface HubDetail extends HubListing {
   /** The version shown, and its SKILL.md. */
   version: number;
   skillMd: string;
+  /** You may verify versions and dismiss reports (a hub admin). */
+  canModerate: boolean;
+  /** You may yank versions (its publisher or a hub admin). */
+  canYank: boolean;
+  /** Open reports, for hub admins and the publisher; null for everyone else. */
+  openReports: HubReport[] | null;
 }
 
 export interface HubList {
   skills: HubListing[];
   canInstall: boolean;
   canPublish: boolean;
+  /** You are a hub admin. */
+  isAdmin: boolean;
+}
+
+export interface HubDiffFile {
+  path: string;
+  change: "added" | "removed" | "changed";
+  /** The text on each side; null when there is no such side or it isn't text. */
+  before: string | null;
+  after: string | null;
+  binary: boolean;
+}
+
+export interface HubDiff {
+  name: string;
+  from: number;
+  to: number;
+  files: HubDiffFile[];
+  /** What the scan found in `to`. */
+  flags: ScanFlag[];
 }
 
 /** Most files a skill (published or imported) may have. */
@@ -87,22 +138,48 @@ const manifestOf = (skill: Skill): HubManifest => ({
   needsExecution: skill.needsExecution,
 });
 
-interface ListingRow {
+interface ScannedRow {
+  version_id: string;
+  files: HubFile[];
+  flags: ScanFlag[] | null;
+}
+
+interface ListingRow extends ScannedRow {
   id: string;
   name: string;
   owner_id: string;
   publisher: string | null;
   updated_at: Date;
   latest: number;
+  verified: boolean;
+  yanked: boolean;
   manifest: HubManifest;
   installed: number | null;
+  reports: number;
 }
 
+/** HUB_ADMINS: emails or login subjects, separated by commas or spaces. */
+function parseAdmins(value: string | undefined) {
+  return new Set(
+    (value ?? "")
+      .split(/[\s,]+/)
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class SkillHub {
+  private readonly admins: Set<string>;
+
   constructor(
     private readonly storage: () => Storage | null,
     private readonly skills: SkillService,
-  ) {}
+    options: { admins?: string } = {},
+  ) {
+    this.admins = parseAdmins(options.admins ?? process.env.HUB_ADMINS);
+  }
 
   /** The hub's skills, newest first; `query` matches names and descriptions. */
   async list(userId: string | null, query = ""): Promise<HubList> {
@@ -112,10 +189,13 @@ export class SkillHub {
       WHERE h.name ILIKE ${like} OR v.manifest->>'description' ILIKE ${like}
       ORDER BY h.updated_at DESC
       LIMIT 100`;
+    await this.scanned(storage, rows);
+    const admin = await this.isAdmin(storage, userId!);
     return {
-      skills: rows.map((row) => this.listing(row, userId!)),
+      skills: rows.map((row) => this.listing(row, userId!, admin)),
       canInstall: atLeast(role, "editor"),
       canPublish: atLeast(role, "owner"),
+      isAdmin: admin,
     };
   }
 
@@ -125,17 +205,47 @@ export class SkillHub {
     const [row] = await this.listings(storage)`WHERE h.name = ${name}`;
     if (!row) throw new HubNotFoundError(`No skill named ${name} on the hub`);
     const versions = await storage.sql<
-      { version: number; published_at: Date; published_by: string | null; files: HubFile[]; manifest: HubManifest }[]
+      (ScannedRow & {
+        version: number;
+        published_at: Date;
+        published_by: string | null;
+        manifest: HubManifest;
+        verified: boolean;
+        yanked: boolean;
+        yank_reason: string | null;
+      })[]
     >`
-      SELECT v.version, v.published_at, v.files, v.manifest, coalesce(u.name, u.email) AS published_by
+      SELECT v.id AS version_id, v.version, v.published_at, v.files, v.manifest, v.flags,
+             v.verified_at IS NOT NULL AS verified, v.yanked_at IS NOT NULL AS yanked, v.yank_reason,
+             coalesce(u.name, u.email) AS published_by
       FROM hub_skill_versions v LEFT JOIN users u ON u.id = v.published_by
       WHERE v.hub_skill_id = ${row.id}
       ORDER BY v.version DESC`;
+    await this.scanned(storage, [row, ...versions]);
     const shown = versions.find((v) => v.version === (version ?? row.latest));
     if (!shown) throw new HubNotFoundError(`${name} has no version ${version}`);
     const main = shown.files.find((f) => f.path === "SKILL.md");
+    const admin = await this.isAdmin(storage, userId!);
+    const mine = row.owner_id === userId;
+    let openReports: HubReport[] | null = null;
+    if (admin || mine) {
+      const reports = await storage.sql<
+        { id: string; version: number | null; reason: string; reporter: string | null; created_at: Date }[]
+      >`
+        SELECT r.id, r.version, r.reason, r.created_at, coalesce(u.name, u.email) AS reporter
+        FROM hub_skill_reports r LEFT JOIN users u ON u.id = r.reporter_id
+        WHERE r.hub_skill_id = ${row.id} AND r.dismissed_at IS NULL
+        ORDER BY r.created_at DESC`;
+      openReports = reports.map((r) => ({
+        id: r.id,
+        version: r.version,
+        reason: r.reason,
+        reporter: r.reporter,
+        createdAt: r.created_at.toISOString(),
+      }));
+    }
     return {
-      ...this.listing(row, userId!),
+      ...this.listing(row, userId!, admin),
       versions: versions.map((v) => ({
         version: v.version,
         publishedAt: v.published_at.toISOString(),
@@ -143,10 +253,149 @@ export class SkillHub {
         files: v.files.length,
         size: v.files.reduce((sum, f) => sum + f.size, 0),
         needsExecution: v.manifest.needsExecution,
+        verified: v.verified,
+        yanked: v.yanked,
+        yankReason: v.yank_reason,
+        flags: v.flags ?? [],
       })),
       version: shown.version,
       skillMd: main ? new TextDecoder().decode(await this.skills.blob(main.sha256)) : "",
+      canModerate: admin,
+      canYank: admin || mine,
+      openReports,
     };
+  }
+
+  /** What changed between two versions, file by file (for reviewing an update). */
+  async diff(userId: string | null, name: string, from: number, to: number): Promise<HubDiff> {
+    const { storage } = await this.open(userId, "viewer");
+    const rows = await storage.sql<(ScannedRow & { version: number })[]>`
+      SELECT v.id AS version_id, v.version, v.files, v.flags
+      FROM hub_skills h JOIN hub_skill_versions v ON v.hub_skill_id = h.id
+      WHERE h.name = ${name} AND v.version IN ${storage.sql([from, to])}`;
+    const before = rows.find((r) => r.version === from);
+    const after = rows.find((r) => r.version === to);
+    if (!before || !after) {
+      throw new HubNotFoundError(`${name} has no version ${!before ? from : to} on the hub`);
+    }
+    await this.scanned(storage, [after]);
+    const text = async (file: HubFile | undefined) => {
+      if (!file || file.size > LARGE_FILE_BYTES) return null;
+      const bytes = await this.skills.blob(file.sha256);
+      if (bytes.subarray(0, 8192).includes(0)) return null;
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        return null;
+      }
+    };
+    const old = new Map(before.files.map((f) => [f.path, f]));
+    const now = new Map(after.files.map((f) => [f.path, f]));
+    const files: HubDiffFile[] = [];
+    for (const path of [...new Set([...old.keys(), ...now.keys()])].sort()) {
+      const a = old.get(path);
+      const b = now.get(path);
+      if (a && b && a.sha256 === b.sha256) continue;
+      const [beforeText, afterText] = await Promise.all([text(a), text(b)]);
+      files.push({
+        path,
+        change: !a ? "added" : !b ? "removed" : "changed",
+        before: beforeText,
+        after: afterText,
+        binary: (!!a && beforeText === null) || (!!b && afterText === null),
+      });
+    }
+    return { name, from, to, files, flags: after.flags ?? [] };
+  }
+
+  /** Marks a version verified, or takes that back (hub admins). */
+  async verify(userId: string | null, name: string, version: number, verified: boolean) {
+    const { storage } = await this.open(userId, "viewer");
+    if (!(await this.isAdmin(storage, userId!))) {
+      throw new SkillForbiddenError("Only hub admins can verify skills");
+    }
+    return storage.sql.begin(async (tx) => {
+      const updated = await tx`
+        UPDATE hub_skill_versions v
+        SET verified_at = ${verified ? tx`now()` : null}, verified_by = ${verified ? userId! : null}
+        FROM hub_skills h
+        WHERE v.hub_skill_id = h.id AND h.name = ${name} AND v.version = ${version}`;
+      if (!updated.count) throw new HubNotFoundError(`${name} has no version ${version} on the hub`);
+      await storage.access.audit(tx, { userId: userId!, actor: "user" }, verified ? "skill.verify" : "skill.unverify", {
+        name,
+        version,
+      });
+      return { name, version, verified };
+    });
+  }
+
+  /**
+   * Yanks a version (its publisher or a hub admin): it can no longer be
+   * installed, and workspaces that have it see a warning. `yanked` false
+   * restores it.
+   */
+  async yank(userId: string | null, name: string, version: number, yanked: boolean, reason?: string | null) {
+    const { storage } = await this.open(userId, "viewer");
+    const why = (reason ?? "").trim();
+    if (why.length > 500) throw new HubError("Keep the reason under 500 characters");
+    const [hub] = await storage.sql<{ owner_id: string }[]>`SELECT owner_id FROM hub_skills WHERE name = ${name}`;
+    if (!hub) throw new HubNotFoundError(`No skill named ${name} on the hub`);
+    if (hub.owner_id !== userId && !(await this.isAdmin(storage, userId!))) {
+      throw new SkillForbiddenError("Only its publisher or a hub admin can yank a version");
+    }
+    return storage.sql.begin(async (tx) => {
+      const updated = await tx`
+        UPDATE hub_skill_versions v
+        SET yanked_at = ${yanked ? tx`now()` : null}, yanked_by = ${yanked ? userId! : null},
+            yank_reason = ${yanked && why ? why : null}
+        FROM hub_skills h
+        WHERE v.hub_skill_id = h.id AND h.name = ${name} AND v.version = ${version}`;
+      if (!updated.count) throw new HubNotFoundError(`${name} has no version ${version} on the hub`);
+      await storage.access.audit(tx, { userId: userId!, actor: "user" }, yanked ? "skill.yank" : "skill.unyank", {
+        name,
+        version,
+        ...(yanked && why ? { reason: why } : {}),
+      });
+      return { name, version, yanked };
+    });
+  }
+
+  /** Reports a hub skill to its publisher and the hub admins; reporting again replaces your open report. */
+  async report(userId: string | null, name: string, reason: unknown, version?: number) {
+    const { storage } = await this.open(userId, "viewer");
+    const why = typeof reason === "string" ? reason.trim() : "";
+    if (!why) throw new HubError("Say what's wrong with it");
+    if (why.length > 2000) throw new HubError("Keep the report under 2000 characters");
+    const [hub] = await storage.sql<{ id: string }[]>`SELECT id FROM hub_skills WHERE name = ${name}`;
+    if (!hub) throw new HubNotFoundError(`No skill named ${name} on the hub`);
+    return storage.sql.begin(async (tx) => {
+      const [row] = await tx<{ id: string }[]>`
+        INSERT INTO hub_skill_reports (hub_skill_id, version, reporter_id, reason)
+        VALUES (${hub.id}, ${version ?? null}, ${userId!}, ${why})
+        ON CONFLICT (hub_skill_id, reporter_id) WHERE dismissed_at IS NULL
+        DO UPDATE SET reason = EXCLUDED.reason, version = EXCLUDED.version, created_at = now()
+        RETURNING id`;
+      await storage.access.audit(tx, { userId: userId!, actor: "user" }, "skill.report", { name, version: version ?? null });
+      return { id: row.id };
+    });
+  }
+
+  /** Closes a report (hub admins). */
+  async dismissReport(userId: string | null, name: string, id: string) {
+    const { storage } = await this.open(userId, "viewer");
+    if (!(await this.isAdmin(storage, userId!))) {
+      throw new SkillForbiddenError("Only hub admins can dismiss reports");
+    }
+    if (!UUID.test(id)) throw new HubNotFoundError("No such report");
+    return storage.sql.begin(async (tx) => {
+      const updated = await tx`
+        UPDATE hub_skill_reports r SET dismissed_at = now(), dismissed_by = ${userId!}
+        FROM hub_skills h
+        WHERE r.hub_skill_id = h.id AND h.name = ${name} AND r.id = ${id} AND r.dismissed_at IS NULL`;
+      if (!updated.count) throw new HubNotFoundError("No such open report");
+      await storage.access.audit(tx, { userId: userId!, actor: "user" }, "skill.report.dismiss", { name, id });
+      return { id, dismissed: true };
+    });
   }
 
   /**
@@ -201,24 +450,33 @@ export class SkillHub {
       if (latest?.fingerprint === fingerprint) return { name, version: latest.version, unchanged: true };
       const version = (latest?.version ?? 0) + 1;
       await tx`
-        INSERT INTO hub_skill_versions (hub_skill_id, version, manifest, files, fingerprint, published_by)
+        INSERT INTO hub_skill_versions (hub_skill_id, version, manifest, files, fingerprint, published_by, flags)
         VALUES (${hub.id}, ${version}, ${tx.json(manifestOf(skill) as never)}, ${tx.json(files as never)},
-                ${fingerprint}, ${userId!})`;
+                ${fingerprint}, ${userId!}, ${tx.json(scanSkill(skill.files) as never)})`;
       await tx`UPDATE hub_skills SET updated_at = now() WHERE id = ${hub.id}`;
       await storage.access.audit(tx, principal, "skill.publish", { name, version });
       return { name, version, unchanged: false };
     });
   }
 
-  /** Installs (or moves the workspace's install to) a version, the latest by default. */
+  /** Installs (or moves the workspace's install to) a version, by default the newest that isn't yanked. */
   async install(userId: string | null, name: string, version?: number): Promise<{ name: string; version: number }> {
     const { storage } = await this.open(userId, "editor", "Installing skills needs editor access to the workspace");
-    const [row] = await storage.sql<{ hub_skill_id: string; version_id: string; version: number }[]>`
-      SELECT h.id AS hub_skill_id, v.id AS version_id, v.version
+    const [row] = await storage.sql<
+      { hub_skill_id: string; version_id: string; version: number; yanked: boolean; yank_reason: string | null; current: string | null }[]
+    >`
+      SELECT h.id AS hub_skill_id, v.id AS version_id, v.version, v.yanked_at IS NOT NULL AS yanked, v.yank_reason,
+             i.version_id AS current
       FROM hub_skills h JOIN hub_skill_versions v ON v.hub_skill_id = h.id
+      LEFT JOIN skill_installs i ON i.hub_skill_id = h.id AND i.workspace_id = ${storage.workspaceId}
       WHERE h.name = ${name} ${version === undefined ? storage.sql`` : storage.sql`AND v.version = ${version}`}
-      ORDER BY v.version DESC LIMIT 1`;
+      ORDER BY (v.yanked_at IS NULL) DESC, v.version DESC LIMIT 1`;
     if (!row) throw new HubNotFoundError(version === undefined ? `No skill named ${name} on the hub` : `${name} has no version ${version}`);
+    if (row.yanked && row.current !== row.version_id) {
+      throw new HubError(
+        `${name} v${row.version} was yanked${row.yank_reason ? ` (${row.yank_reason})` : ""}, so it can't be installed`,
+      );
+    }
     // A workspace skill of that name would hide the install (forking is what replaces one with the other).
     if ((await this.skills.find(userId, name))?.source === "workspace") {
       throw new HubConflictError(`The workspace already has a skill named ${name}; rename or remove it to install this one`);
@@ -257,7 +515,7 @@ export class SkillHub {
       JOIN hub_skill_versions v ON v.hub_skill_id = h.id
       LEFT JOIN skill_installs i ON i.hub_skill_id = h.id AND i.workspace_id = ${storage.workspaceId}
       WHERE h.name = ${name}
-      ORDER BY (v.id = i.version_id) DESC NULLS LAST, v.version DESC
+      ORDER BY (v.id = i.version_id) DESC NULLS LAST, (v.yanked_at IS NULL) DESC, v.version DESC
       LIMIT 1`;
     if (!row) throw new HubNotFoundError(`No skill named ${name} on the hub`);
     const files = await Promise.all(
@@ -334,16 +592,47 @@ export class SkillHub {
     return { storage, role };
   }
 
-  /** Hub skills with their latest version and this workspace's install; append the WHERE. */
+  /** Hub admins: HUB_ADMINS (emails or login subjects), and the local user when there is no login. */
+  private async isAdmin(storage: Storage, userId: string): Promise<boolean> {
+    const [user] = await storage.sql<{ subject: string; email: string | null }[]>`
+      SELECT subject, email FROM users WHERE id = ${userId}`;
+    if (!user) return false;
+    return (
+      user.subject === "local" ||
+      this.admins.has(user.subject.toLowerCase()) ||
+      (!!user.email && this.admins.has(user.email.toLowerCase()))
+    );
+  }
+
+  /** Scans versions published before scanning existed (flags NULL), and keeps the result. */
+  private async scanned(storage: Storage, rows: ScannedRow[]) {
+    for (const row of rows) {
+      if (row.flags) continue;
+      const files = await Promise.all(
+        row.files.map(async (f) => ({ path: f.path, bytes: await this.skills.blob(f.sha256) })),
+      );
+      row.flags = scanSkill(files);
+      await storage.sql`
+        UPDATE hub_skill_versions SET flags = ${storage.sql.json(row.flags as never)} WHERE id = ${row.version_id}`;
+    }
+  }
+
+  /**
+   * Hub skills with their newest version that isn't yanked (else the newest),
+   * this workspace's install and the open reports; append the WHERE.
+   */
   private listings(storage: Storage) {
     return (strings: TemplateStringsArray, ...values: unknown[]) =>
       storage.sql<ListingRow[]>`
-        SELECT h.id, h.name, h.owner_id, h.updated_at, v.version AS latest, v.manifest,
-               coalesce(u.name, u.email) AS publisher, iv.version AS installed
+        SELECT h.id, h.name, h.owner_id, h.updated_at, v.id AS version_id, v.version AS latest, v.manifest,
+               v.files, v.flags, v.verified_at IS NOT NULL AS verified, v.yanked_at IS NOT NULL AS yanked,
+               coalesce(u.name, u.email) AS publisher, iv.version AS installed,
+               (SELECT count(*)::int FROM hub_skill_reports r
+                WHERE r.hub_skill_id = h.id AND r.dismissed_at IS NULL) AS reports
         FROM hub_skills h
         JOIN LATERAL (
-          SELECT version, manifest FROM hub_skill_versions
-          WHERE hub_skill_id = h.id ORDER BY version DESC LIMIT 1
+          SELECT id, version, manifest, files, flags, verified_at, yanked_at FROM hub_skill_versions
+          WHERE hub_skill_id = h.id ORDER BY (yanked_at IS NULL) DESC, version DESC LIMIT 1
         ) v ON true
         LEFT JOIN users u ON u.id = h.owner_id
         LEFT JOIN skill_installs i ON i.hub_skill_id = h.id AND i.workspace_id = ${storage.workspaceId}
@@ -351,15 +640,20 @@ export class SkillHub {
         ${storage.sql(strings, ...(values as never[]))}`;
   }
 
-  private listing(row: ListingRow, userId: string): HubListing {
+  private listing(row: ListingRow, userId: string, admin: boolean): HubListing {
+    const mine = row.owner_id === userId;
     return {
       ...row.manifest,
       name: row.name,
       publisher: row.publisher,
-      mine: row.owner_id === userId,
+      mine,
       latest: row.latest,
+      verified: row.verified,
+      yanked: row.yanked,
+      flags: row.flags?.length ?? 0,
       updatedAt: row.updated_at.toISOString(),
       installed: row.installed,
+      reports: admin || mine ? row.reports : null,
     };
   }
 }

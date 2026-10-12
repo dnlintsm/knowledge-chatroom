@@ -198,7 +198,8 @@ function ReviewButton({
   );
 }
 
-function Diff({ before, after }: { before: string; after: string }) {
+/** A file's line diff; also shows hub skill updates (skill-hub.tsx). */
+export function Diff({ before, after }: { before: string; after: string }) {
   const rows = diffRows(before, after);
   const added = rows.filter((r) => r.type === "added").length;
   const removed = rows.filter((r) => r.type === "removed").length;

@@ -51,7 +51,9 @@ workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
 skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory.
-Skills are instructions; embedded shell commands are not executed. See
+Skills are instructions; embedded shell commands are not executed. `HUB_ADMINS`
+(emails or login subjects, comma-separated) names who may verify hub skills and
+dismiss reports; without login the built-in user is an admin. See
 [Architecture](architecture.md#skills) for the behavior and limits.
 
 ## Optional login
