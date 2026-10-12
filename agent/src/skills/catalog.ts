@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Skills Claude can use (issue #7): SKILL.md folders in the Claude Code /
- * Agent Skills layout, from two sources for now: built-in ones shipped with
- * the agent (agent/skills/) and the workspace's own skills/<name>/ files.
+ * Agent Skills layout, from three sources: built-in ones shipped with the
+ * agent (agent/skills/), skills installed from the hub (hub.ts), and the
+ * workspace's own skills/<name>/ files.
  * Each has a mode the user picks (settings.ts):
  *
  *   auto    Claude may use it on its own, and /name runs it
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 export type SkillMode = "auto" | "manual" | "off";
 export const SKILL_MODES: readonly SkillMode[] = ["auto", "manual", "off"];
-export type SkillSource = "builtin" | "workspace";
+export type SkillSource = "builtin" | "workspace" | "hub";
 
 export interface SkillFile {
   /** Path inside the skill's folder, e.g. "SKILL.md" or "reference/style.md". */
@@ -38,6 +39,8 @@ export interface Skill {
   /** It ships scripts or asks for a shell, which skills here can't run (yet). */
   needsExecution: boolean;
   files: SkillFile[];
+  /** For a hub skill: the installed version and the newest one published. */
+  hub?: { version: number; latest: number };
 }
 
 /** Where a mode was chosen: for everyone, for one user, or for one of their chats. */
@@ -48,7 +51,7 @@ export interface ModeLayers {
 }
 
 /** What the API and the UI see: a skill without its files, plus its modes. */
-export interface SkillInfo extends Omit<Skill, "files"> {
+export interface SkillInfo extends Omit<Skill, "files" | "hub"> {
   /** The mode that applies (the chat's, else the user's, else the workspace's, else the default). */
   mode: SkillMode;
   defaultMode: SkillMode;
@@ -58,13 +61,14 @@ export interface SkillInfo extends Omit<Skill, "files"> {
   userMode: SkillMode | null;
   /** This chat's choice (only when asked for a chat); null = the user's. */
   chatMode: SkillMode | null;
+  hub: { version: number; latest: number } | null;
 }
 
 export const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Caps what a run copies to disk; bigger files and skills are left out. */
 export const MAX_SKILL_FILE_BYTES = 1024 * 1024;
-const MAX_SKILL_BYTES = 5 * 1024 * 1024;
+export const MAX_SKILL_BYTES = 5 * 1024 * 1024;
 
 /** Reads the simple `key: value` front matter of a SKILL.md. */
 export function parseFrontMatter(text: string): Record<string, string> {
@@ -181,16 +185,20 @@ function loadBuiltins(dir: string): Skill[] {
     .filter((s): s is Skill => s !== null);
 }
 
-/** All skills by name; a workspace skill replaces a built-in one of the same name. */
-export function mergeSkills(builtin: Skill[], workspace: Skill[]): Skill[] {
+/** All skills by name; a later list's skill replaces an earlier one's of the same name. */
+export function mergeSkills(...lists: Skill[][]): Skill[] {
   const byName = new Map<string, Skill>();
-  for (const skill of [...builtin, ...workspace]) byName.set(skill.name, skill);
+  for (const skill of lists.flat()) byName.set(skill.name, skill);
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** A skill's mode before the user changes it: auto, unless it can't be. */
+/**
+ * A skill's mode before anyone changes it: auto, unless it can't be. Hub
+ * skills start manual, so someone else's instructions reach Claude only when
+ * a user runs them, until someone makes them auto.
+ */
 export function defaultMode(skill: Skill): SkillMode {
-  return skill.modelInvocable ? "auto" : "manual";
+  return skill.modelInvocable && skill.source !== "hub" ? "auto" : "manual";
 }
 
 /**
@@ -224,5 +232,6 @@ export function describe(skill: Skill, layers: ModeLayers = {}): SkillInfo {
     workspaceMode: layers.workspace ?? null,
     userMode: layers.user ?? null,
     chatMode: layers.chat ?? null,
+    hub: skill.hub ?? null,
   };
 }

@@ -8,7 +8,7 @@
  * search under `/search`, proposed versions under `/proposals` and groups
  * and grants under `/access` (see
  * src/storage/http.ts). `/skills` lists the user's skills and their modes
- * (src/skills/http.ts), with or without storage.
+ * (src/skills/http.ts), with or without storage; `/hub` is the skill hub.
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -25,6 +25,7 @@ import { currentStorage, startStorage, storageState, type Storage } from "./stor
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
 import { IDENTITY_HEADER, identify, verifyIdentity } from "./storage/identity";
+import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { materialize, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
@@ -41,7 +42,8 @@ const handleStorage = createStorageHandler(
   storageState,
 );
 const skills = new SkillService(currentStorage);
-const handleSkills = createSkillsHandler(skills, currentStorage, storageState);
+const hub = new SkillHub(currentStorage, skills);
+const handleSkills = createSkillsHandler(skills, hub, currentStorage, storageState);
 
 /** The run's skills: built-in ones, plus the workspace's when storage is up, in this chat's modes. */
 async function prepareSkills(
@@ -70,7 +72,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === "/skills" || pathname.startsWith("/skills/")) {
+  if (/^\/(skills|hub)(\/|$)/.test(pathname)) {
     await handleSkills(req, res, url);
     return;
   }

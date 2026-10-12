@@ -14,13 +14,15 @@ import {
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { HubBrowser, SkillActions, SkillsToolbar, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 
 /**
  * Skill management in the workspace (issue #7):
- * - the Skills panel lists every skill Claude can have (built-in + the
- *   workspace's skills/<name>/SKILL.md) and sets each to Auto, Manual or Off
- *   for you; editors of the workspace also set the default for everyone;
+ * - the Skills panel lists every skill Claude can have (built-in, installed
+ *   from the hub, and the workspace's skills/<name>/SKILL.md) and sets each
+ *   to Auto, Manual or Off for you; editors of the workspace also set the
+ *   default for everyone; the hub and .zip import/export are in skill-hub.tsx;
  * - typing "/" in the chat opens a menu of the skills you can run by name;
  * - under the chat input, a status bar says which skills are on and which
  *   ones the current turn used (the agent sends a "skill_used" event for
@@ -35,7 +37,7 @@ export interface SkillInfo {
   name: string;
   description: string;
   argumentHint: string | null;
-  source: "builtin" | "workspace";
+  source: "builtin" | "workspace" | "hub";
   /** Its SKILL.md in the workspace; null for built-in skills. */
   path: string | null;
   /** The mode that applies here (in the current chat). */
@@ -47,6 +49,8 @@ export interface SkillInfo {
   userMode: SkillMode | null;
   /** This chat's choice; null = yours. */
   chatMode: SkillMode | null;
+  /** For a skill installed from the hub: its pinned version and the newest one. */
+  hub: { version: number; latest: number } | null;
   modelInvocable: boolean;
   userInvocable: boolean;
   needsExecution: boolean;
@@ -79,8 +83,14 @@ export function resolveMode(skill: SkillInfo, levels: ModeScope[] = ["chat", "us
 interface Skills {
   skills: SkillInfo[];
   status: "loading" | "ready" | "unavailable";
-  /** You may set the defaults for everyone (editor or owner of the workspace). */
+  /** You may set the defaults for everyone and add skills (editor or owner of the workspace). */
   canSetDefaults: boolean;
+  /** You may publish the workspace's skills to the hub (owner). */
+  canPublish: boolean;
+  /** There is a skill hub (the workspace is stored on the server). */
+  hub: boolean;
+  /** Loads the skills again, e.g. after installing one. */
+  reload: () => Promise<void>;
   /** Sets a skill's mode at one level; null clears it there. */
   setMode: (name: string, mode: SkillMode | null, scope?: ModeScope) => Promise<void>;
   /** The current (or last) turn of the chat. */
@@ -100,6 +110,8 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [status, setStatus] = useState<Skills["status"]>("loading");
   const [canSetDefaults, setCanSetDefaults] = useState(false);
+  const [canPublish, setCanPublish] = useState(false);
+  const [hub, setHub] = useState(false);
   const threadId = useCopilotChatConfiguration()?.threadId;
 
   // Workspace skills are the root's skills/ files: reload when those change.
@@ -116,9 +128,16 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
       const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
       const res = await fetch(`/api/skills${query}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      const list = (await res.json()) as { skills: SkillInfo[]; canSetDefaults?: boolean };
+      const list = (await res.json()) as {
+        skills: SkillInfo[];
+        canSetDefaults?: boolean;
+        canPublish?: boolean;
+        hub?: boolean;
+      };
       setSkills(list.skills);
       setCanSetDefaults(Boolean(list.canSetDefaults));
+      setCanPublish(Boolean(list.canPublish));
+      setHub(Boolean(list.hub));
       setStatus("ready");
     } catch {
       setStatus("unavailable");
@@ -176,8 +195,8 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   }, [agent]);
 
   const value = useMemo(
-    () => ({ skills, status, canSetDefaults, setMode, turn }),
-    [skills, status, canSetDefaults, setMode, turn],
+    () => ({ skills, status, canSetDefaults, canPublish, hub, reload: load, setMode, turn }),
+    [skills, status, canSetDefaults, canPublish, hub, load, setMode, turn],
   );
   return <SkillsContext.Provider value={value}>{children}</SkillsContext.Provider>;
 }
@@ -234,14 +253,40 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
   const { skills, status, canSetDefaults, setMode } = useSkills();
   const ws = useWorkspace();
   const atRoot = ws.node === null && !ws.experiment;
+  const [browsing, setBrowsing] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   if (status === "loading") {
     return <p className="px-3 py-2 text-[var(--muted-foreground)]">Loading skills…</p>;
   }
   if (status === "unavailable") return <>{fallback}</>;
 
+  const noticeLine = notice && (
+    <p
+      role="status"
+      data-testid="skill-notice"
+      className={cn(
+        "mx-3 mb-2 rounded px-2 py-1.5 text-xs",
+        notice.kind === "error" ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300" : "bg-[var(--secondary)]",
+      )}
+    >
+      {notice.text}
+    </p>
+  );
+
+  if (browsing) {
+    return (
+      <div data-testid="skills-panel" className="flex flex-col">
+        {noticeLine}
+        <HubBrowser onClose={() => setBrowsing(false)} notify={setNotice} />
+      </div>
+    );
+  }
+
   return (
     <div data-testid="skills-panel" className="flex flex-col">
+      <SkillsToolbar onBrowse={() => { setNotice(null); setBrowsing(true); }} notify={setNotice} />
+      {noticeLine}
       <p className="px-3 pb-2 text-xs text-[var(--muted-foreground)]">
         Auto: Claude uses it when it fits. Manual: only when you type /name in the chat. Your choice
         applies to all your chats; the bar under the chat sets one chat's own.
@@ -282,7 +327,7 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
                 <span className="min-w-0 truncate font-medium">{skill.name}</span>
               )}
               <span className="shrink-0 rounded bg-[var(--secondary)] px-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
-                {skill.source === "builtin" ? "Built-in" : "Workspace"}
+                {skill.source === "builtin" ? "Built-in" : skill.hub ? `Hub v${skill.hub.version}` : "Workspace"}
               </span>
               {skill.needsExecution && (
                 <span
@@ -355,6 +400,7 @@ export function SkillsPanel({ fallback }: { fallback: ReactNode }) {
                 />
               </label>
             )}
+            <SkillActions skill={skill} notify={setNotice} />
           </div>
         );
       })}

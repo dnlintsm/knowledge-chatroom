@@ -266,3 +266,65 @@ test("proposed changes", async ({ page, request }) => {
   await expect(page.getByTestId("file-preview")).toContainText("RF power: 350 W");
   await expect(tree.getByRole("treeitem", { name: /purge\.md/ })).toHaveCount(0);
 });
+
+test("skill hub", async ({ page, request }) => {
+  const NAME = "standup-notes";
+  const md = { "Content-Type": "text/markdown" };
+  const skillMd = (step: string) =>
+    `---\nname: ${NAME}\ndescription: Turn the team's notes into a standup update\n---\n\n# Standup notes\n\n${step}`;
+  const clear = async () => {
+    await request.delete(`/api/hub/${NAME}/install`);
+    await request.delete(`/api/files/skills/${NAME}/SKILL.md`);
+  };
+  // Puts a version on the hub, as an owner does from their workspace.
+  const publish = async (step: string) => {
+    await request.put(`/api/files/skills/${NAME}/SKILL.md`, { data: skillMd(step), headers: md });
+    expect((await request.post("/api/hub", { data: { skill: NAME } })).ok()).toBe(true);
+    await request.delete(`/api/files/skills/${NAME}/SKILL.md`);
+  };
+  await clear();
+  await publish("List yesterday, today and blockers.");
+
+  await page.goto("/");
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  const panel = page.getByTestId("skills-panel");
+
+  // Browse the hub and install a skill: it starts as Manual (/name only).
+  await panel.getByTestId("hub-browse").click();
+  const card = panel.getByTestId("hub-skill").filter({ hasText: NAME });
+  await expect(card).toContainText("Turn the team's notes");
+  await shot(page, "22-skill-hub");
+  await card.getByRole("button", { name: NAME }).click();
+  await expect(panel.getByTestId("hub-skill-md")).toContainText("List yesterday, today and blockers.");
+  await panel.getByRole("button", { name: "Back to your skills" }).click();
+  await card.getByTestId("hub-install").click();
+  await expect(panel.getByTestId("skill-notice")).toContainText(`Installed ${NAME} v`);
+  await panel.getByRole("button", { name: "Back to your skills" }).click();
+  const row = panel.locator(`[data-skill="${NAME}"]`);
+  await expect(row).toContainText(/Hub v\d+/);
+  await expect(row.getByRole("radio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
+
+  // A newer version shows as an update; installs stay pinned until then.
+  await publish("List yesterday, today and blockers. Flag anything waiting on review.");
+  await page.reload();
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  await expect(row.getByTestId("skill-update")).toBeVisible();
+  await shot(page, "23-skill-update");
+  await row.getByTestId("skill-update").click();
+  await expect(row.getByTestId("skill-update")).toHaveCount(0);
+
+  // Fork it into the workspace to change it there.
+  await row.getByTestId("skill-fork").click();
+  await expect(panel.getByTestId("skill-notice")).toContainText(`Forked ${NAME} into skills/${NAME}/`);
+  await expect(row).toContainText("Workspace");
+  await expect(row.getByTestId("skill-publish")).toBeVisible();
+
+  // Export and import again: the existing folder is replaced after asking.
+  const zip = await (await request.get(`/api/skills/${NAME}/export`)).body();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await panel.getByTestId("skill-import-file").setInputFiles({ name: `${NAME}.zip`, mimeType: "application/zip", buffer: zip });
+  await expect(panel.getByTestId("skill-notice")).toContainText(`Imported ${NAME}`);
+
+  await clear();
+});

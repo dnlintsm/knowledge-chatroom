@@ -77,6 +77,9 @@ test("modes: a skill Claude may not invoke is never auto; one without /name is n
   assert.equal(effectiveMode(manualOnly, undefined), "manual");
   assert.equal(effectiveMode(manualOnly, "auto"), "manual");
   assert.equal(effectiveMode({ ...base, userInvocable: false }, "manual"), "off");
+  // Hub skills start manual: someone else's instructions run only when asked for.
+  assert.equal(effectiveMode({ ...base, source: "hub" }, undefined), "manual");
+  assert.equal(effectiveMode({ ...base, source: "hub" }, "auto"), "auto");
 });
 
 test("the built-in skills load", () => {

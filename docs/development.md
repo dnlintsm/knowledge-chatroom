@@ -47,7 +47,7 @@ Changing the model re-embeds the corpus. See `.env.example` for the default mode
 ## Skills
 
 Built-in skills live in `agent/skills/`; with server storage, the agent also loads
-workspace skills from `skills/<name>/SKILL.md`. Users choose Auto, Manual, or Off, for
+workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
 skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory.

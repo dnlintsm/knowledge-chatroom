@@ -1,5 +1,5 @@
 import type { Storage } from "../storage";
-import { atLeast } from "../storage/access";
+import { atLeast, type Role } from "../storage/access";
 import {
   builtinSkills,
   chosenMode,
@@ -8,6 +8,7 @@ import {
   mergeSkills,
   SKILL_MODES,
   workspaceSkills,
+  skillFromFiles,
   type Skill,
   type ModeLayers,
   type SkillInfo,
@@ -19,6 +20,13 @@ import {
 export interface UserSkill {
   skill: Skill;
   mode: SkillMode;
+}
+
+/** A file of a published hub version: its bytes are the blob with that hash. */
+export interface HubFile {
+  path: string;
+  sha256: string;
+  size: number;
 }
 
 export class UnknownSkillError extends Error {}
@@ -34,13 +42,21 @@ export const MODE_SCOPES: readonly ModeScope[] = ["workspace", "user", "chat"];
 
 export interface SkillList {
   skills: SkillInfo[];
-  /** Whether this user may set the workspace's defaults (editor or owner at the root). */
+  /**
+   * Whether this user may set the workspace's defaults, and add skills to it
+   * (install from the hub, fork, import): editor or owner at the root.
+   */
   canSetDefaults: boolean;
+  /** Whether this user may publish the workspace's skills to the hub: owner at the root. */
+  canPublish: boolean;
+  /** Whether there is a hub (it needs server storage). */
+  hub: boolean;
 }
 
 /**
- * Skills per user: which exist for them (built-in + the workspace's skills
- * they can read) and the mode each is in, chosen at up to three levels: for
+ * Skills per user: which exist for them (built-in, installed from the hub,
+ * and the workspace's own; the latter two if they can read the workspace
+ * root) and the mode each is in, chosen at up to three levels: for
  * everyone (by an editor of the workspace root), by the user, and by the user
  * for one chat; the most specific applies. With storage these live in
  * Postgres (009_skills.sql, 010_skill_scopes.sql); without it there is only
@@ -63,12 +79,17 @@ export class SkillService {
 
   /** Every skill the user can see, with its modes (with `threadId`, that chat's too). */
   async list(userId: string | null, threadId?: string): Promise<SkillList> {
-    const [skills, layers, canSetDefaults] = await Promise.all([
+    const [skills, layers, role] = await Promise.all([
       this.skills(userId),
       this.layers(userId, threadId),
-      this.canSetDefaults(userId),
+      this.rootRole(userId),
     ]);
-    return { skills: skills.map((skill) => describe(skill, layers.get(skill.name))), canSetDefaults };
+    return {
+      skills: skills.map((skill) => describe(skill, layers.get(skill.name))),
+      canSetDefaults: atLeast(role, "editor"),
+      canPublish: atLeast(role, "owner"),
+      hub: this.storage() !== null,
+    };
   }
 
   /** The skills a run for this user (in this chat) gets: everything not off, with its mode. */
@@ -184,15 +205,61 @@ export class SkillService {
     return layers;
   }
 
+  /** The skill named so, with its files, as this user sees it; null if there is none. */
+  async find(userId: string | null, name: string): Promise<Skill | null> {
+    return (await this.skills(userId)).find((s) => s.name === name) ?? null;
+  }
+
+  /** The user's role at the workspace root; without storage the local user owns everything. */
+  async rootRole(userId: string | null): Promise<Role | null> {
+    const storage = this.storage();
+    if (!storage || !userId) return "owner";
+    return storage.access.role(userId, null);
+  }
+
   /** Editors and owners of the workspace root set its defaults; the local user always may. */
   private async canSetDefaults(userId: string | null): Promise<boolean> {
-    const storage = this.storage();
-    if (!storage || !userId) return true;
-    return atLeast(await storage.access.role(userId, null), "editor");
+    return atLeast(await this.rootRole(userId), "editor");
+  }
+
+  /** A blob's bytes, from the cache when this server has read it before. */
+  async blob(sha256: string): Promise<Uint8Array> {
+    let bytes = this.blobCache.get(sha256);
+    if (!bytes) {
+      bytes = await this.storage()!.blobs.get(sha256);
+      this.remember(sha256, bytes);
+    }
+    return bytes;
   }
 
   private async skills(userId: string | null): Promise<Skill[]> {
-    return mergeSkills(this.builtins(), await this.workspace(userId));
+    // A workspace skill hides an installed hub skill of the same name (e.g. its fork).
+    const [hub, workspace] = await Promise.all([this.installed(userId), this.workspace(userId)]);
+    return mergeSkills(this.builtins(), hub, workspace);
+  }
+
+  /** The hub skills installed in the workspace, at their pinned versions. */
+  private async installed(userId: string | null): Promise<Skill[]> {
+    const storage = this.storage();
+    if (!storage || !userId || !(await storage.access.role(userId, null))) return [];
+    const rows = await storage.sql<{ name: string; version: number; latest: number; files: HubFile[] }[]>`
+      SELECT h.name, v.version, v.files,
+             (SELECT max(version) FROM hub_skill_versions WHERE hub_skill_id = h.id) AS latest
+      FROM skill_installs i
+      JOIN hub_skills h ON h.id = i.hub_skill_id
+      JOIN hub_skill_versions v ON v.id = i.version_id
+      WHERE i.workspace_id = ${storage.workspaceId}
+      ORDER BY h.name`;
+    const skills = await Promise.all(
+      rows.map(async (row) => {
+        const files = await Promise.all(
+          row.files.map(async (f) => ({ path: f.path, bytes: await this.blob(f.sha256) })),
+        );
+        const skill = skillFromFiles(row.name, files, "hub", null);
+        return skill ? ({ ...skill, name: row.name, hub: { version: row.version, latest: row.latest } } as Skill) : null;
+      }),
+    );
+    return skills.filter((s): s is Skill => s !== null);
   }
 
   /** skills/<name>/... at the workspace root, as far as the user may read it. */
