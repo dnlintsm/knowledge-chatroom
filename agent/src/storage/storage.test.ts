@@ -27,7 +27,7 @@ import { ProposalError } from "./proposals";
 import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
-import { createFileTools, formatTree, numberLines } from "./tools";
+import { createFileTools, numberLines } from "./tools";
 import { createSkillsHandler } from "../skills/http";
 import { SkillService } from "../skills/service";
 

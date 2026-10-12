@@ -12,6 +12,8 @@ import {
 } from "react";
 import type { LineRange } from "./file-refs";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
+import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
+import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace } from "./local-persistence";
 import {
   createServerExperiment,
   createServerNode,
@@ -85,30 +87,12 @@ import {
  * this user, the workspace goes there and opens the Review tab.
  */
 
-const STORAGE_KEY = "knowledge-chatroom.workspace.v1";
-/** Tabs at the workspace root, from before the knowledge tree. */
-const SERVER_UI_KEY = "knowledge-chatroom.workspace.server-ui.v1";
-/** Tabs per place: {"": root, "<node id>": that node, "x:<id>": that experiment}. */
-const PLACE_UI_KEY = "knowledge-chatroom.workspace.place-ui.v1";
-/** The place the user was last in, so a reload returns there. */
-const NODE_KEY = "knowledge-chatroom.workspace.node.v1";
-/**
- * "1" once this browser has filled an empty server workspace, or a JSON list of
- * paths whose upload failed and is retried on the next load.
- */
-const SERVER_SEEDED_KEY = "knowledge-chatroom.workspace.server-seeded.v1";
 const SAVE_DELAY_MS = 600;
 /** How long to wait for storage that is still starting before using the browser. */
 const STARTUP_RETRY_MS = 2_000;
 const STARTUP_RETRIES = 30;
 
 export type StorageMode = "loading" | "server" | "local";
-
-interface Persisted {
-  files: WorkspaceFile[];
-  tabs: TabId[];
-  active: TabId | null;
-}
 
 /** Lines the middle pane scrolls to and highlights, from open(path, lines). */
 export interface Reveal {
@@ -195,19 +179,6 @@ interface WorkspaceValue {
   deleteNode: (id: string) => Promise<void>;
 }
 
-type PlaceUi = Record<string, Pick<Persisted, "tabs" | "active">>;
-
-function readPlaceUi(): PlaceUi {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(PLACE_UI_KEY) ?? "null") as PlaceUi | null;
-    if (all) return all;
-    const root = JSON.parse(window.localStorage.getItem(SERVER_UI_KEY) ?? "null");
-    return root ? { "": root } : {};
-  } catch {
-    return {};
-  }
-}
-
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 
 export function normalizePath(path: string) {
@@ -250,6 +221,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const knownSha = useRef(new Map<string, string>());
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inflight = useRef(new Map<string, number>());
+  // Each place/path has an ordered write chain. Capture the file before a
+  // navigation changes files.current, then send after its previous write.
+  const saveChains = useRef(new Map<string, Promise<void>>());
   /** Files whose last save failed, until one succeeds. */
   const failed = useRef(new Set<string>());
   const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
@@ -261,8 +235,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // seed is never written over saved work, even when Strict Mode replays effects.
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setState(JSON.parse(raw) as Persisted);
+      const restored = restoreWorkspace(window.localStorage);
+      if (restored) setState(restored);
     } catch {
       // Private mode or corrupt data: keep the seed.
     }
@@ -271,38 +245,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated || storageMode === "loading") return;
     try {
-      if (storageMode === "local") {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } else {
-        const ui = readPlaceUi();
-        ui[place ?? ""] = { tabs: state.tabs, active: state.active };
-        window.localStorage.setItem(PLACE_UI_KEY, JSON.stringify(ui));
-        if (place) window.localStorage.setItem(NODE_KEY, place);
-        else window.localStorage.removeItem(NODE_KEY);
-      }
+      persistWorkspace(window.localStorage, state, storageMode, place);
     } catch {
       // Quota exceeded (large uploads): the session still works in memory.
     }
   }, [state, hydrated, storageMode, place]);
 
   const upsert = useCallback((file: WorkspaceFile) => {
-    setState((s) => ({
-      ...s,
-      files: s.files.some((f) => f.path === file.path)
-        ? s.files.map((f) => (f.path === file.path ? file : f))
-        : [...s.files, file],
-    }));
+    setState((s) => reduceWorkspace(s, { type: "upsert", file }));
   }, []);
 
   const removeLocal = useCallback((path: string) => {
-    setState((s) => {
-      const tabs = s.tabs.filter((t) => t !== path);
-      return {
-        files: s.files.filter((f) => f.path !== path),
-        tabs,
-        active: s.active === path ? (tabs[tabs.length - 1] ?? null) : s.active,
-      };
-    });
+    setState((s) => reduceWorkspace(s, { type: "remove", path }));
   }, []);
 
   const save = useCallback(async (path: string, at: PlaceId): Promise<void> => {
@@ -319,8 +273,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const file = files.current.find((f) => f.path === path);
     if (!file) return;
     inflight.current.set(k, (inflight.current.get(k) ?? 0) + 1);
+    const previous = saveChains.current.get(k) ?? Promise.resolve();
+    const sent = previous.then(() => putServerFile(file, at));
+    // A failed request must not prevent the next edit from being saved.
+    const tail = sent.then(() => {}, () => {});
+    saveChains.current.set(k, tail);
     try {
-      const info = await putServerFile(file, at);
+      const info = await sent;
       knownSha.current.set(k, info.sha256);
       failed.current.delete(k);
       setSyncError(null);
@@ -330,8 +289,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSyncError(`Couldn't save ${path}`);
     } finally {
       inflight.current.set(k, (inflight.current.get(k) ?? 1) - 1);
+      if (saveChains.current.get(k) === tail) saveChains.current.delete(k);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scheduleSave = useCallback(
@@ -340,7 +299,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(pending.current.get(key(path, at)));
       pending.current.set(key(path, at), setTimeout(() => void save(path, at), SAVE_DELAY_MS));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [save],
   );
 
@@ -441,7 +399,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       flushSaves();
       placeRef.current = id;
       setPlace(id);
-      const ui = readPlaceUi()[id ?? ""] ?? {
+      const ui = readPlaceUi(window.localStorage)[id ?? ""] ?? {
         // An experiment opens on its details the first time.
         tabs: experimentOf(id) ? [EXPERIMENT_TAB] : [],
         active: experimentOf(id) ? EXPERIMENT_TAB : null,
@@ -528,7 +486,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (info.author === "agent") open(path);
     };
 
-    const useLocal = () => {
+    const activateLocalStorage = () => {
       mode.current = "local";
       setStorageMode("local");
     };
@@ -545,7 +503,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         list = await listServerFiles();
       }
       if (cancelled) return;
-      if (!Array.isArray(list)) return useLocal();
+      if (!Array.isArray(list)) return activateLocalStorage();
 
       // First visit to an empty server: bring over this browser's files (or
       // the samples), so nothing made before storage existed is lost. Uploads
@@ -580,7 +538,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setPlace(lastNode);
         list = there;
       }
-      const ui = readPlaceUi()[placeRef.current ?? ""];
+      const ui = readPlaceUi(window.localStorage)[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
       await resync(list, placeRef.current === null ? new Set(failed) : new Set());
@@ -608,7 +566,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
     })().catch((err) => {
       console.error("[workspace] server storage failed to load:", err);
-      useLocal();
+      activateLocalStorage();
     });
 
     return () => {
@@ -640,21 +598,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setOpenCount((n) => n + 1);
     // A new object every time, so citing the same lines again scrolls back to them.
     setReveal(lines ? { path: tab, lines } : null);
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.includes(tab) ? s.tabs : [...s.tabs, tab],
-      active: tab,
-    }));
+    setState((s) => reduceWorkspace(s, { type: "open", tab }));
   }, []);
 
   const close = useCallback((tab: TabId) => {
-    setState((s) => {
-      const index = s.tabs.indexOf(tab);
-      const tabs = s.tabs.filter((t) => t !== tab);
-      const active =
-        s.active === tab ? (tabs[Math.min(index, tabs.length - 1)] ?? null) : s.active;
-      return { ...s, tabs, active };
-    });
+    setState((s) => reduceWorkspace(s, { type: "close", tab }));
   }, []);
 
   const write = useCallback<WorkspaceValue["write"]>(
@@ -744,7 +692,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setSyncError(`Couldn't delete ${path}`);
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [removeLocal],
   );
 
