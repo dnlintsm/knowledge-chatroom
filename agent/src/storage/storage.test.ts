@@ -28,7 +28,10 @@ import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
+import { strToU8, unzipSync, zipSync } from "fflate";
+
 import { createSkillsHandler } from "../skills/http";
+import { HubConflictError, HubError, SkillHub } from "../skills/hub";
 import { InvalidModeError, SkillForbiddenError, SkillService } from "../skills/service";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -1702,7 +1705,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
 
     test("HTTP: list and set modes for the signed-in user", async () => {
       const skills = new SkillService(() => storage);
-      const handle = createSkillsHandler(skills, () => storage, () => "ready");
+      const handle = createSkillsHandler(skills, new SkillHub(() => storage, skills), () => storage, () => "ready");
       const server = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
       await new Promise<void>((resolve) => server.listen(0, resolve));
       const base = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -1724,6 +1727,127 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
           skills: { name: string; mode: string }[];
         };
         assert.equal(inThread.skills.find((s) => s.name === "write-skill")?.mode, "manual");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    test("hub: publish, install pinned, update, fork, and .zip in and out", async () => {
+      const owner = await storage.access.localUserId();
+      const other = await storage.access.userForSubject("test|hub-owner", { name: "Other Owner" });
+      const editor = await storage.access.userForSubject("test|hub-editor");
+      const viewer = await storage.access.userForSubject("test|hub-viewer");
+      const admin = storage.session({ userId: owner, actor: "user" });
+      await admin.setGrant(null, "user", other, "owner");
+      await admin.setGrant(null, "user", editor, "editor");
+      await admin.setGrant(null, "user", viewer, "viewer");
+      const skills = new SkillService(() => storage);
+      const hub = new SkillHub(() => storage, skills);
+      const find = async (user: string, name: string) => (await skills.list(user)).skills.find((s) => s.name === name);
+
+      await storage.files.write("skills/digest/SKILL.md", text("---\nname: digest\ndescription: Weekly digest\n---\nv1"));
+      await storage.files.write("skills/digest/ref/style.md", text("Short."));
+
+      // Only owners publish; built-in skills can't be.
+      await assert.rejects(hub.publish(editor, "digest"), SkillForbiddenError);
+      await assert.rejects(hub.publish(owner, "tldr"), HubError);
+      const v1 = await hub.publish(owner, "digest");
+      assert.deepEqual(v1, { name: "digest", version: 1, unchanged: false });
+      assert.deepEqual(await hub.publish(owner, "digest"), { name: "digest", version: 1, unchanged: true });
+      await storage.files.write("skills/digest/SKILL.md", text("---\nname: digest\ndescription: Weekly digest\n---\nv2"));
+      assert.equal((await hub.publish(owner, "digest")).version, 2);
+      // The name belongs to whoever published it first.
+      await assert.rejects(hub.publish(other, "digest"), SkillForbiddenError);
+
+      const listed = await hub.list(viewer, "weekly");
+      assert.deepEqual(
+        listed.skills.map((s) => [s.name, s.latest, s.installed, s.mine]),
+        [["digest", 2, null, false]],
+      );
+      assert.deepEqual([listed.canInstall, listed.canPublish], [false, false]);
+      assert.equal((await hub.list(viewer, "nothing-like-this")).skills.length, 0);
+      const detail = await hub.detail(viewer, "digest", 1);
+      assert.deepEqual(detail.versions.map((v) => [v.version, v.files]), [[2, 2], [1, 2]]);
+      assert.match(detail.skillMd, /v1$/);
+
+      // Installs are pinned and start Manual; the workspace's own skill of the
+      // same name wins, so move that out of the way first.
+      await storage.files.remove("skills/digest/SKILL.md");
+      await storage.files.remove("skills/digest/ref/style.md");
+      await assert.rejects(hub.install(viewer, "digest", 1), SkillForbiddenError);
+      assert.deepEqual(await hub.install(editor, "digest", 1), { name: "digest", version: 1 });
+      const installed = await find(viewer, "digest");
+      assert.deepEqual(
+        [installed?.source, installed?.hub, installed?.mode, installed?.defaultMode],
+        ["hub", { version: 1, latest: 2 }, "manual", "manual"],
+      );
+      const run = (await skills.forRun(viewer)).find((s) => s.skill.name === "digest");
+      assert.match(new TextDecoder().decode(run!.skill.files.find((f) => f.path === "SKILL.md")!.bytes), /v1$/);
+      await hub.install(editor, "digest");
+      assert.deepEqual((await find(viewer, "digest"))?.hub, { version: 2, latest: 2 });
+
+      // Fork: the pinned version becomes the workspace's skill, the install goes.
+      const forked = await hub.fork(editor, "digest");
+      assert.equal(forked.path, "skills/digest/SKILL.md");
+      assert.equal((await find(viewer, "digest"))?.source, "workspace");
+      assert.equal((await hub.list(viewer)).skills.find((s) => s.name === "digest")?.installed, null);
+      await assert.rejects(hub.fork(editor, "digest"), HubConflictError);
+
+      // Export, then import under another name and replace it.
+      const zip = await hub.exportZip(viewer, "digest");
+      assert.deepEqual(Object.keys(unzipSync(zip)).sort(), ["digest/SKILL.md", "digest/ref/style.md"]);
+      const recap = zipSync({
+        "recap/SKILL.md": strToU8("---\nname: recap\ndescription: Recap\n---\nOne"),
+        "recap/notes.md": strToU8("n"),
+        "__MACOSX/recap/._SKILL.md": strToU8("x"),
+      });
+      await assert.rejects(hub.importZip(viewer, recap), SkillForbiddenError);
+      assert.deepEqual(await hub.importZip(editor, recap), { name: "recap", path: "skills/recap/SKILL.md", files: 2 });
+      await assert.rejects(hub.importZip(editor, recap), HubConflictError);
+      const flat = zipSync({ "SKILL.md": strToU8("---\nname: recap\ndescription: Recap 2\n---\nTwo") });
+      await hub.importZip(editor, flat, { replace: true, filename: "whatever.zip" });
+      assert.equal((await find(viewer, "recap"))?.description, "Recap 2");
+      assert.equal(await storage.files.stat("skills/recap/notes.md"), null);
+      await assert.rejects(hub.importZip(editor, zipSync({ "a/b.md": strToU8("x") })), HubError);
+      await assert.rejects(hub.importZip(editor, strToU8("not a zip")), HubError);
+
+      // Uses of hub skills are recorded like any other.
+      await skills.record(viewer, { threadId: "t-hub", runId: "r", skill: "digest", source: "hub", trigger: "slash" });
+    });
+
+    test("HTTP: the hub, import and export", async () => {
+      const skills = new SkillService(() => storage);
+      const handle = createSkillsHandler(skills, new SkillHub(() => storage, skills), () => storage, () => "ready");
+      const server = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      const base = `http://localhost:${(server.address() as AddressInfo).port}`;
+      const call = (path: string, init?: RequestInit) => fetch(`${base}${path}`, init);
+      try {
+        await storage.files.write("skills/memo/SKILL.md", text("---\nname: memo\ndescription: Memo\n---\nWrite."));
+        const list = (await (await call("/skills")).json()) as { canPublish: boolean; hub: boolean };
+        assert.deepEqual([list.canPublish, list.hub], [true, true]);
+        const published = await call("/hub", { method: "POST", body: JSON.stringify({ skill: "memo" }) });
+        assert.equal(published.status, 201);
+        assert.equal(((await (await call("/hub?q=memo")).json()) as { skills: unknown[] }).skills.length, 1);
+        assert.equal((await call("/hub/memo?version=7")).status, 404);
+        assert.equal((await call("/hub/memo?version=x")).status, 400);
+        await storage.files.remove("skills/memo/SKILL.md");
+        const install = await call("/hub/memo/install", { method: "PUT", body: "{}" });
+        assert.equal(((await install.json()) as { version: number }).version, 1);
+        assert.equal((await call("/hub/memo/install", { method: "DELETE" })).status, 200);
+        assert.equal((await call("/hub/memo/install", { method: "DELETE" })).status, 404);
+        assert.equal((await call("/hub/memo/fork", { method: "POST" })).status, 201);
+        assert.equal((await call("/hub/memo/fork", { method: "POST" })).status, 409);
+
+        const exported = await call("/skills/memo/export");
+        assert.equal(exported.headers.get("content-type"), "application/zip");
+        assert.match(exported.headers.get("content-disposition") ?? "", /memo\.zip/);
+        const zip = new Uint8Array(await exported.arrayBuffer());
+        assert.equal((await call("/skills/import", { method: "POST", body: zip })).status, 409);
+        const replaced = await call("/skills/import?replace=1", { method: "POST", body: zip });
+        assert.equal(replaced.status, 201);
+        assert.equal((await call("/skills/import", { method: "POST", body: "nope" })).status, 400);
+        assert.equal((await call("/skills/nope/export")).status, 404);
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

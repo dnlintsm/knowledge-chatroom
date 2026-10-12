@@ -26,9 +26,10 @@ the knowledge workspace's persistence responsibilities.
 ### Skills
 
 Skills are `SKILL.md` folders in the [Claude Code / Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
-layout. Claude gets the built-in ones (`agent/skills/`) plus the workspace's own
-`skills/<name>/` at the root (with [file storage](#file-storage)). In the **Skills** view each
-one is set to:
+layout. Claude gets the built-in ones (`agent/skills/`), skills installed from the
+[skill hub](#skill-hub), and the workspace's own `skills/<name>/` at the root (with
+[file storage](#file-storage)); a workspace skill hides a hub or built-in one of the same name.
+In the **Skills** view each one is set to:
 
 - **Auto:** Claude uses it when it fits, and `/name` runs it.
 - **Manual:** only when you type `/name` in the chat.
@@ -46,6 +47,29 @@ input says which skills are on and which ones the current turn used. Skills are 
 only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies each
 user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp folder),
 and only `/name` for one of those skills reaches the SDK as a command.
+
+### Skill hub
+
+With file storage, a deployment has one skill hub (`011_skill_hub.sql`), opened with
+**Browse hub** in the Skills view:
+
+- **Publish** (owners of the workspace root) snapshots a workspace skill as the next numbered
+  version. A version never changes: its files are stored as blobs by content hash, and
+  publishing unchanged files adds no version. Whoever publishes a name first owns it on the hub.
+- **Install** (editors) pins a version for the whole workspace. Hub skills start as **Manual**,
+  so someone else's instructions reach Claude only when a user runs `/name`, until someone
+  makes them Auto. A newer version shows as **Update to vN** on the skill's row.
+- **Fork** (editors) copies the installed version into `skills/<name>/` to change it there,
+  and removes the install it replaces.
+- **Export** downloads any skill as a `.zip` in the Agent Skills layout (`<name>/SKILL.md`, ...),
+  which Claude Code reads too; **Import .zip** (editors) adds one as `skills/<name>/`, asking
+  before it replaces a folder that exists. A skill may have up to 200 files and 5 MB.
+
+Claude has no tools for the hub: installing, publishing and forking are the user's own
+actions. `GET /api/hub?q=` lists and searches, `GET /api/hub/<name>?version=` shows a version's
+SKILL.md, `POST /api/hub {skill}` publishes, `PUT|DELETE /api/hub/<name>/install` installs
+(`{version?}`) or removes, `POST /api/hub/<name>/fork` forks, and `GET /api/skills/<name>/export`
+and `POST /api/skills/import?replace=1` move `.zip` files.
 
 ### Runs: Focus and Traverse modes
 

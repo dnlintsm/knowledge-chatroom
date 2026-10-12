@@ -23,6 +23,8 @@ const FORWARDED_RESPONSE_HEADERS = [
   "x-file-author",
   "x-file-read-only",
   "cache-control",
+  // Skill .zip exports download under the skill's name.
+  "content-disposition",
   // Binary downloads may redirect to a signed object-store link.
   "location",
 ];

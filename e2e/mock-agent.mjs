@@ -23,8 +23,8 @@
  * skills and keeps their modes in memory.
  *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
- * storage routes /files, /nodes, /access, /experiments, /search, /proposals and /skills are
- * forwarded there, so the preview can show server storage and the knowledge
+ * storage routes /files, /nodes, /access, /experiments, /search, /proposals,
+ * /skills and /hub are forwarded there, so the preview can show server storage and the knowledge
  * tree without an API key.
  */
 
@@ -139,7 +139,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals|skills)(\/|$)/.test(pathname)) {
+  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals|skills|hub)(\/|$)/.test(pathname)) {
     forward(req, res);
     return;
   }
