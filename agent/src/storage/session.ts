@@ -4,6 +4,7 @@ import type { WorkspaceEvent } from "./events";
 import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
+import type { SearchHit, SearchOptions, SearchService } from "./search";
 
 /**
  * Everything one principal (a user, or Claude acting for one) may do in the
@@ -33,6 +34,7 @@ interface Parts {
   nodes: NodeService;
   experiments: ExperimentService;
   access: AccessService;
+  search: SearchService;
   sql: Sql;
   /** Whether queries can run as the restricted role (db.ts prepareRowSecurity). */
   rowSecurity: boolean;
@@ -215,6 +217,11 @@ export class Session {
     );
   }
 
+  /** Files this principal may read that match, best first (see search.ts). */
+  search(opts: SearchOptions): Promise<SearchHit[]> {
+    return this.scoped((db) => on(this.parts.search, db).search(this.principal.userId, opts));
+  }
+
   /** Whether this principal may hear about a change. */
   async canSee(event: WorkspaceEvent): Promise<boolean> {
     const userId = this.principal.userId;
@@ -356,11 +363,17 @@ export class FilesSession {
     return this.run((s) => s.history(path));
   }
 
-  async write(path: string, bytes: Uint8Array, opts: { mime?: string } = {}) {
+  async write(
+    path: string,
+    bytes: Uint8Array,
+    opts: { mime?: string; createOnly?: boolean; readOnly?: boolean } = {},
+  ) {
     this.needEditor();
     return this.run((s) =>
       s.write(path, bytes, {
         mime: opts.mime,
+        createOnly: opts.createOnly,
+        readOnly: opts.readOnly,
         author: this.principal.actor,
         authorId: this.principal.userId,
         inTx: this.audit("file.write", { path, size: bytes.byteLength }),

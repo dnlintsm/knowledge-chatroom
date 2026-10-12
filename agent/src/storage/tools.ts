@@ -11,9 +11,11 @@ import { z } from "zod";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { ExperimentError } from "./experiments";
 import type { Storage } from "./index";
+import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile } from "./paths";
+import { SearchError } from "./search";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
 const MAX_READ_CHARS = 200_000;
@@ -94,6 +96,9 @@ export function createFileTools(
       const principal: Principal = { userId, actor: "agent" };
       return await fn(current.session(principal));
     } catch (err) {
+      if (err instanceof ReadOnlyFileError) {
+        return error(`${err.path} is read-only: it can't be changed or deleted.`);
+      }
       if (err instanceof NodeError && err.message === "Node not found") {
         return error("No such knowledge node (or the user can't see it). Call list_nodes.");
       }
@@ -102,7 +107,8 @@ export function createFileTools(
         err instanceof NodeError ||
         err instanceof ForbiddenError ||
         err instanceof AccessError ||
-        err instanceof ExperimentError
+        err instanceof ExperimentError ||
+        err instanceof SearchError
       ) {
         return error(err.message);
       }
@@ -169,6 +175,7 @@ export function createFileTools(
               size: f.size,
               lastWrittenBy: f.author,
               updatedAt: f.updatedAt,
+              ...(f.readOnly ? { readOnly: true } : {}),
             })),
           ),
         ),
@@ -205,17 +212,72 @@ export function createFileTools(
         }),
     ),
     tool(
+      "search_files",
+      "Search the text and paths of every workspace file the user can read: the root, all " +
+        "knowledge nodes and the experiments they can see. Matches whole words (and their " +
+        "forms: etch finds etching), exact text (part numbers) and, when available, passages " +
+        "close in meaning (match: \"meaning\"), so describe what you're after in plain words. " +
+        "\"Quotes\" or -word ask for exact words only. " +
+        "Each result has the place to pass to read_file (node or experiment) and the passage " +
+        "that matched. Use it to find what the workspace already knows before answering or " +
+        "writing.",
+      {
+        query: z
+          .string()
+          .describe('Words to find, e.g. etch rate drift; "quotes" for a phrase, -word to exclude.'),
+        scope: z
+          .string()
+          .optional()
+          .describe("Knowledge node id: search only it, the nodes below it and their experiments."),
+        node: z
+          .string()
+          .optional()
+          .describe("Where the user is (the context's currentNode), so nearby files rank first."),
+        experiment: experimentParam.describe(
+          "The context's currentExperiment, if any, so its node's neighborhood ranks first.",
+        ),
+        limit: z.number().int().min(1).max(50).optional().describe("Most results (default 20)."),
+      },
+      ({ query, scope, node, experiment, limit }) =>
+        run(async (session) => {
+          const hits = await session.search({
+            query,
+            scope: scope || null,
+            near: node || null,
+            nearExperiment: experiment || null,
+            limit,
+          });
+          if (!hits.length) return text(`No files match ${JSON.stringify(query)}.`);
+          return text(
+            hits.map((h) => ({
+              path: h.path,
+              node: h.node,
+              experiment: h.experiment,
+              where: [
+                ...(h.where.length ? h.where : ["(workspace root)"]),
+                ...(h.experimentTitle ? [`experiment: ${h.experimentTitle}`] : []),
+              ].join(" › "),
+              match: h.match,
+              snippet: h.snippet || "(matched by path)",
+              updatedAt: h.updatedAt,
+            })),
+          );
+        }),
+    ),
+    tool(
       "write_file",
       "Create or overwrite a workspace file with the COMPLETE new content (no line " +
         "numbers), at the workspace root, in a knowledge node or in an experiment. Write " +
         "where the user is working (the context's currentExperiment, else currentNode) " +
         "unless they say otherwise; inside an experiment, never write to its node. It opens " +
-        "for the user automatically. Put new generated documents under artifacts/ " +
-        "unless the user asks to change an existing file. Paths starting with notes/, " +
-        "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is " +
-        "listed. Every write is kept as a version.",
+        "for the user automatically. Put new generated documents in the focused run's " +
+        "artifacts/ folder (<run>/artifacts/, see `run` in context), or under artifacts/ " +
+        "when there is no run, unless the user asks to change an existing file. Paths " +
+        "starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where " +
+        "the file is listed. Every write is kept as a version. Read-only files (readOnly " +
+        "in list_files) can't be written.",
       {
-        path: z.string().describe("e.g. artifacts/summary.md"),
+        path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
         node: nodeParam,
         experiment: experimentParam,
