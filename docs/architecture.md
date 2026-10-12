@@ -389,3 +389,13 @@ caused by close/delete/resync. Opening even the same citation creates a fresh
 reveal signal; editing its file invalidates its line range. Navigation clears
 selection/reveal without resetting the open counter. The provider keeps the public
 `selection`, `setSelection`, `reveal` and `openCount` fields unchanged.
+
+`use-place-navigation.ts` owns location state, per-place tab restoration and the
+flush-before-switch sequence. Its pure `place-navigation.ts` coordinator rejects
+older list responses once a newer move is requested. `use-workspace-catalog.ts`
+owns tree/experiment/proposal/account metadata and catalog refreshes.
+`workspace-context.ts` derives the current experiment/node, lineage and UI role
+from that metadata, including read-only archived experiments. Account fetching
+remains in storage bootstrap so its existing cancellation and seeding policy stay
+together. SSE routing and feature commands still orchestrate these smaller units
+through the provider; `useWorkspace()`/`useWorkbench()` remain unchanged.

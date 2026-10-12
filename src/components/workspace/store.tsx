@@ -17,6 +17,10 @@ import type { LineRange } from "./file-refs";
 import type { Reveal } from "./file-focus";
 export type { Reveal } from "./file-focus";
 import { useFileFocus } from "./use-file-focus";
+import { usePlaceNavigation } from "./use-place-navigation";
+import { useWorkspaceCatalog } from "./use-workspace-catalog";
+import { lineageOf, resolvePlaceContext } from "./workspace-context";
+export { lineageOf } from "./workspace-context";
 import { SaveScheduler, type StorageMode } from "./save-scheduler";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
@@ -32,9 +36,6 @@ import {
   experimentOf,
   experimentPlace,
   getAccount,
-  listExperiments,
-  listNodes,
-  listProposals,
   listServerFiles,
   loadServerFile,
   promoteExperiment,
@@ -46,7 +47,6 @@ import {
   type Experiment,
   type ExperimentChange,
   type KnowledgeNode,
-  type KnowledgeTree,
   type NodeId,
   type NodeType,
   type PlaceId,
@@ -56,7 +56,6 @@ import {
   type ServerFile,
 } from "./server-files";
 import {
-  EXPERIMENT_TAB,
   FileExistsError,
   isBuiltInTab,
   kindForPath,
@@ -205,12 +204,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const mode = useRef<StorageMode>("loading");
   const files = useRef(state.files);
   files.current = state.files;
-  const [place, setPlace] = useState<PlaceId>(null);
   const placeRef = useRef<PlaceId>(null);
-  const [tree, setTree] = useState<KnowledgeTree>({ types: [], rootRole: null, nodes: [] });
-  const [experiments, setExperiments] = useState<Experiment[]>([]);
-  const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [account, setAccount] = useState<Account>({ login: false, user: null });
+  const {
+    tree, experiments, proposals, account, setExperiments, setProposals, setAccount,
+    refreshTree, refreshExperiments, refreshProposals,
+  } = useWorkspaceCatalog();
   const [sync] = useState(() => new SaveScheduler({
     getMode: () => mode.current,
     getPlace: () => placeRef.current,
@@ -231,15 +229,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // Private mode or corrupt data: keep the seed.
     }
   }, []);
-
-  useEffect(() => {
-    if (!hydrated || storageMode === "loading") return;
-    try {
-      persistWorkspace(window.localStorage, state, storageMode, place);
-    } catch {
-      // Quota exceeded (large uploads): the session still works in memory.
-    }
-  }, [state, hydrated, storageMode, place]);
 
   const upsert = useCallback((file: WorkspaceFile) => {
     setState((s) => reduceWorkspace(s, { type: "upsert", file }));
@@ -287,52 +276,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshExperiments = useCallback(async () => {
-    const next = await listExperiments();
-    if (next) setExperiments(next);
-    return next;
-  }, []);
+  const { place, setPlace, enterNode, enterExperiment } = usePlaceNavigation({
+    mode, placeRef, files, setState, flushSaves, resync, resetFocus,
+  });
 
-  const refreshProposals = useCallback(async () => {
-    const next = await listProposals();
-    if (next) setProposals(next);
-    return next;
-  }, []);
-
-  /** The tree and the experiments on it; null when the tree can't be read. */
-  const refreshTree = useCallback(async () => {
-    const [next, list] = await Promise.all([listNodes(), refreshExperiments()]);
-    if (next) setTree(next);
-    return next && list ? { nodes: next.nodes, experiments: list } : null;
-  }, [refreshExperiments]);
-
-  // Counts the latest move, so an older one that finishes late does nothing.
-  const moves = useRef(0);
-  const enterPlace = useCallback(
-    async (id: PlaceId): Promise<boolean> => {
-      if (mode.current !== "server") return false;
-      if (id === placeRef.current) return true;
-      const move = ++moves.current;
-      const list = await listServerFiles(id);
-      if (move !== moves.current || !Array.isArray(list)) return false;
-      flushSaves();
-      placeRef.current = id;
-      setPlace(id);
-      const ui = readPlaceUi(window.localStorage)[id ?? ""] ?? {
-        // An experiment opens on its details the first time.
-        tabs: experimentOf(id) ? [EXPERIMENT_TAB] : [],
-        active: experimentOf(id) ? EXPERIMENT_TAB : null,
-      };
-      files.current = [];
-      setState({ files: [], tabs: ui.tabs, active: ui.active });
-      resetFocus();
-      await resync(list);
-      return true;
-    },
-    [flushSaves, resync, resetFocus],
-  );
-  const enterNode = enterPlace;
-  const enterExperiment = useCallback((id: string) => enterPlace(experimentPlace(id)), [enterPlace]);
+  useEffect(() => {
+    if (!hydrated || storageMode === "loading") return;
+    try {
+      persistWorkspace(window.localStorage, state, storageMode, place);
+    } catch {
+      // Quota exceeded (large uploads): the session still works in memory.
+    }
+  }, [state, hydrated, storageMode, place]);
 
   // Pick server or local storage once, after the local restore above.
   useEffect(() => {
@@ -653,7 +608,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
       return updated;
     },
-    [settleSaves],
+    [settleSaves, setExperiments],
   );
   const deleteExperiment = useCallback(
     async (id: string) => {
@@ -672,7 +627,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       void refreshProposals();
       return decided;
     },
-    [refreshProposals],
+    [refreshProposals, setProposals],
   );
   const promote = useCallback(
     async (experimentId: string, paths?: string[], note?: string) => {
@@ -686,24 +641,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [settleSaves, refreshProposals],
   );
 
-  const experimentId = experimentOf(place);
-  const experiment = experimentId ? (experiments.find((e) => e.id === experimentId) ?? null) : null;
-  const node: NodeId = experimentId ? (experiment?.nodeId ?? null) : place;
-  const lineage = useMemo(() => (node ? lineageOf(tree.nodes, node) : []), [tree.nodes, node]);
-  // In an experiment, its author edits and everyone else who sees it reads.
-  const placeRole: Role | null =
-    storageMode !== "server"
-      ? "owner"
-      : experimentId
-        ? experiment
-          ? experiment.access === "writer"
-            ? "editor"
-            : "viewer"
-          : null
-        : node
-          ? (tree.nodes.find((n) => n.id === node)?.role ?? null)
-          : tree.rootRole;
-  const canEdit = placeRole === "editor" || placeRole === "owner";
+  const { experiment, node, lineage, placeRole, canEdit } = useMemo(
+    () => resolvePlaceContext(storageMode, place, tree, experiments),
+    [storageMode, place, tree, experiments],
+  );
 
   const value = useMemo<WorkspaceValue>(() => {
     const activeFile =
@@ -755,16 +696,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
-}
-
-/** `id` and its ancestors, top level first. */
-export function lineageOf(nodes: KnowledgeNode[], id: string): KnowledgeNode[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const chain: KnowledgeNode[] = [];
-  for (let n = byId.get(id); n; n = n.parentId ? byId.get(n.parentId) : undefined) {
-    chain.unshift(n);
-  }
-  return chain;
 }
 
 export function useWorkspace() {
