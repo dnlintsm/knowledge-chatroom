@@ -16,7 +16,7 @@ import type { Storage } from "./index";
 import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
-import { InvalidPathError, isTextFile, kindForPath } from "./paths";
+import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
 
@@ -299,7 +299,7 @@ export function createFileTools(
           // Claude may suggest skills but not add or change them itself: the
           // workspace's skills shape every later run (issue #7).
           const skillFile =
-            !place.experiment && !place.node && kindForPath(path.trim().replace(/^\/+/, "")) === "skill";
+            !place.experiment && !place.node && kindForPath(normalizePath(path)) === "skill";
           if (!place.experiment && (place.node || skillFile)) {
             const proposal = await session.propose(place.node || null, path, bytes, { note: summary });
             return text({

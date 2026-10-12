@@ -1269,6 +1269,15 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const [skillProposal] = await local.proposals({ node: null });
       assert.equal(skillProposal.path, "skills/recap/SKILL.md");
       await local.decide(skillProposal.id, "reject");
+      // However the path is spelled.
+      for (const spelled of ["skills\\recap\\SKILL.md", " //skills//recap/SKILL.md"]) {
+        const again = JSON.parse((await call("write_file", { path: spelled, content: "Recap." })).text) as {
+          proposed: boolean;
+        };
+        assert.equal(again.proposed, true, spelled);
+      }
+      assert.equal((await call("read_file", { path: "skills/recap/SKILL.md" })).isError, true);
+      for (const open of await local.proposals({ node: null })) await local.decide(open.id, "reject");
 
       const missing = await call("list_files", { node: "not-a-node" });
       assert.equal(missing.isError, true);
