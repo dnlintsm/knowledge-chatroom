@@ -95,6 +95,7 @@ jobs:
       - name: Make walkthrough GIF
         if: always()
         continue-on-error: true
+        timeout-minutes: 3
         run: |
           command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           scripts/preview-gif.sh preview/walkthrough.gif
