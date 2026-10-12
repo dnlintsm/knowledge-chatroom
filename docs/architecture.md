@@ -56,9 +56,12 @@ gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, 
 host must have; the run fails rather than run a command unsandboxed):
 
 - **No network**: commands can't reach the internet, other hosts or the agent's own ports.
-- **Files**: writes only in the user's run folder, and not to its skills. The agent's own folder
-  (code, `.env`), its home (including the SDK's chat history) and other users' run folders
-  can't be read.
+- **Files**: writes only in the user's run folder, and not to its skills or the files the SDK
+  reads as instructions there (`CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json`). The agent's own
+  folder (code, `.env`), its home (including the SDK's chat history), other users' run folders
+  and the usual secret mounts (`/run/secrets`, `/var/run/secrets`, `/etc/secrets`) can't be
+  read; `SKILL_SCRIPTS_DENY_READ` (comma-separated absolute paths) adds more. Other processes,
+  the agent's included, aren't visible.
 - **No secrets**: the run's environment keeps only basics such as `PATH`, `HOME`, the locale and
   the model, so no `DATABASE_URL`, `AUTH_SECRET`, S3 or proxy settings. The SDK itself needs an
   API key, and its commands would inherit it, so the run gets a stand-in key that only a proxy

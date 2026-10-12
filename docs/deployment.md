@@ -38,4 +38,6 @@ application behavior without promising provider availability.
 Skill scripts are off unless the agent has `SKILL_SCRIPTS=on`. Turning them on needs
 bubblewrap on the agent host (and, in a container, permission to create user
 namespaces) plus whatever interpreters the skills use; a run with scripts fails
-when the sandbox can't start. See [Skill scripts](architecture.md#skill-scripts).
+when the sandbox can't start. Scripts can read the rest of the host's filesystem,
+so list any credential files outside the usual secret mounts in
+`SKILL_SCRIPTS_DENY_READ`. See [Skill scripts](architecture.md#skill-scripts).

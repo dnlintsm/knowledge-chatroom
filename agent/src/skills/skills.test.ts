@@ -200,8 +200,22 @@ test("script options: only when turned on, for a run with scripts, sandboxed, no
     assert.equal(sandbox.failIfUnavailable, true);
     assert.equal(sandbox.allowUnsandboxedCommands, false);
     assert.deepEqual(sandbox.network?.allowedDomains, []);
-    assert.deepEqual(sandbox.filesystem?.denyWrite, ["/runs/abc/.claude"]);
-    assert.deepEqual(sandbox.filesystem?.denyRead, ["/app", "/runs", os.homedir()]);
+    assert.deepEqual(sandbox.filesystem?.denyWrite, [
+      "/runs/abc/.claude",
+      "/runs/abc/CLAUDE.md",
+      "/runs/abc/CLAUDE.local.md",
+      "/runs/abc/.mcp.json",
+    ]);
+    assert.deepEqual(sandbox.filesystem?.denyRead, [
+      "/app",
+      "/runs",
+      os.homedir(),
+      "/run/secrets",
+      "/var/run/secrets",
+      "/etc/secrets",
+    ]);
+    process.env.SKILL_SCRIPTS_DENY_READ = "/srv/keys, relative, /opt/creds";
+    assert.deepEqual(scriptOptions(run, "/app", "/runs")!.sandbox!.filesystem?.denyRead?.slice(-2), ["/srv/keys", "/opt/creds"]);
     assert.deepEqual(sandbox.filesystem?.allowRead, ["/runs/abc"]);
   } finally {
     for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
@@ -219,6 +233,8 @@ test("key proxy: passes requests on with the real key, only for its own stand-in
     seen.auth = req.headers.authorization;
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write("event: a\n\n");
+    // A stream that breaks after it started.
+    if (req.url === "/reset") return void setTimeout(() => res.destroy(), 20);
     res.end("event: b\n\n");
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -241,6 +257,12 @@ test("key proxy: passes requests on with the real key, only for its own stand-in
       assert.equal(denied.status, 401);
     }
     assert.equal(calls, 1);
+
+    // An upstream reset ends that response only; the proxy keeps serving.
+    const broken = await fetch(`${proxy.baseUrl}/reset`, { method: "POST", headers: { "x-api-key": proxy.apiKey }, body: "{}" });
+    await assert.rejects(broken.text());
+    const again = await fetch(`${proxy.baseUrl}/v1/messages`, { method: "POST", headers: { "x-api-key": proxy.apiKey }, body: "{}" });
+    assert.equal(await again.text(), "event: a\n\nevent: b\n\n");
   } finally {
     if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = saved;

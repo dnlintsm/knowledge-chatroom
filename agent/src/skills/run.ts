@@ -113,6 +113,11 @@ export const scriptsEnabled = () => process.env.SKILL_SCRIPTS === "on";
 const RUN_ENV =
   /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|LC_[A-Z]+|TZ|TERM|TMPDIR|ANTHROPIC_(MODEL|SMALL_FAST_MODEL|DEFAULT_[A-Z]+_MODEL))$/;
 
+/** Where containers usually mount credentials (Docker, Kubernetes, some hosts). */
+const SECRET_MOUNTS = ["/run/secrets", "/var/run/secrets", "/etc/secrets"];
+/** Files in the working folder that the SDK reads as project instructions or settings. */
+const PROJECT_FILES = ["CLAUDE.md", "CLAUDE.local.md", ".mcp.json"];
+
 /**
  * SDK options that let this run use Bash for its skills' scripts, in the
  * sandbox; null when scripts are off or none of its skills has any.
@@ -138,9 +143,19 @@ export function scriptOptions(run: RunSkills, appRoot: string, root = ROOT): Par
       allowUnsandboxedCommands: false,
       network: { allowedDomains: [] },
       filesystem: {
-        denyWrite: [path.join(run.cwd, ".claude")],
-        // Other users' run folders, the server's files and its home stay out of reach.
-        denyRead: [path.resolve(appRoot), path.resolve(root), os.homedir()],
+        // Its skills, and files the SDK reads as instructions in later chats.
+        denyWrite: [".claude", ...PROJECT_FILES].map((name) => path.join(run.cwd, name)),
+        // Other users' run folders, the server's files, its home and mounted secrets stay out of reach.
+        denyRead: [
+          path.resolve(appRoot),
+          path.resolve(root),
+          os.homedir(),
+          ...SECRET_MOUNTS,
+          ...(process.env.SKILL_SCRIPTS_DENY_READ ?? "")
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => path.isAbsolute(p)),
+        ],
         allowRead: [run.cwd],
       },
     },

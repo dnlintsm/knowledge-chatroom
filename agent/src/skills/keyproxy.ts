@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { Readable } from "node:stream";
+import { pipeline, Readable } from "node:stream";
 
 /**
  * Keeps the server's Anthropic credentials away from skill scripts (step 5).
@@ -80,8 +80,11 @@ export async function startKeyProxy(
         if (!DROP.has(key) && key !== "content-encoding") out[key] = value;
       });
       res.writeHead(answer.status, out);
-      if (answer.body) Readable.fromWeb(answer.body as never).pipe(res);
-      else res.end();
+      if (!answer.body) return void res.end();
+      // An upstream reset mid-stream ends this response; it must not crash the server.
+      pipeline(Readable.fromWeb(answer.body as never), res, (err) => {
+        if (err) res.destroy();
+      });
     } catch (err) {
       if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "upstream unreachable" } }));
