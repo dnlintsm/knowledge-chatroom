@@ -43,10 +43,35 @@ takes edit access to the workspace's `skills/` folder. When Claude writes a skil
 proposed change that someone with edit access accepts, and Claude never turns skills on or off.
 
 Typing `/` in the chat lists the skills you can run; the line under the
-input says which skills are on and which ones the current turn used. Skills are instructions
-only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies each
-user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp folder),
-and only `/name` for one of those skills reaches the SDK as a command.
+input says which skills are on and which ones the current turn used. By default skills are
+instructions only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies
+each user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp
+folder), and only `/name` for one of those skills reaches the SDK as a command.
+
+#### Skill scripts
+
+A deployment can let skills run the scripts they ship (`scripts/`, `*.py`, `*.sh`, ...) with
+`SKILL_SCRIPTS=on` (`agent/src/skills/run.ts`). A run whose skills include one with scripts then
+gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, which the agent
+host must have; the run fails rather than run a command unsandboxed):
+
+- **No network**: commands can't reach the internet, other hosts or the agent's own ports.
+- **Files**: writes only in the user's run folder, and not to its skills or the files the SDK
+  reads as instructions there (`CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json`). The agent's own
+  folder (code, `.env`), its home (including the SDK's chat history), other users' run folders
+  and the usual secret mounts (`/run/secrets`, `/var/run/secrets`, `/etc/secrets`) can't be
+  read; `SKILL_SCRIPTS_DENY_READ` (comma-separated absolute paths) adds more. Other processes,
+  the agent's included, aren't visible.
+- **No secrets**: the run's environment keeps only basics such as `PATH`, `HOME`, the locale and
+  the model, so no `DATABASE_URL`, `AUTH_SECRET`, S3 or proxy settings. The SDK itself needs an
+  API key, and its commands would inherit it, so the run gets a stand-in key that only a proxy
+  inside the agent accepts (`agent/src/skills/keyproxy.ts`, on 127.0.0.1); the proxy sends
+  requests on to Anthropic with the real key.
+
+Commands run without a permission prompt because they're sandboxed; `!` commands in a SKILL.md
+stay off. The Skills view marks a skill with scripts with a terminal icon when they run, and a
+warning when they don't. Python or other interpreters the scripts need must be installed on the
+agent host.
 
 ### Skill hub
 
