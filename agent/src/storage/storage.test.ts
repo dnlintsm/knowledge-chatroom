@@ -28,6 +28,8 @@ import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, formatTree, numberLines } from "./tools";
+import { createSkillsHandler } from "../skills/http";
+import { SkillService } from "../skills/service";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -1600,6 +1602,65 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
 
       const bad = await fetch(`${base}/files/notes/..%2F..%2Fsecret`, { method: "PUT", body: "x" });
       assert.equal(bad.status, 400);
+    });
+  });
+
+  describe("skills", () => {
+    test("workspace skills, per-user modes and usage history", async () => {
+      const local = await storage.access.localUserId();
+      const stranger = await storage.access.userForSubject("test|skills-stranger");
+      await storage.files.write("skills/standup/SKILL.md", text("---\nname: standup\ndescription: Daily standup\n---\nSteps."));
+      await storage.files.write("skills/standup/template.md", text("Yesterday / Today"));
+      const skills = new SkillService(() => storage);
+
+      const mine = await skills.list(local);
+      const standup = mine.find((s) => s.name === "standup");
+      assert.equal(standup?.source, "workspace");
+      assert.equal(standup?.path, "skills/standup/SKILL.md");
+      assert.equal(standup?.mode, "auto");
+      assert.ok(mine.some((s) => s.name === "tldr" && s.source === "builtin"));
+      const run = await skills.forRun(local);
+      assert.deepEqual(
+        run.find((s) => s.skill.name === "standup")?.skill.files.map((f) => f.path).sort(),
+        ["SKILL.md", "template.md"],
+      );
+
+      // Someone who can't read the workspace root gets the built-in skills only.
+      assert.ok(!(await skills.list(stranger)).some((s) => s.source === "workspace"));
+
+      // Modes are per user.
+      await skills.setMode(local, "standup", "manual");
+      await skills.setMode(local, "tldr", "off");
+      await skills.setMode(stranger, "tldr", "manual");
+      const after = await skills.list(local);
+      assert.equal(after.find((s) => s.name === "standup")?.mode, "manual");
+      assert.equal(after.find((s) => s.name === "tldr")?.mode, "off");
+      assert.equal((await skills.list(stranger)).find((s) => s.name === "tldr")?.mode, "manual");
+      assert.ok(!(await skills.forRun(local)).some((s) => s.skill.name === "tldr"));
+
+      await skills.record(local, { threadId: "t1", runId: "r1", skill: "standup", source: "workspace", trigger: "slash" });
+      const [use] = await storage.sql`SELECT skill, trigger FROM skill_invocations WHERE thread_id = 't1'`;
+      assert.deepEqual({ ...use }, { skill: "standup", trigger: "slash" });
+    });
+
+    test("HTTP: list and set modes for the signed-in user", async () => {
+      const skills = new SkillService(() => storage);
+      const handle = createSkillsHandler(skills, () => storage, () => "ready");
+      const server = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      const base = `http://localhost:${(server.address() as AddressInfo).port}`;
+      try {
+        const list = (await (await fetch(`${base}/skills/`)).json()) as { skills: { name: string }[] };
+        assert.ok(list.skills.some((s) => s.name === "write-skill"));
+        const put = await fetch(`${base}/skills/write-skill`, { method: "PUT", body: JSON.stringify({ mode: "off" }) });
+        assert.equal(((await put.json()) as { mode: string }).mode, "off");
+        const bad = await fetch(`${base}/skills/write-skill`, { method: "PUT", body: JSON.stringify({ mode: "always" }) });
+        assert.equal(bad.status, 400);
+        const missing = await fetch(`${base}/skills/nope`, { method: "PUT", body: JSON.stringify({ mode: "off" }) });
+        assert.equal(missing.status, 404);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });

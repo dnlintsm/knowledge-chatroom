@@ -2,11 +2,12 @@
 
 import type { ComponentProps, ReactNode } from "react";
 import { FileText, FlaskConical, MessageSquarePlus, TextSelect } from "lucide-react";
-import { CopilotChat } from "@copilotkit/react-core/v2";
+import { CopilotChat, type CopilotChatInput } from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
 import { parseFileRef, rootRelativeLinks, type FileRef } from "./file-refs";
+import { SkillChatInput } from "./skills";
 import { useWorkspace } from "./store";
 import { fileName } from "./types";
 import { useWorkbench } from "./workbench";
@@ -81,7 +82,8 @@ export function ChatPane() {
       <div className="min-h-0 flex-1">
         <CopilotChat
           attachments={{ enabled: true }}
-          input={{ disclaimer: () => null, className: "pb-4" }}
+          // A slot may be any component taking the input's props; the type asks for its statics too.
+          input={SkillChatInput as typeof CopilotChatInput}
           messageView={MESSAGE_VIEW}
           className="h-full"
         />

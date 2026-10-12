@@ -24,6 +24,7 @@ import { generateA2ui } from "./a2ui_dynamic_schema";
 import { currentStorage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
+import { guardSlashCommand, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
@@ -54,6 +55,8 @@ const SYSTEM_PROMPT = [
   "  listActions and runAction run the current run's Actions-block buttons (e.g.",
   "  generate-rules, which writes the run's read-only models/general_rules.md once and",
   "  opens it). Use them when the user asks for what they do, not on your own.",
+  "- Skills: when one of your skills fits the request, use it. When the user's",
+  "  message starts with /<skill>, that skill was loaded for this turn: follow it.",
   "- File references: when you mention a workspace file or lines in it, link them so",
   "  the user can click to open them beside the chat: [welcome.md](notes/welcome.md),",
   "  [welcome.md:12](notes/welcome.md#L12) or [welcome.md:12-18](notes/welcome.md#L12-L18).",
@@ -99,24 +102,73 @@ const toolServer = (tools: Tools) =>
 const fileTools = serverStorage ? createFileTools(currentStorage) : [];
 const backendTools: Tools = [...baseTools, ...fileTools];
 
-const runUser = new AsyncLocalStorage<string | null>();
+interface RunContext {
+  userId: string | null | undefined;
+  /** This run's skills (see ./skills/run.ts); null = none. */
+  skills: RunSkills | null;
+  onSkillUse: (use: SkillUse) => void;
+}
+
+const runContext = new AsyncLocalStorage<RunContext>();
 
 /**
  * Runs `fn` (which starts an adapter run) for a storage user: that run's file
  * tools can do what the user can, and nothing else. null = no access;
  * undefined = the shared tools, which act for the local user without login.
+ * `skills` are the skills prepared for the run, and `onSkillUse` hears each
+ * one it uses.
  */
-export const runAs = <T>(userId: string | null | undefined, fn: () => T): T =>
-  userId === undefined ? fn() : runUser.run(userId, fn);
+export const runAs = <T>(
+  userId: string | null | undefined,
+  fn: () => T,
+  skills: RunSkills | null = null,
+  onSkillUse: (use: SkillUse) => void = () => {},
+): T => runContext.run({ userId, skills, onSkillUse }, fn);
 
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
-  // Called synchronously when a run starts, so runAs()'s user is in scope.
+  // Slash commands only for the run's own skills (guardSlashCommand).
+  override run(input: RunAgentInput) {
+    const messages = input.messages ?? [];
+    const last = messages[messages.length - 1];
+    if (last?.role !== "user") return super.run(input);
+    const skills = runContext.getStore()?.skills ?? null;
+    const guard = (text: string) => guardSlashCommand(text, skills);
+    const content =
+      typeof last.content === "string"
+        ? guard(last.content)
+        : Array.isArray(last.content)
+          ? (() => {
+              // The adapter sends the first text part as the prompt.
+              const first = last.content.findIndex((part) => "text" in part);
+              return last.content.map((part, i) =>
+                i === first && "text" in part ? { ...part, text: guard(part.text) } : part,
+              );
+            })()
+          : last.content;
+    if (content === last.content) return super.run(input);
+    return super.run({
+      ...input,
+      messages: [...messages.slice(0, -1), { ...last, content } as typeof last],
+    });
+  }
+
+  // Called synchronously when a run starts, so runAs()'s context is in scope.
   override buildOptions(input: RunAgentInput) {
     const options = super.buildOptions(input);
-    const userId = runUser.getStore();
-    if (!serverStorage || userId === undefined) return options;
+    const ctx = runContext.getStore();
+    if (!ctx) return options;
+    const withSkills = ctx.skills
+      ? {
+          ...options,
+          ...skillOptions(ctx.skills, ctx.onSkillUse),
+          allowedTools: [...(options.allowedTools ?? []), "Skill"],
+          tools: ["Skill"],
+        }
+      : options;
+    const userId = ctx.userId;
+    if (!serverStorage || userId === undefined) return withSkills;
     const tools = [...baseTools, ...createFileTools(currentStorage, async () => userId)];
-    return { ...options, mcpServers: { ...options.mcpServers, [SERVER_NAME]: toolServer(tools) } };
+    return { ...withSkills, mcpServers: { ...withSkills.mcpServers, [SERVER_NAME]: toolServer(tools) } };
   }
 }
 

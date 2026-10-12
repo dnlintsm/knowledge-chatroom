@@ -27,6 +27,7 @@ import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
 import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
 import { SearchPanel } from "./search-panel";
+import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
 import { fileName, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
@@ -205,10 +206,14 @@ export function SidePanel({ view }: { view: SidebarView }) {
         {view === "search" && <SearchPanel />}
         {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
-          <FlatList
-            files={files.filter((f) => f.kind === "skill")}
-            label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
-            empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+          <SkillsPanel
+            fallback={
+              <FlatList
+                files={files.filter((f) => f.kind === "skill")}
+                label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
+                empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+              />
+            }
           />
         )}
         {view === "uploads" && (
