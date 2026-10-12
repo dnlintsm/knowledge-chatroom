@@ -36,6 +36,10 @@ export class SaveScheduler {
   }
 
   private key = (path: string, at: PlaceId) => `${at ?? ""}\n${path}`;
+  private reportFailures = () => {
+    const failed = this.failed.values().next().value;
+    this.options.onError(failed ? `Couldn't save ${failed.slice(failed.indexOf("\n") + 1)}` : null);
+  };
   busy = (path: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
     return this.pending.has(key) || (this.inflight.get(key) ?? 0) > 0 || this.failed.has(key);
@@ -83,8 +87,8 @@ export class SaveScheduler {
     try {
       const info = await sent;
       this.remember(path, info.sha256, at);
-      this.failed.delete(key);
-      if (!this.failed.size) this.options.onError(null);
+      const recovered = this.failed.delete(key);
+      if (recovered || !this.failed.size) this.reportFailures();
     } catch (error) {
       console.error("[workspace] save failed:", error);
       this.failed.add(key);
@@ -122,6 +126,7 @@ export class SaveScheduler {
     if (pending) this.clock.clearTimeout(pending.timer);
     this.pending.delete(key);
     this.hashes.delete(key);
+    if (this.failed.delete(key)) this.reportFailures();
   };
   forget = (path: string, at = this.options.getPlace()) => this.hashes.delete(this.key(path, at));
 }

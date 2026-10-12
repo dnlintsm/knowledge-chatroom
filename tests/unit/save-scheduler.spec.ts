@@ -124,3 +124,35 @@ test("create tracking is scoped and cancel removes the debounce/hash before dele
   expect(sync.hash("notes/a.md")).toBeUndefined();
   expect(sync.busy("notes/a.md")).toBe(false);
 });
+
+test("explicitly deleting a failed draft removes its protection and settle error", async () => {
+  const { sync, state, transport, errors } = fixture();
+  transport.fail = true;
+  sync.schedule("notes/a.md");
+  await expect(sync.settle(null)).rejects.toThrow("haven't saved yet");
+  sync.cancel("notes/a.md");
+  state.files = [];
+  expect(sync.busy("notes/a.md")).toBe(false);
+  await expect(sync.settle(null)).resolves.toBeUndefined();
+  expect(errors.at(-1)).toBeNull();
+});
+
+test("deleting one failed file reports the remaining failure without clearing it", async () => {
+  const { sync, state, transport, errors } = fixture();
+  transport.fail = true;
+  state.files.push(file("second", "notes/b.md"));
+  sync.schedule("notes/a.md");
+  await expect(sync.settle(null)).rejects.toThrow();
+  sync.cancel("notes/healthy.md");
+  expect(errors.at(-1)).toBe("Couldn't save notes/a.md");
+  sync.schedule("notes/b.md");
+  await expect(sync.settle(null)).rejects.toThrow();
+  expect(errors.at(-1)).toBe("Couldn't save notes/b.md");
+  sync.cancel("notes/b.md");
+  expect(errors.at(-1)).toBe("Couldn't save notes/a.md");
+  expect(sync.busy("notes/a.md")).toBe(true);
+  await expect(sync.settle(null)).rejects.toThrow();
+  sync.cancel("notes/a.md");
+  await expect(sync.settle(null)).resolves.toBeUndefined();
+  expect(errors.at(-1)).toBeNull();
+});
