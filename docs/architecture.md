@@ -23,6 +23,23 @@ root installs both. The starter's charts, meeting picker and A2UI examples remai
 under `src/app/declarative-generative-ui` and `src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
+### Skills
+
+Skills are `SKILL.md` folders in the [Claude Code / Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
+layout. Claude gets the built-in ones (`agent/skills/`) plus the workspace's own
+`skills/<name>/` at the root (with [file storage](#file-storage)). In the **Skills** view each
+one is set to:
+
+- **Auto:** Claude uses it when it fits, and `/name` runs it.
+- **Manual:** only when you type `/name` in the chat.
+- **Off:** not available.
+
+Modes are per user. Typing `/` in the chat lists the skills you can run; the line under the
+input says which skills are on and which ones the current turn used. Skills are instructions
+only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies each
+user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp folder),
+and only `/name` for one of those skills reaches the SDK as a command.
+
 ### Runs: Focus and Traverse modes
 
 A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. Any folder that
@@ -135,7 +152,7 @@ accepts `#L12-18` and `notes/welcome.md:12`.
 ## File storage
 
 Workspace files can live in Postgres + an S3-compatible object store instead of
-the browser (plan and next steps: issue #4). It is optional; without
+the browser (see issue #4). It is optional; without
 `DATABASE_URL` the app runs as before.
 
 For local setup, see [Development](development.md).
@@ -149,7 +166,9 @@ For local setup, see [Development](development.md).
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
   (request body = bytes) and deletes one, `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
-  LISTEN/NOTIFY, so it works across processes). Login is optional (see below); keep the agent port private in either mode.
+  LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
+  (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,
+  `PUT` and `DELETE` answer 403, for every role. Login is optional (see below); keep the agent port private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
   Postgres `ltree`, and the database checks that each node sits exactly one level below its
@@ -166,8 +185,18 @@ For local setup, see [Development](development.md).
   forks, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes one, and every
   `/api/files` route takes `?experiment=<id>`. In the Knowledge view, experiments sit under
   their node with their status, and the Experiment tab holds the details and a comparison
-  table. Moving an experiment's results into the node comes with proposed edits (step 7 of
-  issue #4).
+  table. Its author brings its results to the node by proposing them (below).
+- **Proposed changes**: a change to a node's file can wait for review instead of landing at
+  once (`008_proposals.sql`). Claude's edits in a node arrive this way, and so does an
+  experiment's work when its author proposes it from the Experiment tab (only files the
+  experiment changed, so a proposal never undoes someone else's later work on the node).
+  Anyone who can view a node may propose; editors there accept or reject in the Proposed
+  changes tab, which shows each one as a diff against the file as it is now, and accepting
+  writes it as the file's next version, credited to whoever proposed it. Proposing again
+  revises your open proposal. `GET /api/proposals` lists open ones (`?node=`,
+  `?experiment=`, `?status=`), `PUT /api/files/<path>?node=<id>&propose` proposes, `POST
+  /api/proposals {experimentId, paths?, note?}` promotes an experiment, and `POST
+  /api/proposals/<id>/accept|reject|withdraw` decides.
 - **Search**: every text file is indexed when it is written (`006_search.sql`): its text is
   split into passages and stored once per distinct content, so versions, experiment copies and
   duplicates share one entry. `GET /api/search?q=<text>` finds the files you can read whose
@@ -206,8 +235,8 @@ For local setup, see [Development](development.md).
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
-  (`agent/src/storage/migrations/004_row_security.sql`, and `005_experiments.sql` for
-  experiments) that apply the same grants. If a
+  (`agent/src/storage/migrations/004_row_security.sql`, `005_experiments.sql` for
+  experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
   otherwise the agent logs that row-level security is off, and an admin can enable it with
@@ -218,12 +247,13 @@ For local setup, see [Development](development.md).
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
-- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`, `write_file`,
-  `list_experiments`, `create_experiment` and `update_experiment` tools on the agent server
+- **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
+  `write_file`, `list_experiments`, `create_experiment`, `update_experiment` and
+  `propose_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. Its writes are versions authored by the
-  agent.
+  agent; in a knowledge node they are proposed changes until someone accepts them.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this
@@ -233,7 +263,7 @@ For local setup, see [Development](development.md).
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.
 - **Tests**: `npm run test:integration` requires `TEST_DATABASE_URL` and `S3_ENDPOINT`;
-  it resets a disposable database. See [Testing](testing.md).
+  it resets a disposable test database. See [Testing](testing.md).
 
 
 ## Boundaries when changing code

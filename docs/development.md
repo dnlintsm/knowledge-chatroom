@@ -44,6 +44,15 @@ and caches it under `EMBEDDING_CACHE_DIR` or `~/.cache/knowledge-chatroom/models
 `EMBEDDING_MODEL=off` disables embeddings while retaining keyword search.
 Changing the model re-embeds the corpus. See `.env.example` for the default model.
 
+## Skills
+
+Built-in skills live in `agent/skills/`; with server storage, the agent also loads
+workspace skills from `skills/<name>/SKILL.md`. Users choose Auto, Manual, or Off.
+Slash commands run only enabled skills; the status bar shows enabled and used
+skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory.
+Skills are instructions; embedded shell commands are not executed. See
+[Architecture](architecture.md#skills) for the behavior and limits.
+
 ## Optional login
 
 Set the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.
