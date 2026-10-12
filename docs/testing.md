@@ -88,3 +88,12 @@ Inspect the first failed assertion and retained trace, not just the screenshot.
 Check test counts and skips in the list/TAP output. A prerequisite failure must
 be fixed by providing disposable services, not by weakening an assertion. Tests
 should cover observable behavior and boundaries rather than mirror an implementation.
+
+## Workflow summaries
+
+Each workflow appends a test-case table to the GitHub Actions job summary, with
+passed, failed, skipped, cancelled, todo and flaky counts. Cases are counted once,
+not once per retry. A step that never executes is shown as Not run; a failed runner
+without a report is shown explicitly rather than as zero successful tests.
+`scripts/ci-tests.mjs` retains failed commands' exit codes and rejects empty or
+entirely skipped required suites. Local test commands keep their existing reporters.

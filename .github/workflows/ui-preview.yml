@@ -90,7 +90,7 @@ jobs:
 
       - name: Capture UI preview
         id: playwright
-        run: npm run test:e2e
+        run: node scripts/ci-tests.mjs run "Browser E2E" playwright -- npm run test:e2e -- --reporter=list,html,json
 
       - name: Make walkthrough GIF
         if: always()
@@ -102,14 +102,18 @@ jobs:
       - name: Test server storage and knowledge tree
         id: storage
         if: always()
-        run: npm run test:e2e:storage -- --output test-results-storage --reporter=list
+        run: node scripts/ci-tests.mjs run "Storage E2E" playwright -- npm run test:e2e:storage -- --output test-results-storage --reporter=list,json
 
       # Login and sharing need the app with login on, so they get their own run
       # (and their own output folder, so the walkthrough video above stays).
       - name: Capture login and sharing
         id: login
         if: always()
-        run: npm run test:e2e:login -- --output test-results-login --reporter=list
+        run: node scripts/ci-tests.mjs run "Login E2E" playwright -- npm run test:e2e:login -- --output test-results-login --reporter=list,json
+
+      - name: Summarize test suites
+        if: always()
+        run: node scripts/ci-tests.mjs summary "Browser E2E" "Storage E2E" "Login E2E"
 
       - name: Upload preview artifact
         id: artifact

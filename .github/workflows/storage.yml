@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "agent/**"
+      - "scripts/ci-*.mjs"
       - "docker-compose.yml"
       - "deploy/**"
       - ".github/workflows/storage.yml"
@@ -74,4 +75,7 @@ jobs:
 
       - name: Test
         working-directory: agent
-        run: npm run test:integration
+        run: node ../scripts/ci-tests.mjs run "Storage integration" tap -- npm run test:integration
+      - name: Summarize test suites
+        if: always()
+        run: node scripts/ci-tests.mjs summary "Storage integration"
