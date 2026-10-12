@@ -7,10 +7,13 @@ import {
   ChevronRight,
   Files,
   FilePlus,
+  FlaskConical,
   ListTodo,
+  Lock,
   MessagesSquare,
   Network,
   Package,
+  Route,
   Search,
   Sparkles,
   Trash2,
@@ -18,19 +21,22 @@ import {
 } from "lucide-react";
 import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
+import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
-import { fileName, isTextFile, mimeForPath, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { fileName, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
   { id: "search", label: "Search", icon: Search },
+  { id: "runs", label: "Traverse", icon: Route },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
@@ -92,7 +98,10 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 
 export function SidePanel({ view }: { view: SidebarView }) {
   const { files, write, canEdit } = useWorkspace();
-  const { open } = useWorkbench().editor;
+  const { editor, runDir, notify } = useWorkbench();
+  const { open } = editor;
+  // In Focus mode the Files view shows the run, and new files go into it.
+  const root = view === "files" ? runDir : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -100,7 +109,13 @@ export function SidePanel({ view }: { view: SidebarView }) {
     let last: string | null = null;
     for (const file of Array.from(list ?? [])) {
       const { content, mime } = await readUpload(file);
-      last = write(`uploads/${file.name}`, content, { mime }).path;
+      const path = root ? `${root}/${file.name}` : `uploads/${file.name}`;
+      try {
+        last = write(path, content, { mime }).path;
+      } catch (err) {
+        if (!(err instanceof ReadOnlyFileError)) throw err;
+        notify(`${path} is read-only, so the upload was skipped.`, "warning");
+      }
     }
     if (last) open(last);
   };
@@ -109,7 +124,11 @@ export function SidePanel({ view }: { view: SidebarView }) {
     const taken = new Set(files.map((f) => f.path));
     let n = 1;
     const pathFor = (i: number) =>
-      kind === "skill" ? `skills/new-skill-${i}/SKILL.md` : `notes/untitled-${i}.md`;
+      kind === "skill"
+        ? `skills/new-skill-${i}/SKILL.md`
+        : root
+          ? `${root}/untitled-${i}.md`
+          : `notes/untitled-${i}.md`;
     while (taken.has(pathFor(n))) n++;
     const content =
       kind === "skill"
@@ -124,7 +143,8 @@ export function SidePanel({ view }: { view: SidebarView }) {
     void upload(e.dataTransfer.files);
   };
 
-  const title = VIEWS.find((v) => v.id === view)?.label ?? "";
+  const label = VIEWS.find((v) => v.id === view)?.label ?? "";
+  const title = root ? `${label} · ${root.split("/").pop()}` : label;
   // Viewers see the files but get no controls that change them.
   const actions: ReactNode = canEdit && (
     <>
@@ -155,7 +175,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats" || view === "search" || !canEdit) return;
+        if (view === "chats" || view === "search" || view === "runs" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -178,7 +198,10 @@ export function SidePanel({ view }: { view: SidebarView }) {
         }}
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
-        {view === "files" && <FileTree files={files} />}
+        {view === "files" && (
+          <FileTree files={root ? files.filter((f) => isInRun(f.path, root)) : files} root={root} />
+        )}
+        {view === "runs" && <RunList />}
         {view === "search" && <SearchPanel />}
         {view === "knowledge" && <KnowledgeTree />}
         {view === "skills" && (
@@ -206,7 +229,8 @@ export function SidePanel({ view }: { view: SidebarView }) {
           </div>
         )}
       </div>
-      {view !== "chats" && (
+      {root && <ActionsBlock />}
+      {view !== "chats" && view !== "runs" && (
         <button
           type="button"
           onClick={() => open(TASKS_TAB)}
@@ -272,18 +296,22 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
-      {canEdit && (
-      <button
-        type="button"
-        aria-label={`Delete ${file.path}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
-        }}
-        className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
-      >
-        <Trash2 className="size-3.5" />
-      </button>
+      {file.readOnly ? (
+        <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
+      ) : (
+        canEdit && (
+          <button
+            type="button"
+            aria-label={`Delete ${file.path}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
+            }}
+            className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )
       )}
     </div>
   );
@@ -317,10 +345,11 @@ interface Folder {
   files: WorkspaceFile[];
 }
 
-function buildTree(files: WorkspaceFile[]): Folder {
-  const root: Folder = { name: "", path: "", folders: [], files: [] };
+/** Folders under `base` (a run, in Focus mode) are shown relative to it. */
+function buildTree(files: WorkspaceFile[], base: string | null): Folder {
+  const root: Folder = { name: "", path: base ?? "", folders: [], files: [] };
   for (const file of files) {
-    const parts = file.path.split("/");
+    const parts = (base ? file.path.slice(base.length + 1) : file.path).split("/");
     let node = root;
     for (const part of parts.slice(0, -1)) {
       const path = node.path ? `${node.path}/${part}` : part;
@@ -342,8 +371,16 @@ function buildTree(files: WorkspaceFile[]): Folder {
   return root;
 }
 
-export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
-  const tree = useMemo(() => buildTree(files), [files]);
+export function FileTree({
+  files,
+  root = null,
+  depth: start = 0,
+}: {
+  files: WorkspaceFile[];
+  root?: string | null;
+  depth?: number;
+}) {
+  const tree = useMemo(() => buildTree(files, root), [files, root]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) =>
     setCollapsed((s) => {
@@ -382,4 +419,51 @@ export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; 
 
   // Nested in the knowledge tree, this is a group inside that tree.
   return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
+}
+
+/** Traverse view: every run in the workspace; picking one focuses it. */
+function RunList() {
+  const { runs, runDir, run } = useWorkbench();
+  if (!runs.length) {
+    return (
+      <p className="px-3 py-2 text-[var(--muted-foreground)]">
+        No runs yet. A run is a folder that contains{" "}
+        {RUN_DIR_MARKERS.map((m) => `${m}/`).join(" or ")}.
+      </p>
+    );
+  }
+  return (
+    <ul aria-label="Runs" data-testid="run-list">
+      {runs.map((r) => (
+        <RunRow key={r.path} run={r} current={r.path === runDir} onFocus={() => run.focus(r.path)} />
+      ))}
+    </ul>
+  );
+}
+
+function RunRow({ run, current, onFocus }: { run: RunDir; current: boolean; onFocus: () => void }) {
+  return (
+    <li>
+      <button
+        type="button"
+        aria-current={current ? "true" : undefined}
+        title={`Focus on ${run.path}`}
+        onClick={onFocus}
+        className={cn(
+          "flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer",
+          current ? "bg-[var(--accent)] text-[var(--accent-foreground)]" : "hover:bg-[var(--secondary)]",
+        )}
+      >
+        <FlaskConical className="mt-0.5 size-4 shrink-0 text-[var(--muted-foreground)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{run.name}</span>
+          <span className="block truncate text-xs text-[var(--muted-foreground)]">
+            {[run.parent, `${run.fileCount} file${run.fileCount === 1 ? "" : "s"}`, run.markers.join(", ")]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </span>
+      </button>
+    </li>
+  );
 }

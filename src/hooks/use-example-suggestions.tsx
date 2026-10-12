@@ -20,7 +20,7 @@ export const useExampleSuggestions = () => {
       {
         title: "Summarize This File (Workspace)",
         message:
-          "Summarize the file I have open in a few bullets, then save the summary as a new file under artifacts/.",
+          "Summarize the file I have open in a few bullets, then save the summary as a new file in this run's artifacts/ folder.",
       },
       {
         title: "Draft a Note (Workspace)",

@@ -5,6 +5,7 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
+import { FileExistsError, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
@@ -25,11 +26,17 @@ import type { Session } from "./session";
  *                                   when S3_PUBLIC_URL is set)
  *   GET    /files/<path>?versions   version history (JSON)
  *   PUT    /files/<path>            create or replace; body = bytes,
- *                                   Content-Type = mime (optional)
+ *                                   Content-Type = mime (optional).
+ *                                   `If-None-Match: *` only creates (412 when
+ *                                   the file exists); `X-Read-Only: true`
+ *                                   makes a new file read-only
  *   PUT    /files/<path>?propose    propose that content instead, for an
  *                                   editor to accept (see /proposals); a
  *                                   viewer may propose too. ?note= says why
  *   DELETE /files/<path>            soft delete
+ *
+ *   Read-only files answer 403 to PUT and DELETE, and carry
+ *   `X-File-Read-Only: true` on GET.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
  *   ?experiment=<id> for an experiment's; without either, files at the
@@ -476,6 +483,14 @@ export function createStorageHandler(
         json(res, 403, { error: err.message });
         return;
       }
+      if (err instanceof ReadOnlyFileError) {
+        json(res, 403, { error: err.message, readOnly: true });
+        return;
+      }
+      if (err instanceof FileExistsError) {
+        json(res, 412, { error: err.message, exists: true });
+        return;
+      }
       if (
         err instanceof InvalidPathError ||
         err instanceof NodeError ||
@@ -564,6 +579,7 @@ export function createStorageHandler(
           ETag: etag,
           "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
           "X-File-Author": file.info.author,
+          ...(file.info.readOnly ? { "X-File-Read-Only": "true" } : {}),
           "Cache-Control": "no-cache",
         });
         res.end(file.bytes);
@@ -586,7 +602,12 @@ export function createStorageHandler(
           json(res, 201, await session.propose(service.nodeId, path, bytes, { mime, note }));
           return;
         }
-        json(res, 200, await service.write(path, bytes, { mime }));
+        const info = await service.write(path, bytes, {
+          mime,
+          createOnly: req.headers["if-none-match"]?.trim() === "*",
+          readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
+        });
+        json(res, 200, info);
         return;
       }
       case "DELETE": {

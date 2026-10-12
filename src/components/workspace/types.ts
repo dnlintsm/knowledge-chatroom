@@ -17,6 +17,24 @@ export interface WorkspaceFile {
   updatedAt: number;
   /** Who last wrote the file. */
   author: "user" | "agent";
+  /** Created read-only (e.g. a run's generated rules): it can't be edited or deleted. */
+  readOnly?: boolean;
+}
+
+/** An edit or delete of a read-only file. */
+export class ReadOnlyFileError extends Error {
+  constructor(readonly path: string) {
+    super(`${path} is read-only`);
+    this.name = "ReadOnlyFileError";
+  }
+}
+
+/** A create-only write to a path that already has a file. */
+export class FileExistsError extends Error {
+  constructor(readonly path: string) {
+    super(`${path} already exists`);
+    this.name = "FileExistsError";
+  }
 }
 
 /** A tab in the middle pane: a file path, or the built-in task board. */

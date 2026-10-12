@@ -13,6 +13,7 @@ import { z } from "zod";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { ExperimentError } from "./experiments";
 import type { Storage } from "./index";
+import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile } from "./paths";
@@ -98,6 +99,9 @@ export function createFileTools(
       const principal: Principal = { userId, actor: "agent" };
       return await fn(current.session(principal));
     } catch (err) {
+      if (err instanceof ReadOnlyFileError) {
+        return error(`${err.path} is read-only: it can't be changed or deleted.`);
+      }
       if (err instanceof NodeError && err.message === "Node not found") {
         return error("No such knowledge node (or the user can't see it). Call list_nodes.");
       }
@@ -175,6 +179,7 @@ export function createFileTools(
               size: f.size,
               lastWrittenBy: f.author,
               updatedAt: f.updatedAt,
+              ...(f.readOnly ? { readOnly: true } : {}),
             })),
           ),
         ),
@@ -272,12 +277,14 @@ export function createFileTools(
         "root and in an experiment the file changes at once and opens for the user. In a " +
         "knowledge node it is PROPOSED instead: the file stays as it was until someone who " +
         "can edit the node accepts the change (writing the same file again revises your " +
-        "proposal). Put new generated documents under artifacts/ unless the user asks to " +
-        "change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, " +
-        "uploads/ or artifacts/ decide where the file is listed. Every write is kept as a " +
-        "version.",
+        "proposal). Put new generated documents in the focused run's artifacts/ folder " +
+        "(<run>/artifacts/, see `run` in context), or under artifacts/ when there is no run, " +
+        "unless the user asks to change an existing file. Paths starting with notes/, " +
+        "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed. " +
+        "Every write is kept as a version. Read-only files (readOnly in list_files) can't be " +
+        "written.",
       {
-        path: z.string().describe("e.g. artifacts/summary.md"),
+        path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
         node: nodeParam,
         experiment: experimentParam,

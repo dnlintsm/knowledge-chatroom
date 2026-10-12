@@ -6,11 +6,12 @@ import type { BlobStore } from "./blobs";
 import { sha256Hex } from "./blobs";
 import type { Sql, Tx } from "./db";
 import type { AuthorType, EventHub } from "./events";
+import { ReadOnlyFileError } from "./files";
 import { isNodeId, NodeNotFoundError } from "./nodes";
 import { mimeForPath, normalizePath } from "./paths";
 
 /**
- * Proposed versions (007_proposals.sql): a change to a file in a knowledge
+ * Proposed versions (008_proposals.sql): a change to a file in a knowledge
  * node, or at the workspace root, that someone who can edit there accepts or
  * rejects. Claude's edits to a node arrive this way, and an experiment's
  * author promotes its work to the node the same way. The bytes are a blob, so
@@ -250,11 +251,12 @@ export class ProposalService {
           WHERE id = ${input.node} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL`;
         if (!live) throw new NodeNotFoundError("Node not found");
       }
-      const [file] = await tx<{ version: string; sha256: string; mime: string }[]>`
-        SELECT f.current_version_id AS version, v.blob_sha256 AS sha256, f.mime
+      const [file] = await tx<{ version: string; sha256: string; mime: string; read_only: boolean }[]>`
+        SELECT f.current_version_id AS version, v.blob_sha256 AS sha256, f.mime, f.read_only
         FROM files f JOIN file_versions v ON v.id = f.current_version_id
         WHERE f.workspace_id = ${this.workspaceId} AND f.node_id IS NOT DISTINCT FROM ${input.node}::uuid
           AND f.experiment_id IS NULL AND f.path = ${path} AND f.deleted_at IS NULL`;
+      if (file?.read_only) throw new ReadOnlyFileError(path);
       if (file && file.sha256 === sha256 && file.mime === mime) {
         throw new ProposalError(`${path} already has this content; there is nothing to propose`);
       }
@@ -361,6 +363,7 @@ export class ProposalService {
       WHERE e.id = ${experimentId} AND e.workspace_id = ${this.workspaceId} AND e.deleted_at IS NULL
         AND (fv.id IS NULL OR fv.blob_sha256 <> v.blob_sha256 OR fv.mime <> f.mime)
         AND (nv.id IS NULL OR nv.blob_sha256 <> v.blob_sha256 OR nf.mime <> f.mime)
+        AND NOT coalesce(nf.read_only, false)
       ORDER BY f.path`;
     return rows.map((r) => ({ ...r, size: Number(r.size) }));
   }
