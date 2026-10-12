@@ -193,7 +193,7 @@ test("Generate Rules writes the run's rules once, read-only, then opens them", a
 });
 
 test("Claude runs actions and switches runs through the workbench", async ({ page }) => {
-  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned tool calls.");
+  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned tool calls.");
   await openHome(page);
   await send(page, "Please generate the rules for this run");
   await expect(page.getByTestId("file-preview")).toContainText("General rules: etch-2026-10-01", reply);
@@ -269,7 +269,7 @@ const citesFiles = "Which book should I read next?";
 const fileRef = (page: Page, text: string) => page.getByTestId("file-ref").filter({ hasText: text });
 
 test("file references in answers open the cited lines", async ({ page }) => {
-  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned answer.");
+  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await openHome(page);
   await send(page, citesFiles);
   await fileRef(page, "The Pragmatic Programmer").click(reply);
@@ -295,7 +295,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
 });
 
 test("file references on a phone show the editor", async ({ page }) => {
-  test.skip(Boolean(process.env.ANTHROPIC_API_KEY), "Needs the mock agent's canned answer.");
+  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoRun(page);
   await page.getByRole("button", { name: "Files" }).last().click();
