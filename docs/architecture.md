@@ -382,3 +382,10 @@ provider retains storage bootstrap, SSE routing and reconciliation, which depend
 on navigation and the current UI state. `flush()` captures pending content before
 navigation; `settle()` additionally waits and rejects unresolved/failed saves
 before fork/archive/promote operations.
+
+`file-focus.ts` holds pure selection, citation/reveal and open-count transitions.
+`use-file-focus.ts` clears selection when the active tab changes, including changes
+caused by close/delete/resync. Opening even the same citation creates a fresh
+reveal signal; editing its file invalidates its line range. Navigation clears
+selection/reveal without resetting the open counter. The provider keeps the public
+`selection`, `setSelection`, `reveal` and `openCount` fields unchanged.
