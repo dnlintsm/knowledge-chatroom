@@ -56,6 +56,8 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
       S3_ENDPOINT: http://s3:8333
       S3_REGION: us-east-1

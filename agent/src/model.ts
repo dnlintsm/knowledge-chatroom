@@ -3,14 +3,17 @@
 export const DEFAULT_CLAUDE_MODEL = "claude-sonnet-5";
 
 /**
- * Resolve the Claude model id from the environment. Prefers CLAUDE_MODEL, then
- * ANTHROPIC_MODEL, then the default. A dotted marketing name (e.g.
- * "claude-sonnet-4-6") is normalized to the API id ("claude-sonnet-4-6").
+ * Resolve the model id from the environment. Prefers CLAUDE_MODEL, then
+ * ANTHROPIC_MODEL, then the default. A dotted Claude marketing name (e.g.
+ * "claude-sonnet-4.6") is normalized to the API id ("claude-sonnet-4-6").
+ * Any other name is passed through untouched, since gateways such as
+ * OpenRouter or LiteLLM use dots in their ids ("openai/gpt-5.1",
+ * "anthropic/claude-sonnet-4.6").
  */
 export function resolveModel(): string {
   const model =
     process.env.CLAUDE_MODEL ||
     process.env.ANTHROPIC_MODEL ||
     DEFAULT_CLAUDE_MODEL;
-  return model.replace(/\./g, "-");
+  return /^claude-/.test(model) ? model.replace(/\./g, "-") : model;
 }
