@@ -10,6 +10,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { parseWorkspaceEvent } from "../../../shared/storage-contract";
+import { normalizePath } from "../../../shared/files";
+export { normalizePath } from "../../../shared/files";
 import type { LineRange } from "./file-refs";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
@@ -180,10 +183,6 @@ interface WorkspaceValue {
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
-
-export function normalizePath(path: string) {
-  return path.trim().replace(/^\/+/, "").replace(/\/+/g, "/");
-}
 
 /** False on the first render, true from the next commit on. */
 export function useHydrated() {
@@ -549,7 +548,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setStorageMode("server");
 
       events = new EventSource(WATCH_URL);
-      events.onmessage = (e) => void onEvent(JSON.parse(e.data) as ServerEvent).catch(() => {});
+      events.onmessage = (e) => {
+        try { void onEvent(parseWorkspaceEvent(JSON.parse(e.data))).catch(() => {}); }
+        catch { /* Invalid stream messages cannot enter state; reconnect resyncs. */ }
+      };
       // The browser reconnects by itself; catch up on anything missed meanwhile.
       let dropped = false;
       events.onerror = () => (dropped = true);

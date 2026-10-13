@@ -1,3 +1,4 @@
+import { parseLocalFile } from "../../../shared/storage-contract";
 import type { TabId, WorkspaceFile } from "./types";
 
 export interface PersistedWorkspace {
@@ -48,4 +49,21 @@ export function reduceWorkspace(state: PersistedWorkspace, action: WorkspaceActi
       };
     }
   }
+}
+
+export function parseTabState(value: unknown): Pick<PersistedWorkspace, "tabs" | "active"> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (!Array.isArray(item.tabs) || !item.tabs.every((tab) => typeof tab === "string" && tab.length) ||
+      !(item.active === null || (typeof item.active === "string" && item.active.length))) return null;
+  return { tabs: item.tabs, active: item.active as string | null };
+}
+
+export function parsePersistedWorkspace(value: unknown): PersistedWorkspace | null {
+  const ui = parseTabState(value);
+  if (!ui) return null;
+  const item = value as Record<string, unknown>;
+  if (!Array.isArray(item.files)) return null;
+  try { return { ...ui, files: item.files.map(parseLocalFile) }; }
+  catch { return null; }
 }

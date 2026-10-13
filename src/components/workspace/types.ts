@@ -6,20 +6,10 @@
  * (see store.tsx and docs/architecture.md).
  */
 
-export type FileKind = "note" | "skill" | "upload" | "artifact";
-
-export interface WorkspaceFile {
-  path: string;
-  kind: FileKind;
-  /** Text content, or a data: URL for binary uploads such as images. */
-  content: string;
-  mime: string;
-  updatedAt: number;
-  /** Who last wrote the file. */
-  author: "user" | "agent";
-  /** Created read-only (e.g. a run's generated rules): it can't be edited or deleted. */
-  readOnly?: boolean;
-}
+import { extension, isTextFile as isTextContent } from "../../../shared/files";
+import type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
+export type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
+export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "../../../shared/files";
 
 /** An edit or delete of a read-only file. */
 export class ReadOnlyFileError extends Error {
@@ -47,51 +37,13 @@ export const REVIEW_TAB: TabId = "::review";
 /** Tabs that aren't files. */
 export const isBuiltInTab = (tab: TabId) => tab === TASKS_TAB || tab === EXPERIMENT_TAB || tab === REVIEW_TAB;
 
-export const KIND_FOLDERS: Record<FileKind, string> = {
-  note: "notes",
-  skill: "skills",
-  upload: "uploads",
-  artifact: "artifacts",
-};
-
-export function kindForPath(path: string): FileKind {
-  const top = path.split("/")[0];
-  const match = (Object.keys(KIND_FOLDERS) as FileKind[]).find(
-    (kind) => KIND_FOLDERS[kind] === top,
-  );
-  return match ?? "note";
-}
-
 export function fileName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
-export function extension(path: string) {
-  const name = fileName(path);
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
-}
-
-const TEXT_EXTENSIONS = new Set([
-  "md", "markdown", "txt", "json", "csv", "ts", "tsx", "js", "jsx", "py",
-  "yaml", "yml", "html", "css", "sql", "sh", "toml", "xml",
-]);
-
-export function mimeForPath(path: string) {
-  const ext = extension(path);
-  if (ext === "md" || ext === "markdown") return "text/markdown";
-  if (ext === "json") return "application/json";
-  if (ext === "csv") return "text/csv";
-  if (TEXT_EXTENSIONS.has(ext)) return "text/plain";
-  return "application/octet-stream";
-}
-
 export function isTextFile(file: Pick<WorkspaceFile, "mime" | "path">) {
-  return (
-    file.mime.startsWith("text/") ||
-    file.mime === "application/json" ||
-    TEXT_EXTENSIONS.has(extension(file.path))
-  );
+  // UI image previews retain data/HTTP URLs; SVG text remains readable by the agent.
+  return isTextContent(file.path, file.mime, false);
 }
 
 export function isMarkdown(file: Pick<WorkspaceFile, "mime" | "path">) {

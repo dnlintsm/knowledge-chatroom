@@ -9,17 +9,8 @@ import { indexBlob } from "./search";
 
 export type { AuthorType, FileEvent } from "./events";
 
-export interface FileInfo {
-  path: string;
-  kind: FileKind;
-  mime: string;
-  size: number;
-  sha256: string;
-  updatedAt: string;
-  author: AuthorType;
-  /** Set when the file was created read-only; it can then never change or be deleted. */
-  readOnly: boolean;
-}
+import type { FileInfo } from "../../../shared/storage-contract";
+export type { FileInfo } from "../../../shared/storage-contract";
 
 /** A write or delete of a read-only file. */
 export class ReadOnlyFileError extends Error {

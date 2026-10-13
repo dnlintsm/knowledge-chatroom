@@ -355,3 +355,21 @@ and in-flight writes take priority over incoming SSE updates.
 Experiments are persisted forks of a node's file list. Workbench runs describe UI/workflow traversal in Focus/Traverse modes; they do not
 replace experiment storage.
 Coordinate changes with the feature PR stack before introducing new semantics.
+
+## File contracts and validation
+
+`shared/files.ts` and `shared/storage-contract.ts` have no React, database or SDK
+imports. File metadata and committed events use one transport definition on both
+sides; the browser validates lists, PUT responses and SSE messages before use.
+Transport timestamps are date strings, with hashes/sizes and a read-only flag.
+Local files hold numeric timestamps and text or binary data/HTTP URLs instead.
+
+Path normalization, kinds and MIME inference are shared. SVG is intentionally
+readable as text by agent tools, while browser previews/uploads retain image URLs.
+Both sides use the same helper with an explicit SVG policy. Unknown event variants
+are ignored; reconnect still refreshes the server list.
+
+Local workspace/tab payloads are structurally validated. Invalid local file data
+is rejected and preserved under `knowledge-chatroom.workspace.v1.invalid` before
+replacement; if that backup cannot be written, the original value is retained.
+Valid existing v1 files/tabs and optional read-only fields remain compatible.
