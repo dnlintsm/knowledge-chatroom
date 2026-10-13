@@ -1,0 +1,37 @@
+name: Docker
+
+# Builds the demo images so the Dockerfile keeps up with the code it packages.
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.ts"
+      - "agent/package.json"
+      - "agent/package-lock.json"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the compose file
+        run: docker compose --profile demo config --quiet
+      - name: Build the UI image
+        run: docker build --target app -t knowledge-chatroom-app .
+      - name: Build the agent image
+        run: docker build --target agent -t knowledge-chatroom-agent .
