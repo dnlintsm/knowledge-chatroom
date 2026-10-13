@@ -138,7 +138,7 @@ interface WorkspaceValue {
   setSelection: (text: string) => void;
   /** Where files are kept; see the comment at the top of this file. */
   storageMode: StorageMode;
-  /** The last failed save, cleared by the next successful one. */
+  /** A failed save, retained until all failed files have saved successfully. */
   syncError: string | null;
   /**
    * Where the user is: a knowledge node (also when in one of its experiments),
@@ -227,7 +227,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const failed = useRef(new Set<string>());
   const key = (path: string, at: PlaceId = placeRef.current) => `${at ?? ""}\n${path}`;
   const busy = (path: string, at: PlaceId = placeRef.current) =>
-    pending.current.has(key(path, at)) || (inflight.current.get(key(path, at)) ?? 0) > 0;
+    pending.current.has(key(path, at)) || (inflight.current.get(key(path, at)) ?? 0) > 0 ||
+    failed.current.has(key(path, at));
 
   // Restore after mount so server and client render the same seed first.
   // Saving waits for `hydrated` (set in the same commit as the restore), so the
@@ -281,7 +282,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const info = await sent;
       knownSha.current.set(k, info.sha256);
       failed.current.delete(k);
-      setSyncError(null);
+      if (!failed.current.size) setSyncError(null);
     } catch (err) {
       console.error("[workspace] save failed:", err);
       failed.current.add(k);

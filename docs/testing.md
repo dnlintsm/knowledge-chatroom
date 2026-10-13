@@ -97,3 +97,19 @@ not once per retry. A step that never executes is shown as Not run; a failed run
 without a report is shown explicitly rather than as zero successful tests.
 `scripts/ci-tests.mjs` retains failed commands' exit codes and rejects empty or
 entirely skipped required suites. Local test commands keep their existing reporters.
+
+## Synchronization regressions
+
+`e2e/sync.spec.ts` drives the real provider with controlled HTTP/SSE transport:
+ordered saves, navigation, failed writes, stale responses, reconnect, permission
+revocation during a save, and storage outage/recovery. Failed edits in the current
+place stay visible through remote events/reconnect until a subsequent edit saves;
+a successful save of a different file must not hide their error. Permission
+revocation changes the editor to read-only without replacing the unsaved content.
+These drafts are held in memory: this policy does not promise durability across
+reload or navigation after a failed save.
+
+`e2e/sync-storage.spec.ts` runs only in storage mode. Two pages in one browser
+context share a real workspace and receive its real stream. It checks both
+persisted bytes and the other tab's editor, then confirms remote deletion closes
+both tabs. Its fixture uses a dedicated note and removes it after testing.
