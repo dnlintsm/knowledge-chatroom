@@ -14,6 +14,9 @@ import { parseWorkspaceEvent } from "../../../shared/storage-contract";
 import { normalizePath } from "../../../shared/files";
 export { normalizePath } from "../../../shared/files";
 import type { LineRange } from "./file-refs";
+import type { Reveal } from "./file-focus";
+export type { Reveal } from "./file-focus";
+import { useFileFocus } from "./use-file-focus";
 import { SaveScheduler, type StorageMode } from "./save-scheduler";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
@@ -96,12 +99,6 @@ const STARTUP_RETRY_MS = 2_000;
 const STARTUP_RETRIES = 30;
 
 export type { StorageMode } from "./save-scheduler";
-
-/** Lines the middle pane scrolls to and highlights, from open(path, lines). */
-export interface Reveal {
-  path: string;
-  lines: LineRange;
-}
 
 interface WorkspaceValue {
   files: WorkspaceFile[];
@@ -197,9 +194,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tabs: [DEFAULT_OPEN],
     active: DEFAULT_OPEN,
   });
-  const [selection, setSelection] = useState("");
-  const [openCount, setOpenCount] = useState(0);
-  const [reveal, setReveal] = useState<Reveal | null>(null);
+  const {
+    selection, openCount, reveal, setSelection,
+    open: openFocus, edit: editFocus, reset: resetFocus,
+  } = useFileFocus(state.active);
   const hydrated = useHydrated();
 
   const [storageMode, setStorageMode] = useState<StorageMode>("loading");
@@ -327,12 +325,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
       files.current = [];
       setState({ files: [], tabs: ui.tabs, active: ui.active });
-      setSelection("");
-      setReveal(null);
+      resetFocus();
       await resync(list);
       return true;
     },
-    [flushSaves, resync],
+    [flushSaves, resync, resetFocus],
   );
   const enterNode = enterPlace;
   const enterExperiment = useCallback((id: string) => enterPlace(experimentPlace(id)), [enterPlace]);
@@ -512,18 +509,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.files],
   );
 
-  // A selection belongs to the file it was made in; drop it whenever the active
-  // tab changes (open, close, or delete), so it never pairs with another file.
-  useEffect(() => setSelection(""), [state.active]);
-
   const open = useCallback((tab: TabId, lines?: LineRange) => {
-    // Also when reopening the active file, e.g. after Claude rewrote it.
-    setSelection("");
-    setOpenCount((n) => n + 1);
-    // A new object every time, so citing the same lines again scrolls back to them.
-    setReveal(lines ? { path: tab, lines } : null);
+    openFocus(tab, lines);
     setState((s) => reduceWorkspace(s, { type: "open", tab }));
-  }, []);
+  }, [openFocus]);
 
   const close = useCallback((tab: TabId) => {
     setState((s) => reduceWorkspace(s, { type: "close", tab }));
@@ -549,10 +538,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       upsert(file);
       if (mode.current !== "local") scheduleSave(path);
       // Line numbers may now point at different text.
-      setReveal((r) => (r?.path === path ? null : r));
+      editFocus(path);
       return file;
     },
-    [upsert, scheduleSave],
+    [upsert, scheduleSave, editFocus],
   );
 
   const create = useCallback<WorkspaceValue["create"]>(
@@ -759,7 +748,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       promote,
     };
   }, [
-    state, selection, openCount, reveal, getFile, open, close, write, create, remove, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment, proposals, decideProposal, promote,
