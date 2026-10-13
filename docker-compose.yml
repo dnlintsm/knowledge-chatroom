@@ -4,6 +4,11 @@
 #   docker compose up -d
 #
 # then set the DATABASE_URL / S3_* values from .env.example and run `npm run dev`.
+#
+# The whole demo (storage, agent and UI) in one command, with ANTHROPIC_API_KEY
+# in .env, then open http://localhost:3000:
+#
+#   docker compose --profile demo up --build
 # To use managed services instead (RDS/Neon, AWS S3, R2, B2), skip this file and
 # point the same env vars at them.
 #
@@ -35,7 +40,62 @@ services:
     volumes:
       - s3-data:/data
       - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- Demo profile: the agent and UI built from ./Dockerfile ---
+  # No login (one built-in user owns everything); chat needs ANTHROPIC_API_KEY.
+  agent:
+    profiles: [demo]
+    build:
+      context: .
+      target: agent
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
+      S3_ENDPOINT: http://s3:8333
+      S3_REGION: us-east-1
+      S3_BUCKET: knowledge
+      S3_ACCESS_KEY_ID: knowledge
+      S3_SECRET_ACCESS_KEY: knowledge-secret
+      S3_FORCE_PATH_STYLE: "true"
+      # Binary downloads go straight to the store, as the browser reaches it.
+      S3_PUBLIC_URL: http://localhost:8333
+    volumes:
+      - models:/var/lib/knowledge/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # The agent port stays private: the UI forwards to it and signs identities.
+
+  app:
+    profiles: [demo]
+    build:
+      context: .
+      target: app
+      args:
+        # Fixed into the UI at build time; change it in .env, then rebuild.
+        RUN_DIR_MARKERS: ${RUN_DIR_MARKERS:-xdoe-report}
+    environment:
+      AGENT_URL: http://agent:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      agent:
+        condition: service_healthy
 
 volumes:
   postgres-data:
   s3-data:
+  models:

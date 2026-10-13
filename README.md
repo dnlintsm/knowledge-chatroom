@@ -47,6 +47,21 @@ refresh instructions are in [the screenshot guide](docs/assets/README.md).
 
 ## Quick start
 
+### Run the demo with Docker
+
+The whole stack (UI, agent, PostgreSQL and an S3-compatible store) in one command:
+
+```bash
+cp .env.example .env           # then set ANTHROPIC_API_KEY for chat
+docker compose --profile demo up --build
+```
+
+Open <http://localhost:3000>. Sample notes and runs are added on first visit and kept
+in the `postgres-data`/`s3-data` volumes; `docker compose --profile demo down -v`
+starts over. There is no login: one built-in user owns everything.
+
+### Run from source
+
 Use **Node 22** (`.nvmrc`) and npm. Add an Anthropic API key to `.env` for real chat.
 
 ```bash

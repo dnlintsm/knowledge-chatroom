@@ -1,5 +1,18 @@
 # Deployment
 
+## Demo stack
+
+`docker compose --profile demo up --build` builds the UI and agent images from the
+root `Dockerfile` (targets `app` and `agent`) and starts them with PostgreSQL and
+SeaweedFS. Only the UI (3000) and the object store (8333, for signed binary
+downloads) are published; the agent stays on the compose network. It runs without
+login, with the local storage credentials from `deploy/seaweedfs/s3.json`, and reads
+`ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`) from `.env`. The search model
+downloads into the `models` volume on first start. Treat it as a single-user demo:
+for anything shared, change the storage credentials and configure login as below.
+
+## Production
+
 Use Node 22 for build and runtime. Install with `npm ci`, run `npm run check`,
 then `npm run build`. The build includes TypeScript checks. `npm start` serves the
 production build; the configured standalone output can also be packaged by a
