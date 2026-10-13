@@ -27,7 +27,8 @@ import { createStorageHandler } from "./storage/http";
 import { IDENTITY_HEADER, identify, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
-import { materialize, type RunSkills, type SkillUse } from "./skills/run";
+import { keyRoute } from "./skills/keyproxy";
+import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
@@ -55,7 +56,15 @@ async function prepareSkills(
   if (storage && !userId) return null;
   const owner = storage ? userId! : null;
   try {
-    return await materialize(owner ?? "local", await skills.forRun(owner, threadId));
+    const run = await materialize(owner ?? "local", await skills.forRun(owner, threadId));
+    // Scripts run with a stand-in key; without the proxy, the run has no Bash.
+    if (scriptsEnabled() && run.skills.some((s) => s.skill.needsExecution)) {
+      run.keys = await keyRoute().catch((err) => {
+        console.error(`[skills] key proxy didn't start; scripts are off for this run: ${err instanceof Error ? err.message : err}`);
+        return undefined;
+      });
+    }
+    return run;
   } catch (err) {
     console.error(`[skills] couldn't prepare skills; running without them: ${err instanceof Error ? err.message : err}`);
     return null;

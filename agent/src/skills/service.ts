@@ -16,6 +16,7 @@ import {
   type SkillMode,
   type SkillSource,
 } from "./catalog";
+import { scriptsEnabled } from "./run";
 
 /** A skill with the mode that applies to this user. */
 export interface UserSkill {
@@ -52,6 +53,8 @@ export interface SkillList {
   canPublish: boolean;
   /** Whether there is a hub (it needs server storage). */
   hub: boolean;
+  /** Whether skills' scripts run (SKILL_SCRIPTS=on), in a sandbox. */
+  scripts: boolean;
 }
 
 /**
@@ -90,6 +93,7 @@ export class SkillService {
       canSetDefaults: atLeast(role, "editor"),
       canPublish: atLeast(role, "owner"),
       hub: this.storage() !== null,
+      scripts: scriptsEnabled(),
     };
   }
 

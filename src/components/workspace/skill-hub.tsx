@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store, Upload } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Diff } from "./review-panel";
-import { useSkills, type SkillInfo } from "./skills";
+import { ScriptsBadge, useSkills, type SkillInfo } from "./skills";
 
 /**
  * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
@@ -725,14 +725,7 @@ export function HubBrowser({ onClose, notify }: { onClose: () => void; notify: N
               </button>
               <span className="shrink-0 text-xs text-[var(--muted-foreground)]">v{skill.latest}</span>
               <TrustBadges verified={skill.verified} yanked={skill.yanked} flags={skill.flags} />
-              {skill.needsExecution && (
-                <span
-                  title="It ships scripts or asks for a shell; skills here are instructions only, so those parts won't run."
-                  className="shrink-0 text-amber-600"
-                >
-                  <AlertTriangle className="size-3.5" />
-                </span>
-              )}
+              {skill.needsExecution && <ScriptsBadge />}
               <span className="ml-auto shrink-0 text-xs">
                 {skill.installed === skill.latest ? (
                   <span className="text-[var(--muted-foreground)]">Installed</span>

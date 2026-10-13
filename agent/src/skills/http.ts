@@ -8,7 +8,7 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
 /**
  * Skills API, mounted on the agent server next to the storage API:
  *
- *   GET /skills          {skills, canSetDefaults, canPublish, hub}: every
+ *   GET /skills          {skills, canSetDefaults, canPublish, hub, scripts}: every
  *                        skill you can use, each with name, description,
  *                        argumentHint, source (builtin | hub | workspace),
  *                        path (its SKILL.md in the workspace), hub ({version,
@@ -17,7 +17,8 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *                        workspaceMode, userMode, chatMode, modelInvocable,
  *                        userInvocable, needsExecution. ?thread=<id> includes
  *                        that chat's modes. canSetDefaults: you are an editor
- *                        of the root; canPublish: an owner; hub: there is one
+ *                        of the root; canPublish: an owner; hub: there is one;
+ *                        scripts: skills' scripts run (SKILL_SCRIPTS=on)
  *   PUT /skills/<name>   {mode, scope?, thread?} → that skill as you now see
  *                        it. scope: user (default, yours), workspace (for
  *                        everyone; editors only, else 403) or chat (yours,
