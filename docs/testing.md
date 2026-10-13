@@ -78,6 +78,9 @@ mock coverage. It is not run by required CI.
 
 ## CI and failures
 
+See [CI merge gates](ci.md) for the repository ruleset settings that enforce
+successful checks before merging and for preview-step limits.
+
 - `quality.yml`: locked root/agent install, lint/types/units, unchanged lockfiles.
 - `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
   including the cached real embedding-model test (`EMBEDDING_TEST=1`).
