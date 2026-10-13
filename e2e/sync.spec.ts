@@ -78,6 +78,10 @@ async function storage(page: Page) {
       if (transport.failWrite) return route.fulfill({ status: 500, json: { error: "Controlled write failure" } });
       return route.fulfill({ json: put(content, node, path) });
     }
+    if (route.request().method() === "DELETE") {
+      files.delete(`${node}\n${path}`);
+      return route.fulfill({ status: 204 });
+    }
     // Capture before delaying, so this response can really become stale.
     const file = files.get(`${node}\n${path}`);
     await transport.beforeRead();
@@ -254,4 +258,23 @@ test("saving another file does not clear a failed file's error or draft", async 
   await page.getByTestId("file-editor").fill("# Saved first file");
   await expect.poll(() => backend.files.get(`\n${PATH}`)?.content).toBe("# Saved first file");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+});
+
+test("deleting a failed draft clears its error and allows the same path to sync again", async ({ page }) => {
+  const backend = await storage(page);
+  backend.transport.failWrite = true;
+  await page.getByTestId("file-editor").fill("# Draft to discard");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+  const row = page.getByRole("treeitem", { name: /sync\.md/ });
+  await row.hover();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await row.getByRole("button", { name: `Delete ${PATH}`, exact: true }).click();
+  await expect.poll(() => backend.files.has(`\n${PATH}`)).toBe(false);
+  await expect(row).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: /sync\.md/ })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  const info = backend.put("# Recreated remotely");
+  await event(page, { op: "write", node: null, path: PATH, sha256: info.sha256 });
+  await row.click();
+  await expect(page.getByTestId("file-editor")).toHaveValue("# Recreated remotely");
 });
