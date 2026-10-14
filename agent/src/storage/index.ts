@@ -8,7 +8,7 @@ import { FileService } from "./files";
 import { NodeService } from "./nodes";
 import { ProposalService } from "./proposals";
 import { SearchService } from "./search";
-import { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
+import { ApiEmbedder, LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 import { Session } from "./session";
 
 export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
@@ -23,7 +23,7 @@ export type { Principal, Role } from "./access";
 export { Session } from "./session";
 export { SearchService } from "./search";
 export type { SearchHit, SearchOptions } from "./search";
-export { LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
+export { ApiEmbedder, LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 
 export interface Storage {
   config: StorageConfig;
@@ -154,9 +154,12 @@ function indexExisting(search: SearchService, attempt = 0) {
 export function startStorage(config: StorageConfig | null = storageConfigFromEnv()) {
   if (!config) return;
   state = "starting";
-  const embedder = config.embeddingModel
-    ? new LocalEmbedder(config.embeddingModel, config.embeddingCacheDir)
-    : null;
+  const { embeddingModel: model, embeddingApi: api } = config;
+  const embedder = !model
+    ? null
+    : api
+      ? new ApiEmbedder(model, api.baseUrl, api.apiKey, api.dimensions)
+      : new LocalEmbedder(model, config.embeddingCacheDir);
   initStorage(config, embedder)
     .then((ready) => {
       current = ready;

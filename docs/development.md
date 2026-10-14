@@ -42,7 +42,9 @@ rules files are read-only. See [Architecture](architecture.md).
 With pgvector, semantic search downloads a local embedding model on first use
 and caches it under `EMBEDDING_CACHE_DIR` or `~/.cache/knowledge-chatroom/models`.
 `EMBEDDING_MODEL=off` disables embeddings while retaining keyword search.
-Changing the model re-embeds the corpus. See `.env.example` for the default model.
+Changing the model re-embeds the corpus. See `.env.example` for the default model,
+and for `EMBEDDING_BASE_URL` to use an OpenAI-compatible embeddings API (LiteLLM,
+OpenRouter, OpenAI) instead of the local model.
 
 ## Skills
 

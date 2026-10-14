@@ -1008,6 +1008,32 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(await meaningful.semantic!.prepare(), true);
       await meaningful.semantic!.embedAll();
     });
+
+    test("vectors too long for pgvector's index are searched without one", async (t) => {
+      if (!vectors) return t.skip("Postgres has no pgvector");
+      // Like text-embedding-3-large (3072): the concepts, padded with zeros.
+      const wide: Embedder = {
+        model: "test/wide",
+        embed: async (texts) =>
+          (await new ConceptEmbedder().embed(texts)).map((v) => [...v, ...new Array<number>(2984).fill(0)]),
+      };
+      const wideStorage = (await initStorage(storage.config, wide))!;
+      try {
+        assert.equal(await wideStorage.semantic!.prepare(), true);
+        const [{ indexed }] = await wideStorage.sql<{ indexed: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'blob_chunks_embedding') AS indexed`;
+        assert.equal(indexed, false);
+        await wideStorage.semantic!.embedAll();
+        const hits = await wideStorage.session({ userId: alice, actor: "user" })
+          .search({ query: "wall buildup", scope: fab });
+        assert.ok(hits.some((h) => h.path === "notes/walls.md" && h.match === "meaning"));
+      } finally {
+        await wideStorage.close();
+      }
+      // Back to the first model, for the other tests.
+      assert.equal(await meaningful.semantic!.prepare(), true);
+      await meaningful.semantic!.embedAll();
+    });
   });
 
   describe("proposals", () => {

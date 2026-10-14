@@ -6,7 +6,8 @@ import type { Sql } from "./db";
 /**
  * Search by meaning (issue #4, step 6). Every passage of indexed text
  * (blob_chunks, 006_search.sql) gets an embedding from a small model that
- * runs inside the agent, stored with pgvector; a search embeds the query and
+ * runs inside the agent (or from an OpenAI-compatible embeddings API, with
+ * EMBEDDING_BASE_URL), stored with pgvector; a search embeds the query and
  * finds the nearest passages. It is optional: without pgvector, or with
  * EMBEDDING_MODEL=off, search stays word-based.
  *
@@ -16,6 +17,12 @@ import type { Sql } from "./db";
 
 export interface Embedder {
   readonly model: string;
+  /**
+   * What the stored vectors came from, when the model name alone doesn't say
+   * (an API's model alias can mean another model at another endpoint).
+   * Defaults to `model`; a change starts the vectors over.
+   */
+  readonly source?: string;
   /** One unit-length vector per text. */
   embed(texts: string[], kind: "query" | "passage"): Promise<number[][]>;
 }
@@ -54,15 +61,82 @@ export class LocalEmbedder implements Embedder {
 
   async embed(texts: string[], kind: "query" | "passage"): Promise<number[][]> {
     const extractor = await this.load();
-    // E5 models were trained with these prefixes.
-    const prefix = /(^|\/)(multilingual-)?e5-/i.test(this.model) ? `${kind}: ` : "";
     const output = await extractor(
-      texts.map((t) => prefix + t),
+      texts.map((t) => e5Prefix(this.model, kind) + t),
       { pooling: "mean", normalize: true },
     );
     return output.tolist();
   }
 }
+
+/** E5 models were trained with "query: " and "passage: " prefixes. */
+const e5Prefix = (model: string, kind: "query" | "passage") =>
+  /(^|\/)(multilingual-)?e5-/i.test(model) ? `${kind}: ` : "";
+
+const API_TIMEOUT_MS = 60_000;
+
+/**
+ * A model behind an OpenAI-compatible `POST /embeddings` endpoint: a
+ * self-hosted one through LiteLLM, vLLM or Ollama, or an online API such as
+ * OpenRouter or OpenAI. Passages leave the server, unlike LocalEmbedder.
+ */
+export class ApiEmbedder implements Embedder {
+  private readonly url: string;
+  readonly source: string;
+
+  constructor(
+    readonly model: string,
+    baseUrl: string,
+    private readonly apiKey?: string,
+    private readonly dimensions?: number,
+  ) {
+    this.url = `${baseUrl.replace(/\/+$/, "")}/embeddings`;
+    this.source = `${model} at ${this.url}`;
+  }
+
+  async embed(texts: string[], kind: "query" | "passage"): Promise<number[][]> {
+    const res = await fetch(this.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: this.model,
+        input: texts.map((t) => e5Prefix(this.model, kind) + t),
+        encoding_format: "float",
+        ...(this.dimensions ? { dimensions: this.dimensions } : {}),
+      }),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 500);
+      throw new Error(`embeddings endpoint ${this.url} answered ${res.status}: ${detail}`);
+    }
+    const body = (await res.json()) as { data?: { index?: number; embedding?: unknown }[] };
+    const data = body.data ?? [];
+    if (data.length !== texts.length) {
+      throw new Error(`embeddings endpoint returned ${data.length} vectors for ${texts.length} texts`);
+    }
+    return [...data]
+      .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+      .map(({ embedding }) => {
+        if (!Array.isArray(embedding) || !embedding.length || typeof embedding[0] !== "number") {
+          throw new Error("embeddings endpoint returned a vector that isn't a list of numbers");
+        }
+        return unitLength(embedding as number[]);
+      });
+  }
+}
+
+/** Not every provider normalizes; cosine search and the similarity bar assume it. */
+function unitLength(v: number[]): number[] {
+  const norm = Math.sqrt(v.reduce((sum, x) => sum + x * x, 0));
+  return norm > 0 ? v.map((x) => x / norm) : v;
+}
+
+/** pgvector's HNSW index takes vectors of at most this many dimensions. */
+const MAX_INDEXED_DIMS = 2000;
 
 /** pgvector's text form of a vector. */
 export const toVector = (v: number[]) => `[${v.join(",")}]`;
@@ -99,7 +173,7 @@ export class SemanticIndex {
     if (!(await this.enableVectors())) return (this.ready = false);
     const [probe] = await this.embedder.embed(["probe"], "passage");
     const dims = probe.length;
-    const model = this.embedder.model;
+    const model = this.embedder.source ?? this.embedder.model;
     await this.sql.begin(async (tx) => {
       // Same lock as migrate(): schema changes one process at a time.
       await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))`;
@@ -115,7 +189,14 @@ export class SemanticIndex {
       // Vectors from another model don't compare with this one's: start over.
       await tx`ALTER TABLE blob_chunks DROP COLUMN IF EXISTS embedding`;
       await tx.unsafe(`ALTER TABLE blob_chunks ADD COLUMN embedding vector(${Number(dims)})`);
-      await tx`CREATE INDEX blob_chunks_embedding ON blob_chunks USING hnsw (embedding vector_cosine_ops)`;
+      if (dims <= MAX_INDEXED_DIMS) {
+        await tx`CREATE INDEX blob_chunks_embedding ON blob_chunks USING hnsw (embedding vector_cosine_ops)`;
+      } else {
+        console.warn(
+          `[search] ${model} gives ${dims} dimensions, more than pgvector can index (${MAX_INDEXED_DIMS}), ` +
+            "so search by meaning compares every passage; set EMBEDDING_DIMENSIONS to shorten its vectors",
+        );
+      }
       await tx`CREATE INDEX blob_chunks_unembedded ON blob_chunks (sha256, ord) WHERE embedding IS NULL`;
       await tx`
         INSERT INTO search_embedding (model, dims) VALUES (${model}, ${dims})
