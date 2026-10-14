@@ -67,6 +67,13 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       # Binary downloads go straight to the store, as the browser reaches it.
       S3_PUBLIC_URL: http://localhost:8333
+      # Search by meaning through an embeddings API instead of the local model
+      # (.env.example). Empty keeps the local model.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
+      SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
     volumes:
       - models:/var/lib/knowledge/models
     depends_on:

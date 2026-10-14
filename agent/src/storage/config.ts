@@ -37,6 +37,20 @@ export interface StorageConfig {
   embeddingModel: string | null;
   /** Where the model is downloaded to on first use. */
   embeddingCacheDir?: string;
+  /**
+   * An OpenAI-compatible embeddings endpoint (LiteLLM, OpenRouter, OpenAI,
+   * vLLM, Ollama...) to call instead of running the model inside the agent;
+   * set by EMBEDDING_BASE_URL. embeddingModel is then the name it knows.
+   */
+  embeddingApi?: EmbeddingApiConfig;
+}
+
+export interface EmbeddingApiConfig {
+  /** Up to and including the version, e.g. https://openrouter.ai/api/v1. */
+  baseUrl: string;
+  apiKey?: string;
+  /** Asked of models that can shorten their vectors (text-embedding-3-*). */
+  dimensions?: number;
 }
 
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/multilingual-e5-small";
@@ -64,7 +78,24 @@ export function storageConfigFromEnv(
     embeddingModel:
       env.EMBEDDING_MODEL === "off" ? null : env.EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL,
     embeddingCacheDir: env.EMBEDDING_CACHE_DIR || undefined,
+    embeddingApi: embeddingApiFromEnv(env),
   };
+}
+
+function embeddingApiFromEnv(env: NodeJS.ProcessEnv): EmbeddingApiConfig | undefined {
+  const baseUrl = env.EMBEDDING_BASE_URL || undefined;
+  if (!baseUrl || env.EMBEDDING_MODEL === "off") return undefined;
+  if (!env.EMBEDDING_MODEL) {
+    throw new Error(
+      "EMBEDDING_BASE_URL needs EMBEDDING_MODEL, the model name the endpoint knows " +
+        "(e.g. openai/text-embedding-3-small on OpenRouter)",
+    );
+  }
+  const dims = env.EMBEDDING_DIMENSIONS ? Number.parseInt(env.EMBEDDING_DIMENSIONS, 10) : undefined;
+  if (dims !== undefined && !(dims > 0)) {
+    throw new Error("EMBEDDING_DIMENSIONS must be a positive whole number");
+  }
+  return { baseUrl, apiKey: env.EMBEDDING_API_KEY || undefined, dimensions: dims };
 }
 
 function authSecretFromEnv(env: NodeJS.ProcessEnv) {
