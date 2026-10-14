@@ -24,7 +24,8 @@ work easier to find, understand, and reuse.
 - **Review proposed changes** — inspect diffs for Claude's edits to knowledge nodes
   and changes promoted from experiments, then accept or reject them.
 - **Find related knowledge** — search by words, paths, or similar meaning using a
-  local embedding model when pgvector is available.
+  local embedding model (or an OpenAI-compatible embeddings API such as LiteLLM or
+  OpenRouter) when pgvector is available.
 - **Choose storage and sharing** — start with browser-local files, or use versioned
   PostgreSQL/S3 storage with optional OIDC login and viewer/editor/owner access.
 

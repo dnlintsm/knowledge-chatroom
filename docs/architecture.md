@@ -291,7 +291,12 @@ For local setup, see [Development](development.md).
   buildup" finds "polymer deposition on the liner"), marked "Similar meaning". Word
   matches still rank first; "quotes" or -word ask for exact words only. Without pgvector,
   or with `EMBEDDING_MODEL=off`, search matches words. Changing `EMBEDDING_MODEL` re-embeds
-  everything.
+  everything. To use a model you host (behind LiteLLM, vLLM or Ollama) or an online API
+  (OpenRouter, OpenAI) instead, set `EMBEDDING_BASE_URL` to its OpenAI-compatible base
+  (`…/v1`), `EMBEDDING_API_KEY`, and `EMBEDDING_MODEL` to the name it knows; optional
+  `EMBEDDING_DIMENSIONS` asks for shorter vectors. pgvector indexes up to 2000 dimensions,
+  so longer vectors are compared one by one (fine for small workspaces). Each model scores
+  similarity differently, so tune `SEARCH_MIN_SIMILARITY` (default 0.5, 0.82 for E5).
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
