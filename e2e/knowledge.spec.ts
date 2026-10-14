@@ -422,6 +422,17 @@ test.describe("on a touch screen", () => {
     await node(TECH).tap();
     await shot(page, "27-knowledge-touch");
 
+    // From the keyboard, a focused row shows its actions, and Enter on one
+    // runs that action without opening the row.
+    await node(MODULE).focus();
+    const addLoop = node(MODULE).getByRole("button", { name: `Add loop under ${MODULE}` });
+    await expect(addLoop).toBeVisible();
+    await addLoop.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByPlaceholder("New loop name")).toBeFocused();
+    await expect(location).not.toContainText(MODULE);
+    await page.keyboard.press("Escape");
+
     page.once("dialog", (dialog) => void dialog.accept());
     await node(TECH).getByRole("button", { name: `Delete ${TECH}` }).tap();
     await expect(node(TECH)).toHaveCount(0);

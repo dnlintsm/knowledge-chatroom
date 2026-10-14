@@ -288,7 +288,7 @@ function FileRow({
       aria-selected={selected}
       tabIndex={0}
       onClick={() => open(file.path)}
-      onKeyDown={(e) => e.key === "Enter" && open(file.path)}
+      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && open(file.path)}
       title={file.path}
       style={{ paddingLeft: 12 + depth * 12 }}
       className={cn(

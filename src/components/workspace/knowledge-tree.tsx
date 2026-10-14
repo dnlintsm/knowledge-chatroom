@@ -159,7 +159,8 @@ export function KnowledgeTree() {
               data-testid="knowledge-node"
               title={open ? undefined : "You can't open this; it leads to something shared with you"}
               onClick={go}
-              onKeyDown={(e) => e.key === "Enter" && go()}
+              // Only the row itself: Enter on one of its buttons is that button's.
+              onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && go()}
               style={{ paddingLeft: 4 + depth * 12 }}
               className={cn(
                 "group flex h-7 cursor-pointer items-center gap-1 pr-2",
