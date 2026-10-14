@@ -573,6 +573,25 @@ export class SkillHub {
     return { name: skill.name, path: `skills/${skill.name}/SKILL.md`, files: files.length };
   }
 
+  /**
+   * Deletes the workspace skill skills/<name>/: every file in the folder, as
+   * the user (editors). SKILL.md goes last, so a failure part way leaves the
+   * skill listed to try again. A folder with read-only files is left alone.
+   */
+  async deleteSkill(userId: string | null, name: string): Promise<{ name: string; deleted: number }> {
+    const { storage } = await this.open(userId, "editor", "Deleting skills needs editor access to the workspace");
+    const session = await storage.session({ userId: userId!, actor: "user" }).files(null);
+    const prefix = `skills/${name}/`;
+    const files = (await session.list()).filter((f) => f.path.startsWith(prefix));
+    if (!files.length) throw new HubNotFoundError(`The workspace has no skill folder ${prefix}`);
+    const locked = files.find((f) => f.readOnly);
+    if (locked) throw new HubConflictError(`${locked.path} is read-only, so ${name} can't be deleted`);
+    const main = `${prefix}SKILL.md`;
+    files.sort((a, b) => Number(a.path === main) - Number(b.path === main));
+    for (const file of files) await session.remove(file.path);
+    return { name, deleted: files.length };
+  }
+
   /** Writes a skill's files to skills/<name>/ as the user. */
   private async writeSkill(storage: Storage, userId: string, name: string, files: SkillFile[], replace: boolean) {
     const session = await storage.session({ userId, actor: "user" }).files(null);

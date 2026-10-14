@@ -1816,6 +1816,18 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await assert.rejects(hub.importZip(editor, zipSync({ "a/b.md": strToU8("x") })), HubError);
       await assert.rejects(hub.importZip(editor, strToU8("not a zip")), HubError);
 
+      // Delete: the whole folder goes, for editors; read-only files block it.
+      await hub.importZip(editor, recap, { replace: true });
+      await assert.rejects(hub.deleteSkill(viewer, "recap"), SkillForbiddenError);
+      assert.deepEqual(await hub.deleteSkill(editor, "recap"), { name: "recap", deleted: 2 });
+      assert.equal(await find(viewer, "recap"), undefined);
+      assert.equal(await storage.files.stat("skills/recap/notes.md"), null);
+      await assert.rejects(hub.deleteSkill(editor, "recap"), HubNotFoundError);
+      await hub.importZip(editor, recap);
+      await storage.files.write("skills/recap/locked.md", strToU8("x"), { readOnly: true });
+      await assert.rejects(hub.deleteSkill(editor, "recap"), HubConflictError);
+      assert.equal((await find(viewer, "recap"))?.name, "recap");
+
       // Uses of hub skills are recorded like any other.
       await skills.record(viewer, { threadId: "t-hub", runId: "r", skill: "digest", source: "hub", trigger: "slash" });
     });
@@ -1942,6 +1954,9 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         assert.equal((await call("/hub/memo/install", { method: "DELETE" })).status, 404);
         assert.equal((await call("/hub/memo/fork", { method: "POST" })).status, 201);
         assert.equal((await call("/hub/memo/fork", { method: "POST" })).status, 409);
+        await storage.files.write("skills/gone/SKILL.md", text("---\nname: gone\ndescription: Gone\n---\nBye."));
+        assert.equal((await call("/skills/gone", { method: "DELETE" })).status, 200);
+        assert.equal((await call("/skills/gone", { method: "DELETE" })).status, 404);
 
         // Trust routes (the local user is a hub admin).
         const json = (method: string, body: unknown) => ({ method, body: JSON.stringify(body) });

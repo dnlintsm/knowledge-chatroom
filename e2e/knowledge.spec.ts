@@ -354,6 +354,14 @@ test("skill hub", async ({ page, request }) => {
   await panel.getByTestId("skill-import-file").setInputFiles({ name: `${NAME}.zip`, mimeType: "application/zip", buffer: zip });
   await expect(panel.getByTestId("skill-notice")).toContainText(`Imported ${NAME}`);
 
+  // Delete the workspace skill: its whole folder goes, after asking.
+  await shot(page, "26-skill-delete");
+  page.once("dialog", (dialog) => void dialog.accept());
+  await row.getByTestId("skill-delete").click();
+  await expect(panel.getByTestId("skill-notice")).toContainText(`Deleted ${NAME}.`);
+  await expect(row).toHaveCount(0);
+  expect((await request.get(`/api/files/skills/${NAME}/SKILL.md`)).status()).toBe(404);
+
   await clear();
 });
 

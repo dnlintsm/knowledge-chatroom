@@ -23,6 +23,9 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *                        it. scope: user (default, yours), workspace (for
  *                        everyone; editors only, else 403) or chat (yours,
  *                        in `thread`). mode null clears that level
+ *   DELETE /skills/<name> deletes the workspace skill: all of skills/<name>/
+ *                        (editors; 404 when there is no such folder, 409
+ *                        when a file in it is read-only)
  *   GET /skills/<name>/export   the skill as a .zip (<name>/SKILL.md, ...)
  *   POST /skills/import  a .zip as the body (?filename=, ?replace=1) → adds
  *                        it to the workspace as skills/<name>/ (editors; 409
@@ -116,6 +119,9 @@ export function createSkillsHandler(
       if (!input) return send(res, 400, { error: "Invalid JSON body" });
       const thread = typeof input.thread === "string" ? input.thread : undefined;
       return send(res, 200, await skills.setMode(userId, name, input.mode, input.scope ?? "user", thread));
+    }
+    if (req.method === "DELETE" && name && !action) {
+      return send(res, 200, await hub.deleteSkill(userId, name));
     }
     return send(res, 405, { error: "Method not allowed" });
   }
