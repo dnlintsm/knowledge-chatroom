@@ -389,3 +389,53 @@ test("skill scripts", async ({ page, request }) => {
     for (const file of Object.keys(files)) await request.delete(`/api/files/${file}`);
   }
 });
+
+test.describe("on a touch screen", () => {
+  // Touch screens can't hover, so actions shown only on hover never appear.
+  test.use({ hasTouch: true });
+
+  test("add levels under a new tech, then delete it", async ({ page }) => {
+    await page.goto("/");
+    expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(false);
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await page.getByRole("button", { name: "Knowledge", exact: true }).tap();
+    const tree = page.getByRole("tree", { name: "Knowledge tree" });
+    // Exact, since "Main etch" also contains "Etch".
+    const node = (name: string) =>
+      tree.getByTestId("knowledge-node").filter({ has: page.getByText(name, { exact: true }) });
+    const location = page.getByRole("navigation", { name: "Location" });
+
+    await tree.getByRole("button", { name: /^New / }).tap();
+    await page.getByPlaceholder(/^New .* name$/).fill(TECH);
+    await page.keyboard.press("Enter");
+    // Opening a node shows its actions.
+    let parent = TECH;
+    for (const [level, name] of [["module", MODULE], ["loop", "Endpoint"], ["process", "Main etch"]]) {
+      await node(parent).tap();
+      await expect(location).toContainText(parent);
+      await node(parent).getByRole("button", { name: `Add ${level} under ${parent}` }).tap();
+      await page.getByPlaceholder(/^New .* name$/).fill(name);
+      await page.keyboard.press("Enter");
+      await expect(node(name)).toBeVisible();
+      parent = name;
+    }
+    await node(TECH).tap();
+    await shot(page, "27-knowledge-touch");
+
+    // From the keyboard, a focused row shows its actions, and Enter on one
+    // runs that action without opening the row.
+    await node(MODULE).focus();
+    const addLoop = node(MODULE).getByRole("button", { name: `Add loop under ${MODULE}` });
+    await expect(addLoop).toBeVisible();
+    await addLoop.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByPlaceholder("New loop name")).toBeFocused();
+    await expect(location).not.toContainText(MODULE);
+    await page.keyboard.press("Escape");
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await node(TECH).getByRole("button", { name: `Delete ${TECH}` }).tap();
+    await expect(node(TECH)).toHaveCount(0);
+    await expect(node(MODULE)).toHaveCount(0);
+  });
+});

@@ -111,7 +111,8 @@ import type { Session } from "./session";
  *   GET    /access/audit?limit=     recent changes, newest first
  *
  * Reading needs viewer, changing files and nodes editor, deleting a node or
- * managing grants on it owner (of that node or one above it), and managing
+ * managing grants on it owner (of that node or one above it; whoever adds a
+ * node owns it), and managing
  * groups owner of the workspace. Viewers may fork a node into an experiment;
  * a draft is seen by its author only, a shared or archived one by everyone
  * who can view the node, and only its author changes it. Who is asking comes from identity.ts: the

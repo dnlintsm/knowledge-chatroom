@@ -120,9 +120,11 @@ export class Session {
   async createNode(parentId: string | null, name: string) {
     await this.need(parentId, "editor");
     return this.scoped((db) =>
-      on(this.parts.nodes, db).create(parentId, name, (tx, id) =>
-        this.audit("node.create", { node: id, parent: parentId, name })(tx),
-      ),
+      on(this.parts.nodes, db).create(parentId, name, async (tx, id) => {
+        // Whoever adds a node owns it; with row security a trigger does this.
+        if (!db) await this.parts.access.ownNewNode(tx, this.principal.userId, id);
+        await this.audit("node.create", { node: id, parent: parentId, name })(tx);
+      }),
     );
   }
 

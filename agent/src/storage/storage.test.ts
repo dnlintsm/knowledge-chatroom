@@ -390,8 +390,18 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(info.author, "user");
       const [version] = (await bobFiles.history("notes/bob.md"))!;
       assert.equal(version.authorId, bob);
-      await as(bob).createNode(moduleX, "Loop B");
+      // Whoever adds a node owns it, so bob can delete what he made but not
+      // the module above it.
+      const loopB = await as(bob).createNode(moduleX, "Loop B");
+      assert.equal(await as(bob).role(loopB.id), "owner");
+      assert.equal(await as(bob).role(moduleX), "editor");
+      assert.ok((await as(alice).grants(loopB.id)).some((g) => g.principalId === bob && g.role === "owner"));
       await assert.rejects(as(bob).deleteNode(moduleX), ForbiddenError);
+      assert.equal(await as(bob).deleteNode(loopB.id), true);
+      // Owners above it get no extra grant.
+      const loopA = await as(alice).createNode(moduleX, "Loop A");
+      assert.equal((await as(alice).grants(loopA.id)).length, 0);
+      assert.equal(await as(alice).deleteNode(loopA.id), true);
       await assert.rejects(as(bob).files(null), ForbiddenError);
       await assert.rejects(as(bob).createNode(null, "Tech Z"), ForbiddenError);
       await assert.rejects(as(bob).createGroup(null, "Mine"), ForbiddenError);

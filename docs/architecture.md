@@ -301,7 +301,8 @@ For local setup, see [Development](development.md).
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
   file keeps its history) and adds and renames nodes; owner also deletes nodes and manages
-  grants. A grant to a group covers members of its sub-groups too.
+  grants. Whoever adds a node becomes its owner, so they can delete or share what they
+  made. A grant to a group covers members of its sub-groups too.
   The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
   check access in one place (`agent/src/storage/session.ts`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is

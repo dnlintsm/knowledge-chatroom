@@ -159,7 +159,8 @@ export function KnowledgeTree() {
               data-testid="knowledge-node"
               title={open ? undefined : "You can't open this; it leads to something shared with you"}
               onClick={go}
-              onKeyDown={(e) => e.key === "Enter" && go()}
+              // Only the row itself: Enter on one of its buttons is that button's.
+              onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && go()}
               style={{ paddingLeft: 4 + depth * 12 }}
               className={cn(
                 "group flex h-7 cursor-pointer items-center gap-1 pr-2",
@@ -185,10 +186,23 @@ export function KnowledgeTree() {
               <span className={cn("min-w-0 flex-1 truncate font-medium", !open && "text-[var(--muted-foreground)]")}>
                 {n.name}
               </span>
-              <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)] group-hover:hidden">
+              <span
+                className={cn(
+                  "shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]",
+                  current ? "hidden" : "group-hover:hidden group-focus-within:hidden",
+                )}
+              >
                 {n.type}
               </span>
-              <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              {/* Hover alone isn't enough: touch screens have none (Tailwind's
+                  hover only applies where the device can hover), so the open
+                  node and a focused row show their actions too. */}
+              <span
+                className={cn(
+                  "shrink-0 items-center gap-0.5",
+                  current ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+                )}
+              >
                 {canAdd && (
                   <RowAction
                     label={`Add ${typeAt(n.depth + 1)} under ${n.name}`}
