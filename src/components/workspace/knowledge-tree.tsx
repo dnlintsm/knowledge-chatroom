@@ -185,10 +185,23 @@ export function KnowledgeTree() {
               <span className={cn("min-w-0 flex-1 truncate font-medium", !open && "text-[var(--muted-foreground)]")}>
                 {n.name}
               </span>
-              <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)] group-hover:hidden">
+              <span
+                className={cn(
+                  "shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]",
+                  current ? "hidden" : "group-hover:hidden group-focus-within:hidden",
+                )}
+              >
                 {n.type}
               </span>
-              <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              {/* Hover alone isn't enough: touch screens have none (Tailwind's
+                  hover only applies where the device can hover), so the open
+                  node and a focused row show their actions too. */}
+              <span
+                className={cn(
+                  "shrink-0 items-center gap-0.5",
+                  current ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+                )}
+              >
                 {canAdd && (
                   <RowAction
                     label={`Add ${typeAt(n.depth + 1)} under ${n.name}`}

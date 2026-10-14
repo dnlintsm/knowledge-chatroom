@@ -312,7 +312,11 @@ function FileRow({
               e.stopPropagation();
               if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
             }}
-            className="hidden size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] group-hover:flex cursor-pointer"
+            className={cn(
+              "size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] cursor-pointer",
+              // Shown on the open file too, for touch screens that can't hover.
+              selected ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+            )}
           >
             <Trash2 className="size-3.5" />
           </button>
