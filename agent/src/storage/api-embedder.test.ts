@@ -82,23 +82,24 @@ describe("ApiEmbedder", () => {
 
 describe("embedding settings", () => {
   const db = { DATABASE_URL: "postgres://x" };
+  const config = (vars: Record<string, string>) => storageConfigFromEnv(vars as NodeJS.ProcessEnv);
 
   test("the local model by default", () => {
-    const config = storageConfigFromEnv(db)!;
-    assert.equal(config.embeddingModel, "Xenova/multilingual-e5-small");
-    assert.equal(config.embeddingApi, undefined);
+    const local = config(db)!;
+    assert.equal(local.embeddingModel, "Xenova/multilingual-e5-small");
+    assert.equal(local.embeddingApi, undefined);
   });
 
   test("EMBEDDING_BASE_URL switches to the API", () => {
-    const config = storageConfigFromEnv({
+    const api = config({
       ...db,
       EMBEDDING_BASE_URL: "http://litellm:4000/v1",
       EMBEDDING_API_KEY: "sk-1",
       EMBEDDING_MODEL: "bge-m3",
       EMBEDDING_DIMENSIONS: "1024",
     })!;
-    assert.equal(config.embeddingModel, "bge-m3");
-    assert.deepEqual(config.embeddingApi, {
+    assert.equal(api.embeddingModel, "bge-m3");
+    assert.deepEqual(api.embeddingApi, {
       baseUrl: "http://litellm:4000/v1",
       apiKey: "sk-1",
       dimensions: 1024,
@@ -106,8 +107,8 @@ describe("embedding settings", () => {
   });
 
   test("the API needs a model name, and off still turns search by meaning off", () => {
-    assert.throws(() => storageConfigFromEnv({ ...db, EMBEDDING_BASE_URL: "http://x/v1" }), /EMBEDDING_MODEL/);
-    const off = storageConfigFromEnv({ ...db, EMBEDDING_BASE_URL: "http://x/v1", EMBEDDING_MODEL: "off" })!;
+    assert.throws(() => config({ ...db, EMBEDDING_BASE_URL: "http://x/v1" }), /EMBEDDING_MODEL/);
+    const off = config({ ...db, EMBEDDING_BASE_URL: "http://x/v1", EMBEDDING_MODEL: "off" })!;
     assert.equal(off.embeddingModel, null);
     assert.equal(off.embeddingApi, undefined);
   });
