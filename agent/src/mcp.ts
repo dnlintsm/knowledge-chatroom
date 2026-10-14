@@ -13,10 +13,11 @@
  * - type: "http" (default), "sse" or "stdio".
  * - headers / env: values may use ${VAR} to take secrets from the agent's
  *   environment instead of writing them into the config.
- * - forwardIdentity (http/sse): each run sends the signed X-Knowledge-User
- *   header the agent itself got, so the server can tell who is calling (verify
- *   it with AUTH_SECRET as in ./storage/identity.ts). Without login there is no
- *   header and the run is the local user's.
+ * - forwardIdentity (http/sse): each run sends the signed-in user as an
+ *   X-Knowledge-User header so the server can tell who is calling. Verify it
+ *   with AUTH_SECRET as in ./storage/identity.ts and check `aud` is
+ *   "mcp:<name>": it is signed for that server only, and the agent refuses it.
+ *   Without login there is no header and the run is the local user's.
  *
  * Every tool of a configured server is pre-approved. A server that is down or
  * misconfigured leaves its tools out of the run; the chat carries on.
@@ -133,17 +134,17 @@ export const allowServer = (name: string) => `mcp__${name}`;
 
 /**
  * The SDK configs for one run: servers with forwardIdentity carry the run's
- * signed identity header when it has one.
+ * user, signed for that server, when the run has one.
  */
 export function serverConfigs(
   servers: ExternalServers,
-  identity?: string,
+  identity?: (server: string) => string,
 ): Record<string, McpServerConfig> {
   return Object.fromEntries(
     Object.entries(servers).map(([name, { config, forwardIdentity }]) => [
       name,
       forwardIdentity && identity && (config.type === "http" || config.type === "sse")
-        ? { ...config, headers: { ...config.headers, [IDENTITY_HEADER]: identity } }
+        ? { ...config, headers: { ...config.headers, [IDENTITY_HEADER]: identity(name) } }
         : config,
     ]),
   );

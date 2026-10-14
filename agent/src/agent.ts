@@ -113,8 +113,8 @@ interface RunContext {
   /** This run's skills (see ./skills/run.ts); null = none. */
   skills: RunSkills | null;
   onSkillUse: (use: SkillUse) => void;
-  /** The run's signed user, for outside MCP servers that ask for it. */
-  identity?: string;
+  /** Signs the run's user for an outside MCP server that asks for it. */
+  identity?: (server: string) => string;
 }
 
 const runContext = new AsyncLocalStorage<RunContext>();
@@ -124,15 +124,15 @@ const runContext = new AsyncLocalStorage<RunContext>();
  * tools can do what the user can, and nothing else. null = no access;
  * undefined = the shared tools, which act for the local user without login.
  * `skills` are the skills prepared for the run, and `onSkillUse` hears each
- * one it uses. `identity` is the run's signed user (X-Knowledge-User), passed
- * on to the outside MCP servers that ask for it (./mcp.ts).
+ * one it uses. `identity` signs the run's user for each outside MCP server
+ * that asks for it (./mcp.ts).
  */
 export const runAs = <T>(
   userId: string | null | undefined,
   fn: () => T,
   skills: RunSkills | null = null,
   onSkillUse: (use: SkillUse) => void = () => {},
-  identity?: string,
+  identity?: (server: string) => string,
 ): T => runContext.run({ userId, skills, onSkillUse, identity }, fn);
 
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {

@@ -80,8 +80,10 @@ reads the agent's environment, so secrets stay out of the file. Every tool of a
 configured server runs without asking, as `mcp__<name>__<tool>`; a server that is
 down is left out and the chat carries on. With login on, `forwardIdentity` sends
 the run's signed user as the `X-Knowledge-User` header (`v1.<payload>.<hmac>`,
-re-signed for an hour; verify it with `AUTH_SECRET` as in
-`agent/src/storage/identity.ts`). These tools act outside workspace storage and its
+valid for an hour; verify it with `AUTH_SECRET` as in
+`agent/src/storage/identity.ts` and check its `aud` is `mcp:<name>`). The token is
+signed for that server only, and the agent refuses it, so a server can't call the
+agent's own APIs as the user. These tools act outside workspace storage and its
 permissions: a server that needs workspace files should take them as arguments or
 check the forwarded user itself.
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { allowServer, externalServersFromEnv, serverConfigs } from "./mcp";
+import { signIdentity, verifyIdentity } from "./storage/identity";
 
 const quiet = <T>(fn: () => T): T => {
   const { error, warn } = console;
@@ -73,9 +74,18 @@ test("only forwardIdentity servers get the run's identity", () => {
       other: { url: "http://other/mcp" },
     }),
   });
-  const configs = serverConfigs(servers, "v1.token.sig");
-  assert.deepEqual((configs.lab as { headers?: object }).headers, { A: "1", "x-knowledge-user": "v1.token.sig" });
+  const configs = serverConfigs(servers, (server) => `token-for-${server}`);
+  assert.deepEqual((configs.lab as { headers?: object }).headers, { A: "1", "x-knowledge-user": "token-for-lab" });
   assert.equal((configs.other as { headers?: object }).headers, undefined);
   // Outside a run (no identity) nothing is added.
   assert.deepEqual((serverConfigs(servers).lab as { headers?: object }).headers, { A: "1" });
+});
+
+test("tokens signed for an MCP server aren't accepted by the agent", () => {
+  const secret = "s".repeat(32);
+  const exp = Math.floor(Date.now() / 1000) + 60;
+  const forLab = signIdentity({ sub: "test|alice", exp, aud: "mcp:lab" }, secret);
+  assert.equal(verifyIdentity(forLab, secret), null);
+  assert.equal(verifyIdentity(forLab, secret, Date.now(), "mcp:lab")?.sub, "test|alice");
+  assert.equal(verifyIdentity(forLab, secret, Date.now(), "mcp:other"), null);
 });

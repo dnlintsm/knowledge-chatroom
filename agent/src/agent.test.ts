@@ -43,7 +43,7 @@ test("outside MCP servers are pre-approved and get each run's signed user", () =
   const shared = adapter.buildOptions(input);
   assert.ok(shared.allowedTools?.includes("mcp__lab"));
   assert.deepEqual(shared.mcpServers?.lab, { type: "http", url: "http://lab/mcp", alwaysLoad: true });
-  const run = runAs("alice", () => adapter.buildOptions(input), null, () => {}, "v1.alice.sig");
-  assert.deepEqual((run.mcpServers?.lab as { headers?: object }).headers, { "x-knowledge-user": "v1.alice.sig" });
+  const run = runAs("alice", () => adapter.buildOptions(input), null, () => {}, (server) => `alice-for-${server}`);
+  assert.deepEqual((run.mcpServers?.lab as { headers?: object }).headers, { "x-knowledge-user": "alice-for-lab" });
   assert.ok(run.mcpServers?.copilotkit);
 });

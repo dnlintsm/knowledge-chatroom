@@ -86,16 +86,18 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
 }
 
 /**
- * The signed user for outside MCP servers (forwardIdentity in ./mcp.ts). The
- * app's header expires in minutes, so it is re-signed to last as long as a run
- * may. None without login.
+ * Signs the run's user for one outside MCP server (forwardIdentity in ./mcp.ts):
+ * a token for audience "mcp:<server>", which the agent itself refuses, so a
+ * server can't use it against the agent. The app's header expires in minutes,
+ * so this one lasts as long as a run may. None without login.
  */
-function identityForTools(req: http.IncomingMessage): string | undefined {
+function identityForTools(req: http.IncomingMessage): ((server: string) => string) | undefined {
   const secret = storageConfig?.authSecret;
   const header = req.headers[IDENTITY_HEADER];
   const identity = secret && typeof header === "string" ? verifyIdentity(header, secret) : null;
   if (!secret || !identity) return undefined;
-  return signIdentity({ ...identity, exp: Math.floor(Date.now() / 1000) + TOOL_IDENTITY_SECONDS }, secret);
+  const exp = Math.floor(Date.now() / 1000) + TOOL_IDENTITY_SECONDS;
+  return (server) => signIdentity({ ...identity, aud: `mcp:${server}`, exp }, secret);
 }
 
 const TOOL_IDENTITY_SECONDS = 60 * 60;
