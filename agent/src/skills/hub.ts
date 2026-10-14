@@ -574,16 +574,18 @@ export class SkillHub {
   }
 
   /**
-   * Deletes the workspace skill skills/<name>/: every file in the folder, as
-   * the user (editors). SKILL.md goes last, so a failure part way leaves the
-   * skill listed to try again. A folder with read-only files is left alone.
+   * Deletes the workspace skill called `name`: every file in its folder (which
+   * may be named differently, as the name comes from SKILL.md), as the user
+   * (editors). SKILL.md goes last, so a failure part way leaves the skill
+   * listed to try again. A folder with read-only files is left alone.
    */
   async deleteSkill(userId: string | null, name: string): Promise<{ name: string; deleted: number }> {
     const { storage } = await this.open(userId, "editor", "Deleting skills needs editor access to the workspace");
+    const skill = await this.skills.find(userId, name);
+    if (skill?.source !== "workspace" || !skill.path) throw new HubNotFoundError(`The workspace has no skill named ${name}`);
     const session = await storage.session({ userId: userId!, actor: "user" }).files(null);
-    const prefix = `skills/${name}/`;
+    const prefix = skill.path.slice(0, -"SKILL.md".length);
     const files = (await session.list()).filter((f) => f.path.startsWith(prefix));
-    if (!files.length) throw new HubNotFoundError(`The workspace has no skill folder ${prefix}`);
     const locked = files.find((f) => f.readOnly);
     if (locked) throw new HubConflictError(`${locked.path} is read-only, so ${name} can't be deleted`);
     const main = `${prefix}SKILL.md`;

@@ -336,6 +336,8 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
     }
   };
   const name = encodeURIComponent(skill.name);
+  // Its folder: the name comes from SKILL.md, so the two can differ.
+  const folder = skill.path?.replace(/SKILL\.md$/, "") ?? `skills/${skill.name}/`;
 
   return (
     <>
@@ -378,9 +380,9 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
             type="button"
             data-testid="skill-delete"
             disabled={busy}
-            title={`Delete skills/${skill.name}/ and everything in it`}
+            title={`Delete ${folder} and everything in it`}
             onClick={() => {
-              if (!window.confirm(`Delete the skill ${skill.name} (skills/${skill.name}/ and all its files)?`)) return;
+              if (!window.confirm(`Delete the skill ${skill.name} (${folder} and all its files)?`)) return;
               void run(async () => {
                 await call(`/api/skills/${name}`, { method: "DELETE" });
                 return `Deleted ${skill.name}.`;

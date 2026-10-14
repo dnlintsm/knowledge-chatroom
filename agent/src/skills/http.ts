@@ -23,9 +23,10 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *                        it. scope: user (default, yours), workspace (for
  *                        everyone; editors only, else 403) or chat (yours,
  *                        in `thread`). mode null clears that level
- *   DELETE /skills/<name> deletes the workspace skill: all of skills/<name>/
- *                        (editors; 404 when there is no such folder, 409
- *                        when a file in it is read-only)
+ *   DELETE /skills/<name> deletes that workspace skill: its whole folder under
+ *                        skills/ (editors; 404 when the workspace has no
+ *                        skill of that name, 409 when a file in it is
+ *                        read-only)
  *   GET /skills/<name>/export   the skill as a .zip (<name>/SKILL.md, ...)
  *   POST /skills/import  a .zip as the body (?filename=, ?replace=1) → adds
  *                        it to the workspace as skills/<name>/ (editors; 409

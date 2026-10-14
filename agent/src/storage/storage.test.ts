@@ -1827,6 +1827,12 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await storage.files.write("skills/recap/locked.md", strToU8("x"), { readOnly: true });
       await assert.rejects(hub.deleteSkill(editor, "recap"), HubConflictError);
       assert.equal((await find(viewer, "recap"))?.name, "recap");
+      // The name comes from SKILL.md: the folder it lives in may differ.
+      await storage.files.write("skills/odd-folder/SKILL.md", strToU8("---\nname: renamed\ndescription: R\n---\nR"));
+      await storage.files.write("skills/odd-folder/notes.md", strToU8("n"));
+      assert.deepEqual(await hub.deleteSkill(editor, "renamed"), { name: "renamed", deleted: 2 });
+      assert.equal(await storage.files.stat("skills/odd-folder/notes.md"), null);
+      await assert.rejects(hub.deleteSkill(editor, "odd-folder"), HubNotFoundError);
 
       // Uses of hub skills are recorded like any other.
       await skills.record(viewer, { threadId: "t-hub", runId: "r", skill: "digest", source: "hub", trigger: "slash" });
