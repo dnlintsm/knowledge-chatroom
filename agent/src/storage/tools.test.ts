@@ -37,10 +37,26 @@ test("a long file stops at a whole line and pages on from there", () => {
   assert.deepEqual(seen, file.split("\n"));
 });
 
-test("one line longer than a read shows its start", () => {
-  const out = readLines("min.json", `${"x".repeat(50)}\nend`, { maxChars: 20 });
+test("a line longer than a read continues by column", () => {
+  const long = "abcdefghij".repeat(5);
+  const content = `${long}\nend`;
+  const first = readLines("min.json", content, { maxChars: 20 });
   assert.equal(
-    out,
-    `min.json (lines 1-1 of 2; line 1 cut at 20 characters; continue with offset 2)\n1\t${"x".repeat(20)}`,
+    first,
+    "min.json (lines 1-1 of 2; line 1 cut before column 21; continue with offset 1 column 21)\n" +
+      `1\t${long.slice(0, 20)}`,
   );
+  // Following the hints reads every character, then the next line.
+  let at = { offset: 1, column: 1 };
+  let text = "";
+  for (let reads = 0; reads < 10; reads++) {
+    const out = readLines("min.json", content, { ...at, maxChars: 20 });
+    text += out.split("\n").slice(1).map((l) => l.split("\t")[1]).join("\n");
+    const next = /continue with offset (\d+)(?: column (\d+))?/.exec(out);
+    if (!next) break;
+    if (!next[2]) text += "\n";
+    at = { offset: Number(next[1]), column: Number(next[2] ?? 1) };
+  }
+  assert.equal(text, content);
+  assert.match(readLines("min.json", content, { offset: 1, column: 51 }), /column 51 is past its end/);
 });

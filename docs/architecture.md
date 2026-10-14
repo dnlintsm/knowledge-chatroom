@@ -337,7 +337,8 @@ For local setup, see [Development](development.md).
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in
-  lines and returns at most 200,000 characters per call, saying where to continue, so long
+  lines (and `column` for lines longer than one read) and returns at most 200,000 characters
+  per call, saying where to continue, so long
   files are read in pages. Its writes are versions authored by the
   agent; in a knowledge node they are proposed changes until someone accepts them.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
