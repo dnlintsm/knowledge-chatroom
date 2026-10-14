@@ -35,8 +35,8 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
     chips.push({
       title: `Summarize ${fileName(openFile)}`,
       message:
-        `Summarize ${openFile} in a few bullets, then save the summary as a new file in ` +
-        (runDir ? `${runDir}/artifacts/.` : "artifacts/."),
+        `Summarize ${openFile} in a few bullets, then save the summary as a new file in the ` +
+        `${runDir ? `${runDir}/artifacts` : "artifacts"} folder.`,
     });
   }
 

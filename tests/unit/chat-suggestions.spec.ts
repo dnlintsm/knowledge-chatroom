@@ -24,7 +24,7 @@ test("a focused run with a report offers all of its chips, named after the file 
   });
   expect(chips.map((s) => s.title)).toEqual(["Summarize effects.csv", "Draft a note", "Analyze the etch report"]);
   expect(chips[0].message).toContain("runs/etch/data/effects.csv");
-  expect(chips[0].message).toContain("runs/etch/artifacts/");
+  expect(chips[0].message).toContain("the runs/etch/artifacts folder.");
   expect(chips[1].message).toContain("runs/etch/notes/next-steps.md");
   expect(chips[2].message).toContain("runs/etch/xdoe-report/report.md");
 });
