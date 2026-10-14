@@ -17,6 +17,12 @@ import type { Sql } from "./db";
 
 export interface Embedder {
   readonly model: string;
+  /**
+   * What the stored vectors came from, when the model name alone doesn't say
+   * (an API's model alias can mean another model at another endpoint).
+   * Defaults to `model`; a change starts the vectors over.
+   */
+  readonly source?: string;
   /** One unit-length vector per text. */
   embed(texts: string[], kind: "query" | "passage"): Promise<number[][]>;
 }
@@ -76,6 +82,7 @@ const API_TIMEOUT_MS = 60_000;
  */
 export class ApiEmbedder implements Embedder {
   private readonly url: string;
+  readonly source: string;
 
   constructor(
     readonly model: string,
@@ -84,6 +91,7 @@ export class ApiEmbedder implements Embedder {
     private readonly dimensions?: number,
   ) {
     this.url = `${baseUrl.replace(/\/+$/, "")}/embeddings`;
+    this.source = `${model} at ${this.url}`;
   }
 
   async embed(texts: string[], kind: "query" | "passage"): Promise<number[][]> {
@@ -165,7 +173,7 @@ export class SemanticIndex {
     if (!(await this.enableVectors())) return (this.ready = false);
     const [probe] = await this.embedder.embed(["probe"], "passage");
     const dims = probe.length;
-    const model = this.embedder.model;
+    const model = this.embedder.source ?? this.embedder.model;
     await this.sql.begin(async (tx) => {
       // Same lock as migrate(): schema changes one process at a time.
       await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))`;

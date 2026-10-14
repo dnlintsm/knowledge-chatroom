@@ -53,6 +53,8 @@ describe("ApiEmbedder", () => {
     const vectors = await embedder.embed(["a", "bbb"], "passage");
     assert.deepEqual(vectors, [[1, 0, 0, 0], [1, 0, 0, 0]]);
     assert.equal(seen[0].path, "/v1/embeddings");
+    // Vectors from the same alias at another endpoint don't mix with these.
+    assert.equal(embedder.source, `openai/text-embedding-3-small at ${base}embeddings`);
     assert.equal(seen[0].auth, "Bearer sk-test");
     assert.deepEqual(seen[0].body, {
       model: "openai/text-embedding-3-small",
@@ -108,6 +110,13 @@ describe("embedding settings", () => {
 
   test("the API needs a model name, and off still turns search by meaning off", () => {
     assert.throws(() => config({ ...db, EMBEDDING_BASE_URL: "http://x/v1" }), /EMBEDDING_MODEL/);
+    for (const bad of ["1e3", "1024oops", "10.5", "0", "-4"]) {
+      assert.throws(
+        () => config({ ...db, EMBEDDING_BASE_URL: "http://x/v1", EMBEDDING_MODEL: "m", EMBEDDING_DIMENSIONS: bad }),
+        /EMBEDDING_DIMENSIONS/,
+        bad,
+      );
+    }
     const off = config({ ...db, EMBEDDING_BASE_URL: "http://x/v1", EMBEDDING_MODEL: "off" })!;
     assert.equal(off.embeddingModel, null);
     assert.equal(off.embeddingApi, undefined);

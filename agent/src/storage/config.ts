@@ -91,10 +91,11 @@ function embeddingApiFromEnv(env: NodeJS.ProcessEnv): EmbeddingApiConfig | undef
         "(e.g. openai/text-embedding-3-small on OpenRouter)",
     );
   }
-  const dims = env.EMBEDDING_DIMENSIONS ? Number.parseInt(env.EMBEDDING_DIMENSIONS, 10) : undefined;
-  if (dims !== undefined && !(dims > 0)) {
+  const raw = env.EMBEDDING_DIMENSIONS?.trim();
+  if (raw && !/^[1-9]\d*$/.test(raw)) {
     throw new Error("EMBEDDING_DIMENSIONS must be a positive whole number");
   }
+  const dims = raw ? Number(raw) : undefined;
   return { baseUrl, apiKey: env.EMBEDDING_API_KEY || undefined, dimensions: dims };
 }
 
