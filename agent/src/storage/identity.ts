@@ -21,6 +21,11 @@ export interface Identity {
   name?: string;
   /** Expiry, seconds since the epoch. */
   exp: number;
+  /**
+   * Who the token is for; unset = this agent. Tokens forwarded to outside MCP
+   * servers carry "mcp:<server>" so the agent never accepts them back.
+   */
+  aud?: string;
 }
 
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
@@ -33,7 +38,12 @@ export function signIdentity(identity: Identity, secret: string): string {
   return `${body}.${b64(mac(secret, body))}`;
 }
 
-export function verifyIdentity(token: string, secret: string, now = Date.now()): Identity | null {
+export function verifyIdentity(
+  token: string,
+  secret: string,
+  now = Date.now(),
+  audience?: string,
+): Identity | null {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== "v1") return null;
   const expected = mac(secret, `${parts[0]}.${parts[1]}`);
@@ -43,6 +53,7 @@ export function verifyIdentity(token: string, secret: string, now = Date.now()):
     const identity = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Identity;
     if (typeof identity.sub !== "string" || !identity.sub || identity.sub === "local") return null;
     if (typeof identity.exp !== "number" || identity.exp * 1000 < now) return null;
+    if (identity.aud !== audience) return null;
     return identity;
   } catch {
     return null;

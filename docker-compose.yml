@@ -57,6 +57,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
       SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
+      # Outside MCP servers (JSON); use service names, not localhost, for URLs.
+      MCP_SERVERS: ${MCP_SERVERS:-}
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge

@@ -25,7 +25,7 @@ import { adapter, runAs } from "./agent";
 import { currentStorage, startStorage, storageState, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
-import { IDENTITY_HEADER, identify, verifyIdentity } from "./storage/identity";
+import { IDENTITY_HEADER, identify, signIdentity, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { keyRoute } from "./skills/keyproxy";
@@ -84,6 +84,23 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
   }
   return true;
 }
+
+/**
+ * Signs the run's user for one outside MCP server (forwardIdentity in ./mcp.ts):
+ * a token for audience "mcp:<server>", which the agent itself refuses, so a
+ * server can't use it against the agent. The app's header expires in minutes,
+ * so this one lasts as long as a run may. None without login.
+ */
+function identityForTools(req: http.IncomingMessage): ((server: string) => string) | undefined {
+  const secret = storageConfig?.authSecret;
+  const header = req.headers[IDENTITY_HEADER];
+  const identity = secret && typeof header === "string" ? verifyIdentity(header, secret) : null;
+  if (!secret || !identity) return undefined;
+  const exp = Math.floor(Date.now() / 1000) + TOOL_IDENTITY_SECONDS;
+  return (server) => signIdentity({ ...identity, aud: `mcp:${server}`, exp }, secret);
+}
+
+const TOOL_IDENTITY_SECONDS = 60 * 60;
 
 /** The AG-UI run input in the body; null after answering 400 when it isn't JSON. */
 async function readInput(req: http.IncomingMessage, res: http.ServerResponse): Promise<RunAgentInput | null> {
@@ -203,6 +220,7 @@ const server = http.createServer(async (req, res) => {
         }),
       runSkills,
       onSkillUse,
+      identityForTools(req),
     );
     return;
   }

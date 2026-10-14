@@ -17,6 +17,7 @@ import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { RunAgentInput } from "@ag-ui/core";
 
+import { allowServer, externalServersFromEnv, serverConfigs } from "./mcp";
 import { resolveModel } from "./model";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
@@ -104,12 +105,16 @@ const toolServer = (tools: Tools) =>
 // is always the local user; with it, each run gets tools for its own user.
 const fileTools = serverStorage ? createFileTools(currentStorage) : [];
 const backendTools: Tools = [...baseTools, ...fileTools];
+// Outside MCP servers from MCP_SERVERS (see ./mcp.ts), e.g. Python tools.
+const externalServers = externalServersFromEnv();
 
 interface RunContext {
   userId: string | null | undefined;
   /** This run's skills (see ./skills/run.ts); null = none. */
   skills: RunSkills | null;
   onSkillUse: (use: SkillUse) => void;
+  /** Signs the run's user for an outside MCP server that asks for it. */
+  identity?: (server: string) => string;
 }
 
 const runContext = new AsyncLocalStorage<RunContext>();
@@ -119,14 +124,16 @@ const runContext = new AsyncLocalStorage<RunContext>();
  * tools can do what the user can, and nothing else. null = no access;
  * undefined = the shared tools, which act for the local user without login.
  * `skills` are the skills prepared for the run, and `onSkillUse` hears each
- * one it uses.
+ * one it uses. `identity` signs the run's user for each outside MCP server
+ * that asks for it (./mcp.ts).
  */
 export const runAs = <T>(
   userId: string | null | undefined,
   fn: () => T,
   skills: RunSkills | null = null,
   onSkillUse: (use: SkillUse) => void = () => {},
-): T => runContext.run({ userId, skills, onSkillUse }, fn);
+  identity?: (server: string) => string,
+): T => runContext.run({ userId, skills, onSkillUse, identity }, fn);
 
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   // Slash commands only for the run's own skills (guardSlashCommand).
@@ -171,10 +178,13 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
           ...scripts,
         }
       : options;
+    const withIdentity = ctx.identity
+      ? { ...withSkills, mcpServers: { ...withSkills.mcpServers, ...serverConfigs(externalServers, ctx.identity) } }
+      : withSkills;
     const userId = ctx.userId;
-    if (!serverStorage || userId === undefined) return withSkills;
+    if (!serverStorage || userId === undefined) return withIdentity;
     const tools = [...baseTools, ...createFileTools(currentStorage, async () => userId)];
-    return { ...withSkills, mcpServers: { ...withSkills.mcpServers, [SERVER_NAME]: toolServer(tools) } };
+    return { ...withIdentity, mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) } };
   }
 }
 
@@ -183,8 +193,11 @@ export const adapter = new WorkspaceAgentAdapter({
   description: "CopilotKit × Claude Agent SDK (TypeScript) starter",
   model: resolveModel(),
   systemPrompt: SYSTEM_PROMPT,
-  mcpServers: { [SERVER_NAME]: toolServer(backendTools) },
-  allowedTools: backendTools.map((tool) => `mcp__${SERVER_NAME}__${tool.name}`),
+  mcpServers: { ...serverConfigs(externalServers), [SERVER_NAME]: toolServer(backendTools) },
+  allowedTools: [
+    ...backendTools.map((tool) => `mcp__${SERVER_NAME}__${tool.name}`),
+    ...Object.keys(externalServers).map(allowServer),
+  ],
   tools: [],
   includePartialMessages: true,
 });
