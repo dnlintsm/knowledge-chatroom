@@ -61,6 +61,46 @@ bubblewrap (`apt-get install bubblewrap`; macOS has its own) on the agent host; 
 dismiss reports; without login the built-in user is an admin. See
 [Architecture](architecture.md#skills) for the behavior and limits.
 
+## Outside MCP servers
+
+`MCP_SERVERS` connects the agent to MCP servers beside its own tools, for example
+a Python server holding the tools of an existing agent (#60). Its value is JSON,
+or a path to a JSON file, shaped like Claude's `.mcp.json`:
+
+```json
+{"mcpServers": {
+  "lab": {"url": "http://localhost:9100/mcp", "forwardIdentity": true,
+          "headers": {"Authorization": "Bearer ${LAB_TOKEN}"}},
+  "local": {"type": "stdio", "command": "python", "args": ["tools.py"]}
+}}
+```
+
+`type` is `http` (the default), `sse` or `stdio` (give stdio servers absolute paths: runs with skills start in their own folder). `${VAR}` in `headers` and `env`
+reads the agent's environment, so secrets stay out of the file. Every tool of a
+configured server runs without asking, as `mcp__<name>__<tool>`; a server that is
+down is left out and the chat carries on. With login on, `forwardIdentity` sends
+the run's signed user as the `X-Knowledge-User` header (`v1.<payload>.<hmac>`,
+re-signed for an hour; verify it with `AUTH_SECRET` as in
+`agent/src/storage/identity.ts`). These tools act outside workspace storage and its
+permissions: a server that needs workspace files should take them as arguments or
+check the forwarded user itself.
+
+A minimal Python server (`pip install mcp`; with mcp 1.x import `FastMCP` from
+`mcp.server.fastmcp` instead):
+
+```python
+from mcp.server.mcpserver import MCPServer, Context
+
+mcp = MCPServer("lab")
+
+@mcp.tool()
+def whoami(ctx: Context) -> str:
+    """Says which signed-in user called."""
+    return (ctx.headers or {}).get("x-knowledge-user", "local")
+
+mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
+```
+
 ## Optional login
 
 Set the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.

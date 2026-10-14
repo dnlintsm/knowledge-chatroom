@@ -5,6 +5,7 @@ import type { RunAgentInput } from "@ag-ui/core";
 
 // The agent only adds workspace file tools when storage is configured.
 process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL || "postgres://localhost/unused";
+process.env.MCP_SERVERS = JSON.stringify({ lab: { url: "http://lab/mcp", forwardIdentity: true } });
 const { adapter, runAs } = await import("./agent");
 
 const input = {
@@ -36,4 +37,13 @@ test("a run with skills gets them, the Skill tool and its own working folder", (
   assert.ok(options.allowedTools?.includes("Skill"));
   // Without skills the run keeps no built-in tools.
   assert.deepEqual(runAs("alice", () => adapter.buildOptions(input)).tools, []);
+});
+
+test("outside MCP servers are pre-approved and get each run's signed user", () => {
+  const shared = adapter.buildOptions(input);
+  assert.ok(shared.allowedTools?.includes("mcp__lab"));
+  assert.deepEqual(shared.mcpServers?.lab, { type: "http", url: "http://lab/mcp", alwaysLoad: true });
+  const run = runAs("alice", () => adapter.buildOptions(input), null, () => {}, "v1.alice.sig");
+  assert.deepEqual((run.mcpServers?.lab as { headers?: object }).headers, { "x-knowledge-user": "v1.alice.sig" });
+  assert.ok(run.mcpServers?.copilotkit);
 });
