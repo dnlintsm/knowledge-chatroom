@@ -317,7 +317,7 @@ export function SkillsToolbar({ onBrowse, notify }: { onBrowse: () => void; noti
   );
 }
 
-/** A skill row's actions: export; publish (workspace skills); update, fork, remove (hub skills). */
+/** A skill row's actions: export; publish, delete (workspace skills); update, fork, remove (hub skills). */
 export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Notify }) {
   const { hub, canSetDefaults, canPublish, reload } = useSkills();
   const [busy, setBusy] = useState(false);
@@ -336,6 +336,8 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
     }
   };
   const name = encodeURIComponent(skill.name);
+  // Its folder: the name comes from SKILL.md, so the two can differ.
+  const folder = skill.path?.replace(/SKILL\.md$/, "") ?? `skills/${skill.name}/`;
 
   return (
     <>
@@ -371,6 +373,24 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
             className={linkButton}
           >
             Publish
+          </button>
+        )}
+        {skill.source === "workspace" && canSetDefaults && (
+          <button
+            type="button"
+            data-testid="skill-delete"
+            disabled={busy}
+            title={`Delete ${folder} and everything in it`}
+            onClick={() => {
+              if (!window.confirm(`Delete the skill ${skill.name} (${folder} and all its files)?`)) return;
+              void run(async () => {
+                await call(`/api/skills/${name}`, { method: "DELETE" });
+                return `Deleted ${skill.name}.`;
+              });
+            }}
+            className={linkButton}
+          >
+            Delete
           </button>
         )}
         {skill.hub && canSetDefaults && (
