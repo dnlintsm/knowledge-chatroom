@@ -394,3 +394,21 @@ test("file references on a phone show the editor", async ({ page }) => {
   // Only possible once the editor pane is on screen.
   await expect(page.getByTestId("file-editor")).toBeFocused();
 });
+
+test("first-round suggestions follow what is open", async ({ page }) => {
+  await openHome(page);
+  const chip = (name: string | RegExp) => page.getByTestId("copilot-suggestion").filter({ hasText: name });
+  // Focusing the run opens its report: summarize it, draft a note, analyze the report.
+  await expect(chip("Summarize report.md")).toBeVisible();
+  await expect(chip("Draft a note")).toBeVisible();
+  await expect(chip("Analyze the etch-2026-10-01 report")).toBeVisible();
+  // Similar experiments needs server storage (its tools live there).
+  await expect(chip("Search similar experiments")).toHaveCount(0);
+  await shot(page, "17-chat-suggestions");
+
+  // The summarize chip follows the open file.
+  await page.getByRole("treeitem", { name: /effects\.csv/ }).click();
+  await expect(chip("Summarize effects.csv")).toBeVisible();
+  await chip("Analyze the etch-2026-10-01 report").click();
+  await expect(page.getByText(`Analyze the report at ${RUN}/xdoe-report/report.md`)).toBeVisible();
+});
