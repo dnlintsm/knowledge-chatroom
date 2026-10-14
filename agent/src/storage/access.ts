@@ -343,6 +343,17 @@ export class AccessService {
     }
   }
 
+  /**
+   * Makes the user owner of a node they just added, unless they own it
+   * already (013_node_creator_owns.sql). With row security a trigger does
+   * this, since the restricted role can't write grants.
+   */
+  ownNewNode(tx: Tx, userId: string, nodeId: string) {
+    return tx`
+      SELECT own_new_node(workspace_id, ${userId}, id, path) FROM nodes
+      WHERE id = ${nodeId} AND workspace_id = ${this.workspaceId}`;
+  }
+
   audit(tx: Tx, principal: Principal, action: string, target: Record<string, unknown>) {
     return tx`
       INSERT INTO audit_log (workspace_id, actor_type, actor_id, action, target)
