@@ -4,7 +4,7 @@ import {
   createCopilotEndpoint,
   InMemoryAgentRunner,
 } from "@copilotkit/runtime/v2";
-import { createDefaultAgent } from "@/agent";
+import { createDefaultAgent, createSuggesterAgent, dynamicSuggestions } from "@/agent";
 import { handle } from "hono/vercel";
 import {
   IDENTITY_HEADER,
@@ -22,8 +22,12 @@ import type { NextRequest } from "next/server";
 // wiring, MCP apps, openGenerativeUI, a2ui — mirrors the canonical demo.
 const defaultAgent = createDefaultAgent();
 
+// "suggester" writes the chat's follow-up chips; without it the browser keeps
+// the first-round chips (src/components/workspace/use-chat-suggestions.ts).
 const runtime = new CopilotRuntime({
-  agents: { default: defaultAgent },
+  agents: dynamicSuggestions()
+    ? { default: defaultAgent, suggester: createSuggesterAgent() }
+    : { default: defaultAgent },
   // --- copilotkit:intelligence (remove this block to opt out) ---
   ...(process.env.CPK_INTELLIGENCE_API_KEY
     ? {

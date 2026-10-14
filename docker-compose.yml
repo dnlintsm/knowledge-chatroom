@@ -56,6 +56,7 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
@@ -98,6 +99,7 @@ services:
         RUN_DIR_MARKERS: ${RUN_DIR_MARKERS:-xdoe-report}
     environment:
       AGENT_URL: http://agent:8000
+      CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
     ports:
       - "3000:3000"
     depends_on:

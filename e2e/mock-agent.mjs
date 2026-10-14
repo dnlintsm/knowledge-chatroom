@@ -22,6 +22,9 @@
  * skills status bar. Without STORAGE_URL, /skills answers with the built-in
  * skills and keeps their modes in memory.
  *
+ * `POST /suggest` answers the chat's follow-up chips with two canned ones
+ * (FOLLOW_UPS), as the real agent's src/suggest.ts does with a small model.
+ *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
  * storage routes /files, /nodes, /access, /experiments, /search, /proposals,
  * /skills and /hub are forwarded there, so the preview can show server storage and the knowledge
@@ -53,6 +56,12 @@ const ARTIFACT = `# Summary
 - The middle pane previews or edits the open file.
 - The chat sees the open file and your selection.
 `;
+
+// What POST /suggest answers after every reply.
+const FOLLOW_UPS = [
+  { title: "Check the evidence", message: "How strong is the evidence for that? Point me to the lines that support it." },
+  { title: "Save it as a note", message: "Save what you just told me as a short note next to the report." },
+];
 
 const TOOL_REPLIES = {
   writeWorkspaceFile: `Saved the summary to ${ARTIFACT_PATH} and opened it.`,
@@ -149,7 +158,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || pathname !== "/") {
+  if (req.method !== "POST" || (pathname !== "/" && pathname !== "/suggest")) {
     res.writeHead(404).end();
     return;
   }
@@ -173,6 +182,18 @@ const server = http.createServer(async (req, res) => {
   const threadId = input.threadId ?? randomUUID();
   const runId = input.runId ?? randomUUID();
   const messageId = randomUUID();
+
+  if (pathname === "/suggest") {
+    // Canned follow-up chips, as the real agent's small-model call returns them.
+    const toolCallId = randomUUID();
+    send({ type: "RUN_STARTED", threadId, runId });
+    send({ type: "TOOL_CALL_START", toolCallId, toolCallName: "copilotkitSuggest", parentMessageId: messageId });
+    send({ type: "TOOL_CALL_ARGS", toolCallId, delta: JSON.stringify({ suggestions: FOLLOW_UPS }) });
+    send({ type: "TOOL_CALL_END", toolCallId });
+    send({ type: "RUN_FINISHED", threadId, runId });
+    res.end();
+    return;
+  }
 
   const messages = input.messages ?? [];
   const last = messages[messages.length - 1];

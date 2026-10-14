@@ -2,7 +2,8 @@
  * Claude Agent SDK (TypeScript) starter — AG-UI SSE server.
  *
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
- * `adapter.run(input)`, `GET /health` reports status. Runs on port 8000.
+ * `adapter.run(input)`, `POST /suggest` answers the chat's follow-up chips
+ * (src/suggest.ts), `GET /health` reports status. Runs on port 8000.
  * When DATABASE_URL is set it also serves the workspace file API under
  * `/files`, the knowledge tree under `/nodes`, experiments under `/experiments`,
  * search under `/search`, proposed versions under `/proposals` and groups
@@ -30,6 +31,7 @@ import { createSkillsHandler } from "./skills/http";
 import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
+import { suggest } from "./suggest";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
@@ -71,6 +73,31 @@ async function prepareSkills(
   }
 }
 
+/** With login on, only requests the Next.js app signed for a user get through. */
+function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const secret = storageConfig?.authSecret;
+  const header = req.headers[IDENTITY_HEADER];
+  if (secret && !(typeof header === "string" && verifyIdentity(header, secret))) {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Sign in first" }));
+    return false;
+  }
+  return true;
+}
+
+/** The AG-UI run input in the body; null after answering 400 when it isn't JSON. */
+async function readInput(req: http.IncomingMessage, res: http.ServerResponse): Promise<RunAgentInput | null> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf-8")) as RunAgentInput;
+  } catch {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid JSON body" }));
+    return null;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -91,16 +118,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/suggest") {
+    if (!signedIn(req, res)) return;
+    const input = await readInput(req, res);
+    if (!input) return;
+    const encoder = new EventEncoder({ accept: req.headers.accept ?? "text/event-stream" });
+    const events = await suggest(input);
+    res.writeHead(200, { "Content-Type": encoder.getContentType(), "Cache-Control": "no-cache" });
+    for (const event of events) res.write(encoder.encode(event as never));
+    res.end();
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/") {
     // With login on, a run must be for a signed-in user (the Next.js app
     // signs that into the header), and Claude's file tools act as that user.
-    const secret = storageConfig?.authSecret;
-    const header = req.headers[IDENTITY_HEADER];
-    if (secret && !(typeof header === "string" && verifyIdentity(header, secret))) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Sign in first" }));
-      return;
-    }
+    if (!signedIn(req, res)) return;
     // Undefined while storage is still starting: the tools then decide when
     // called (the local user without login, nobody with it).
     const storage = currentStorage();
@@ -114,19 +147,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-
-    let input: RunAgentInput;
-    try {
-      input = JSON.parse(
-        Buffer.concat(chunks).toString("utf-8"),
-      ) as RunAgentInput;
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON body" }));
-      return;
-    }
+    const input = await readInput(req, res);
+    if (!input) return;
 
     const encoder = new EventEncoder({
       accept: req.headers.accept ?? "text/event-stream",
