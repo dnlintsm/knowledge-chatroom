@@ -1,13 +1,12 @@
 "use client";
 
 import { Workspace, WorkspaceProvider } from "@/components/workspace";
-import { useGenerativeUIExamples, useExampleSuggestions } from "@/hooks";
+import { useGenerativeUIExamples } from "@/hooks";
 
 import { CopilotChatConfigurationProvider } from "@copilotkit/react-core/v2";
 
 function Demos() {
   useGenerativeUIExamples();
-  useExampleSuggestions();
   return null;
 }
 

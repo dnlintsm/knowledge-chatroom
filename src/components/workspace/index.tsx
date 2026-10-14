@@ -21,6 +21,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import { ActionsProvider } from "./actions";
 import { useWorkspaceAgent } from "./agent-bridge";
+import { useChatSuggestions } from "./use-chat-suggestions";
 import { ChatPane } from "./chat-pane";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
@@ -55,6 +56,7 @@ export function Workspace() {
 
 function WorkspaceLayout() {
   useWorkspaceAgent();
+  useChatSuggestions();
   const { layout, panes, sidebar } = useWorkbench();
   const dragStart = useRef(0);
   const { mobilePane } = layout;
