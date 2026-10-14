@@ -395,7 +395,7 @@ test("file references on a phone show the editor", async ({ page }) => {
   await expect(page.getByTestId("file-editor")).toBeFocused();
 });
 
-test("first-round suggestions follow what is open", async ({ page }) => {
+test("chat suggestions: first round follows what is open, then follow-ups", async ({ page }) => {
   await openHome(page);
   const chip = (name: string | RegExp) => page.getByTestId("copilot-suggestion").filter({ hasText: name });
   // Focusing the run opens its report: summarize it, draft a note, analyze the report.
@@ -411,4 +411,12 @@ test("first-round suggestions follow what is open", async ({ page }) => {
   await expect(chip("Summarize effects.csv")).toBeVisible();
   await chip("Analyze the etch-2026-10-01 report").click();
   await expect(page.getByText(`Analyze the report at ${RUN}/xdoe-report/report.md`)).toBeVisible();
+
+  // After the reply, the suggester's follow-ups replace the first round
+  // (the mock agent's canned ones without an API key).
+  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
+  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
+  await expect(chip("Draft a note")).toHaveCount(0);
+  if (process.env.E2E_MODE !== "live") await expect(chip("Check the evidence")).toBeVisible();
+  await shot(page, "17-chat-follow-ups");
 });

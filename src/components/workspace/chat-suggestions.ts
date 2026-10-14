@@ -76,3 +76,11 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
 
   return chips;
 }
+
+/**
+ * What the suggester (agent/src/suggest.ts) is asked for after each reply;
+ * it also sees the conversation and the workspace context.
+ */
+export const FOLLOW_UP_INSTRUCTIONS =
+  "Suggest the next steps the user is most likely to want after Claude's last reply, " +
+  "about the files, run, report or experiments in front of them.";
