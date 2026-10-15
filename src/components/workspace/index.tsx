@@ -20,6 +20,7 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import { ActionsProvider } from "./actions";
+import { AdminButton } from "./admin";
 import { useWorkspaceAgent } from "./agent-bridge";
 import { useChatSuggestions } from "./use-chat-suggestions";
 import { ChatPane } from "./chat-pane";
@@ -137,6 +138,7 @@ function TitleBar() {
       <RunBreadcrumb />
       <div className="ml-auto flex items-center gap-0.5">
         <ShareButton />
+        <AdminButton />
         <AccountMenu />
         <button
           type="button"

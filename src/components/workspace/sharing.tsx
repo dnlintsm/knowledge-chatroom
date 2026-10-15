@@ -12,17 +12,19 @@ import { useWorkspace } from "./store";
  * also reaches it, so that is said rather than repeated.
  */
 
-interface Person {
+export interface Person {
   id: string;
   name: string | null;
   email: string | null;
   subject: string;
 }
 
-interface Group {
+export interface Group {
   id: string;
   parentId: string | null;
   name: string;
+  /** Direct members. */
+  memberIds: string[];
 }
 
 interface Grant {
@@ -33,13 +35,13 @@ interface Grant {
   role: Role;
 }
 
-const ROLES: { role: Role; label: string }[] = [
+export const ROLES: { role: Role; label: string }[] = [
   { role: "viewer", label: "Can view" },
   { role: "editor", label: "Can edit" },
   { role: "owner", label: "Owner" },
 ];
 
-async function access<T>(path: string, init?: RequestInit): Promise<T> {
+export async function access<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(`/api/access${path}`, {
     ...init,
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
@@ -49,7 +51,7 @@ async function access<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-const personLabel = (p: Person) => p.name ?? p.email ?? p.subject;
+export const personLabel = (p: Person) => p.name ?? p.email ?? p.subject;
 
 /** The signed-in user, and signing out. Shown only with login on. */
 export function AccountMenu() {
@@ -270,7 +272,7 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
   );
 }
 
-function RoleSelect({ label, value, onChange }: { label: string; value: Role; onChange: (r: Role) => void }) {
+export function RoleSelect({ label, value, onChange }: { label: string; value: Role; onChange: (r: Role) => void }) {
   return (
     <select
       aria-label={label}
