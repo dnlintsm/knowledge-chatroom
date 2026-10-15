@@ -317,7 +317,11 @@ For local setup, see [Development](development.md).
   opens; the app keeps them in a signed cookie and signs each request it forwards to the agent
   (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
   person to sign in owns the workspace and shares nodes from the title bar's Share button
-  (people show up there once they have signed in). Viewers get the files read only, and
+  (people show up there once they have signed in). Workspace owners also get an **Admin**
+  panel next to Share (`src/components/workspace/admin.tsx`): everyone who has signed in with
+  their last activity, their workspace role (set in place), the groups and their members, and
+  recent access changes from the audit log. There is no separate admin list: owning the
+  workspace is what makes someone an admin. Viewers get the files read only, and
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies

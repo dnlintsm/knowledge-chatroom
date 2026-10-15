@@ -386,6 +386,12 @@ export class Session {
     return this.parts.access.users();
   }
 
+  /** Everyone who has signed in, with roles and groups: for workspace owners. */
+  async people() {
+    await this.need(null, "owner");
+    return this.parts.access.people();
+  }
+
   groups() {
     return this.parts.access.groups();
   }
@@ -454,9 +460,9 @@ export class Session {
     );
   }
 
-  async auditLog(limit?: number) {
+  async auditLog(limit?: number, kinds?: string[]) {
     await this.need(null, "owner");
-    return this.parts.access.auditLog(limit);
+    return this.parts.access.auditLog(limit, kinds);
   }
 }
 

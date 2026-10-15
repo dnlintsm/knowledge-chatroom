@@ -98,6 +98,9 @@ import type { Session } from "./session";
  *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
+ *   GET    /access/people           the same, with sign-up and last-active
+ *                                   times, workspace role and groups
+ *                                   (workspace owners only; for the admin panel)
  *   GET    /access/groups           the org tree, with direct members
  *   POST   /access/groups           {parentId|null, name}
  *   PATCH  /access/groups/<id>      {name}
@@ -108,7 +111,8 @@ import type { Session } from "./session";
  *   POST   /access/grants           {node|null, principalType: "user"|"group",
  *                                   principalId, role: viewer|editor|owner}
  *   DELETE /access/grants/<id>
- *   GET    /access/audit?limit=     recent changes, newest first
+ *   GET    /access/audit?limit=&kind=  recent changes, newest first; kind
+ *                                   (repeatable) keeps e.g. only group.* and grant.*
  *
  * Reading needs viewer, changing files and nodes editor, deleting a node or
  * managing grants on it owner (of that node or one above it; whoever adds a
@@ -299,6 +303,10 @@ async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL,
     return json(res, 200, { users: await session.users() });
   }
 
+  if (section === "people" && !id && method === "GET") {
+    return json(res, 200, { people: await session.people() });
+  }
+
   if (section === "groups") {
     if (!id) {
       if (method === "GET") return json(res, 200, { groups: await session.groups() });
@@ -348,7 +356,8 @@ async function handleAccess(req: IncomingMessage, res: ServerResponse, url: URL,
 
   if (section === "audit" && !id && method === "GET") {
     const limit = Number.parseInt(url.searchParams.get("limit") ?? "100", 10);
-    return json(res, 200, { entries: await session.auditLog(Number.isNaN(limit) ? 100 : limit) });
+    const kinds = url.searchParams.getAll("kind").filter(Boolean);
+    return json(res, 200, { entries: await session.auditLog(Number.isNaN(limit) ? 100 : limit, kinds) });
   }
 
   json(res, 404, { error: "Not found" });
