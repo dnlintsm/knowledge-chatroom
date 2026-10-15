@@ -51,12 +51,13 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * Whether plain http is acceptable for `url`: only on this machine, or
- * anywhere when AUTH_ALLOW_HTTP=true (development and tests only).
+ * anywhere when AUTH_ALLOW_HTTP=true outside production (development and tests).
  */
 export function httpAllowed(url: URL, env: Env = process.env): boolean {
   if (url.protocol === "https:") return true;
   if (url.protocol !== "http:") return false;
-  return LOOPBACK.has(url.hostname) || url.hostname.endsWith(".localhost") || env.AUTH_ALLOW_HTTP === "true";
+  if (LOOPBACK.has(url.hostname) || url.hostname.endsWith(".localhost")) return true;
+  return env.AUTH_ALLOW_HTTP === "true" && env.NODE_ENV !== "production";
 }
 
 /**
@@ -80,7 +81,7 @@ export function checkOidcSettings(env: Env = process.env): void {
       continue;
     }
     if (!httpAllowed(url, env)) {
-      problems.push(`${name} must use https (http only for localhost, or with AUTH_ALLOW_HTTP=true in development)`);
+      problems.push(`${name} must use https (http only for localhost, or with AUTH_ALLOW_HTTP=true outside production)`);
     }
   }
   if (problems.length) throw new Error(`Login is on (AUTH_MODE=oidc) but ${problems.join("; ")}`);

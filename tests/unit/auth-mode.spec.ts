@@ -34,6 +34,8 @@ test("http is only for this machine unless explicitly allowed", () => {
   expect(httpAllowed(new URL("http://keycloak:8080"), {})).toBe(false);
   expect(httpAllowed(new URL("http://localhost.example.com"), {})).toBe(false);
   expect(httpAllowed(new URL("http://keycloak:8080"), { AUTH_ALLOW_HTTP: "true" })).toBe(true);
+  expect(httpAllowed(new URL("http://keycloak:8080"), { AUTH_ALLOW_HTTP: "true", NODE_ENV: "production" })).toBe(false);
+  expect(httpAllowed(new URL("http://localhost:9400"), { NODE_ENV: "production" })).toBe(true);
 });
 
 test("sign-in settings are complete and use https", () => {

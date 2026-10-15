@@ -32,10 +32,13 @@ import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
 import { suggest } from "./suggest";
+import { authSettings } from "../../shared/auth-mode";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
+// Login settings are checked at startup whether or not storage is on.
+const authSecret = authSettings().secret;
 // Storage is optional (DATABASE_URL) and starts in the background.
 const storageConfig = storageConfigFromEnv();
 startStorage(storageConfig);
@@ -75,7 +78,7 @@ async function prepareSkills(
 
 /** With login on, only requests the Next.js app signed for a user get through. */
 function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  const secret = storageConfig?.authSecret;
+  const secret = authSecret;
   const header = req.headers[IDENTITY_HEADER];
   if (secret && !(typeof header === "string" && verifyIdentity(header, secret))) {
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -92,7 +95,7 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
  * so this one lasts as long as a run may. None without login.
  */
 function identityForTools(req: http.IncomingMessage): ((server: string) => string) | undefined {
-  const secret = storageConfig?.authSecret;
+  const secret = authSecret;
   const header = req.headers[IDENTITY_HEADER];
   const identity = secret && typeof header === "string" ? verifyIdentity(header, secret) : null;
   if (!secret || !identity) return undefined;
