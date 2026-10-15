@@ -13,8 +13,7 @@ export type SidebarView =
   | "knowledge"
   | "skills"
   | "uploads"
-  | "artifacts"
-  | "chats";
+  | "artifacts";
 
 export interface Layout {
   sideOpen: boolean;

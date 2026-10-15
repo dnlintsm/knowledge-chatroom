@@ -12,7 +12,6 @@ import {
   MessagesSquare,
   Moon,
   PanelLeft,
-  PanelRight,
   PanelsTopLeft,
   Sun,
   X,
@@ -37,7 +36,7 @@ export { useWorkbench, type Workbench } from "./workbench";
 
 /**
  * IDE-style workspace: icon rail + side panel (files, skills, uploads,
- * artifacts, chats) | editor/preview | Claude chat. Side and chat panes resize
+ * artifacts) | editor/preview | Claude chat (with its history). Side and chat panes resize
  * by dragging and collapse via the rail / the title bar; sizes are remembered.
  * Below 1024px one pane shows at a time with a bottom switcher. All of it is
  * driven through the workbench contract (workbench.tsx).
@@ -122,7 +121,7 @@ function WorkspaceLayout() {
 
 function TitleBar() {
   const { setTheme } = useTheme();
-  const { panes, mode } = useWorkbench();
+  const { panes, mode, chat } = useWorkbench();
   const sideOpen = panes.isOpen("explorer");
   const chatOpen = panes.isOpen("chat");
   const button =
@@ -148,18 +147,6 @@ function TitleBar() {
         >
           <PanelLeft className="size-4" />
         </button>
-        {mode === "focus" && (
-          <button
-            type="button"
-            aria-label={chatOpen ? "Hide chat" : "Show chat"}
-            title={chatOpen ? "Hide chat" : "Show chat"}
-            aria-pressed={chatOpen}
-            onClick={() => panes.toggle("chat")}
-            className={cn(button, "max-lg:hidden")}
-          >
-            <PanelRight className="size-4" />
-          </button>
-        )}
         <button
           type="button"
           aria-label="Toggle theme"
@@ -172,6 +159,23 @@ function TitleBar() {
           <Sun className="size-4 dark:hidden" />
           <Moon className="hidden size-4 dark:block" />
         </button>
+        {/* Last, at the top-right corner, where people look for the chat. */}
+        {mode === "focus" && (
+          <button
+            type="button"
+            aria-label={chatOpen ? "Hide chat" : "Show chat"}
+            title={chatOpen ? "Hide chat" : "Chat with Claude"}
+            aria-pressed={chatOpen}
+            onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
+            className={cn(
+              button,
+              "ml-1 border border-[var(--border)]",
+              chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
+            )}
+          >
+            <MessagesSquare className="size-4" />
+          </button>
+        )}
       </div>
     </header>
   );
