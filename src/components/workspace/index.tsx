@@ -167,9 +167,10 @@ function TitleBar() {
             title={chatOpen ? "Hide chat" : "Chat with Claude"}
             aria-pressed={chatOpen}
             onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
+            // Phones switch to the chat with the bottom pane switcher instead.
             className={cn(
               button,
-              "ml-1 border border-[var(--border)]",
+              "ml-1 border border-[var(--border)] max-lg:hidden",
               chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
             )}
           >

@@ -98,6 +98,8 @@ test("workspace walkthrough", async ({ page }) => {
   await shot(page, "07-chats-list");
   await page.getByRole("button", { name: "Chat history" }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  // Hidden while showing the history, the chat reopens on the conversation.
+  await page.getByRole("button", { name: "Chat history" }).click();
 
   await page.getByRole("button", { name: "Hide chat" }).click();
   await page.getByRole("button", { name: "Files", exact: true }).click();

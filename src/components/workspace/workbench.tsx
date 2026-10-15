@@ -214,15 +214,18 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }, [runDir, ws.storageMode, active, getFile, open]);
 
   const startNewThread = chatConfig?.startNewThread;
+  const setDrawerOpen = chatConfig?.setDrawerOpen;
   const chatAvailable = mode === "focus";
   const focusChat = useCallback(() => {
     if (!chatAvailable) return;
+    // Back to the conversation if the pane was showing the chat history.
+    setDrawerOpen?.(false);
     apply({ type: "show", pane: "chat" });
     // After the pane renders, also when it was hidden until now.
     requestAnimationFrame(() =>
       document.querySelector<HTMLTextAreaElement>(CHAT_INPUT_SELECTOR)?.focus(),
     );
-  }, [apply, chatAvailable]);
+  }, [apply, chatAvailable, setDrawerOpen]);
 
   const value = useMemo<Workbench>(() => {
     const shown = chatAvailable ? layout : withoutChat(layout);
