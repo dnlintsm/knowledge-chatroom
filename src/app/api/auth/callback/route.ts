@@ -8,6 +8,7 @@ import {
   clearCookie,
   oidcConfig,
   readLogin,
+  safeReturnTo,
   sessionCookie,
   userFromClaims,
 } from "@/lib/auth";
@@ -44,7 +45,10 @@ export async function GET(req: NextRequest) {
   }
   if (!claims) return retry("The login provider didn't say who you are.");
 
-  const res = NextResponse.redirect(new URL(login.returnTo, appUrl(req)));
+  // Checked again here, and the result must stay on this app's origin.
+  const app = appUrl(req);
+  const destination = new URL(safeReturnTo(login.returnTo), app);
+  const res = NextResponse.redirect(destination.origin === new URL(app).origin ? destination : new URL("/", app));
   res.cookies.set(sessionCookie(req, userFromClaims(claims)));
   res.cookies.set(clearCookie(req, LOGIN_COOKIE, "/api/auth"));
   return res;
