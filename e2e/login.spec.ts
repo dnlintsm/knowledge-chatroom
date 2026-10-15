@@ -155,6 +155,16 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.getByRole("button", { name: "Files", exact: true }).click();
   await expect(bob.getByRole("button", { name: "New note" })).toBeVisible();
 
+  // Alice hands ownership to Bob and steps down to editor: the app reloads
+  // with her new access, so the Admin button goes away.
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  await admin.getByLabel("Workspace role for Bob Builder").selectOption("owner");
+  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("owner");
+  alice.once("dialog", (d) => void d.accept());
+  await admin.getByLabel("Workspace role for Alice Admin").selectOption("editor");
+  await expect(alice.getByRole("button", { name: "Account" })).toBeVisible();
+  await expect(alice.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
+
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();
   await bob.getByRole("button", { name: "Sign out" }).click();

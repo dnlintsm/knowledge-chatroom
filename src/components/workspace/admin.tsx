@@ -104,6 +104,13 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
   const run = async (action: () => Promise<unknown>) => {
     try {
       await action();
+      // A change can take away your own ownership (your role, or a group's).
+      // The panel's reads need it, so reload the app with your new access.
+      const { rootRole } = await access<{ rootRole: Role | null }>("");
+      if (rootRole !== "owner") {
+        window.location.reload();
+        return;
+      }
       setError(null);
       await load();
     } catch (err) {
@@ -190,8 +197,15 @@ function PeopleTab({
 }) {
   if (!people) return <p className="text-[var(--muted-foreground)]">Loading…</p>;
   const groupName = (id: string) => groups.find((g) => g.id === id)?.name ?? "Unknown group";
-  const setRole = (p: PersonRow, role: Role | "") =>
-    run(() =>
+  const setRole = (p: PersonRow, role: Role | "") => {
+    if (
+      p.id === me &&
+      role !== "owner" &&
+      !window.confirm("Give up owning the workspace? You will lose this panel unless a group makes you an owner.")
+    ) {
+      return;
+    }
+    return run(() =>
       role === ""
         ? access(`/grants/${p.grantId}`, { method: "DELETE" })
         : access("/grants", {
@@ -199,6 +213,7 @@ function PeopleTab({
             body: JSON.stringify({ node: null, principalType: "user", principalId: p.id, role }),
           }),
     );
+  };
   return (
     <>
       <p className="mb-3 text-xs text-[var(--muted-foreground)]">
