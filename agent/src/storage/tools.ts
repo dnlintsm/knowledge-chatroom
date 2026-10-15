@@ -39,6 +39,65 @@ export function numberLines(content: string): string {
   return lines.map((line, i) => `${String(i + 1).padStart(width)}\t${line}`).join("\n");
 }
 
+/**
+ * Lines `offset`.. of a file (1-based), at most `limit` of them and at most
+ * `maxChars` characters, numbered like numberLines(). `column` starts the
+ * first line part way in, for lines longer than a whole read (minified JSON,
+ * say). The header line says which lines these are and, when the file goes
+ * on, where to continue from, so Claude can page through files of any size.
+ */
+export function readLines(
+  path: string,
+  content: string,
+  {
+    offset = 1,
+    column = 1,
+    limit,
+    maxChars = MAX_READ_CHARS,
+  }: { offset?: number; column?: number; limit?: number; maxChars?: number } = {},
+): string {
+  const lines = content.split(/\r\n|\r|\n/);
+  const total = lines.length;
+  if (offset > total) {
+    return `${path} (${total} lines; offset ${offset} is past the end)`;
+  }
+  if (column > 1 && column > lines[offset - 1].length) {
+    return `${path} (line ${offset} has ${lines[offset - 1].length} characters; column ${column} is past its end)`;
+  }
+  const width = String(total).length;
+  const out: string[] = [];
+  let chars = 0;
+  // Set when a line didn't fit whole: the column to continue that line from.
+  let resumeAt: number | null = null;
+  const end = limit === undefined ? total : Math.min(total, offset - 1 + limit);
+  for (let i = offset - 1; i < end; i++) {
+    const from = i === offset - 1 ? column - 1 : 0;
+    let line = lines[i].slice(from);
+    if (chars + line.length > maxChars) {
+      if (out.length > 0) break;
+      line = line.slice(0, maxChars);
+      resumeAt = from + maxChars + 1;
+    }
+    out.push(`${String(i + 1).padStart(width)}\t${line}`);
+    chars += line.length + 1;
+    if (resumeAt !== null) break;
+  }
+  const last = offset - 1 + out.length;
+  const whole = offset === 1 && column === 1 && last === total && resumeAt === null;
+  let header = path;
+  if (!whole) {
+    header += ` (lines ${offset}-${last} of ${total}`;
+    if (column > 1) header += `; line ${offset} from column ${column}`;
+    if (resumeAt !== null) {
+      header += `; line ${last} cut before column ${resumeAt}; continue with offset ${last} column ${resumeAt}`;
+    } else if (last < total) {
+      header += `; continue with offset ${last + 1}`;
+    }
+    header += ")";
+  }
+  return `${header}\n${out.join("\n")}`;
+}
+
 const nodeParam = z
   .string()
   .optional()
@@ -188,13 +247,37 @@ export function createFileTools(
       "read_file",
       "Read a workspace file by path (in a knowledge node or experiment when given). " +
         "Each line starts with its line number and a tab, for citing lines; the " +
-        "numbers are not part of the file.",
+        "numbers are not part of the file. A read returns at most " +
+        `${MAX_READ_CHARS} characters; when a file is longer, the first line says which ` +
+        "lines you got and the offset to continue from. Use offset and limit to read " +
+        "part of a file, e.g. the lines around a passage search_files found.",
       {
         path: z.string().describe("Workspace path, e.g. notes/welcome.md"),
+        offset: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Line number to start reading from (1-based). Defaults to 1."),
+        column: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            "Character in the offset line to start from (1-based), for continuing a line " +
+              "too long for one read. Defaults to 1.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Most lines to return. Defaults to as many as fit in one read."),
         node: nodeParam,
         experiment: experimentParam,
       },
-      ({ path, ...place }) =>
+      ({ path, offset, column, limit, ...place }) =>
         inPlace(place, async (service) => {
           const file = await service.read(path);
           if (!file) return error(`No file at ${path}`);
@@ -208,11 +291,7 @@ export function createFileTools(
             });
           }
           const content = new TextDecoder().decode(file.bytes);
-          const truncated = content.length > MAX_READ_CHARS;
-          return text(
-            `${info.path}${truncated ? ` (first ${MAX_READ_CHARS} characters)` : ""}\n` +
-              numberLines(content.slice(0, MAX_READ_CHARS)),
-          );
+          return text(readLines(info.path, content, { offset, column, limit }));
         }),
     ),
     tool(
