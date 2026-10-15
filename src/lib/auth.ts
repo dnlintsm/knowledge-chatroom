@@ -134,11 +134,27 @@ export interface LoginState {
 export const readLogin = (req: NextRequest) =>
   unseal<LoginState & { exp: number }>("l1", req.cookies.get(LOGIN_COOKIE)?.value, authSecret()!);
 
-/** Only paths on this app, so a link can't send users elsewhere after login. */
+// Stands in for the app's origin: only whether a value stays on it matters.
+const SAME_ORIGIN = "https://app.invalid";
+
+/**
+ * Only paths on this app, so a link can't send users elsewhere after login.
+ * The URL parser drops tabs and newlines and reads "\" as "/", so the value
+ * is checked as the parser will see it, and returned in that form.
+ */
 export function safeReturnTo(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")
-    ? value
-    : "/";
+  // eslint-disable-next-line no-control-regex
+  if (!value || !value.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(value)) return "/";
+  let url: URL;
+  try {
+    url = new URL(value, SAME_ORIGIN);
+  } catch {
+    return "/";
+  }
+  if (url.origin !== SAME_ORIGIN) return "/";
+  const path = `${url.pathname}${url.search}${url.hash}`;
+  // "/x/..//evil.com" normalizes to "//evil.com": a host once resolved again.
+  return path.startsWith("//") ? "/" : path;
 }
 
 let provider: Promise<oidc.Configuration> | null = null;
