@@ -54,6 +54,8 @@ services:
       context: .
       target: agent
     environment:
+      # The demo runs without login; production images refuse to guess.
+      AUTH_MODE: local
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
       SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
@@ -101,6 +103,7 @@ services:
         RUN_DIR_MARKERS: ${RUN_DIR_MARKERS:-xdoe-report}
     environment:
       AGENT_URL: http://agent:8000
+      AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
     ports:
       - "3000:3000"

@@ -6,6 +6,8 @@
  * (docker-compose.yml), Garage, AWS S3, Cloudflare R2 or Backblaze B2.
  */
 
+import { authSettings } from "../../../shared/auth-mode";
+
 export interface StorageConfig {
   databaseUrl: string;
   s3: {
@@ -99,10 +101,8 @@ function embeddingApiFromEnv(env: NodeJS.ProcessEnv): EmbeddingApiConfig | undef
   return { baseUrl, apiKey: env.EMBEDDING_API_KEY || undefined, dimensions: dims };
 }
 
+// AUTH_MODE / AUTH_SECRET, read as the Next.js app reads them; throws on
+// settings that would silently turn login off in production.
 function authSecretFromEnv(env: NodeJS.ProcessEnv) {
-  const secret = env.AUTH_SECRET || undefined;
-  if (secret && secret.length < 32) {
-    throw new Error("AUTH_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)");
-  }
-  return secret;
+  return authSettings(env).secret;
 }

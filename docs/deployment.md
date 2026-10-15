@@ -21,9 +21,11 @@ its dependencies and the sibling `shared/` directory and run `npm --prefix agent
 
 Configure `AGENT_URL` on Next.js to reach the agent over a private network. Expose
 the Next.js UI through HTTPS. Keep the agent HTTP port private: Next.js signs
-forwarded identities, and users should not call the agent directly. Login is
-optional, but a shared workspace should configure the OIDC values and shared
-`AUTH_SECRET` described in [Development](development.md).
+forwarded identities, and users should not call the agent directly. Set `AUTH_MODE`
+on both: `oidc` with the OIDC values, `APP_URL` and shared `AUTH_SECRET` described in
+[Development](development.md) for a shared workspace, or `local` for a single-user
+setup without login. Production builds refuse to start when it is unset and no
+`AUTH_SECRET` is given, so a missing secret can't silently turn login off.
 
 Persist PostgreSQL and the S3 bucket together; files and their versions reference
 content hashes in the bucket. Set database/object-store credentials for the agent.

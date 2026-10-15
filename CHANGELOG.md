@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Login settings fail closed (#64): set `AUTH_MODE=oidc` or `AUTH_MODE=local`. A
+  production server with neither `AUTH_MODE` nor `AUTH_SECRET` now refuses to start
+  instead of running without login; with login, `APP_URL` is required in production
+  and the issuer and `APP_URL` must use https unless on localhost (`AUTH_ALLOW_HTTP=true`
+  for development). The docker demo sets `AUTH_MODE=local`.
+
 ## 0.0.1 — first demo release
 
 The first tagged version of Knowledge Chatroom: an AI-assisted workspace where you
