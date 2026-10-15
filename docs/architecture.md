@@ -307,11 +307,13 @@ For local setup, see [Development](development.md).
   check access in one place (`agent/src/storage/session.ts`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is
   one built-in user who owns everything, so nothing changes for a single-user setup.
-- **Login** (optional): set `AUTH_SECRET` (the same value for the app and the agent, at least
+- **Login** (optional): set `AUTH_MODE=oidc`, `AUTH_SECRET` (the same value for the app and the agent, at least
   32 characters, e.g. `openssl rand -hex 32`) and an OpenID Connect provider (`OIDC_ISSUER`,
   `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` if the client has one; Keycloak, Authentik, Google,
   Entra ID and others work). Register `<APP_URL>/api/auth/callback` as the redirect URI, and
-  set `APP_URL` when the app sits behind a proxy. Users then sign in before the workspace
+  set `APP_URL` (required in production; https unless on localhost). `AUTH_MODE=local` runs
+  without login; a production server with neither refuses to start rather than guess
+  (`shared/auth-mode.ts`). Users then sign in before the workspace
   opens; the app keeps them in a signed cookie and signs each request it forwards to the agent
   (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
   person to sign in owns the workspace and shares nodes from the title bar's Share button

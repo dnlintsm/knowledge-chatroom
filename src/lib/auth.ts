@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import * as oidc from "openid-client";
 
+import { authSettings, checkOidcSettings, httpAllowed } from "../../shared/auth-mode";
+
 /**
  * Login, for deployments that set AUTH_SECRET (the agent server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
@@ -10,7 +12,8 @@ import * as oidc from "openid-client";
  * short-lived signed X-Knowledge-User header (agent/src/storage/identity.ts
  * checks it), so the agent knows whose access rules apply.
  *
- * Without AUTH_SECRET there is no login and everyone is the local user.
+ * AUTH_MODE=local turns login off and everyone is the local user; see
+ * shared/auth-mode.ts for how the mode is chosen when it is unset.
  */
 
 export const SESSION_COOKIE = "kc_session";
@@ -29,13 +32,15 @@ export interface SessionUser {
   name?: string;
 }
 
+/**
+ * The signing secret when login is on, null in local mode. Throws when the
+ * settings are incomplete, so a misconfigured deployment fails closed.
+ */
 export function authSecret(): string | null {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return null;
-  if (secret.length < 32) {
-    throw new Error("AUTH_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)");
-  }
-  return secret;
+  const settings = authSettings();
+  if (settings.mode === "local") return null;
+  checkOidcSettings();
+  return settings.secret!;
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -145,13 +150,13 @@ let provider: Promise<oidc.Configuration> | null = null;
 
 /** The provider's settings, discovered once from OIDC_ISSUER. */
 export function oidcConfig(): Promise<oidc.Configuration> {
-  const issuer = process.env.OIDC_ISSUER;
-  const clientId = process.env.OIDC_CLIENT_ID;
-  if (!issuer || !clientId) {
-    return Promise.reject(
-      new Error("Login is on (AUTH_SECRET) but OIDC_ISSUER and OIDC_CLIENT_ID are not set"),
-    );
+  try {
+    checkOidcSettings();
+  } catch (err) {
+    return Promise.reject(err);
   }
+  const issuer = process.env.OIDC_ISSUER!;
+  const clientId = process.env.OIDC_CLIENT_ID!;
   const secret = process.env.OIDC_CLIENT_SECRET;
   const url = new URL(issuer);
   provider ??= oidc
@@ -161,8 +166,8 @@ export function oidcConfig(): Promise<oidc.Configuration> {
       secret ? { client_secret: secret } : undefined,
       // Without a secret this is a public client; PKCE protects the code.
       secret ? undefined : oidc.None(),
-      // Plain http only for a provider on this machine (development).
-      url.protocol === "http:" ? { execute: [oidc.allowInsecureRequests] } : undefined,
+      // checkOidcSettings() only lets http through for this machine or AUTH_ALLOW_HTTP.
+      url.protocol === "http:" && httpAllowed(url) ? { execute: [oidc.allowInsecureRequests] } : undefined,
     )
     .catch((err) => {
       provider = null;

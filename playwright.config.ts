@@ -33,6 +33,8 @@ if (!useRealAgent) {
   process.env.CPK_INTELLIGENCE_API_KEY = "";
 }
 if (!withStorage) process.env.DATABASE_URL = "";
+// CI serves a production build, which needs the login mode spelled out.
+process.env.AUTH_MODE = withLogin ? "oidc" : "local";
 if (!withLogin) process.env.AUTH_SECRET = "";
 if (withLogin) {
   // Always use the test provider and a public test signing key, not real login credentials.

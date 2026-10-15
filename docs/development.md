@@ -105,12 +105,14 @@ mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 
 ## Optional login
 
-Set the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.
+Set `AUTH_MODE=oidc` and the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.
 Generate one with `openssl rand -hex 32`. Configure `OIDC_ISSUER`, `OIDC_CLIENT_ID`
 and, for confidential clients, `OIDC_CLIENT_SECRET`. Register
 `<APP_URL>/api/auth/callback` with the provider; set `APP_URL` to the external UI URL.
-The first person to sign in owns the workspace. Without login, one built-in user
-owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
+The issuer and `APP_URL` must use https unless they are on localhost; set
+`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. The first person to
+sign in owns the workspace. Without login (`AUTH_MODE=local`, or no `AUTH_SECRET`
+in development), one built-in user owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
 
 `CPK_INTELLIGENCE_API_KEY` is optional for live thread history. Its browser gate
 is resolved at build time, so rebuild after changing it for a production run.
