@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- Admin panel for workspace owners (#67): see everyone who has signed in and when they
+  were last active, set their workspace role, create and nest groups and add or remove
+  members, and read recent access changes. Migration `014_last_seen.sql` adds
+  `users.last_seen_at`.
+
 ### Changed
 
 - Login settings fail closed (#64): set `AUTH_MODE=oidc` or `AUTH_MODE=local`. A

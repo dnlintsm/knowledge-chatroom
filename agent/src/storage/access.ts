@@ -31,6 +31,20 @@ export interface User {
   name: string | null;
 }
 
+/** A signed-in user as workspace owners see them in the admin panel. */
+export interface Person extends User {
+  createdAt: string;
+  /** null = not seen since activity was first recorded (014_last_seen.sql). */
+  lastSeenAt: string | null;
+  /** Their own grant on the whole workspace, if any. */
+  role: Role | null;
+  grantId: string | null;
+  /** Their best workspace role, groups included. */
+  effectiveRole: Role | null;
+  /** Groups they are a direct member of. */
+  groupIds: string[];
+}
+
 export interface Group {
   id: string;
   parentId: string | null;
@@ -75,9 +89,12 @@ function explain(err: unknown): never {
   throw err;
 }
 
+/** How often a user's last_seen_at is refreshed, at most. */
+const SEEN_EVERY_MS = 5 * 60_000;
+
 export class AccessService {
   private localUser: Promise<string> | null = null;
-  private readonly subjects = new Map<string, string>();
+  private readonly subjects = new Map<string, { id: string; seen: number }>();
 
   constructor(
     private readonly sql: Sql,
@@ -98,14 +115,22 @@ export class AccessService {
    */
   async userForSubject(subject: string, profile: { email?: string; name?: string } = {}) {
     const cached = this.subjects.get(subject);
-    if (cached) return cached;
+    if (cached) {
+      const now = Date.now();
+      if (now - cached.seen >= SEEN_EVERY_MS) {
+        cached.seen = now;
+        await this.sql`UPDATE users SET last_seen_at = now() WHERE id = ${cached.id}`;
+      }
+      return cached.id;
+    }
     const id = await this.sql.begin(async (tx) => {
       const [user] = await tx<{ id: string }[]>`
-        INSERT INTO users (subject, email, name)
-        VALUES (${subject}, ${profile.email ?? null}, ${profile.name ?? null})
+        INSERT INTO users (subject, email, name, last_seen_at)
+        VALUES (${subject}, ${profile.email ?? null}, ${profile.name ?? null}, now())
         ON CONFLICT (subject) DO UPDATE
           SET email = coalesce(EXCLUDED.email, users.email),
-              name = coalesce(EXCLUDED.name, users.name)
+              name = coalesce(EXCLUDED.name, users.name),
+              last_seen_at = now()
         RETURNING id`;
       // Serialize first sign-ins so exactly one becomes the owner.
       await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))`;
@@ -119,7 +144,7 @@ export class AccessService {
         ON CONFLICT DO NOTHING`;
       return user.id;
     });
-    this.subjects.set(subject, id);
+    this.subjects.set(subject, { id, seen: Date.now() });
     return id;
   }
 
@@ -156,6 +181,50 @@ export class AccessService {
   async users(): Promise<User[]> {
     return this.sql<User[]>`
       SELECT id, subject, email, name FROM users ORDER BY coalesce(name, email, subject)`;
+  }
+
+  /**
+   * Everyone who has signed in, with their workspace role and groups. The
+   * built-in local user is left out: it can't sign in once login is on.
+   */
+  async people(): Promise<Person[]> {
+    const rows = await this.sql<
+      {
+        id: string;
+        subject: string;
+        email: string | null;
+        name: string | null;
+        created_at: Date;
+        last_seen_at: Date | null;
+        grant_id: string | null;
+        role: Role | null;
+        effective_role: Role | null;
+        group_ids: string[];
+      }[]
+    >`
+      SELECT u.id, u.subject, u.email, u.name, u.created_at, u.last_seen_at,
+             g.id AS grant_id, g.role,
+             effective_role(${this.workspaceId}, u.id, NULL) AS effective_role,
+             coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id)
+                       FROM group_members m JOIN groups gr ON gr.id = m.group_id
+                       WHERE m.user_id = u.id AND gr.workspace_id = ${this.workspaceId}), '{}') AS group_ids
+      FROM users u
+      LEFT JOIN grants g ON g.workspace_id = ${this.workspaceId} AND g.node_id IS NULL
+        AND g.principal_type = 'user' AND g.principal_id = u.id
+      WHERE u.subject <> 'local'
+      ORDER BY lower(coalesce(u.name, u.email, u.subject))`;
+    return rows.map((r) => ({
+      id: r.id,
+      subject: r.subject,
+      email: r.email,
+      name: r.name,
+      createdAt: r.created_at.toISOString(),
+      lastSeenAt: r.last_seen_at?.toISOString() ?? null,
+      role: r.role,
+      grantId: r.grant_id,
+      effectiveRole: r.effective_role,
+      groupIds: r.group_ids,
+    }));
   }
 
   async user(id: string): Promise<User | null> {
@@ -361,7 +430,8 @@ export class AccessService {
               ${tx.json(target as never)})`;
   }
 
-  async auditLog(limit = 100): Promise<AuditEntry[]> {
+  /** Newest first; `kinds` keeps only actions starting with those (e.g. "group" for group.*). */
+  async auditLog(limit = 100, kinds?: string[]): Promise<AuditEntry[]> {
     const rows = await this.sql<
       {
         id: string;
@@ -374,6 +444,7 @@ export class AccessService {
     >`
       SELECT id, actor_type, actor_id, action, target, at FROM audit_log
       WHERE workspace_id = ${this.workspaceId}
+        ${kinds?.length ? this.sql`AND split_part(action, '.', 1) = ANY(${kinds})` : this.sql``}
       ORDER BY at DESC, id DESC LIMIT ${Math.min(Math.max(limit, 1), 1000)}`;
     return rows.map((r) => ({
       id: String(r.id),

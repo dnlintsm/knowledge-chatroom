@@ -415,6 +415,28 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await assert.rejects(claude.files(techY), NodeNotFoundError);
     });
 
+    test("owners see everyone with roles, groups and activity", async () => {
+      await assert.rejects(as(bob).people(), ForbiddenError);
+      const people = await as(alice).people();
+      // The local user can't sign in, so the admin panel leaves it out.
+      assert.deepEqual(people.map((p) => p.subject).filter((s) => s.startsWith("test|")).slice(0, 3), [
+        "test|alice",
+        "test|bob",
+        "test|carol",
+      ]);
+      assert.ok(!people.some((p) => p.subject === "local"));
+      const a = people.find((p) => p.id === alice)!;
+      assert.deepEqual([a.role, a.effectiveRole], ["owner", "owner"]);
+      assert.ok(a.grantId && a.lastSeenAt && a.createdAt);
+      const b = people.find((p) => p.id === bob)!;
+      assert.deepEqual([b.role, b.grantId, b.effectiveRole, b.groupIds.length], [null, null, null, 1]);
+
+      const accessOnly = await as(alice).auditLog(50, ["group", "grant"]);
+      assert.ok(accessOnly.length > 0);
+      assert.ok(accessOnly.every((e) => /^(group|grant)\./.test(e.action)));
+      assert.ok(accessOnly.some((e) => e.action === "group.add_member"));
+    });
+
     test("the workspace always keeps an owner who can sign in", async () => {
       const ownGrant = (await as(alice).grants(null)).find(
         (g) => g.principalType === "user" && g.principalId === alice,

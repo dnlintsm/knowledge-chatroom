@@ -112,6 +112,59 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.mouse.move(600, 500);
   await shot(bob, "18-actions-by-role");
 
+  // Admin panel (#67): only workspace owners get it. Alice puts Bob in a
+  // group, sees the change logged, and makes him a workspace editor.
+  await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
+  await alice.goto("/");
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  const admin = alice.getByRole("dialog", { name: "Admin" });
+  await expect(admin.getByRole("tab", { name: "People (2)" })).toBeVisible();
+  const peopleTable = admin.getByRole("table", { name: "People" });
+  await expect(peopleTable).toContainText("Alice Admin");
+  await expect(peopleTable).toContainText("(you)");
+  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("");
+
+  await admin.getByRole("tab", { name: /^Groups/ }).click();
+  await admin.getByLabel("New group name").fill("Fab");
+  await admin.getByRole("button", { name: "Create group" }).click();
+  await expect(admin.getByRole("list", { name: "Groups" })).toContainText("Fab");
+  await admin.getByLabel("New group name").fill("Litho team");
+  await admin.getByLabel("Inside").selectOption({ label: "Fab" });
+  await admin.getByRole("button", { name: "Create group" }).click();
+  const litho = admin.getByRole("listitem", { name: "Litho team" });
+  await litho.getByLabel("Add a member to Litho team").selectOption({ label: "Bob Builder" });
+  await expect(litho).toContainText("1 member");
+  await expect(litho.getByRole("button", { name: "Remove Bob Builder from Litho team" })).toBeVisible();
+  await shot(alice, "19-admin-groups");
+
+  await admin.getByRole("tab", { name: /^People/ }).click();
+  await admin.getByLabel("Workspace role for Bob Builder").selectOption("editor");
+  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("editor");
+  await expect(peopleTable).toContainText("Litho team");
+  await shot(alice, "20-admin-people");
+
+  await admin.getByRole("tab", { name: "Activity" }).click();
+  const changes = admin.getByRole("list", { name: "Access changes" });
+  await expect(changes).toContainText("added Bob Builder to Litho team");
+  await expect(changes).toContainText("gave Bob Builder edit access to the workspace");
+  await shot(alice, "21-admin-activity");
+  await admin.getByRole("button", { name: "Close" }).click();
+
+  // The workspace role reaches Bob on his next request.
+  await bob.goto("/");
+  await bob.getByRole("button", { name: "Files", exact: true }).click();
+  await expect(bob.getByRole("button", { name: "New note" })).toBeVisible();
+
+  // Alice hands ownership to Bob and steps down to editor: the app reloads
+  // with her new access, so the Admin button goes away.
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  await admin.getByLabel("Workspace role for Bob Builder").selectOption("owner");
+  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("owner");
+  alice.once("dialog", (d) => void d.accept());
+  await admin.getByLabel("Workspace role for Alice Admin").selectOption("editor");
+  await expect(alice.getByRole("button", { name: "Account" })).toBeVisible();
+  await expect(alice.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
+
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();
   await bob.getByRole("button", { name: "Sign out" }).click();
