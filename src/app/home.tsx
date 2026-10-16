@@ -14,8 +14,8 @@ export function Home() {
   return (
     /*
       One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
-      the active thread. The threads list in the sidebar's Chats view and the
-      chat's "New chat" button drive it directly; a *controlled* provider would
+      the active thread. The chat pane's history list and its
+      "New chat" button drive it directly; a *controlled* provider would
       block "New chat" from resetting the conversation.
     */
     <CopilotChatConfigurationProvider agentId="default">

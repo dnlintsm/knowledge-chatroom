@@ -10,7 +10,6 @@ import {
   FlaskConical,
   ListTodo,
   Lock,
-  MessagesSquare,
   Network,
   Package,
   Route,
@@ -19,7 +18,6 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { CopilotThreadsDrawer } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
@@ -42,7 +40,6 @@ const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
   { id: "artifacts", label: "Artifacts", icon: Package },
-  { id: "chats", label: "Chats", icon: MessagesSquare },
 ];
 
 /** VS Code-style icon rail. Clicking the active view collapses the panel. */
@@ -176,7 +173,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "chats" || view === "search" || view === "runs" || !canEdit) return;
+        if (view === "search" || view === "runs" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -228,14 +225,9 @@ export function SidePanel({ view }: { view: SidebarView }) {
             empty="Files Claude creates show up here."
           />
         )}
-        {view === "chats" && (
-          <div className="h-full [&_copilotkit-threads-drawer]:h-full">
-            <CopilotThreadsDrawer agentId="default" collapsible={false} label="Chats" />
-          </div>
-        )}
       </div>
       {root && <ActionsBlock />}
-      {view !== "chats" && view !== "runs" && (
+      {view !== "runs" && (
         <button
           type="button"
           onClick={() => open(TASKS_TAB)}

@@ -1,8 +1,13 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-import { FileText, FlaskConical, MessageSquarePlus, TextSelect } from "lucide-react";
-import { CopilotChat, type CopilotChatInput } from "@copilotkit/react-core/v2";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { FileText, FlaskConical, History, MessageSquarePlus, TextSelect } from "lucide-react";
+import {
+  CopilotChat,
+  CopilotThreadsDrawer,
+  useCopilotChatConfiguration,
+  type CopilotChatInput,
+} from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "./file-icon";
@@ -29,6 +34,21 @@ const MESSAGE_VIEW = {
 export function ChatPane() {
   const { activeFile, selection } = useWorkspace();
   const { chat, runDir } = useWorkbench();
+  // Past chats show in place of the conversation (on phones the list slides
+  // over it). Picking one, or starting a new one, changes the thread, which
+  // brings the conversation back.
+  const chatConfig = useCopilotChatConfiguration();
+  const history = chatConfig?.drawerOpen ?? false;
+  const setHistory = (open: boolean) => chatConfig?.setDrawerOpen(open);
+  const threadId = chatConfig?.threadId;
+  const [shownThread, setShownThread] = useState(threadId);
+  useEffect(() => {
+    if (threadId === shownThread) return;
+    setShownThread(threadId);
+    chatConfig?.setDrawerOpen(false);
+  }, [threadId, shownThread, chatConfig]);
+  const headerButton =
+    "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer";
 
   return (
     <section aria-label="Chat" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
@@ -41,10 +61,23 @@ export function ChatPane() {
           type="button"
           title="New chat"
           aria-label="New chat"
-          onClick={chat.newThread}
-          className="flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer"
+          onClick={() => {
+            setHistory(false);
+            chat.newThread();
+          }}
+          className={headerButton}
         >
           <MessageSquarePlus className="size-4" />
+        </button>
+        <button
+          type="button"
+          title={history ? "Back to chat" : "Chat history"}
+          aria-label="Chat history"
+          aria-pressed={history}
+          onClick={() => setHistory(!history)}
+          className={cn(headerButton, history && "bg-[var(--card)] text-[var(--foreground)] shadow-sm")}
+        >
+          <History className="size-4" />
         </button>
       </header>
 
@@ -79,7 +112,13 @@ export function ChatPane() {
         )}
       </div>
 
-      <div className="min-h-0 flex-1">
+      {history && (
+        <div data-testid="chat-history" className="min-h-0 flex-1 overflow-y-auto [&_copilotkit-threads-drawer]:h-full [&_copilotkit-threads-drawer]:[--cpk-drawer-width:100%]">
+          <CopilotThreadsDrawer agentId="default" collapsible={false} label="Chats" />
+        </div>
+      )}
+      {/* Kept mounted under the history so the conversation and its tools survive. */}
+      <div className={cn("min-h-0 flex-1", history && "hidden")}>
         <CopilotChat
           attachments={{ enabled: true }}
           // A slot may be any component taking the input's props; the type asks for its statics too.

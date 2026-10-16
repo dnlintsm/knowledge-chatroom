@@ -90,12 +90,24 @@ test("workspace walkthrough", async ({ page }) => {
   await page.getByRole("button", { name: "Add a task" }).click();
   await shot(page, "06-task-board");
 
-  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  // Past chats live in the chat pane now, not on the left icon rail.
+  await expect(page.getByRole("button", { name: "Chats", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Chat history" }).click();
+  await expect(page.getByTestId("chat-history")).toBeVisible();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
   await shot(page, "07-chats-list");
+  await page.getByRole("button", { name: "Chat history" }).click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  // Hidden while showing the history, the chat reopens on the conversation.
+  await page.getByRole("button", { name: "Chat history" }).click();
 
   await page.getByRole("button", { name: "Hide chat" }).click();
   await page.getByRole("button", { name: "Files", exact: true }).click();
   await shot(page, "08-hidden-chat");
+  // The chat icon at the top-right opens the chat with the cursor in its input.
+  await page.getByRole("button", { name: "Show chat" }).click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
+  await shot(page, "08b-chat-reopened");
 
   // Leaving the run goes back to Traverse; the browser's back button returns to it.
   await page.getByRole("button", { name: "Leave run" }).click();
@@ -346,6 +358,9 @@ test("mobile layout", async ({ page }) => {
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await shot(page, "15-mobile-chat");
+  await page.getByRole("button", { name: "Chat history" }).click();
+  await expect(page.getByTestId("chat-history")).toBeVisible();
+  await shot(page, "16-mobile-chat-history");
 });
 
 // The mock agent answers "read next" with references to notes/reading-list.md
