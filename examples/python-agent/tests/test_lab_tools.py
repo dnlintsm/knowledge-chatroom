@@ -38,7 +38,10 @@ def test_compare_runs_verdicts():
     assert stats.compare_runs(baseline, [0.78, 0.80, 0.79]).verdict == "better"
     assert stats.compare_runs(baseline, [0.78, 0.80, 0.79], higher_is_better=False).verdict == "worse"
     assert stats.compare_runs(baseline, [0.70, 0.74, 0.72]).verdict == "within noise"
-    assert stats.compare_runs([1.0], [2.0]).welch_t is None
+    assert stats.compare_runs([1.0], [2.0]).verdict == "not enough repeats to tell noise from change"
+    # Constant repeats: no noise, so any difference counts.
+    assert stats.compare_runs([1, 1, 1], [2, 2, 2]).verdict == "better"
+    assert stats.compare_runs([1, 1, 1], [1, 1, 1]).verdict == "no change"
     result = stats.as_dict(stats.compare_runs(baseline, [0.78, 0.80, 0.79]))
     assert result["percent_change"] == pytest.approx(9.72, abs=0.01)
     json.dumps(result)

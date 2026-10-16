@@ -51,11 +51,15 @@ def compare_runs(baseline: list[float], candidate: list[float], higher_is_better
     a, b = describe_metric(baseline), describe_metric(candidate)
     difference = b.mean - a.mean
     percent = difference / abs(a.mean) * 100 if a.mean else None
-    spread = (a.std**2 / a.n + b.std**2 / b.n) if a.n > 1 and b.n > 1 else 0.0
+    repeated = a.n > 1 and b.n > 1
+    spread = a.std**2 / a.n + b.std**2 / b.n if repeated else 0.0
     welch_t = difference / math.sqrt(spread) if spread > 0 else None
 
-    if welch_t is None:
+    if not repeated:
         verdict = "not enough repeats to tell noise from change"
+    elif welch_t is None:
+        # Repeats with no spread at all: any difference is real.
+        verdict = "no change" if difference == 0 else "better" if (difference > 0) == higher_is_better else "worse"
     elif abs(welch_t) < 2:
         verdict = "within noise"
     elif (difference > 0) == higher_is_better:

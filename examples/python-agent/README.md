@@ -51,7 +51,8 @@ and `whoami` shows the forwarded user.
 4. Ask: *"Compare baseline [0.71, 0.73, 0.72] with candidate [0.78, 0.80, 0.79]."*
 
 With Docker, the `python-sample` profile builds and runs the server next to the
-demo. Use the service name in `.env`:
+demo. The demo has no login, so the server treats every call as the local user.
+Use the service name in `.env`:
 
 ```bash
 MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true}}}

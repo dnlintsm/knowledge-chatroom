@@ -119,8 +119,9 @@ services:
     build: ./examples/python-agent
     environment:
       LAB_TOOLS_NAME: lab
-      # Same secret as the agent when login is on; empty = the local user.
-      AUTH_SECRET: ${AUTH_SECRET:-}
+      # The demo has no login, so every call is the local user. With login, give
+      # this server the agent's AUTH_SECRET (examples/python-agent/README.md).
+      AUTH_SECRET: ""
 
 volumes:
   postgres-data:

@@ -55,7 +55,7 @@ def compare_runs(baseline: list[float], candidate: list[float], ctx: Context, hi
     """Compare a metric between a baseline run and a candidate run.
 
     Returns both summaries, the difference of means, the percent change, Welch's t
-    and a verdict ("better", "worse", "within noise", or too few repeats to tell).
+    and a verdict ("better", "worse", "within noise", "no change", or too few repeats to tell).
     Set higher_is_better to false for metrics like loss or latency.
     """
     require_user(ctx)
