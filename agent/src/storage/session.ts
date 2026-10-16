@@ -535,6 +535,11 @@ export class FilesSession {
     );
   }
 
+  async rename(from: string, to: string) {
+    this.needEditor();
+    return this.run((s) => s.rename(from, to, this.audit("file.rename", { path: from, to })));
+  }
+
   async remove(path: string) {
     this.needEditor();
     return this.run((s) => s.remove(path, this.audit("file.delete", { path })));

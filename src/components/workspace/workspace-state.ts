@@ -10,6 +10,7 @@ export interface PersistedWorkspace {
 export type WorkspaceAction =
   | { type: "upsert"; file: WorkspaceFile }
   | { type: "remove"; path: string }
+  | { type: "rename"; from: string; file: WorkspaceFile }
   | { type: "open"; tab: TabId }
   | { type: "close"; tab: TabId };
 
@@ -29,6 +30,18 @@ export function reduceWorkspace(state: PersistedWorkspace, action: WorkspaceActi
         files: state.files.filter((file) => file.path !== action.path),
         tabs,
         active: state.active === action.path ? (tabs[tabs.length - 1] ?? null) : state.active,
+      };
+    }
+    case "rename": {
+      const to = action.file.path;
+      const tabs = state.tabs.filter((tab) => tab !== to).map((tab) => (tab === action.from ? to : tab));
+      return {
+        files: [
+          ...state.files.filter((file) => file.path !== action.from && file.path !== to),
+          action.file,
+        ],
+        tabs,
+        active: state.active === action.from ? to : state.active,
       };
     }
     case "open":
