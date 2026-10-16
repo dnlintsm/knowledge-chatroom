@@ -87,6 +87,10 @@ agent's own APIs as the user. These tools act outside workspace storage and its
 permissions: a server that needs workspace files should take them as arguments or
 check the forwarded user itself.
 
+[examples/python-agent](../examples/python-agent/README.md) is a complete sample:
+a Python agent's prompt moved into a skill and its tools into an MCP server, with
+the forwarded user checked and tests. Start there when bringing a Python agent in.
+
 A minimal Python server (`pip install mcp`; with mcp 1.x import `FastMCP` from
 `mcp.server.fastmcp` instead):
 
