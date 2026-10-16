@@ -537,7 +537,9 @@ export class FilesSession {
 
   async rename(from: string, to: string) {
     this.needEditor();
-    return this.run((s) => s.rename(from, to, this.audit("file.rename", { path: from, to })));
+    return this.run((s) =>
+      s.rename(from, to, { author: this.principal.actor, inTx: this.audit("file.rename", { path: from, to }) }),
+    );
   }
 
   async remove(path: string) {

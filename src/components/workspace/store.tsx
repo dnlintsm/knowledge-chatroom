@@ -582,19 +582,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const at = placeRef.current;
         // The server must have the latest edits before they move with the file.
         await sync.settle(at);
-        const latest = files.current.find((f) => f.path === from);
-        if (latest) file = { ...latest, path: to, kind: kindForPath(to), mime };
+        const latest = files.current.find((f) => f.path === from) ?? existing;
+        file = { ...latest, path: to, kind: kindForPath(to), mime };
+        // Locked while it moves, so no edit lands on the old path meanwhile.
+        const lock = (f: WorkspaceFile) => {
+          if (placeRef.current !== at) return; // Those files are no longer loaded.
+          files.current = files.current.map((x) => (x.path === from ? f : x));
+          upsert(f);
+        };
+        lock({ ...latest, readOnly: true });
         // Counted as in flight, so this rename's own change events are ignored.
         sync.beginWrite(from, at);
         sync.beginWrite(to, at);
+        let failure: unknown = null;
         try {
           const info = await renameServerFile(from, to, at);
           sync.forget(from, at);
           sync.remember(to, info.sha256, at);
           file = { ...file, kind: info.kind, mime: info.mime, updatedAt: Date.parse(info.updatedAt) };
+        } catch (err) {
+          failure = err;
         } finally {
           sync.endWrite(from, at);
           sync.endWrite(to, at);
+        }
+        if (failure) {
+          lock(latest);
+          // Another browser may have taken the name or moved the file; the
+          // events saying so were ignored while this was in flight.
+          const list = await listServerFiles(at).catch(() => null);
+          if (Array.isArray(list) && placeRef.current === at) await resync(list);
+          throw failure;
         }
         if (placeRef.current !== at) return file;
       }
@@ -602,7 +620,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setState((s) => reduceWorkspace(s, { type: "rename", from, file }));
       return file;
     },
-    [sync],
+    [sync, upsert, resync],
   );
 
   const createNode = useCallback(

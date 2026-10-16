@@ -244,12 +244,13 @@ export class FileService {
   /**
    * Moves a file to another path in the same place, keeping its history.
    * Returns null when there is no file at `rawFrom`. Throws ReadOnlyFileError
-   * for a read-only file and FileExistsError when `rawTo` is taken.
+   * for a read-only file and FileExistsError when `rawTo` is taken. Change
+   * events name `author` (who renamed it), not who wrote its current version.
    */
   async rename(
     rawFrom: string,
     rawTo: string,
-    inTx?: (tx: Tx) => Promise<unknown>,
+    opts: { author?: AuthorType; inTx?: (tx: Tx) => Promise<unknown> } = {},
   ): Promise<FileInfo | null> {
     const from = normalizePath(rawFrom);
     const to = normalizePath(rawTo);
@@ -257,9 +258,9 @@ export class FileService {
       if (this.nodeId) await NodeService.lockLive(tx, this.workspaceId, this.nodeId);
       if (this.experimentId) await lockLiveExperiment(tx, this.workspaceId, this.experimentId);
       const [file] = await tx<
-        { id: string; read_only: boolean; mime: string; sha256: string; author: AuthorType }[]
+        { id: string; read_only: boolean; mime: string; sha256: string }[]
       >`
-        SELECT f.id, f.read_only, f.mime, v.blob_sha256 AS sha256, v.author_type AS author
+        SELECT f.id, f.read_only, f.mime, v.blob_sha256 AS sha256
         FROM files f JOIN file_versions v ON v.id = f.current_version_id
         WHERE ${this.here} AND f.path = ${from} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
@@ -274,10 +275,10 @@ export class FileService {
       await tx`
         UPDATE files SET path = ${to}, kind = ${kindForPath(to)}, mime = ${mime}, updated_at = now()
         WHERE id = ${file.id}`;
-      await inTx?.(tx);
+      await opts.inTx?.(tx);
       await this.events.notify(tx, { op: "delete", ...this.place, path: from });
       await this.events.notify(tx, {
-        op: "write", ...this.place, path: to, sha256: file.sha256, author: file.author,
+        op: "write", ...this.place, path: to, sha256: file.sha256, author: opts.author ?? "user",
       });
       return true;
     }).catch((err: unknown) => {

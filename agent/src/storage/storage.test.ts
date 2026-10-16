@@ -152,12 +152,12 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
   });
 
   test("rename moves a file with its history and frees the old path", async () => {
-    await storage.files.write("notes/draft.txt", text("v1"));
-    await storage.files.write("notes/draft.txt", text("v2"));
+    await storage.files.write("notes/draft.txt", text("v1"), { author: "agent" });
+    await storage.files.write("notes/draft.txt", text("v2"), { author: "agent" });
     const events: string[] = [];
     const stop = await storage.events.subscribe((e) => {
       if (e.op === "delete" && e.path === "notes/draft.txt") events.push("delete draft");
-      if (e.op === "write" && e.path === "notes/plan.md") events.push("write plan");
+      if (e.op === "write" && e.path === "notes/plan.md") events.push(`write plan by ${e.author}`);
     });
     const moved = await storage.files.rename("notes/draft.txt", "notes/plan.md");
     assert.equal(moved?.path, "notes/plan.md");
@@ -174,7 +174,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     await waitFor(() => events.length >= 2);
     stop();
     // Other browsers drop the old path and load the new one.
-    assert.deepEqual(events, ["delete draft", "write plan"]);
+    // Named after who renamed it, so Claude's last edit doesn't pull others to the file.
+    assert.deepEqual(events, ["delete draft", "write plan by user"]);
   });
 
   test("rejects paths that escape the tree", async () => {
