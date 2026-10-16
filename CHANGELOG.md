@@ -9,6 +9,13 @@
   members, and read recent access changes. Migration `014_last_seen.sql` adds
   `users.last_seen_at`.
 
+### Fixed
+
+- Files can be renamed: anyone who can edit a place (workspace owners included) gets a
+  Rename button next to Delete in the file list. The file keeps its history and open
+  tab; read-only files and names already taken are refused. API: `PATCH
+  /api/files/<path>` with `{"path": "<new path>"}`.
+
 ### Changed
 
 - Login settings fail closed (#64): set `AUTH_MODE=oidc` or `AUTH_MODE=local`. A

@@ -241,7 +241,9 @@ For local setup, see [Development](development.md).
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
 - **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
-  (request body = bytes) and deletes one, `?versions` returns its history, and
+  (request body = bytes) and deletes one, `PATCH /api/files/<path>` with `{"path": ...}`
+  renames it within the same place (history kept; 412 when the name is taken),
+  `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
   (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,
