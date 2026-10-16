@@ -111,6 +111,17 @@ services:
       agent:
         condition: service_healthy
 
+  # --- Sample Python tools (examples/python-agent) for the demo's agent ---
+  # Add `--profile python-sample` and, in .env,
+  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true}}}
+  lab-tools:
+    profiles: [python-sample]
+    build: ./examples/python-agent
+    environment:
+      LAB_TOOLS_NAME: lab
+      # Same secret as the agent when login is on; empty = the local user.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+
 volumes:
   postgres-data:
   s3-data:

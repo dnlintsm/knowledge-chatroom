@@ -40,3 +40,19 @@ jobs:
         run: node scripts/ci-tests.mjs summary "Frontend units" "Agent units"
       - name: Verify lockfiles are unchanged
         run: git diff --exit-code -- package-lock.json agent/package-lock.json
+
+  python-sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/python-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the sample's dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Sample Python agent tests
+        run: python -m pytest -q
