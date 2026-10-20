@@ -250,6 +250,25 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
   return { dir, places, files: keep.size - failed, bytes, skipped };
 }
 
+/**
+ * Removes a run folder's workspace copy, for a run without one (turned off,
+ * or the sync failed): scripts can read the whole run folder, and an old copy
+ * may hold files the user can no longer read.
+ */
+export async function clearWorkdir(cwd: string): Promise<void> {
+  const previous = syncing.get(cwd) ?? Promise.resolve();
+  const done = previous.catch(() => {}).then(async () => {
+    await rm(path.join(cwd, WORKSPACE_DIR), { recursive: true, force: true });
+    await rm(path.join(cwd, MANIFEST), { force: true });
+  });
+  syncing.set(cwd, done);
+  try {
+    await done;
+  } finally {
+    if (syncing.get(cwd) === done) syncing.delete(cwd);
+  }
+}
+
 async function pool<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {
   let next = 0;
   await Promise.all(

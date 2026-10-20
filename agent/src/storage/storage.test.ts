@@ -31,7 +31,7 @@ import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
-import { confineTools, syncWorkdir } from "./workdir";
+import { clearWorkdir, confineTools, syncWorkdir } from "./workdir";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
 import { createSkillsHandler } from "../skills/http";
@@ -1485,6 +1485,18 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await rm(join(cwd, "workspace/nodes/Photonics/Optics-Lenses/notes/focus.md"));
       await syncWorkdir(as(erin), cwd, limits);
       assert.equal(await local("nodes/Photonics/Optics-Lenses/notes/focus.md"), "focal length 35 mm");
+    });
+
+    test("a run without a fresh copy keeps no old one", async () => {
+      const other = await mkdtemp(join(tmpdir(), "workdir-test-"));
+      await syncWorkdir(as(erin), other, limits);
+      await clearWorkdir(other);
+      await assert.rejects(stat(join(other, "workspace")));
+      await assert.rejects(stat(join(other, ".workspace-manifest.json")));
+      // A later sync starts over cleanly.
+      await syncWorkdir(as(erin), other, limits);
+      assert.ok(await readFile(join(other, "workspace/nodes/Photonics/Optics-Lenses/notes/focus.md"), "utf8"));
+      await rm(other, { recursive: true, force: true });
     });
 
     test("leaves out files over the size limits", async () => {
