@@ -25,6 +25,7 @@ import { adapter, runAs } from "./agent";
 import { currentStorage, startStorage, storageState, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
+import { syncWorkdir, workdirEnabled } from "./storage/workdir";
 import { IDENTITY_HEADER, identify, signIdentity, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
@@ -66,6 +67,13 @@ async function prepareSkills(
     if (scriptsEnabled() && run.skills.some((s) => s.skill.needsExecution)) {
       run.keys = await keyRoute().catch((err) => {
         console.error(`[skills] key proxy didn't start; scripts are off for this run: ${err instanceof Error ? err.message : err}`);
+        return undefined;
+      });
+    }
+    // The workspace copy Claude reads with Read/Glob/Grep (./storage/workdir.ts).
+    if (storage && userId && workdirEnabled()) {
+      run.workdir = await syncWorkdir(storage.session({ userId, actor: "agent" }), run.cwd).catch((err) => {
+        console.error(`[workdir] couldn't copy the workspace; running without it: ${err instanceof Error ? err.message : err}`);
         return undefined;
       });
     }

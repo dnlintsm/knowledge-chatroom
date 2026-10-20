@@ -25,6 +25,7 @@ import { generateA2ui } from "./a2ui_dynamic_schema";
 import { currentStorage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
+import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
 
 // Load .env from the starter root before building the adapter (which reads the
@@ -169,22 +170,47 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
     if (!ctx) return options;
     // Skills' scripts, when on, run in Bash inside the SDK's sandbox.
     const scripts = ctx.skills && scriptOptions(ctx.skills, APP_ROOT);
+    // The workspace copy in the run folder (./storage/workdir.ts): Read, Glob
+    // and Grep, confined to that folder.
+    const workdir = ctx.skills?.workdir ? ctx.skills : null;
+    const builtIn = workdir ? CONFINED_TOOLS : [];
     const withSkills = ctx.skills
-      ? {
-          ...options,
-          ...skillOptions(ctx.skills, ctx.onSkillUse),
-          allowedTools: [...(options.allowedTools ?? []), "Skill", ...(scripts ? ["Bash"] : [])],
-          tools: ["Skill"],
-          ...scripts,
-        }
+      ? (() => {
+          const skill = skillOptions(ctx.skills, ctx.onSkillUse);
+          return {
+            ...options,
+            ...skill,
+            allowedTools: [...(options.allowedTools ?? []), "Skill", ...builtIn, ...(scripts ? ["Bash"] : [])],
+            ...scripts,
+            tools: ["Skill", ...builtIn, ...(scripts ? ["Bash"] : [])],
+            ...(workdir && {
+              systemPrompt: `${options.systemPrompt ?? ""}\n${workdirPrompt(workdir.workdir!, Boolean(scripts))}`,
+              hooks: {
+                ...skill.hooks,
+                PreToolUse: [...(skill.hooks?.PreToolUse ?? []), confineTools(workdir.cwd)],
+              },
+            }),
+          };
+        })()
       : options;
     const withIdentity = ctx.identity
       ? { ...withSkills, mcpServers: { ...withSkills.mcpServers, ...serverConfigs(externalServers, ctx.identity) } }
       : withSkills;
     const userId = ctx.userId;
     if (!serverStorage || userId === undefined) return withIdentity;
-    const tools = [...baseTools, ...createFileTools(currentStorage, async () => userId)];
-    return { ...withIdentity, mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) } };
+    const tools = [
+      ...baseTools,
+      ...createFileTools(currentStorage, async () => userId, workdir?.cwd),
+    ];
+    return {
+      ...withIdentity,
+      mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) },
+      // save_file is only in runs with a working folder.
+      allowedTools: [
+        ...(withIdentity.allowedTools ?? []),
+        ...(workdir ? [`mcp__${SERVER_NAME}__save_file`] : []),
+      ],
+    };
   }
 }
 
