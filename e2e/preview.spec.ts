@@ -115,6 +115,13 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page).toHaveURL(/\/$/);
   await page.goBack();
   await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
+
+  // The app name at the top-left goes home: back to all runs, tabs kept.
+  await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
+  await expect(page.getByTestId("run-list")).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("navigation", { name: "Current run" })).toHaveCount(0);
+  await shot(page, "19-home-link");
 });
 
 test("skills: modes, the / menu and the status bar", async ({ page }) => {
