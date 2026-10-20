@@ -19,7 +19,10 @@ production build; the configured standalone output can also be packaged by a
 deployment host with its `.next/static` assets. Deploy the agent separately with
 its dependencies and the sibling `shared/` directory and run `npm --prefix agent start`.
 
-Configure `AGENT_URL` on Next.js to reach the agent over a private network. Expose
+Configure `LOCAL_AGENT_URL` on Next.js to reach the agent over a private network,
+and `AGENT_URL` only when the chat uses a remote backend
+([Remote agent backend](remote-agent.md)); the agent then still serves storage and
+skills. Expose
 the Next.js UI through HTTPS. Keep the agent HTTP port private: Next.js signs
 forwarded identities, and users should not call the agent directly. Set `AUTH_MODE`
 on both: `oidc` with the OIDC values, `APP_URL` and shared `AUTH_SECRET` described in
@@ -53,7 +56,7 @@ knowledge.example.com:8443 {
 Then set `APP_URL=https://knowledge.example.com` on the UI (session cookies become
 Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`) and
 `S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent, so image and PDF
-previews don't break as mixed content. `AGENT_URL` stays on the private network and
+previews don't break as mixed content. `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
 `AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,
 add `proxy_buffering off;` for the UI so the `/api/files?watch` event stream isn't
 held back; Caddy streams it as is.

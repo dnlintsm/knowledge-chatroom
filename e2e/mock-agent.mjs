@@ -25,6 +25,10 @@
  * `POST /suggest` answers the chat's follow-up chips with two canned ones
  * (FOLLOW_UPS), as the real agent's src/suggest.ts does with a small model.
  *
+ * `POST /agent/report` answers like `POST /`, as a remote backend would
+ * (AGENT_URL, docs/remote-agent.md), and `GET /last-run` returns the input of
+ * the last chat run, so tests can check what the app sent.
+ *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
  * storage routes /files, /nodes, /access, /experiments, /search, /proposals,
  * /skills and /hub are forwarded there, so the preview can show server storage and the knowledge
@@ -36,6 +40,9 @@ import { randomUUID } from "node:crypto";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
+
+/** The input of the last chat run, for GET /last-run. */
+let lastRun = null;
 
 const REPLY =
   "Hi! I'm a mock agent running in CI, so this preview works without an " +
@@ -158,7 +165,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || (pathname !== "/" && pathname !== "/suggest")) {
+  if (req.method === "GET" && pathname === "/last-run") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(lastRun));
+    return;
+  }
+
+  if (req.method !== "POST" || (pathname !== "/" && pathname !== "/agent/report" && pathname !== "/suggest")) {
     res.writeHead(404).end();
     return;
   }
@@ -195,6 +208,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  lastRun = input;
   const messages = input.messages ?? [];
   const last = messages[messages.length - 1];
   const asked = last?.role === "user" ? textOf(last) : "";

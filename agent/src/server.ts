@@ -3,7 +3,9 @@
  *
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `POST /suggest` answers the chat's follow-up chips
- * (src/suggest.ts), `GET /health` reports status. Runs on port 8000.
+ * (src/suggest.ts), `GET /health` reports status. Runs on port 8000. With
+ * AGENT_URL set, the app's chat goes to a remote backend instead and both chat
+ * routes answer 404 (docs/remote-agent.md).
  * When DATABASE_URL is set it also serves the workspace file API under
  * `/files`, the knowledge tree under `/nodes`, experiments under `/experiments`,
  * search under `/search`, proposed versions under `/proposals` and groups
@@ -36,6 +38,9 @@ import { suggest } from "./suggest";
 import { authSettings } from "../../shared/auth-mode";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
+// AGENT_URL set: the app's chat goes to a remote backend (docs/remote-agent.md),
+// so this server keeps storage, skills and the hub, and its own chat is off.
+const REMOTE_CHAT = Boolean(process.env.AGENT_URL?.trim());
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
 // Login settings are checked at startup whether or not storage is on.
@@ -148,6 +153,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/agent/report") {
+    // The app's AGENT_URL points here, but it names a remote backend now.
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: "This is the knowledge-chatroom agent server, not a remote backend: set LOCAL_AGENT_URL to it and unset AGENT_URL.",
+    }));
+    return;
+  }
+
+  if (REMOTE_CHAT && req.method === "POST" && (pathname === "/" || pathname === "/suggest")) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Chat is served by the remote backend at AGENT_URL." }));
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/suggest") {
     if (!signedIn(req, res)) return;
     const input = await readInput(req, res);
@@ -246,4 +266,7 @@ server.listen(PORT, HOST, () => {
   console.log(
     `[agent] Claude Agent SDK (TypeScript) starter listening on http://${HOST}:${PORT}`,
   );
+  if (REMOTE_CHAT) {
+    console.log("[agent] AGENT_URL is set: chat goes to that backend; this server serves storage and skills.");
+  }
 });

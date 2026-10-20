@@ -96,6 +96,16 @@ export function identityHeader(user: SessionUser): string {
   return seal("v1", { ...user, exp: now() + HEADER_SECONDS }, authSecret()!);
 }
 
+/** The user an X-Knowledge-User value names, when this app signed it for the agent and it hasn't expired. */
+export function readIdentityHeader(value: string | undefined): SessionUser | null {
+  const secret = authSecret();
+  if (!secret) return null;
+  const data = unseal<SessionUser & { exp: number; aud?: string }>("v1", value, secret);
+  return data && typeof data.sub === "string" && data.sub && data.aud === undefined
+    ? { sub: data.sub, email: data.email, name: data.name }
+    : null;
+}
+
 /** The origin users reach the app at; set APP_URL when behind a proxy. */
 export function appUrl(req: NextRequest): string {
   return (process.env.APP_URL || req.nextUrl.origin).replace(/\/+$/, "");

@@ -1,18 +1,17 @@
 import type { NextRequest } from "next/server";
 
+import { localAgentUrl } from "./agent-target";
 import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth";
 
 /**
- * Forwards a route group to the agent server (agent/src/storage/http.ts), so
- * the browser talks to one origin and the agent port stays private. Responses
- * stream through, which carries the /files?watch change stream too. With
- * login on, each request says who it is for (see ./auth.ts).
+ * Forwards a route group to this repo's agent server (agent/src/storage/http.ts)
+ * at LOCAL_AGENT_URL, also when the chat goes to a remote backend (AGENT_URL),
+ * so the browser talks to one origin and the agent port stays private.
+ * Responses stream through, which carries the /files?watch change stream too.
+ * With login on, each request says who it is for (see ./auth.ts).
  */
 
-const AGENT_URL = (process.env.AGENT_URL || "http://localhost:8000").replace(
-  /\/+$/,
-  "",
-);
+const LOCAL_AGENT_URL = localAgentUrl();
 
 const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-read-only"];
 const FORWARDED_RESPONSE_HEADERS = [
@@ -29,7 +28,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "location",
 ];
 
-/** A route handler forwarding /api/<prefix>/* to AGENT_URL/<prefix>/*. */
+/** A route handler forwarding /api/<prefix>/* to LOCAL_AGENT_URL/<prefix>/*. */
 export function agentProxy(prefix: string) {
   return async function proxy(
     req: NextRequest,
@@ -41,7 +40,7 @@ export function agentProxy(prefix: string) {
     }
     const { path = [] } = await params;
     const target = new URL(
-      `${AGENT_URL}/${prefix}/${path.map(encodeURIComponent).join("/")}`,
+      `${LOCAL_AGENT_URL}/${prefix}/${path.map(encodeURIComponent).join("/")}`,
     );
     target.search = req.nextUrl.search;
 

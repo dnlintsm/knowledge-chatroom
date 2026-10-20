@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- `AGENT_URL` now names a remote agent backend for the chat. This repo's agent server
+  moved to `LOCAL_AGENT_URL` (default `http://localhost:8000`). Remove
+  `AGENT_URL=http://localhost:8000` from your `.env`, or rename it to
+  `LOCAL_AGENT_URL`. The docker demo already sets `LOCAL_AGENT_URL`.
+
+### Added
+
+- A remote agent backend for the chat (`AGENT_URL`): runs go to
+  `${AGENT_URL}/agent/report`, and this repo's own Claude agent and follow-up chips are
+  off while storage and skills stay on this repo's server. Every chat run carries the
+  user and where they are (node, experiment, run, open file) in
+  `forwardedProps.knowledge_chatroom`. See `docs/remote-agent.md`.
+
 ## 0.1.1
 
 Bring your own tools and models, an admin panel for workspace owners, smarter chat

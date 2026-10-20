@@ -91,6 +91,7 @@ Start with the guide that matches what you want to do:
 | [Architecture](docs/architecture.md) | Runs, skills, actions/rules, file APIs, experiments, search, and access |
 | [Testing](docs/testing.md) | Fast checks, disposable integration services, E2E modes, and CI |
 | [Deployment](docs/deployment.md) | Production build, private agent routing, authentication, HTTPS, and storage |
+| [Remote agent backend](docs/remote-agent.md) | Using an agent from a separate backend (`AGENT_URL`): what it receives and must do |
 
 <details>
 <summary><strong>Contributor commands and project map</strong></summary>

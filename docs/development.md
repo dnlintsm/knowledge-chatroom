@@ -126,6 +126,19 @@ def whoami(ctx: Context) -> str:
 mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 ```
 
+## Remote agent backend
+
+The chat can use an agent from a separate backend instead of this repo's own:
+set `AGENT_URL` to its base URL, and every chat run goes to
+`${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage and
+skills at `LOCAL_AGENT_URL` (default `http://localhost:8000`, which `npm run dev`
+starts), and turns its own chat off. Each run tells the backend who the user is and
+where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
+must do is in [Remote agent backend](remote-agent.md).
+
+`AGENT_URL` used to be the address of this repo's agent server. If your `.env` still
+has `AGENT_URL=http://localhost:8000`, remove it, or rename it to `LOCAL_AGENT_URL`.
+
 ## Optional login
 
 Set `AUTH_MODE=oidc` and the same `AUTH_SECRET` (at least 32 characters) for Next.js and the agent.
