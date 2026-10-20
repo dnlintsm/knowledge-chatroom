@@ -135,6 +135,9 @@ export const runAs = <T>(
   identity?: (server: string) => string,
 ): T => runContext.run({ userId, skills, onSkillUse, identity }, fn);
 
+// The adapter's own extra arguments (profile options, frontend tool results).
+type OptionsRest = Parameters<ClaudeAgentAdapter["buildOptions"]> extends [unknown, ...infer R] ? R : never;
+
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   // Slash commands only for the run's own skills (guardSlashCommand).
   override run(input: RunAgentInput) {
@@ -163,8 +166,8 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   }
 
   // Called synchronously when a run starts, so runAs()'s context is in scope.
-  override buildOptions(input: RunAgentInput) {
-    const options = super.buildOptions(input);
+  override buildOptions(input: RunAgentInput, ...rest: OptionsRest) {
+    const options = super.buildOptions(input, ...rest);
     const ctx = runContext.getStore();
     if (!ctx) return options;
     // Skills' scripts, when on, run in Bash inside the SDK's sandbox.
