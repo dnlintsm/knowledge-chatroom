@@ -68,3 +68,11 @@ test("legacy root UI is restored and malformed place UI is ignored", () => {
   storage.setItem(PLACE_UI_KEY, "broken JSON");
   expect(readPlaceUi(storage)).toEqual({});
 });
+
+test("renaming a file moves its tab in place and keeps it active", () => {
+  const renamed = { ...file, path: "notes/plan.md" };
+  const next = reduceWorkspace(state, { type: "rename", from: file.path, file: renamed });
+  expect(next.files).toEqual([renamed]);
+  expect(next.tabs).toEqual(["notes/plan.md", "notes/b.md", "::tasks"]);
+  expect(next.active).toBe("notes/plan.md");
+});

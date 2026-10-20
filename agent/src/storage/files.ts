@@ -241,6 +241,54 @@ export class FileService {
     });
   }
 
+  /**
+   * Moves a file to another path in the same place, keeping its history.
+   * Returns null when there is no file at `rawFrom`. Throws ReadOnlyFileError
+   * for a read-only file and FileExistsError when `rawTo` is taken. Change
+   * events name `author` (who renamed it), not who wrote its current version.
+   */
+  async rename(
+    rawFrom: string,
+    rawTo: string,
+    opts: { author?: AuthorType; inTx?: (tx: Tx) => Promise<unknown> } = {},
+  ): Promise<FileInfo | null> {
+    const from = normalizePath(rawFrom);
+    const to = normalizePath(rawTo);
+    const moved = await this.sql.begin(async (tx) => {
+      if (this.nodeId) await NodeService.lockLive(tx, this.workspaceId, this.nodeId);
+      if (this.experimentId) await lockLiveExperiment(tx, this.workspaceId, this.experimentId);
+      const [file] = await tx<
+        { id: string; read_only: boolean; mime: string; sha256: string }[]
+      >`
+        SELECT f.id, f.read_only, f.mime, v.blob_sha256 AS sha256
+        FROM files f JOIN file_versions v ON v.id = f.current_version_id
+        WHERE ${this.here} AND f.path = ${from} AND f.deleted_at IS NULL
+        FOR UPDATE OF f`;
+      if (!file) return false;
+      if (file.read_only) throw new ReadOnlyFileError(from);
+      if (from === to) return true;
+      const [taken] = await tx`
+        SELECT 1 FROM files f WHERE ${this.here} AND f.path = ${to} AND f.deleted_at IS NULL`;
+      if (taken) throw new FileExistsError(to);
+      // A type picked from the old name follows the new one; one set on upload stays.
+      const mime = file.mime === mimeForPath(from) ? mimeForPath(to) : file.mime;
+      await tx`
+        UPDATE files SET path = ${to}, kind = ${kindForPath(to)}, mime = ${mime}, updated_at = now()
+        WHERE id = ${file.id}`;
+      await opts.inTx?.(tx);
+      await this.events.notify(tx, { op: "delete", ...this.place, path: from });
+      await this.events.notify(tx, {
+        op: "write", ...this.place, path: to, sha256: file.sha256, author: opts.author ?? "user",
+      });
+      return true;
+    }).catch((err: unknown) => {
+      // Someone else took the name between the check and the update.
+      if ((err as { code?: string }).code === "23505") throw new FileExistsError(to);
+      throw err;
+    });
+    return moved ? this.stat(to) : null;
+  }
+
   async history(rawPath: string): Promise<FileVersion[] | null> {
     const path = normalizePath(rawPath);
     const [file] = await this.sql<{ id: string }[]>`

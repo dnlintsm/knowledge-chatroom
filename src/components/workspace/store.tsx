@@ -40,6 +40,7 @@ import {
   loadServerFile,
   promoteExperiment,
   putServerFile,
+  renameServerFile,
   renameServerNode,
   updateServerExperiment,
   WATCH_URL,
@@ -131,6 +132,12 @@ interface WorkspaceValue {
   ) => Promise<WorkspaceFile>;
   /** Throws ReadOnlyFileError for a read-only file. */
   remove: (path: string) => void;
+  /**
+   * Moves a file to a new path in the same place, keeping its history and
+   * open tab. Throws FileExistsError when the path is taken, ReadOnlyFileError
+   * for a read-only file, and with a message for other failures.
+   */
+  rename: (from: string, to: string) => Promise<WorkspaceFile>;
   setSelection: (text: string) => void;
   /** Where files are kept; see the comment at the top of this file. */
   storageMode: StorageMode;
@@ -559,6 +566,63 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [removeLocal, sync],
   );
 
+  const rename = useCallback<WorkspaceValue["rename"]>(
+    async (from, rawTo) => {
+      const to = normalizePath(rawTo);
+      const existing = files.current.find((f) => f.path === from);
+      if (!existing) throw new Error(`${from} is gone`);
+      if (existing.readOnly) throw new ReadOnlyFileError(from);
+      if (to === from) return existing;
+      if (files.current.some((f) => f.path === to)) throw new FileExistsError(to);
+      // A type picked from the old name follows the new one; one set on upload stays.
+      const mime = existing.mime === mimeForPath(from) ? mimeForPath(to) : existing.mime;
+      let file: WorkspaceFile = { ...existing, path: to, kind: kindForPath(to), mime };
+      if (mode.current === "loading") throw new Error("Files are still loading");
+      if (mode.current === "server") {
+        const at = placeRef.current;
+        // The server must have the latest edits before they move with the file.
+        await sync.settle(at);
+        const latest = files.current.find((f) => f.path === from) ?? existing;
+        file = { ...latest, path: to, kind: kindForPath(to), mime };
+        // Locked while it moves, so no edit lands on the old path meanwhile.
+        const lock = (f: WorkspaceFile) => {
+          if (placeRef.current !== at) return; // Those files are no longer loaded.
+          files.current = files.current.map((x) => (x.path === from ? f : x));
+          upsert(f);
+        };
+        lock({ ...latest, readOnly: true });
+        // Counted as in flight, so this rename's own change events are ignored.
+        sync.beginWrite(from, at);
+        sync.beginWrite(to, at);
+        let failure: unknown = null;
+        try {
+          const info = await renameServerFile(from, to, at);
+          sync.forget(from, at);
+          sync.remember(to, info.sha256, at);
+          file = { ...file, kind: info.kind, mime: info.mime, updatedAt: Date.parse(info.updatedAt) };
+        } catch (err) {
+          failure = err;
+        } finally {
+          sync.endWrite(from, at);
+          sync.endWrite(to, at);
+        }
+        if (failure) {
+          lock(latest);
+          // Another browser may have taken the name or moved the file; the
+          // events saying so were ignored while this was in flight.
+          const list = await listServerFiles(at).catch(() => null);
+          if (Array.isArray(list) && placeRef.current === at) await resync(list);
+          throw failure;
+        }
+        if (placeRef.current !== at) return file;
+      }
+      files.current = [...files.current.filter((f) => f.path !== from && f.path !== to), file];
+      setState((s) => reduceWorkspace(s, { type: "rename", from, file }));
+      return file;
+    },
+    [sync, upsert, resync],
+  );
+
   const createNode = useCallback(
     async (parentId: NodeId, name: string) => {
       const created = await createServerNode(parentId, name);
@@ -663,6 +727,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       write,
       create,
       remove,
+      rename,
       setSelection,
       storageMode,
       syncError,
@@ -689,7 +754,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       promote,
     };
   }, [
-    state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment, proposals, decideProposal, promote,

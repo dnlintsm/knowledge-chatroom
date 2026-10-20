@@ -151,6 +151,33 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     assert.equal((await storage.files.history("notes/tmp.md"))!.length, 1);
   });
 
+  test("rename moves a file with its history and frees the old path", async () => {
+    await storage.files.write("notes/draft.txt", text("v1"), { author: "agent" });
+    await storage.files.write("notes/draft.txt", text("v2"), { author: "agent" });
+    const events: string[] = [];
+    const stop = await storage.events.subscribe((e) => {
+      if (e.op === "delete" && e.path === "notes/draft.txt") events.push("delete draft");
+      if (e.op === "write" && e.path === "notes/plan.md") events.push(`write plan by ${e.author}`);
+    });
+    const moved = await storage.files.rename("notes/draft.txt", "notes/plan.md");
+    assert.equal(moved?.path, "notes/plan.md");
+    // The type picked from the old name follows the new one.
+    assert.equal(moved?.mime, "text/markdown");
+    assert.equal((await storage.files.history("notes/plan.md"))!.length, 2);
+    assert.equal(await storage.files.read("notes/draft.txt"), null);
+    assert.equal(await storage.files.rename("notes/draft.txt", "notes/x.md"), null);
+    await storage.files.write("notes/draft.txt", text("new"));
+    await assert.rejects(storage.files.rename("notes/draft.txt", "notes/plan.md"), FileExistsError);
+    await storage.files.write("notes/fixed.md", text("x"), { createOnly: true, readOnly: true });
+    await assert.rejects(storage.files.rename("notes/fixed.md", "notes/free.md"), ReadOnlyFileError);
+    await assert.rejects(storage.files.rename("notes/plan.md", "../out.md"), /Invalid path/);
+    await waitFor(() => events.length >= 2);
+    stop();
+    // Other browsers drop the old path and load the new one.
+    // Named after who renamed it, so Claude's last edit doesn't pull others to the file.
+    assert.deepEqual(events, ["delete draft", "write plan by user"]);
+  });
+
   test("rejects paths that escape the tree", async () => {
     for (const bad of ["", "../etc/passwd", "notes/../../x", "notes/", "a/./b"]) {
       await assert.rejects(storage.files.write(bad, text("x")), /Invalid path/);
@@ -383,6 +410,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.ok(await carolFiles.read("notes/x.md"));
       await assert.rejects(carolFiles.write("notes/x.md", text("no")), ForbiddenError);
       await assert.rejects(carolFiles.remove("notes/x.md"), ForbiddenError);
+      await assert.rejects(carolFiles.rename("notes/x.md", "notes/y.md"), ForbiddenError);
       await assert.rejects(as(carol).createNode(moduleX, "Loop"), ForbiddenError);
 
       const bobFiles = await as(bob).files(moduleX);
@@ -390,6 +418,11 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(info.author, "user");
       const [version] = (await bobFiles.history("notes/bob.md"))!;
       assert.equal(version.authorId, bob);
+      assert.equal((await bobFiles.rename("notes/bob.md", "notes/bobs.md"))?.path, "notes/bobs.md");
+      // Owners rename files at the root, including ones they made.
+      const aliceRoot = await as(alice).files(null);
+      await aliceRoot.write("notes/alice.md", text("mine"));
+      assert.equal((await aliceRoot.rename("notes/alice.md", "notes/renamed.md"))?.path, "notes/renamed.md");
       // Whoever adds a node owns it, so bob can delete what he made but not
       // the module above it.
       const loopB = await as(bob).createNode(moduleX, "Loop B");

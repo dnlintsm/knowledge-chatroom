@@ -12,6 +12,7 @@ import {
   Lock,
   Network,
   Package,
+  Pencil,
   Route,
   Search,
   Sparkles,
@@ -28,7 +29,7 @@ import { SearchPanel } from "./search-panel";
 import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
-import { fileName, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { fileName, FileExistsError, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
@@ -271,9 +272,66 @@ function FileRow({
   label?: string;
   depth?: number;
 }) {
-  const { active, remove, canEdit } = useWorkspace();
+  const { active, remove, rename, canEdit } = useWorkspace();
   const { open } = useWorkbench().editor;
+  const [renaming, setRenaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const selected = active === file.path;
+  const name = fileName(file.path);
+  const submit = async (next: string) => {
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === name) {
+      setRenaming(false);
+      setError(null);
+      return;
+    }
+    if (trimmed.includes("/")) {
+      setError("A name can't contain /");
+      return;
+    }
+    const folder = file.path.slice(0, file.path.length - name.length);
+    try {
+      await rename(file.path, folder + trimmed);
+      setRenaming(false);
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof FileExistsError
+          ? `${trimmed} already exists here`
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+    }
+  };
+  const actionClass = cn(
+    "size-5 items-center justify-center rounded text-[var(--muted-foreground)] cursor-pointer",
+    // Shown on the open file too, for touch screens that can't hover.
+    selected ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+  );
+  if (renaming) {
+    return (
+      <div style={{ paddingLeft: 12 + depth * 12 }} className="pr-2">
+        <div className="flex h-7 items-center gap-1.5">
+          <FileIcon file={file} />
+          <RenameInput
+            initial={name}
+            label={`New name for ${file.path}`}
+            onSubmit={(value) => void submit(value)}
+            onCancel={() => {
+              setRenaming(false);
+              setError(null);
+            }}
+          />
+        </div>
+        {error && (
+          <p role="alert" className="pb-1 text-[12px] text-[var(--destructive)]">
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
     <div
       role="treeitem"
@@ -289,7 +347,7 @@ function FileRow({
       )}
     >
       <FileIcon file={file} />
-      <span className="min-w-0 flex-1 truncate">{label ?? fileName(file.path)}</span>
+      <span className="min-w-0 flex-1 truncate">{label ?? name}</span>
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
@@ -297,24 +355,68 @@ function FileRow({
         <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
       ) : (
         canEdit && (
-          <button
-            type="button"
-            aria-label={`Delete ${file.path}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
-            }}
-            className={cn(
-              "size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] cursor-pointer",
-              // Shown on the open file too, for touch screens that can't hover.
-              selected ? "flex" : "hidden group-hover:flex group-focus-within:flex",
-            )}
-          >
-            <Trash2 className="size-3.5" />
-          </button>
+          <>
+            <button
+              type="button"
+              aria-label={`Rename ${file.path}`}
+              title="Rename"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenaming(true);
+              }}
+              className={cn(actionClass, "hover:text-[var(--foreground)]")}
+            >
+              <Pencil className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={`Delete ${file.path}`}
+              title="Delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
+              }}
+              className={cn(actionClass, "hover:text-[var(--destructive)]")}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </>
         )
       )}
     </div>
+  );
+}
+
+function RenameInput({
+  initial,
+  label,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string;
+  label: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <input
+      autoFocus
+      aria-label={label}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      // Select the name without its extension, as file managers do.
+      onFocus={(e) => {
+        const dot = initial.lastIndexOf(".");
+        e.currentTarget.setSelectionRange(0, dot > 0 ? dot : initial.length);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onSubmit(value);
+        if (e.key === "Escape") onCancel();
+      }}
+      onBlur={onCancel}
+      className="h-6 min-w-0 flex-1 rounded border border-[var(--ring)] bg-[var(--background)] px-1.5 text-[13px] outline-none"
+    />
   );
 }
 

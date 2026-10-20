@@ -33,9 +33,11 @@ import type { Session } from "./session";
  *   PUT    /files/<path>?propose    propose that content instead, for an
  *                                   editor to accept (see /proposals); a
  *                                   viewer may propose too. ?note= says why
+ *   PATCH  /files/<path>            {path} → rename (move within the same
+ *                                   place); 412 when the new path is taken
  *   DELETE /files/<path>            soft delete
  *
- *   Read-only files answer 403 to PUT and DELETE, and carry
+ *   Read-only files answer 403 to PUT, PATCH and DELETE, and carry
  *   `X-File-Read-Only: true` on GET.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
@@ -618,6 +620,17 @@ export function createStorageHandler(
           readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
         });
         json(res, 200, info);
+        return;
+      }
+      case "PATCH": {
+        const body = await readJson(req);
+        if (!body || typeof body.path !== "string") {
+          json(res, 400, { error: "Expected {path: string}" });
+          return;
+        }
+        const info = await service.rename(path, body.path);
+        if (!info) json(res, 404, { error: "Not found" });
+        else json(res, 200, info);
         return;
       }
       case "DELETE": {
