@@ -25,6 +25,7 @@ import { adapter, runAs } from "./agent";
 import { currentStorage, startStorage, storageState, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
+import { clearWorkdir, syncWorkdir, workdirEnabled } from "./storage/workdir";
 import { IDENTITY_HEADER, identify, signIdentity, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
@@ -69,6 +70,15 @@ async function prepareSkills(
         return undefined;
       });
     }
+    // The workspace copy Claude reads with Read/Glob/Grep (./storage/workdir.ts).
+    if (storage && userId && workdirEnabled()) {
+      run.workdir = await syncWorkdir(storage.session({ userId, actor: "agent" }), run.cwd).catch((err) => {
+        console.error(`[workdir] couldn't copy the workspace; running without it: ${err instanceof Error ? err.message : err}`);
+        return undefined;
+      });
+    }
+    // Without a fresh copy, no old one either: scripts can read the run folder.
+    if (!run.workdir) await clearWorkdir(run.cwd);
     return run;
   } catch (err) {
     console.error(`[skills] couldn't prepare skills; running without them: ${err instanceof Error ? err.message : err}`);

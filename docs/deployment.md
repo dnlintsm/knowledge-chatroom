@@ -50,6 +50,11 @@ or bucket access have finished. Verify authenticated storage operations after
 startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
 
+With storage, the agent keeps a copy of each user's readable files in their run folder
+(`SKILLS_RUN_DIR`, default a temp folder) for Claude's Read/Glob/Grep: give that folder disk
+for up to `AGENT_WORKDIR_MAX_MB` (default 500) per active user, or set `AGENT_WORKDIR=off`. See
+[Working folder](architecture.md#working-folder).
+
 Skill scripts are off unless the agent has `SKILL_SCRIPTS=on`. Turning them on needs
 bubblewrap on the agent host (and, in a container, permission to create user
 namespaces) plus whatever interpreters the skills use; a run with scripts fails

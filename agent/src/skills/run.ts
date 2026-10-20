@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 
+import { MANIFEST, WORKSPACE_DIR, type WorkdirSummary } from "../storage/workdir";
 import type { SkillSource } from "./catalog";
 import type { KeyRoute } from "./keyproxy";
 import type { SkillTrigger, UserSkill } from "./service";
@@ -24,7 +25,7 @@ import type { SkillTrigger, UserSkill } from "./service";
  * Scripts (step 5): with SKILL_SCRIPTS=on, a run that has a skill shipping
  * scripts also gets Bash, always inside the SDK's sandbox (bubblewrap on
  * Linux; the run fails rather than run commands unsandboxed): no network,
- * writes only in the run folder (not its skills), the server's own files,
+ * writes only in the run folder (not its skills or workspace copy), the server's own files,
  * its home and other users' folders unreadable, and an environment holding
  * nothing but what the SDK needs, with a stand-in for the API key
  * (./keyproxy.ts).
@@ -39,6 +40,8 @@ export interface RunSkills {
   skills: UserSkill[];
   /** How the run reaches Anthropic when its scripts are on (./keyproxy.ts). */
   keys?: KeyRoute;
+  /** The workspace copy in `cwd`, when it has one (../storage/workdir.ts). */
+  workdir?: WorkdirSummary;
 }
 
 export interface SkillUse {
@@ -143,8 +146,9 @@ export function scriptOptions(run: RunSkills, appRoot: string, root = ROOT): Par
       allowUnsandboxedCommands: false,
       network: { allowedDomains: [] },
       filesystem: {
-        // Its skills, and files the SDK reads as instructions in later chats.
-        denyWrite: [".claude", ...PROJECT_FILES].map((name) => path.join(run.cwd, name)),
+        // Its skills, files the SDK reads as instructions in later chats, and
+        // the workspace copy (changes to it go through the file tools).
+        denyWrite: [".claude", ...PROJECT_FILES, WORKSPACE_DIR, MANIFEST].map((name) => path.join(run.cwd, name)),
         // Other users' run folders, the server's files, its home and mounted secrets stay out of reach.
         denyRead: [
           path.resolve(appRoot),

@@ -9,7 +9,10 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 
@@ -28,6 +31,7 @@ import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
+import { clearWorkdir, confineTools, syncWorkdir } from "./workdir";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
 import { createSkillsHandler } from "../skills/http";
@@ -1420,6 +1424,137 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const read = JSON.parse((await call("read_file", { path: "uploads/pic.png" })).text);
       assert.equal(read.mime, "image/png");
       assert.match(read.note, /Binary/);
+    });
+  });
+
+  describe("working folder", () => {
+    const as = (userId: string, actor: Principal["actor"] = "agent") =>
+      storage.session({ userId, actor });
+    let erin: string, finn: string, optics: string, cwd: string;
+    const limits = { maxBytes: 1024 * 1024, maxFileBytes: 1024 * 1024 };
+    const local = async (rel: string) =>
+      readFile(join(cwd, "workspace", ...rel.split("/")), "utf8").catch(() => null);
+
+    before(async () => {
+      // The first person to sign in owns the workspace; that mustn't be Erin.
+      await storage.access.userForSubject("test|wf-owner");
+      erin = await storage.access.userForSubject("test|wf-erin");
+      finn = await storage.access.userForSubject("test|wf-finn");
+      const owner = as(await storage.access.localUserId(), "user");
+      const tech = await owner.createNode(null, "Photonics");
+      optics = (await owner.createNode(tech.id, "Optics/Lenses")).id;
+      const files = await owner.files(optics);
+      await files.write("notes/focus.md", text("focal length 50 mm"));
+      await files.write("data/scan.csv", text("x,y\n1,2"));
+      await owner.setGrant(optics, "user", erin, "viewer");
+      cwd = await mkdtemp(join(tmpdir(), "workdir-test-"));
+    });
+
+    after(() => rm(cwd, { recursive: true, force: true }));
+
+    test("copies only what the user can read, read-only, with a map of places", async () => {
+      const summary = await syncWorkdir(as(erin), cwd, limits);
+      // Erin can't read the root, only the Optics node (its "/" made safe).
+      assert.equal(summary.places.some((p) => p.root), false);
+      const place = summary.places.find((p) => p.node === optics)!;
+      assert.equal(place.folder, "workspace/nodes/Photonics/Optics-Lenses");
+      assert.equal(place.role, "viewer");
+      assert.equal(await local("nodes/Photonics/Optics-Lenses/notes/focus.md"), "focal length 50 mm");
+      assert.equal(await local("root/notes/hello.md"), null);
+      const mode = (await stat(join(cwd, "workspace/nodes/Photonics/Optics-Lenses/data/scan.csv"))).mode;
+      assert.equal(mode & 0o222, 0);
+      const places = JSON.parse((await local(".places.json"))!);
+      assert.equal(places.places.find((p: { node?: string }) => p.node === optics).role, "viewer");
+
+      const other = await mkdtemp(join(tmpdir(), "workdir-test-"));
+      const none = await syncWorkdir(as(finn), other, limits);
+      assert.deepEqual([none.files, none.places.length], [0, 0]);
+      await rm(other, { recursive: true, force: true });
+    });
+
+    test("later syncs pick up changes and drop deleted files", async () => {
+      const owner = await as(await storage.access.localUserId(), "user").files(optics);
+      await owner.write("notes/focus.md", text("focal length 35 mm"));
+      await owner.remove("data/scan.csv");
+      await syncWorkdir(as(erin), cwd, limits);
+      assert.equal(await local("nodes/Photonics/Optics-Lenses/notes/focus.md"), "focal length 35 mm");
+      assert.equal(await local("nodes/Photonics/Optics-Lenses/data/scan.csv"), null);
+      // Its now-empty folder goes too.
+      await assert.rejects(stat(join(cwd, "workspace/nodes/Photonics/Optics-Lenses/data")));
+      // A copy that went missing is copied again.
+      await rm(join(cwd, "workspace/nodes/Photonics/Optics-Lenses/notes/focus.md"));
+      await syncWorkdir(as(erin), cwd, limits);
+      assert.equal(await local("nodes/Photonics/Optics-Lenses/notes/focus.md"), "focal length 35 mm");
+    });
+
+    test("a run without a fresh copy keeps no old one", async () => {
+      const other = await mkdtemp(join(tmpdir(), "workdir-test-"));
+      await syncWorkdir(as(erin), other, limits);
+      await clearWorkdir(other);
+      await assert.rejects(stat(join(other, "workspace")));
+      await assert.rejects(stat(join(other, ".workspace-manifest.json")));
+      // A later sync starts over cleanly.
+      await syncWorkdir(as(erin), other, limits);
+      assert.ok(await readFile(join(other, "workspace/nodes/Photonics/Optics-Lenses/notes/focus.md"), "utf8"));
+      await rm(other, { recursive: true, force: true });
+    });
+
+    test("leaves out files over the size limits", async () => {
+      const owner = await as(await storage.access.localUserId(), "user").files(optics);
+      await owner.write("uploads/big.bin", new Uint8Array(2048));
+      const summary = await syncWorkdir(as(erin), cwd, { maxBytes: 1024 * 1024, maxFileBytes: 1024 });
+      assert.ok(summary.skipped.some((s) => s.path.endsWith("uploads/big.bin")));
+      assert.equal(await local("nodes/Photonics/Optics-Lenses/uploads/big.bin"), null);
+      await owner.remove("uploads/big.bin");
+    });
+
+    test("Read, Glob and Grep stay inside the folder", async () => {
+      const hook = confineTools(cwd).hooks[0];
+      const decide = async (tool_name: string, tool_input: Record<string, unknown>) => {
+        const out = (await hook({ hook_event_name: "PreToolUse", tool_name, tool_input } as never, undefined, {
+          signal: new AbortController().signal,
+        })) as { hookSpecificOutput?: { permissionDecision?: string } };
+        return out.hookSpecificOutput?.permissionDecision ?? "allow";
+      };
+      assert.equal(await decide("Read", { file_path: join(cwd, "workspace/.places.json") }), "allow");
+      assert.equal(await decide("Read", { file_path: "workspace/.places.json" }), "allow");
+      assert.equal(await decide("Read", { file_path: "/etc/passwd" }), "deny");
+      assert.equal(await decide("Read", { file_path: join(cwd, "../outside") }), "deny");
+      assert.equal(await decide("Grep", { pattern: "focal" }), "allow");
+      assert.equal(await decide("Grep", { pattern: "x", path: "/" }), "deny");
+      assert.equal(await decide("Glob", { pattern: "**/*.md" }), "allow");
+      assert.equal(await decide("Glob", { pattern: "/etc/*" }), "deny");
+      assert.equal(await decide("Glob", { pattern: "../**" }), "deny");
+      // A link a script left in the folder doesn't lead out of it.
+      await symlink("/etc", join(cwd, "escape"));
+      assert.equal(await decide("Read", { file_path: join(cwd, "escape/passwd") }), "deny");
+      assert.equal(await decide("Grep", { pattern: "root", path: join(cwd, "escape") }), "deny");
+      await rm(join(cwd, "escape"));
+    });
+
+    test("save_file stores a file from the folder with write_file's rules", async () => {
+      const tools = Object.fromEntries(
+        createFileTools(() => storage, async () => erin, cwd).map((t) => [t.name, t]),
+      );
+      const call = async (args: Record<string, unknown>) => {
+        const result = (await tools.save_file.handler(args as never, {})) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
+        return { text: result.content[0].text, isError: Boolean(result.isError) };
+      };
+      await mkdir(join(cwd, "out"), { recursive: true });
+      await writeFile(join(cwd, "out/plot.png"), new Uint8Array([137, 80, 78, 71]));
+      // In a node it becomes a proposal, even for a viewer.
+      const saved = await call({ from: "out/plot.png", path: "artifacts/plot.png", node: optics });
+      assert.equal(saved.isError, false);
+      assert.equal(JSON.parse(saved.text).proposed, true);
+      // Erin can't write the root.
+      assert.equal((await call({ from: "out/plot.png", path: "artifacts/plot.png" })).isError, true);
+      assert.equal((await call({ from: "/etc/passwd", path: "x.txt", node: optics })).isError, true);
+      assert.equal((await call({ from: "out/missing.png", path: "x.png", node: optics })).isError, true);
+      // Without a working folder there is no save_file.
+      assert.equal(createFileTools(() => storage).some((t) => t.name === "save_file"), false);
     });
   });
 

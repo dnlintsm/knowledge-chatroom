@@ -39,6 +39,22 @@ test("a run with skills gets them, the Skill tool and its own working folder", (
   assert.deepEqual(runAs("alice", () => adapter.buildOptions(input)).tools, []);
 });
 
+test("a run with a workspace copy can read it with Read, Glob and Grep, and only there", () => {
+  const workdir = { dir: "/tmp/skills-run/workspace", places: [], files: 3, bytes: 10, skipped: [] };
+  const options = runAs("alice", () => adapter.buildOptions(input), { cwd: "/tmp/skills-run", skills: [], workdir });
+  assert.deepEqual(options.tools, ["Skill", "Read", "Glob", "Grep"]);
+  for (const name of ["Read", "Glob", "Grep", "mcp__copilotkit__save_file"]) {
+    assert.ok(options.allowedTools?.includes(name), name);
+  }
+  assert.ok(options.hooks?.PreToolUse?.some((m) => m.matcher === "Read|Glob|Grep"));
+  // The Skill hook stays.
+  assert.ok(options.hooks?.PreToolUse?.some((m) => m.matcher === "Skill"));
+  assert.match(String(options.systemPrompt), /workspace\/\.places\.json/);
+  // No copy, no save_file.
+  const plain = runAs("alice", () => adapter.buildOptions(input), { cwd: "/tmp/skills-run", skills: [] });
+  assert.equal(plain.allowedTools?.includes("mcp__copilotkit__save_file"), false);
+});
+
 test("outside MCP servers are pre-approved and get each run's signed user", () => {
   const shared = adapter.buildOptions(input);
   assert.ok(shared.allowedTools?.includes("mcp__lab"));

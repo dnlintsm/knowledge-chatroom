@@ -205,6 +205,8 @@ test("script options: only when turned on, for a run with scripts, sandboxed, no
       "/runs/abc/CLAUDE.md",
       "/runs/abc/CLAUDE.local.md",
       "/runs/abc/.mcp.json",
+      "/runs/abc/workspace",
+      "/runs/abc/.workspace-manifest.json",
     ]);
     assert.deepEqual(sandbox.filesystem?.denyRead, [
       "/app",
