@@ -130,8 +130,7 @@ function TitleBar() {
   return (
     // Right padding leaves room for the CopilotKit inspector button pinned top-right.
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4 pr-24">
-      <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
-      <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
+      <HomeLink />
       <StorageStatus />
       <PlaceBreadcrumb />
       <RunBreadcrumb />
@@ -181,6 +180,33 @@ function TitleBar() {
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * The app name, which goes back to where a fresh page load starts: Traverse
+ * mode at the top of the knowledge tree. Open tabs and chats stay as they are.
+ * A real link to "/", so a middle-click or Ctrl-click opens a new tab.
+ */
+function HomeLink() {
+  const { storageMode, node, experiment, enterNode } = useWorkspace();
+  const { run, sidebar } = useWorkbench();
+  return (
+    <a
+      href="/"
+      title="Home: all runs, at the top of the workspace"
+      onClick={(e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        run.leave();
+        if (storageMode === "server" && (node !== null || experiment)) void enterNode(null);
+        sidebar.show("runs");
+      }}
+      className="-ml-1.5 flex shrink-0 items-center gap-2 rounded px-1.5 py-0.5 hover:bg-[var(--secondary)]"
+    >
+      <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
+      <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
+    </a>
   );
 }
 
