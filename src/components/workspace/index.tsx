@@ -185,21 +185,21 @@ function TitleBar() {
 
 /**
  * The app name, which goes back to where a fresh page load starts: Traverse
- * mode at the top of the knowledge tree. Open tabs and chats stay as they are.
- * A real link to "/", so a middle-click or Ctrl-click opens a new tab.
+ * mode (all runs) in the current place. It leaves the knowledge tree place
+ * alone, so Back returns to the run; the Location breadcrumb goes up the tree.
+ * Open tabs and chats stay as they are. A real link to "/", so a middle-click
+ * or Ctrl-click opens a new tab, which starts in the same place.
  */
 function HomeLink() {
-  const { storageMode, node, experiment, enterNode } = useWorkspace();
   const { run, sidebar } = useWorkbench();
   return (
     <a
       href="/"
-      title="Home: all runs, at the top of the workspace"
+      title="Home: all runs"
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         run.leave();
-        if (storageMode === "server" && (node !== null || experiment)) void enterNode(null);
         sidebar.show("runs");
       }}
       className="-ml-1.5 flex shrink-0 items-center gap-2 rounded px-1.5 py-0.5 hover:bg-[var(--secondary)]"
