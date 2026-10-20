@@ -86,7 +86,10 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The run input with the server's `user` in its chatroom props (and the rest kept). */
-export function withChatroomUser<T extends { forwardedProps?: unknown }>(input: T, user: ChatroomUser | null): T {
+export function withChatroomUser<T extends { forwardedProps?: unknown }>(
+  input: T,
+  user: ChatroomUser | null,
+): Omit<T, "forwardedProps"> & { forwardedProps: Record<string, unknown> } {
   const props = record(input.forwardedProps) ? input.forwardedProps : {};
   const sent = record(props[CHATROOM_PROPS]) ? props[CHATROOM_PROPS] : {};
   return {
