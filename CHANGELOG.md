@@ -31,6 +31,9 @@ suggestions, and login that fails closed in production.
 - Search by meaning through any OpenAI-compatible embeddings API such as LiteLLM or
   OpenRouter (`EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`), with
   background re-embedding when the model changes (#55, #56).
+- Claude gets a read-only copy of the user's workspace files in its run folder and
+  can search it with Read, Glob and Grep; skill scripts can read it, and `save_file`
+  stores files they make (`AGENT_WORKDIR=off` to turn off) (#77, #78).
 - Rename files from the file list; history and open tabs follow (#72).
 - Delete workspace skills from the Skills panel (#54).
 - `read_file` pages through long files with `offset`/`limit` (#63).
