@@ -1,21 +1,64 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
+
+Bring your own tools and models, an admin panel for workspace owners, smarter chat
+suggestions, and login that fails closed in production.
+
+### Upgrading from 0.0.1
+
+- Set `AUTH_MODE` (#64, #66): `oidc` for login or `local` for one built-in user. A
+  production server with neither `AUTH_MODE` nor `AUTH_SECRET` now refuses to start
+  instead of running without login. With login, `APP_URL` is required in production,
+  and the issuer and `APP_URL` must use https unless on localhost
+  (`AUTH_ALLOW_HTTP=true` for development). The docker demo sets `AUTH_MODE=local`.
+- Migrations `013` (whoever adds a knowledge node owns it) and `014_last_seen.sql`
+  (`users.last_seen_at` for the admin panel) apply at agent startup. Back up first, as
+  for any upgrade.
+- Serving over HTTPS: see the new HTTPS section in `docs/deployment.md`.
 
 ### Added
 
-- Admin panel for workspace owners (#67): see everyone who has signed in and when they
-  were last active, set their workspace role, create and nest groups and add or remove
-  members, and read recent access changes. Migration `014_last_seen.sql` adds
-  `users.last_seen_at`.
+- Admin panel for workspace owners (#67, #68): see everyone who has signed in and
+  when they were last active, set their workspace role, create and nest groups and
+  manage members, and read recent access changes.
+- Outside MCP servers with `MCP_SERVERS`, optionally forwarding the signed-in user
+  (#61), and a sample that brings a Python agent in as a skill plus a FastMCP server
+  (`examples/python-agent`, #71).
+- Chat suggestions (#57): first chips follow what is open (#58), and after each reply
+  a small model suggests follow-ups (#59; `SUGGESTIONS_MODEL`,
+  `CHAT_SUGGESTIONS=static` to turn off).
+- Search by meaning through any OpenAI-compatible embeddings API such as LiteLLM or
+  OpenRouter (`EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`), with
+  background re-embedding when the model changes (#55, #56).
+- Rename files from the file list; history and open tabs follow (#72).
+- Delete workspace skills from the Skills panel (#54).
+- `read_file` pages through long files with `offset`/`limit` (#63).
 
 ### Changed
 
-- Login settings fail closed (#64): set `AUTH_MODE=oidc` or `AUTH_MODE=local`. A
-  production server with neither `AUTH_MODE` nor `AUTH_SECRET` now refuses to start
-  instead of running without login; with login, `APP_URL` is required in production
-  and the issuer and `APP_URL` must use https unless on localhost (`AUTH_ALLOW_HTTP=true`
-  for development). The docker demo sets `AUTH_MODE=local`.
+- Chat history moved into the chat pane, next to New chat; the top-right chat
+  button opens the chat with the cursor in the message box (#69, #70).
+- Knowledge tree buttons show on touch screens, and whoever adds a node owns it, so
+  editors can delete nodes they created (#62).
+- Non-Claude model ids behind a gateway are kept as written; the docker demo passes
+  `ANTHROPIC_BASE_URL` to the agent (#53).
+- Dependencies (#73): CopilotKit 1.79 with AG-UI 1.0, Claude Agent SDK 0.3 with the
+  AG-UI adapter 0.0.7, Anthropic SDK 0.135, Next.js 16.4.2, transformers.js 4.3 and
+  patch updates across both packages.
+
+### Fixed
+
+- Post-login redirects stay on the app's origin (#65).
+- The agent no longer accepts unsigned chat requests when login is on without a
+  database (#66).
+
+### Known limitations
+
+- `npm audit` still reports `@fastify/busboy` (high) through CopilotKit runtime's
+  Vertex AI provider, which this app doesn't use; no upstream fix yet.
+- Login sessions can't be revoked on the server yet: a removed role applies on the
+  next request, but the session cookie itself stays valid until it expires (#64).
 
 ## 0.0.1 — first demo release
 
