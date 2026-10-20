@@ -1,0 +1,2 @@
+# The MCP server (lab_tools/server.py). mcp 2 renamed FastMCP to MCPServer.
+mcp>=2.2,<3

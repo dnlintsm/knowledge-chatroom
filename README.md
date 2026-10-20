@@ -106,6 +106,7 @@ Keep PRs small and describe the behavior changed and how you validated it.
 | `src/app/declarative-generative-ui`, `src/hooks` | Starter examples and A2UI renderers |
 | `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `agent/src/storage/migrations` | Database schema and access policies |
+| `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
 | `tests/unit` | Pure frontend tests without an application server or browser |
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |
