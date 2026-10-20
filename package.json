@@ -1,6 +1,6 @@
 {
   "name": "knowledge-chatroom",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:ui\" \"npm run dev:agent\" --names ui,agent --prefix-colors blue,green --kill-others",
@@ -24,10 +24,10 @@
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
-    "@ag-ui/client": "0.0.59",
-    "@copilotkit/a2ui-renderer": "1.73.2",
-    "@copilotkit/react-core": "1.73.2",
-    "@copilotkit/runtime": "1.73.2",
+    "@ag-ui/client": "1.0.2",
+    "@copilotkit/a2ui-renderer": "1.79.1",
+    "@copilotkit/react-core": "1.79.1",
+    "@copilotkit/runtime": "1.79.1",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-separator": "^1.1.8",
@@ -37,7 +37,7 @@
     "dotenv": "^16.4.7",
     "hono": "^4.12.10",
     "lucide-react": "^0.577.0",
-    "next": "16.4.0",
+    "next": "16.4.2",
     "openid-client": "^6.8.8",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -66,9 +66,10 @@
     "typescript-eslint": "^8.71.1"
   },
   "overrides": {
-    "@ag-ui/client": "0.0.59",
-    "@ag-ui/core": "0.0.59",
-    "@ag-ui/encoder": "0.0.59",
-    "@ag-ui/proto": "0.0.59"
+    "@ag-ui/client": "$@ag-ui/client",
+    "@ag-ui/core": "1.0.2",
+    "@ag-ui/encoder": "1.0.2",
+    "@ag-ui/proto": "1.0.2",
+    "katex": "0.18.11"
   }
 }

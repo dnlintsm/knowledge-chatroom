@@ -27,6 +27,39 @@ on both: `oidc` with the OIDC values, `APP_URL` and shared `AUTH_SECRET` describ
 setup without login. Production builds refuse to start when it is unset and no
 `AUTH_SECRET` is given, so a missing secret can't silently turn login off.
 
+The first person to sign in owns the workspace. Owners see an **Admin** button next
+to Share: people who have signed in and when they were last active, workspace roles,
+groups and their members, and recent access changes. A removed role applies on the
+user's next request; their login session stays valid until it expires.
+
+## HTTPS
+
+The app has no built-in TLS: the UI (3000) and the object store (8333) speak plain
+HTTP. Put a reverse proxy such as Caddy or nginx in front with your certificate:
+
+```
+knowledge.example.com:443 {
+	tls /certs/fullchain.pem /certs/privkey.pem
+	reverse_proxy app:3000
+}
+
+# Signed downloads: its own port, not a path, because the link signs host and path.
+knowledge.example.com:8443 {
+	tls /certs/fullchain.pem /certs/privkey.pem
+	reverse_proxy s3:8333
+}
+```
+
+Then set `APP_URL=https://knowledge.example.com` on the UI (session cookies become
+Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`) and
+`S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent, so image and PDF
+previews don't break as mixed content. `AGENT_URL` stays on the private network and
+`AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,
+add `proxy_buffering off;` for the UI so the `/api/files?watch` event stream isn't
+held back; Caddy streams it as is.
+
+## Storage and upgrades
+
 Persist PostgreSQL and the S3 bucket together; files and their versions reference
 content hashes in the bucket. Set database/object-store credentials for the agent.
 Replace compose's local credentials before using shared infrastructure. Set

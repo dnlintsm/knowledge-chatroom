@@ -228,6 +228,19 @@ The layout itself is plain data changed by a reducer (`layout.ts`), so its rules
 tested (`tests/unit/workbench.spec.ts`), and a test fails if anything outside the workbench starts
 keeping its own pane state.
 
+### Chat suggestions
+
+The chips under the chat come in two rounds. Before the first message they follow what is
+open (`src/components/workspace/chat-suggestions.ts`): summarize the open file, draft a note,
+analyze the focused run's report, and, with server storage, search for similar experiments.
+After each reply CopilotKit asks a separate `suggester` agent for follow-ups. The chat agent
+can't serve that request, because CopilotKit forces a single tool call and the Claude Agent SDK
+would run a whole turn with file tools, so the agent's `POST /suggest` (`agent/src/suggest.ts`)
+makes one Messages API call on a small model with the conversation and the workspace context,
+and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
+the first-round chips once the chat starts, since any change would reload the follow-ups.
+`CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
+
 ### File references in answers
 
 Claude's answers can point at a file, or at lines in it, and a click opens them in the middle
