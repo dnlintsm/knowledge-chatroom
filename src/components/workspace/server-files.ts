@@ -177,6 +177,23 @@ export async function deleteServerFile(path: string, place: PlaceId = null): Pro
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
 }
 
+/** Renames a file within its place, keeping its history. */
+export async function renameServerFile(from: string, to: string, place: PlaceId = null): Promise<ServerFile> {
+  const res = await apiFetch(fileUrl(from, place), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: to }),
+  });
+  if (res.status === 412) throw new FileExistsError(to);
+  if (res.status === 403) {
+    const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
+    if (answer?.readOnly) throw new ReadOnlyFileError(from);
+    throw new Error(`You can't change files here (${from})`);
+  }
+  if (!res.ok) throw new Error(`Couldn't rename ${from}: ${res.status}`);
+  return parseFileInfo(await res.json());
+}
+
 /** The knowledge tree's levels and the nodes you can see, or null when it can't be read. */
 export async function listNodes(): Promise<KnowledgeTree | null> {
   try {

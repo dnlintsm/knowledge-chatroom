@@ -56,8 +56,9 @@ gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, 
 host must have; the run fails rather than run a command unsandboxed):
 
 - **No network**: commands can't reach the internet, other hosts or the agent's own ports.
-- **Files**: writes only in the user's run folder, and not to its skills or the files the SDK
-  reads as instructions there (`CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json`). The agent's own
+- **Files**: writes only in the user's run folder, and not to its skills, its workspace copy
+  (below) or the files the SDK reads as instructions there (`CLAUDE.md`, `CLAUDE.local.md`,
+  `.mcp.json`). The agent's own
   folder (code, `.env`), its home (including the SDK's chat history), other users' run folders
   and the usual secret mounts (`/run/secrets`, `/var/run/secrets`, `/etc/secrets`) can't be
   read; `SKILL_SCRIPTS_DENY_READ` (comma-separated absolute paths) adds more. Other processes,
@@ -72,6 +73,30 @@ Commands run without a permission prompt because they're sandboxed; `!` commands
 stay off. The Skills view marks a skill with scripts with a terminal icon when they run, and a
 warning when they don't. Python or other interpreters the scripts need must be installed on the
 agent host.
+
+#### Working folder
+
+With file storage, each user's run folder also holds `workspace/`, a read-only copy of every
+file that user can read (`agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
+the workspace like on a local project:
+
+- **Layout**: `workspace/root/` is the workspace root, `workspace/nodes/<tech>/<module>/...`
+  the knowledge nodes by name (child nodes as subfolders), `workspace/experiments/<title> (<id>)/`
+  each experiment the user can see. `workspace/.places.json` maps each folder to its node or
+  experiment id and the user's role, and lists files left out.
+- **Sync**: at the start of each run, through the user's own session (the same permission checks
+  and row security as the file tools). Only files whose content changed are downloaded; deleted
+  ones are removed. It is a snapshot: changes made during a run show up in the next one.
+  `AGENT_WORKDIR_MAX_MB` (default 500) caps the copy, smallest files first, and
+  `AGENT_WORKDIR_MAX_FILE_MB` (default 25) leaves out larger files.
+- **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
+  of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
+  sandboxed as above; scripts can read `workspace/` but not change it.
+- **Writing back**: changes still go through `write_file`, so read-only files stay unchanged,
+  writes in a node or to skills become proposals and every write is a version. `save_file` stores
+  a file a script made in the run folder (a plot, a CSV) the same way.
+
+`AGENT_WORKDIR=off` turns the copy and those tools off.
 
 ### Skill hub
 
@@ -254,7 +279,9 @@ For local setup, see [Development](development.md).
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
 - **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
-  (request body = bytes) and deletes one, `?versions` returns its history, and
+  (request body = bytes) and deletes one, `PATCH /api/files/<path>` with `{"path": ...}`
+  renames it within the same place (history kept; 412 when the name is taken),
+  `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
   (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,

@@ -335,6 +335,36 @@ test("files and layout survive a reload", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
 });
 
+test("rename a file", async ({ page }) => {
+  await gotoRun(page);
+  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByTestId("file-editor").fill("# Etch plan");
+  const row = page.getByRole("treeitem", { name: /untitled-1\.md/ });
+  await row.getByRole("button", { name: `Rename ${RUN}/untitled-1.md` }).click();
+  const input = page.getByRole("textbox", { name: `New name for ${RUN}/untitled-1.md` });
+  await expect(input).toBeFocused();
+  await input.fill("etch-plan.md");
+  await shot(page, "18-file-rename");
+  await page.keyboard.press("Enter");
+  const renamed = page.getByRole("treeitem", { name: /etch-plan\.md/ });
+  await expect(renamed).toHaveAttribute("title", `${RUN}/etch-plan.md`);
+  await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveCount(0);
+  // The open tab follows the file.
+  await expect(page.getByRole("tab", { name: /etch-plan\.md/ })).toBeVisible();
+  await expect(page.getByTestId("file-preview")).toContainText("Etch plan");
+
+  // A taken name is refused, and the file keeps its name.
+  await page.getByRole("button", { name: "New note" }).click();
+  const taken = (await page.getByRole("treeitem", { name: /untitled-\d+\.md/ }).innerText()).trim();
+  await renamed.hover();
+  await renamed.getByRole("button", { name: `Rename ${RUN}/etch-plan.md` }).click();
+  await page.getByRole("textbox", { name: `New name for ${RUN}/etch-plan.md` }).fill(taken);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("alert").filter({ hasText: `${taken} already exists here` })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(renamed).toBeVisible();
+});
+
 test("dark mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openHome(page);

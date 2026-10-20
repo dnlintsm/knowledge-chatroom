@@ -68,7 +68,10 @@ Built-in skills live in `agent/skills/`; with server storage, the agent also loa
 workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
-skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory.
+skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory; with server
+storage it also holds a read-only copy of the user's files that Claude searches with
+Read/Glob/Grep (`AGENT_WORKDIR=off` turns it off; see
+[Working folder](architecture.md#working-folder)).
 Skills are instructions; embedded shell commands are not executed. With
 `SKILL_SCRIPTS=on` the agent runs skills' scripts in the SDK's sandbox, which needs
 bubblewrap (`apt-get install bubblewrap`; macOS has its own) on the agent host; see

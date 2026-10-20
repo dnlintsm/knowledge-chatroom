@@ -7,6 +7,9 @@
  * to accept or reject.
  */
 
+import { readFile, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
@@ -19,6 +22,7 @@ import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
+import { isInside } from "./workdir";
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
 const MAX_READ_CHARS = 200_000;
@@ -146,6 +150,8 @@ export function createFileTools(
   // With login on, the user must come from the chat run; until it does, no access.
   user: (storage: Storage) => Promise<string | null> = async (s) =>
     s.config.authSecret ? null : s.access.localUserId(),
+  /** The run's working folder (./workdir.ts); adds save_file. */
+  workdir?: string,
 ) {
   // Storage starts in the background; a call before it is ready (or after it
   // failed) gets a clear error instead of a crash.
@@ -191,6 +197,46 @@ export function createFileTools(
           : await session.files(place.node || null),
       ),
     );
+
+  /** Writes (or, in a node or for skills, proposes) a file as write_file describes. */
+  const store = async (
+    session: Session,
+    path: string,
+    bytes: Uint8Array,
+    place: { node?: string; experiment?: string },
+    summary?: string,
+  ): Promise<ToolResult> => {
+    // Claude may suggest skills but not add or change them itself: the
+    // workspace's skills shape every later run (issue #7).
+    const skillFile =
+      !place.experiment && !place.node && kindForPath(normalizePath(path)) === "skill";
+    if (!place.experiment && (place.node || skillFile)) {
+      const proposal = await session.propose(place.node || null, path, bytes, { note: summary });
+      return text({
+        ok: true,
+        proposed: true,
+        path: proposal.path,
+        node: proposal.node,
+        newFile: proposal.isNew,
+        note:
+          "Proposed for review, not written yet: someone who can edit " +
+          (skillFile ? "the workspace" : "this node") +
+          " accepts or rejects it in the editor. Tell the user.",
+      });
+    }
+    const service = place.experiment
+      ? await session.experimentFiles(place.experiment)
+      : await session.files(null);
+    const existed = Boolean(await service.stat(path));
+    const info = await service.write(path, bytes);
+    return text({
+      ok: true,
+      path: info.path,
+      node: service.nodeId,
+      experiment: service.experimentId,
+      created: !existed,
+    });
+  };
 
   return [
     tool(
@@ -373,40 +419,40 @@ export function createFileTools(
           .describe("One line on what changed and why; shown to whoever reviews a proposal."),
       },
       ({ path, content, summary, ...place }) =>
-        run(async (session) => {
-          const bytes = new TextEncoder().encode(content);
-          // Claude may suggest skills but not add or change them itself: the
-          // workspace's skills shape every later run (issue #7).
-          const skillFile =
-            !place.experiment && !place.node && kindForPath(normalizePath(path)) === "skill";
-          if (!place.experiment && (place.node || skillFile)) {
-            const proposal = await session.propose(place.node || null, path, bytes, { note: summary });
-            return text({
-              ok: true,
-              proposed: true,
-              path: proposal.path,
-              node: proposal.node,
-              newFile: proposal.isNew,
-              note:
-                "Proposed for review, not written yet: someone who can edit " +
-                (skillFile ? "the workspace" : "this node") +
-                " accepts or rejects it in the editor. Tell the user.",
-            });
-          }
-          const service = place.experiment
-            ? await session.experimentFiles(place.experiment)
-            : await session.files(null);
-          const existed = Boolean(await service.stat(path));
-          const info = await service.write(path, bytes);
-          return text({
-            ok: true,
-            path: info.path,
-            node: service.nodeId,
-            experiment: service.experimentId,
-            created: !existed,
-          });
-        }),
+        run((session) => store(session, path, new TextEncoder().encode(content), place, summary)),
     ),
+    ...(workdir
+      ? [
+          tool(
+            "save_file",
+            "Save a file from the working folder (one a script made, e.g. out/plot.png or a CSV) " +
+              "into the workspace, with the same rules as write_file: where the user is working " +
+              "unless they say otherwise, PROPOSED in a knowledge node or for skills, kept as a " +
+              "version, never over a read-only file. Use write_file for text you write yourself.",
+            {
+              from: z.string().describe("Path in the working folder, e.g. out/plot.png"),
+              path: z.string().describe("Workspace path to save it as, e.g. artifacts/plot.png"),
+              node: nodeParam,
+              experiment: experimentParam,
+              summary: z
+                .string()
+                .optional()
+                .describe("One line on what changed and why; shown to whoever reviews a proposal."),
+            },
+            ({ from, path, summary, ...place }) =>
+              run(async (session) => {
+                const source = resolve(workdir, from);
+                if (!(await isInside(workdir, source))) return error(`${from} is not in the working folder.`);
+                if (await isInside(join(workdir, ".claude"), source)) return error("Skills can't be saved from here.");
+                const info = await stat(source).catch(() => null);
+                if (!info?.isFile()) return error(`No file at ${from} in the working folder.`);
+                const max = storage()?.config.maxUploadBytes ?? 0;
+                if (max && info.size > max) return error(`${from} is larger than uploads may be (${max} bytes).`);
+                return store(session, path, new Uint8Array(await readFile(source)), place, summary);
+              }),
+          ),
+        ]
+      : []),
     tool(
       "propose_experiment",
       "Propose an experiment's work to its knowledge node: each file the experiment " +

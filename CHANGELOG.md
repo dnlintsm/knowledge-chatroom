@@ -38,6 +38,13 @@ suggestions, and login that fails closed in production.
 - Delete workspace skills from the Skills panel (#54).
 - `read_file` pages through long files with `offset`/`limit` (#63).
 
+### Fixed
+
+- Files can be renamed: anyone who can edit a place (workspace owners included) gets a
+  Rename button next to Delete in the file list. The file keeps its history and open
+  tab; read-only files and names already taken are refused. API: `PATCH
+  /api/files/<path>` with `{"path": "<new path>"}`.
+
 ### Changed
 
 - Chat history moved into the chat pane, next to New chat; the top-right chat

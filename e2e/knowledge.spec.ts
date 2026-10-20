@@ -62,10 +62,21 @@ test("knowledge tree", async ({ page }) => {
   await expect(tree.getByRole("treeitem", { name: /untitled-1\.md/ })).toBeVisible();
   await shot(page, "15-knowledge-node-files");
 
+  // Renaming a note you made moves it on the server, history and all.
+  await tree.getByRole("treeitem", { name: /untitled-1\.md/ }).getByRole("button", { name: "Rename notes/untitled-1.md" }).click();
+  await page.getByRole("textbox", { name: "New name for notes/untitled-1.md" }).fill("recipe.md");
+  await page.keyboard.press("Enter");
+  await expect(tree.getByRole("treeitem", { name: /recipe\.md/ })).toBeVisible();
+  const { nodes } = await (await page.request.get("/api/nodes")).json();
+  const moduleId = nodes.find((n: { name: string }) => n.name === MODULE).id;
+  await expect.poll(async () => (await page.request.get(`/api/files/notes/recipe.md?node=${moduleId}`)).status()).toBe(200);
+  expect((await page.request.get(`/api/files/notes/untitled-1.md?node=${moduleId}`)).status()).toBe(404);
+  await shot(page, "15b-knowledge-file-rename");
+
   // Back at the root, the module's note is not listed.
   await location.getByRole("button", { name: "Workspace" }).click();
   await expect(location).not.toContainText(MODULE);
-  await expect(tree.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveCount(0);
+  await expect(tree.getByRole("treeitem", { name: /recipe\.md/ })).toHaveCount(0);
 });
 
 test("experiments", async ({ page, request }) => {
