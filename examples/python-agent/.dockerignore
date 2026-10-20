@@ -1,0 +1,6 @@
+before
+tests
+skills
+__pycache__
+*.pyc
+.pytest_cache
