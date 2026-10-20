@@ -46,6 +46,22 @@ Changing the model re-embeds the corpus. See `.env.example` for the default mode
 and for `EMBEDDING_BASE_URL` to use an OpenAI-compatible embeddings API (LiteLLM,
 OpenRouter, OpenAI) instead of the local model.
 
+## Models and chat suggestions
+
+`CLAUDE_MODEL` picks the chat model. To use a gateway (LiteLLM, OpenRouter) set
+`ANTHROPIC_BASE_URL`; model ids that are not `claude-*` are passed through as
+written, e.g. `openai/gpt-5.1`. Extended thinking for non-Claude models depends on
+the gateway: enable reasoning there (LiteLLM `reasoning_effort`, OpenRouter
+reasoning settings), since the agent's adaptive thinking request is dropped by
+most proxies.
+
+The chips under the chat start from what is open (summarize the file, analyze the
+run's report, search similar experiments with server storage). After each reply
+the agent's `POST /suggest` makes one small-model call for follow-ups:
+`SUGGESTIONS_MODEL` (default `claude-haiku-5-5`, or `CLAUDE_MODEL` when that is
+not a Claude model). `CHAT_SUGGESTIONS=static` on the UI keeps the first-round chips
+and makes no extra calls. See [Chat suggestions](architecture.md#chat-suggestions).
+
 ## Skills
 
 Built-in skills live in `agent/skills/`; with server storage, the agent also loads
