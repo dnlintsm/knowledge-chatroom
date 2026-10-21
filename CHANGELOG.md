@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
-### Upgrading
+Runs become experiments: the Runs view replaces Traverse, Claude starts runs from your
+files with an `analysis` skill and records where every result came from, and the chat
+can go to a remote agent backend.
+
+### Upgrading from 0.1.1
 
 - Runs are experiments now (#82). The Traverse view, Focus mode, `?run=` links and
   `RUN_DIR_MARKERS` are gone; a run is an experiment with a `report.md`. Existing run
@@ -15,6 +19,7 @@
   moved to `LOCAL_AGENT_URL` (default `http://localhost:8000`). Remove
   `AGENT_URL=http://localhost:8000` from your `.env`, or rename it to
   `LOCAL_AGENT_URL`. The docker demo already sets `LOCAL_AGENT_URL`.
+- Back up the database before upgrading, as for any release with migrations.
 
 ### Added
 
@@ -39,6 +44,20 @@
   `create_experiment` takes `rerunOf` to run an earlier run again as a new run with the
   same inputs; the panel links a rerun to its original. A finished run can't be finished
   again with other results.
+
+### Changed
+
+- The app name in the title bar is a home link to the workspace root (#79).
+- The chat shows everywhere, so a workspace with no runs can still chat about the
+  files where you are (#81).
+
+### Known limitations
+
+- Analyses run within one chat turn; background jobs with progress for long runs are
+  still open on #82.
+- `npm audit` still reports `@fastify/busboy` (high) through CopilotKit runtime's
+  unused Vertex AI provider (#75).
+- Login sessions can't be revoked on the server yet (#64).
 
 ## 0.1.1
 
