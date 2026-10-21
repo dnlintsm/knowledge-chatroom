@@ -24,8 +24,6 @@ import {
   type PaneId,
   type ResizablePane,
   type SidebarView,
-  touchesChat,
-  withoutChat,
 } from "./layout";
 import { findRunDirs, isInRun, normalizeRunDir, RUN_REPORT, runFromSearch, searchWithRun, type RunDir } from "./runs";
 import { useHydrated, useWorkspace } from "./store";
@@ -39,8 +37,9 @@ import type { TabId } from "./types";
  */
 export interface Workbench {
   /**
-   * Focus: the panes work on one run (RUN_DIR). Traverse: no run is picked,
-   * the Traverse view lists them, and there is no chat pane.
+   * Focus: the panes work on one run (RUN_DIR). Traverse: no run is picked
+   * and the Traverse view lists them. The chat works in both; without a run
+   * it is about the current place.
    */
   mode: "focus" | "traverse";
   runDir: string | null;
@@ -73,7 +72,6 @@ export interface Workbench {
     /** Opens a file (or the task board) in the middle pane, at `lines` if given. */
     open(tab: TabId, lines?: LineRange): void;
   };
-  /** Only in Focus mode; in Traverse mode these do nothing. */
   chat: {
     /** Starts a new, empty conversation and shows the chat. */
     newThread(): void;
@@ -215,9 +213,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const startNewThread = chatConfig?.startNewThread;
   const setDrawerOpen = chatConfig?.setDrawerOpen;
-  const chatAvailable = mode === "focus";
   const focusChat = useCallback(() => {
-    if (!chatAvailable) return;
     // Back to the conversation if the pane was showing the chat history.
     setDrawerOpen?.(false);
     apply({ type: "show", pane: "chat" });
@@ -225,31 +221,25 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     requestAnimationFrame(() =>
       document.querySelector<HTMLTextAreaElement>(CHAT_INPUT_SELECTOR)?.focus(),
     );
-  }, [apply, chatAvailable, setDrawerOpen]);
+  }, [apply, setDrawerOpen]);
 
   const value = useMemo<Workbench>(() => {
-    const shown = chatAvailable ? layout : withoutChat(layout);
-    // Traverse mode has no chat pane, so nothing may show or size it there.
-    const command = (c: LayoutCommand) => {
-      if (!chatAvailable && touchesChat(c)) return;
-      apply(c);
-    };
     return {
       mode,
       runDir: runDir ?? null,
       runs,
       run: { focus: focusRun, leave: () => runDir && navigate(null) },
-      layout: shown,
+      layout,
       panes: {
-        isOpen: (pane) => isPaneOpen(shown, pane),
-        show: (pane) => command({ type: "show", pane }),
-        hide: (pane) => command({ type: "hide", pane }),
-        toggle: (pane) => command({ type: "toggle", pane }),
-        resize: (pane, width) => command({ type: "resize", pane, width }),
-        resetSize: (pane) => command({ type: "resetSize", pane }),
+        isOpen: (pane) => isPaneOpen(layout, pane),
+        show: (pane) => apply({ type: "show", pane }),
+        hide: (pane) => apply({ type: "hide", pane }),
+        toggle: (pane) => apply({ type: "toggle", pane }),
+        resize: (pane, width) => apply({ type: "resize", pane, width }),
+        resetSize: (pane) => apply({ type: "resetSize", pane }),
       },
       sidebar: {
-        view: shown.view,
+        view: layout.view,
         select: (view) => {
           pickedView.current = true;
           apply({ type: "selectView", view });
@@ -262,7 +252,6 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       editor: { open },
       chat: {
         newThread: () => {
-          if (!chatAvailable) return;
           startNewThread?.();
           focusChat();
         },
@@ -270,7 +259,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       },
       notify,
     };
-  }, [mode, runDir, runs, focusRun, navigate, layout, apply, open, chatAvailable, startNewThread, focusChat, notify]);
+  }, [mode, runDir, runs, focusRun, navigate, layout, apply, open, startNewThread, focusChat, notify]);
 
   return (
     <WorkbenchContext.Provider value={value}>

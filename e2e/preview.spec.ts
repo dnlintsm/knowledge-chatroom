@@ -22,7 +22,7 @@ async function gotoRun(page: Page) {
   await expect(page.getByRole("navigation", { name: "Current run" })).toBeVisible();
 }
 
-/** Focus mode on the sample run: the only mode with a chat. */
+/** Focus mode on the sample run, with the chat ready. */
 async function openHome(page: Page) {
   await gotoRun(page);
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
@@ -46,14 +46,14 @@ async function send(page: Page, text: string) {
 }
 
 test("workspace walkthrough", async ({ page }) => {
-  // Traverse mode: the runs in the workspace, and no chat.
+  // Traverse mode: the runs in the workspace, and the chat beside them.
   await page.goto("/");
   await expect(page.getByTestId("run-list")).toBeVisible();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
-  await expect(page.getByRole("button", { name: "Show chat" })).toHaveCount(0);
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await expect(page.getByTestId("chat-context-run")).toHaveCount(0);
   await shot(page, "01-traverse");
 
-  // Focusing a run opens its report, roots the file tree at it and brings the chat back.
+  // Focusing a run opens its report, roots the file tree at it and scopes the chat to it.
   await page.getByRole("button", { name: /etch-2026-10-01/ }).click();
   await expect(page).toHaveURL(new RegExp(`\\?run=${RUN}$`));
   await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
@@ -221,6 +221,26 @@ test("links and back/forward show the focused run's own report", async ({ page }
   await expect(preview).toContainText("xDOE report: etch rate");
 });
 
+test("a workspace with no runs still has the chat", async ({ page }) => {
+  // A first start with no run folders: one note, nothing to focus.
+  await page.addInitScript((key) => {
+    if (window.localStorage.getItem(key)) return;
+    const note = {
+      path: "notes/welcome.md", kind: "note", content: "# Welcome\n", mime: "text/markdown",
+      author: "user", updatedAt: Date.now(),
+    };
+    window.localStorage.setItem(key, JSON.stringify({ files: [note], tabs: [], active: null }));
+  }, "knowledge-chatroom.workspace.v1");
+  await page.goto("/");
+  await expect(page.getByText("No runs yet.")).toBeVisible();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await page.getByRole("button", { name: "Hide chat" }).click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
+  await page.getByRole("button", { name: "Show chat" }).click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
+  await shot(page, "20-chat-without-runs");
+});
+
 test("a link to a missing run falls back to Traverse", async ({ page }) => {
   await page.goto("/?run=runs/nope");
   await expect(page.getByTestId("notices")).toContainText("There is no run at runs/nope.");
@@ -380,10 +400,10 @@ test("dark mode", async ({ page }) => {
 
 test("mobile layout", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  // Traverse mode has no Chat tab.
+  // Traverse mode has a Chat tab too.
   await page.goto("/");
   await expect(page.getByTestId("run-list")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Chat", exact: true })).toBeVisible();
   await gotoRun(page);
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await shot(page, "13-mobile-editor");

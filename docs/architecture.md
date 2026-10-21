@@ -151,7 +151,8 @@ A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. An
 contains a marker folder is a run, `xdoe-report/` by default (set `RUN_DIR_MARKERS`,
 comma-separated, to add more). The workspace works in one of two modes:
 
-- **Traverse** (`/`): the **Traverse** view on the icon rail lists every run. There is no chat.
+- **Traverse** (`/`): the **Traverse** view on the icon rail lists every run. The chat works
+  here too, about the files where you are, so a workspace with no runs yet can still chat.
 - **Focus** (`/?run=runs/etch-2026-10-01`): the panes work on that run. The Files view is
   rooted at it (new notes and uploads land in it), the title bar shows where you are with a
   button to leave, and Claude gets the run as context (its path, files and
@@ -218,14 +219,15 @@ switcher, file references in answers, and Claude's open-file tools.
 | `panes.resize / resetSize(pane, width)` | splitter drags, clamped to each pane's range |
 | `sidebar.select / show(view)` | the icon rail (`select` on the active view collapses the panel) |
 | `editor.open(path, lines?)` | opens a file or the task board, optionally at cited lines |
-| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat (Focus mode only) |
+| `chat.newThread() / focus()` | starts an empty conversation / puts the cursor in the chat |
 | `notify(message, level)` | a short notice in the corner |
 
 Claude drives the same contract through frontend tools: `showPane` / `hidePane`,
 `listRuns` / `focusRun`, `openWorkspaceFile`, and `listActions` / `runAction`. `runAction`
 goes through the Actions block's runner with the user's role, and only runs actions marked
 `agentInvocable` (Generate Rules is; New Chat isn't, since it would end Claude's own
-conversation). Claude can't leave the run, because Traverse mode has no chat.
+conversation). Claude can't leave the run; `focusRun` moves it to another run (or into one
+from Traverse), and the conversation carries on.
 
 The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit
 tested (`tests/unit/workbench.spec.ts`), and a test fails if anything outside the workbench starts

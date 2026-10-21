@@ -119,23 +119,6 @@ export function reduceLayout(layout: Layout, command: LayoutCommand): Layout {
   }
 }
 
-/** Commands that would show, size or otherwise touch the chat pane. */
-export function touchesChat(command: LayoutCommand): boolean {
-  return "pane" in command && command.pane === "chat";
-}
-
-/**
- * The layout as shown in Traverse mode, which has no chat pane. The user's own
- * chat setting is kept underneath and comes back in Focus mode.
- */
-export function withoutChat(layout: Layout): Layout {
-  return {
-    ...layout,
-    chatOpen: false,
-    mobilePane: layout.mobilePane === "chat" ? "editor" : layout.mobilePane,
-  };
-}
-
 export function persistedLayout(layout: Layout) {
   return Object.fromEntries(PERSISTED_KEYS.map((key) => [key, layout[key]]));
 }
