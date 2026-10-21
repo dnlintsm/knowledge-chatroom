@@ -122,7 +122,7 @@ function WorkspaceLayout() {
 
 function TitleBar() {
   const { setTheme } = useTheme();
-  const { panes, mode, chat } = useWorkbench();
+  const { panes, chat } = useWorkbench();
   const sideOpen = panes.isOpen("explorer");
   const chatOpen = panes.isOpen("chat");
   const button =
@@ -161,23 +161,21 @@ function TitleBar() {
           <Moon className="hidden size-4 dark:block" />
         </button>
         {/* Last, at the top-right corner, where people look for the chat. */}
-        {mode === "focus" && (
-          <button
-            type="button"
-            aria-label={chatOpen ? "Hide chat" : "Show chat"}
-            title={chatOpen ? "Hide chat" : "Chat with Claude"}
-            aria-pressed={chatOpen}
-            onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
-            // Phones switch to the chat with the bottom pane switcher instead.
-            className={cn(
-              button,
-              "ml-1 border border-[var(--border)] max-lg:hidden",
-              chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
-            )}
-          >
-            <MessagesSquare className="size-4" />
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label={chatOpen ? "Hide chat" : "Show chat"}
+          title={chatOpen ? "Hide chat" : "Chat with Claude"}
+          aria-pressed={chatOpen}
+          onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
+          // Phones switch to the chat with the bottom pane switcher instead.
+          className={cn(
+            button,
+            "ml-1 border border-[var(--border)] max-lg:hidden",
+            chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
+          )}
+        >
+          <MessagesSquare className="size-4" />
+        </button>
       </div>
     </header>
   );
@@ -318,15 +316,13 @@ function PlaceBreadcrumb() {
 }
 
 function MobileSwitcher() {
-  const { layout, panes, mode } = useWorkbench();
+  const { layout, panes } = useWorkbench();
   const pane = layout.mobilePane;
-  const all = [
+  const items = [
     { id: "explorer" as const, label: "Files", icon: FolderTree },
     { id: "editor" as const, label: "Editor", icon: PanelsTopLeft },
     { id: "chat" as const, label: "Chat", icon: MessagesSquare },
   ];
-  // Traverse mode has no chat.
-  const items = mode === "focus" ? all : all.filter((item) => item.id !== "chat");
   return (
     <nav aria-label="Panes" className="flex shrink-0 border-t border-[var(--border)] bg-[var(--secondary)] lg:hidden">
       {items.map(({ id, label, icon: Icon }) => (
