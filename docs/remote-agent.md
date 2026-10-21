@@ -105,16 +105,23 @@ otherwise verify `X-Knowledge-User` (next section) and check that it names the s
 
 ### `X-Knowledge-User`
 
-Sent only with login on (`AUTH_SECRET` set). It is signed by the Next.js app with
-`AUTH_SECRET` and valid for 5 minutes:
+Sent only with login on (`AUTH_SECRET` set). The Next.js app signs it with a key pair
+derived from `AUTH_SECRET`, and it is valid for 5 minutes:
 
 ```
-v1.<base64url JSON {sub, email, name, exp}>.<base64url HMAC-SHA256 of "v1.<payload>">
+v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.<payload>">
 ```
 
-- **Verifying it**: `examples/python-agent/lab_tools/identity.py` is a Python verifier. Call
-  `verify(token, secret, audience=None)`: the app's header has no `aud`. `sub` is the same
-  value as `user.id`.
+- **Verifying it**: with the public key only. The agent server gives it at
+  `GET ${LOCAL_AGENT_URL}/identity/public-key` (`{"alg": "Ed25519", "key": "<base64url>"}`)
+  and logs it at startup; pin it in the backend's config as `KNOWLEDGE_PUBLIC_KEY`. Don't
+  give the backend `AUTH_SECRET`: whoever holds it can sign for any user.
+  `examples/python-agent/lab_tools/identity.py` is a Python verifier. Call
+  `verify(token, public_key(KNOWLEDGE_PUBLIC_KEY), audience=None)`: the app's header has no
+  `aud`. `sub` is the same value as `user.id`.
+- **Older backends** that verify `v1` tokens (HMAC with `AUTH_SECRET`) keep working while
+  the app and agent run with `IDENTITY_FORMAT=v1`. That setting goes away in the next
+  release, so move to the public key.
 - **Calling this repo's storage API**: the same header works there, at `LOCAL_AGENT_URL`, on
   the private network, for its 5 minutes. A change made this way is recorded as made by the
   user, not as Claude's.
@@ -171,15 +178,16 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
 
-from identity import HEADER, verify  # examples/python-agent/lab_tools/identity.py
+from identity import HEADER, public_key, verify  # examples/python-agent/lab_tools/identity.py
 
 PROPS = "knowledge_chatroom"
-AUTH_SECRET = os.environ.get("AUTH_SECRET")  # the app's; unset without login
+# The agent server's GET /identity/public-key; unset without login.
+KEY = public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
 
 
 def require_user(request: Request):
-    # With login on (AUTH_SECRET set), only runs the Next.js app signed get through.
-    if AUTH_SECRET and not verify(request.headers.get(HEADER, ""), AUTH_SECRET, audience=None):
+    # With login on, only runs the Next.js app signed get through.
+    if KEY and not verify(request.headers.get(HEADER, ""), KEY, audience=None):
         raise HTTPException(401, "Sign in first")
 
 

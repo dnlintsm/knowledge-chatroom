@@ -23,8 +23,9 @@ from . import identity, stats
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
-# The chatroom's AUTH_SECRET when login is on; unset = no login.
-AUTH_SECRET = os.environ.get("AUTH_SECRET") or None
+# The chatroom's public key (agent GET /identity/public-key) when login is on;
+# unset = no login. Never give this server AUTH_SECRET.
+PUBLIC_KEY = identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
 
 mcp = MCPServer(
     SERVER_NAME,
@@ -34,9 +35,12 @@ mcp = MCPServer(
 
 def require_user(ctx: Context) -> identity.User:
     """The signed-in user calling this tool; refuses calls that can't prove one."""
-    user = identity.caller(ctx.headers, AUTH_SECRET, f"mcp:{SERVER_NAME}")
+    user = identity.caller(ctx.headers, PUBLIC_KEY, f"mcp:{SERVER_NAME}")
     if user is None:
-        raise ToolError("Unknown caller: the chatroom must forward the user (forwardIdentity) with this AUTH_SECRET.")
+        raise ToolError(
+            "Unknown caller: the chatroom must forward the user (forwardIdentity), "
+            "and this server needs the chatroom's KNOWLEDGE_PUBLIC_KEY."
+        )
     return user
 
 

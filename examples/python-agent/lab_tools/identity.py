@@ -1,22 +1,27 @@
 """Who is calling: the chatroom's signed X-Knowledge-User header.
 
 With login on, the agent sends each run's user to servers configured with
-"forwardIdentity": true, as a token signed with AUTH_SECRET for this server only
-(aud "mcp:<server name>"). Python twin of agent/src/storage/identity.ts:
+"forwardIdentity": true, as a token signed for this server only
+(aud "mcp:<server name>"). Python twin of shared/identity-token.ts:
 
-    v1.<base64url JSON payload>.<base64url HMAC-SHA256 of "v1.<payload>">
+    v2.<base64url JSON payload>.<base64url Ed25519 signature of "v2.<payload>">
 
-Without login (no AUTH_SECRET) there is no header: everyone is the local user.
+It is checked with the chatroom's public key (KNOWLEDGE_PUBLIC_KEY, from the
+agent's GET /identity/public-key), not AUTH_SECRET: with only the public key,
+this server can check who is calling but can't sign for anyone (issue #88).
+
+Without login there is no header: everyone is the local user.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 import time
 from dataclasses import dataclass
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 HEADER = "x-knowledge-user"
 
@@ -35,18 +40,22 @@ def _b64decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
-def verify(token: str, secret: str, audience: str, now: float | None = None) -> User | None:
+def public_key(value: str) -> Ed25519PublicKey:
+    """The key from KNOWLEDGE_PUBLIC_KEY: 32 raw bytes, base64url."""
+    return Ed25519PublicKey.from_public_bytes(_b64decode(value.strip()))
+
+
+def verify(token: str, key: Ed25519PublicKey, audience: str | None, now: float | None = None) -> User | None:
     """The user in a token signed for `audience`; None if it is forged, expired or for someone else."""
     parts = token.split(".")
-    if len(parts) != 3 or parts[0] != "v1":
+    if len(parts) != 3 or parts[0] != "v2":
         return None
-    expected = hmac.new(secret.encode(), f"v1.{parts[1]}".encode(), hashlib.sha256).digest()
     try:
-        given = _b64decode(parts[2])
+        key.verify(_b64decode(parts[2]), f"v2.{parts[1]}".encode())
         payload = json.loads(_b64decode(parts[1]))
-    except (ValueError, json.JSONDecodeError):
+    except (InvalidSignature, ValueError, json.JSONDecodeError):
         return None
-    if not hmac.compare_digest(given, expected) or not isinstance(payload, dict):
+    if not isinstance(payload, dict):
         return None
     sub = payload.get("sub")
     exp = payload.get("exp")
@@ -59,9 +68,13 @@ def verify(token: str, secret: str, audience: str, now: float | None = None) -> 
     return User(sub=sub, email=payload.get("email"), name=payload.get("name"))
 
 
-def caller(headers: dict[str, str] | None, secret: str | None, audience: str) -> User | None:
-    """The calling user: the local user without login, None when login is on and the header is bad."""
-    if not secret:
-        return LOCAL_USER
+def caller(headers: dict[str, str] | None, key: Ed25519PublicKey | None, audience: str) -> User | None:
+    """The calling user: the local user without login, None when the call can't prove one.
+
+    A header without a configured key is refused, not ignored: it means login is
+    on and this server is missing KNOWLEDGE_PUBLIC_KEY.
+    """
     token = (headers or {}).get(HEADER)
-    return verify(token, secret, audience) if token else None
+    if key is None:
+        return None if token else LOCAL_USER
+    return verify(token, key, audience) if token else None

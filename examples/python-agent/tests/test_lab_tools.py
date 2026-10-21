@@ -1,27 +1,36 @@
 import base64
-import hashlib
-import hmac
 import json
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lab_tools import identity, server, stats
 
-SECRET = "test-secret-xxxxxxxxxxxxxxxxxxxx"
-# Signed by the chatroom's agent (agent/src/storage/identity.ts signIdentity),
-# so these tests break if the two sides stop agreeing on the format.
+# The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",
+# and tokens its agent signed with it (shared/identity-token.ts, the same values
+# as tests/unit/identity-token.spec.ts), so these tests break if the two sides
+# stop agreeing on the format.
+PUBLIC_KEY = identity.public_key("Z1iN8KqPV0u2Dk95GsXXFlHQE05RT15l2-1TzD3XDI8")
 FOR_LAB = (
-    "v1.eyJzdWIiOiJ0ZXN0fGFsaWNlIiwiZW1haWwiOiJhbGljZUBleGFtcGxlLmNvbSIsIm5hbWUiOiJBbGljZSIsImV4cCI6NDEwMjQ0NDgwMCwiYXVkIjoibWNwOmxhYiJ9"
-    ".YK4QjA3Lh4lqZjLri_qNk0SIGJqWPIQFJ1lRomEdL88"
+    "v2.eyJzdWIiOiJ0ZXN0fGFsaWNlIiwiZW1haWwiOiJhbGljZUBleGFtcGxlLmNvbSIsIm5hbWUiOiJBbGljZSIsImV4cCI6NDEwMjQ0NDgwMCwiYXVkIjoibWNwOmxhYiJ9"
+    ".3PaC2ATVNb3697brWOY91ggVm8HHdIqlYHdGdcVL1N_sUN7V51VIjmgr5HzvZMfJU7jD9Qxn4QBYjl1VuGm0DA"
 )
-FOR_AGENT = "v1.eyJzdWIiOiJ0ZXN0fGFsaWNlIiwiZXhwIjo0MTAyNDQ0ODAwfQ._Ga7Vo6n-I4vYGARXLRPb5tcKg8MHbH0-ZARnZnH0zg"
+FOR_AGENT = (
+    "v2.eyJzdWIiOiJ0ZXN0fGFsaWNlIiwiZW1haWwiOiJhbGljZUBleGFtcGxlLmNvbSIsIm5hbWUiOiJBbGljZSIsImV4cCI6NDEwMjQ0NDgwMH0"
+    ".7dkRyzzd9sZobxDxM99PwMZrpPsmFb8DxJD5btxDSDmc-ZtF5U7EAFjxMvsVF780JIvdLpZ5f6KjMyplax6wDQ"
+)
+# Signs test tokens; the chatroom's own private key is never on this side.
+TEST_KEY = Ed25519PrivateKey.generate()
 
 
-def sign(payload: dict, secret: str = SECRET) -> str:
-    body = "v1." + base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-    mac = hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
-    return body + "." + base64.urlsafe_b64encode(mac).decode().rstrip("=")
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def sign(payload: dict, key: Ed25519PrivateKey = TEST_KEY) -> str:
+    body = "v2." + _b64(json.dumps(payload).encode())
+    return body + "." + _b64(key.sign(body.encode()))
 
 
 def test_describe_metric():
@@ -48,30 +57,36 @@ def test_compare_runs_verdicts():
 
 
 def test_identity_accepts_the_agents_token_for_this_server_only():
-    user = identity.verify(FOR_LAB, SECRET, "mcp:lab")
+    user = identity.verify(FOR_LAB, PUBLIC_KEY, "mcp:lab")
     assert user == identity.User(sub="test|alice", email="alice@example.com", name="Alice")
-    assert identity.verify(FOR_LAB, SECRET, "mcp:other") is None
+    assert identity.verify(FOR_LAB, PUBLIC_KEY, "mcp:other") is None
     # The agent's own credential (no audience) is not a tool server's.
-    assert identity.verify(FOR_AGENT, SECRET, "mcp:lab") is None
-    assert identity.verify(FOR_LAB, "wrong-secret-xxxxxxxxxxxxxxxxxxx", "mcp:lab") is None
+    assert identity.verify(FOR_AGENT, PUBLIC_KEY, "mcp:lab") is None
+    assert identity.verify(FOR_LAB, TEST_KEY.public_key(), "mcp:lab") is None
 
 
 def test_identity_refuses_expired_tampered_and_local_tokens():
-    assert identity.verify(sign({"sub": "a", "exp": 1, "aud": "mcp:lab"}), SECRET, "mcp:lab") is None
-    assert identity.verify(sign({"sub": "local", "exp": 4102444800, "aud": "mcp:lab"}), SECRET, "mcp:lab") is None
-    head, payload, mac = FOR_LAB.split(".")
-    assert identity.verify(f"{head}.e30.{mac}", SECRET, "mcp:lab") is None
-    assert identity.verify("garbage", SECRET, "mcp:lab") is None
+    key = TEST_KEY.public_key()
+    assert identity.verify(sign({"sub": "a", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab").sub == "a"
+    assert identity.verify(sign({"sub": "a", "exp": 1, "aud": "mcp:lab"}), key, "mcp:lab") is None
+    assert identity.verify(sign({"sub": "local", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab") is None
+    head, payload, signature = FOR_LAB.split(".")
+    assert identity.verify(f"{head}.e30.{signature}", PUBLIC_KEY, "mcp:lab") is None
+    # The old HMAC format isn't accepted here: it needs the shared secret.
+    assert identity.verify(f"v1.{payload}.{signature}", PUBLIC_KEY, "mcp:lab") is None
+    assert identity.verify("garbage", PUBLIC_KEY, "mcp:lab") is None
 
 
 def test_caller_without_login_is_the_local_user():
     assert identity.caller(None, None, "mcp:lab") == identity.LOCAL_USER
-    assert identity.caller({}, SECRET, "mcp:lab") is None
-    assert identity.caller({identity.HEADER: FOR_LAB}, SECRET, "mcp:lab").sub == "test|alice"
+    assert identity.caller({}, PUBLIC_KEY, "mcp:lab") is None
+    assert identity.caller({identity.HEADER: FOR_LAB}, PUBLIC_KEY, "mcp:lab").sub == "test|alice"
+    # Login is on but this server has no key: refused, not the local user.
+    assert identity.caller({identity.HEADER: FOR_LAB}, None, "mcp:lab") is None
 
 
 def test_tools_need_a_known_caller_when_login_is_on(monkeypatch):
-    monkeypatch.setattr(server, "AUTH_SECRET", SECRET)
+    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
     monkeypatch.setattr(server, "SERVER_NAME", "lab")
     assert server.whoami(SimpleNamespace(headers={identity.HEADER: FOR_LAB}))["sub"] == "test|alice"
     with pytest.raises(server.ToolError):

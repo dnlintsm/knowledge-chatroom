@@ -3,14 +3,16 @@ import type { NextRequest } from "next/server";
 import * as oidc from "openid-client";
 
 import { authSettings, checkOidcSettings, httpAllowed } from "../../shared/auth-mode";
+import { readIdentityToken, signIdentityToken } from "../../shared/identity-token";
 
 /**
  * Login, for deployments that set AUTH_SECRET (the agent server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
  * signed cookie. Every request it forwards to the agent server carries a
- * short-lived signed X-Knowledge-User header (agent/src/storage/identity.ts
- * checks it), so the agent knows whose access rules apply.
+ * short-lived signed X-Knowledge-User header (shared/identity-token.ts makes
+ * it, agent/src/storage/identity.ts checks it), so the agent knows whose
+ * access rules apply.
  *
  * AUTH_MODE=local turns login off and everyone is the local user; see
  * shared/auth-mode.ts for how the mode is chosen when it is unset.
@@ -93,20 +95,19 @@ export function sessionFromRequest(req: Request): SessionUser | null {
 
 /** The X-Knowledge-User value for a request made for `user`. */
 export function identityHeader(user: SessionUser): string {
-  return seal("v1", { ...user, exp: now() + HEADER_SECONDS }, authSecret()!);
+  return signIdentityToken({ ...user, exp: now() + HEADER_SECONDS }, authSecret()!);
 }
 
 /** The user an X-Knowledge-User value names, when this app signed it for the agent and it hasn't expired. */
 export function readIdentityHeader(value: string | undefined): SessionUser | null {
   const secret = authSecret();
   if (!secret) return null;
-  const data = unseal<SessionUser & { exp: number; aud?: string }>("v1", value, secret);
+  const data = readIdentityToken(value, secret);
   return data && typeof data.sub === "string" && data.sub && data.aud === undefined
     ? { sub: data.sub, email: data.email, name: data.name }
     : null;
 }
 
-/** The origin users reach the app at; set APP_URL when behind a proxy. */
 export function appUrl(req: NextRequest): string {
   return (process.env.APP_URL || req.nextUrl.origin).replace(/\/+$/, "");
 }

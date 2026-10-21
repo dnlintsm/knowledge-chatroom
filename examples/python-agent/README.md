@@ -63,9 +63,13 @@ docker compose --profile demo --profile python-sample up --build
 
 Without login, nobody is forwarded and every call is the local user.
 
-With login on, give the tools server the chatroom's `AUTH_SECRET`. Each run then
-sends the signed-in user as an `X-Knowledge-User` header, signed for this server
-only (`aud` is `mcp:<name in MCP_SERVERS>`, so set `LAB_TOOLS_NAME` to match).
+With login on, give the tools server the chatroom's public key as
+`KNOWLEDGE_PUBLIC_KEY`. The agent logs it at startup and serves it at
+`GET /identity/public-key`. Don't give the server `AUTH_SECRET`: the public key
+lets it check who is calling, while the secret would let it sign for anyone.
+Each run then sends the signed-in user as an `X-Knowledge-User` header, signed
+for this server only (`aud` is `mcp:<name in MCP_SERVERS>`, so set
+`LAB_TOOLS_NAME` to match).
 The agent refuses that token, so a tools server can't use it to call the
 chatroom. `require_user()` in `server.py` checks it on every tool. Keep that call
 in your tools when they act for a person.

@@ -85,6 +85,8 @@ test("tokens signed for an MCP server aren't accepted by the agent", () => {
   const secret = "s".repeat(32);
   const exp = Math.floor(Date.now() / 1000) + 60;
   const forLab = signIdentity({ sub: "test|alice", exp, aud: "mcp:lab" }, secret);
+  // Key-pair signed, so the server verifies it without AUTH_SECRET (#88).
+  assert.match(forLab, /^v2\./);
   assert.equal(verifyIdentity(forLab, secret), null);
   assert.equal(verifyIdentity(forLab, secret, Date.now(), "mcp:lab")?.sub, "test|alice");
   assert.equal(verifyIdentity(forLab, secret, Date.now(), "mcp:other"), null);

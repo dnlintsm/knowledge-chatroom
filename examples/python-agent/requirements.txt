@@ -1,2 +1,4 @@
 # The MCP server (lab_tools/server.py). mcp 2 renamed FastMCP to MCPServer.
 mcp>=2.2,<3
+# Checks the chatroom's Ed25519-signed identity tokens (lab_tools/identity.py).
+cryptography>=42

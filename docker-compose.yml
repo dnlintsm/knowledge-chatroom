@@ -119,8 +119,9 @@ services:
     environment:
       LAB_TOOLS_NAME: lab
       # The demo has no login, so every call is the local user. With login, give
-      # this server the agent's AUTH_SECRET (examples/python-agent/README.md).
-      AUTH_SECRET: ""
+      # this server the agent's public key, never AUTH_SECRET
+      # (examples/python-agent/README.md).
+      KNOWLEDGE_PUBLIC_KEY: ""
 
 volumes:
   postgres-data:
