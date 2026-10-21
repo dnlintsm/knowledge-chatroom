@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { numberLines, readLines } from "./tools";
+import { withFrontMatter } from "./run-report";
+import { numberLines, readLines, skillProvenance } from "./tools";
 
 const file = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
 
@@ -59,4 +60,30 @@ test("a line longer than a read continues by column", () => {
   }
   assert.equal(text, content);
   assert.match(readLines("min.json", content, { offset: 1, column: 51 }), /column 51 is past its end/);
+});
+
+test("a report's front matter is replaced, and added when it has none", () => {
+  const fm = "---\nstate: \"done\"\n---\n";
+  assert.equal(withFrontMatter("# Run\n\nText.\n", fm), `${fm}\n# Run\n\nText.\n`);
+  assert.equal(withFrontMatter("---\nstate: \"running\"\n---\n\n# Run\n", fm), `${fm}\n# Run\n`);
+  assert.equal(withFrontMatter("", fm), fm);
+});
+
+test("a skill is recorded with a hash that follows its files", () => {
+  const skill = (body: string) => ({
+    name: "analysis",
+    description: "",
+    argumentHint: null,
+    source: "workspace" as const,
+    path: "skills/analysis/SKILL.md",
+    modelInvocable: true,
+    userInvocable: true,
+    needsExecution: false,
+    files: [{ path: "SKILL.md", bytes: new TextEncoder().encode(body) }],
+  });
+  const hash = (body: string) => (skillProvenance("analysis", [skill(body)]) as { sha256?: string }).sha256;
+  assert.match(String(hash("v1")), /^[0-9a-f]{64}$/);
+  assert.equal(hash("v1"), hash("v1"));
+  assert.notEqual(hash("v2"), hash("v1"));
+  assert.deepEqual(skillProvenance("missing", [skill("v1")]), { name: "missing" });
 });

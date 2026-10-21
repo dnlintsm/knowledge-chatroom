@@ -865,6 +865,82 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.ok(log.some((e) => e.action === "experiment.from_folder" && e.target.folder === "runs/etch-1"));
     });
 
+    test("a run started by Claude links its inputs read only and records where it came from", async () => {
+      await (await as(alice).files(null)).write("uploads/wafers.csv", text("wafer,dose\n1,30"));
+      const claude = (user: string) => as(user, "agent");
+      // Inputs must be readable: Carol has no access at the root.
+      await assert.rejects(
+        claude(carol).startRun(leveling, { title: "No root" }, [{ path: "uploads/wafers.csv" }]),
+        ForbiddenError,
+      );
+      await assert.rejects(
+        claude(carol).startRun(leveling, { title: "Missing" }, [{ path: "uploads/none.csv", node: leveling }]),
+        ExperimentError,
+      );
+      await assert.rejects(
+        claude(carol).startRun(leveling, { title: "Twice" }, [
+          { path: "uploads/map.bin", node: leveling },
+          { path: "uploads/map.bin", node: leveling },
+        ]),
+        ExperimentError,
+      );
+
+      const run = await claude(carol).startRun(
+        leveling,
+        { title: "Leveling analysis", params: { wafers: 1 } },
+        [
+          { path: "uploads/map.bin", node: leveling },
+          { path: "notes/recipe.md", node: leveling, as: "recipe.md" },
+        ],
+        { chat: "thread-1", model: "claude-test", skill: { name: "analysis" } },
+      );
+      assert.deepEqual([run.state, run.status, run.mine], ["running", "draft", true]);
+      const p = run.provenance as {
+        startedBy: { id: string }; chat: string; model: string; startedAt: string;
+        inputs: { path: string; from: { node: string; path: string }; sha256: string; version: string }[];
+      };
+      assert.equal(p.startedBy.id, carol);
+      assert.deepEqual([p.chat, p.model], ["thread-1", "claude-test"]);
+      assert.ok(p.startedAt);
+      assert.deepEqual(
+        p.inputs.map((i) => [i.path, i.from.node, i.from.path]),
+        [["inputs/map.bin", leveling, "uploads/map.bin"], ["inputs/recipe.md", leveling, "notes/recipe.md"]],
+      );
+
+      const files = await claude(carol).experimentFiles(run.id);
+      const node = await as(alice).files(leveling);
+      const input = (await files.stat("inputs/map.bin"))!;
+      assert.equal(input.readOnly, true);
+      assert.equal(input.sha256, (await node.stat("uploads/map.bin"))!.sha256, "the bytes are shared");
+      assert.equal(p.inputs[0].sha256, input.sha256);
+      await assert.rejects(files.write("inputs/recipe.md", text("changed")), ReadOnlyFileError);
+      // The run keeps the version it read when the node's file moves on.
+      await node.write("notes/recipe.md", text("dose 31"));
+      assert.equal(await read(files, "inputs/recipe.md"), "dose 30");
+
+      const report = await read(files, "report.md");
+      assert.match(report, /^---\nrun: "[0-9a-f-]{36}"\n/);
+      assert.match(report, /\nchat: "thread-1"\n/);
+      assert.match(report, /\ninputs: \[\{"path":"inputs\/map.bin","from":"uploads\/map.bin","sha256":"[0-9a-f]{64}"\}/);
+      assert.match(report, /\n---\n\n# Leveling analysis\n$/);
+
+      // A draft: only Carol sees it, and only she finishes it.
+      await assert.rejects(claude(alice).finishRun(run.id, { ok: 1 }, "done"), NodeNotFoundError);
+      await files.write("report.md", text(report.replace(/\n# Leveling analysis\n$/, "\n# Leveling analysis\n\nTilt is fine.\n")));
+      const done = await claude(carol).finishRun(run.id, { tilt_urad: 1.5 }, "done");
+      assert.deepEqual([done.state, done.results], ["done", { tilt_urad: 1.5 }]);
+      assert.ok((done.provenance as { finishedAt?: string }).finishedAt);
+      assert.equal((done.provenance as { chat: string }).chat, "thread-1", "the start's record stays");
+      const finished = await read(files, "report.md");
+      assert.match(finished, /\nstate: "done"\n/);
+      assert.match(finished, /\nresults: \{"tilt_urad":1.5\}\n/);
+      assert.match(finished, /\n---\n\n# Leveling analysis\n\nTilt is fine.\n$/, "the report's text stays");
+
+      // Bringing the run back to its node never proposes its inputs.
+      const proposals = await claude(carol).promote(run.id);
+      assert.deepEqual(proposals.map((x) => x.path), ["report.md"]);
+    });
+
     test("changes are audited", async () => {
       const log = await as(alice).auditLog(1000);
       const created = log.find((e) => e.action === "experiment.create" && e.target.title === "Shared run")!;
@@ -1445,10 +1521,21 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     test("Claude starts an experiment, works in it and records results", async () => {
       const tech = JSON.parse((await call("create_node", { name: "Sputtering" })).text) as { id: string };
       await (await storage.files.inNode(tech.id))!.write("notes/base.md", text("base"));
+      await storage.files.write("uploads/films.csv", text("nm,stress\n50,120"));
       const exp = JSON.parse(
-        (await call("create_experiment", { node: tech.id, title: "Thinner film", params: { nm: 50 } })).text,
-      ) as { id: string; files: number };
-      assert.equal(exp.files, 1);
+        (
+          await call("create_experiment", {
+            node: tech.id,
+            title: "Thinner film",
+            params: { nm: 50 },
+            inputs: [{ path: "uploads/films.csv" }],
+            skill: "no-such-skill",
+          })
+        ).text,
+      ) as { id: string; files: number; state: string; inputs: string[] };
+      // The node's file, the input and the report.
+      assert.deepEqual([exp.files, exp.state, exp.inputs], [3, "running", ["inputs/films.csv"]]);
+      assert.match((await call("read_file", { experiment: exp.id, path: "report.md" })).text, /skill: \{"name":"no-such-skill"\}/);
 
       const written = JSON.parse(
         (await call("write_file", { experiment: exp.id, path: "notes/base.md", content: "tried" })).text,
@@ -1457,25 +1544,29 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.match((await call("read_file", { node: tech.id, path: "notes/base.md" })).text, /\tbase$/);
       assert.match((await call("read_file", { experiment: exp.id, path: "notes/base.md" })).text, /\ttried$/);
 
-      await call("update_experiment", { id: exp.id, results: { stress_MPa: 120 } });
+      await call("set_experiment_results", { id: exp.id, results: { stress_MPa: 120 } });
       const [listed] = JSON.parse((await call("list_experiments", { node: tech.id })).text) as {
         title: string;
         status: string;
+        state: string;
         results: unknown;
         canChange: boolean;
       }[];
       assert.deepEqual(
-        [listed.title, listed.status, listed.results, listed.canChange],
-        ["Thinner film", "draft", { stress_MPa: 120 }, true],
+        [listed.title, listed.status, listed.state, listed.results, listed.canChange],
+        ["Thinner film", "draft", "done", { stress_MPa: 120 }, true],
       );
-      const bad = await call("update_experiment", { id: exp.id, results: "great" });
+      const bad = await call("set_experiment_results", { id: exp.id, results: "great" });
       assert.equal(bad.isError, true);
 
       // Bringing the work back to the node proposes it there.
       const promoted = JSON.parse((await call("propose_experiment", { experiment: exp.id })).text) as {
         proposed: { path: string; newFile: boolean }[];
       };
-      assert.deepEqual(promoted.proposed, [{ path: "notes/base.md", newFile: false }]);
+      assert.deepEqual(promoted.proposed, [
+        { path: "notes/base.md", newFile: false },
+        { path: "report.md", newFile: true },
+      ]);
       assert.equal((await call("propose_experiment", { experiment: exp.id, paths: ["notes/none.md"] })).isError, true);
     });
 

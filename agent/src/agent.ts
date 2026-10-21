@@ -76,8 +76,14 @@ const SYSTEM_PROMPT = [
         "  or at the workspace root, starting empty.",
         "  When the context has currentExperiment, the user is in it: pass its id as",
         "  `experiment` to the file tools and never write to its node. Keep its",
-        "  hypothesis, params and results up to date with update_experiment as the work",
-        "  shows them; list_experiments compares experiments on a node.",
+        "  hypothesis and params up to date with update_experiment as the work shows",
+        "  them; list_experiments compares experiments on a node.",
+        "- Starting a run: when the user asks to analyze or run something, create_experiment",
+        "  with the files it works from as `inputs` (linked read only under inputs/, at",
+        "  their current versions) and the skill you follow as `skill`. Write the report",
+        "  below the front matter of its report.md (keep the front matter), save outputs",
+        "  in the run, then set_experiment_results with the results and done, or failed",
+        "  with the reason in the report. A rerun is a new run; never rewrite a finished one.",
         "- Reviews: your write_file in a knowledge node doesn't change the file; it",
         "  proposes the change, and someone who can edit the node accepts or rejects it",
         "  in the editor. Say so, with a one-line summary of the change. When the user",
@@ -207,7 +213,11 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
     if (!serverStorage || userId === undefined) return withIdentity;
     const tools = [
       ...baseTools,
-      ...createFileTools(currentStorage, async () => userId, workdir?.cwd),
+      ...createFileTools(currentStorage, async () => userId, workdir?.cwd, {
+        chat: input.threadId ?? null,
+        model: options.model ?? resolveModel(),
+        skills: ctx.skills?.skills.map((s) => s.skill),
+      }),
     ];
     return {
       ...withIdentity,

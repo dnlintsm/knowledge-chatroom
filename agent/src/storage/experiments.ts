@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Sql, Tx } from "./db";
 import type { EventHub } from "./events";
 import { isNodeId, NodeNotFoundError } from "./nodes";
+import { kindForPath } from "./paths";
 
 /**
  * Experiments: a user's sandbox on one knowledge node, or at the workspace
@@ -35,6 +36,8 @@ export interface Experiment {
   forkedAt: string;
   updatedAt: string;
   fileCount: number;
+  /** Where a run came from (016_run_provenance.sql); {} when nobody recorded it. */
+  provenance: Record<string, unknown>;
   /** What the asking user may do with it. */
   access: ExperimentAccess;
   /** Whether the asking user is its author (who may also restore or delete it). */
@@ -48,6 +51,15 @@ export interface ExperimentInput {
   results?: Record<string, unknown>;
   status?: ExperimentStatus;
   state?: ExperimentState;
+}
+
+/**
+ * A file linked into a new run as one of its inputs: a read-only copy at
+ * `path` of the file version `versionId`, sharing its stored bytes.
+ */
+export interface LinkedInput {
+  path: string;
+  versionId: string;
 }
 
 /** The request can't be done as asked (no title, params not an object, …). */
@@ -105,6 +117,7 @@ interface ExperimentRow {
   forked_at: Date;
   updated_at: Date;
   file_count: string;
+  provenance: Record<string, unknown>;
   access: ExperimentAccess;
   mine: boolean;
 }
@@ -123,6 +136,7 @@ const toExperiment = (r: ExperimentRow): Experiment => ({
   forkedAt: r.forked_at.toISOString(),
   updatedAt: r.updated_at.toISOString(),
   fileCount: Number(r.file_count),
+  provenance: r.provenance,
   access: r.access,
   mine: r.mine,
 });
@@ -160,7 +174,7 @@ export class ExperimentService {
     const rows = await this.sql<ExperimentRow[]>`
       SELECT * FROM (
         SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-               e.params, e.results, e.status, e.state, e.forked_at, e.updated_at,
+               e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
                (SELECT count(*) FROM files f
                 WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
                experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
@@ -179,7 +193,7 @@ export class ExperimentService {
     if (!isNodeId(id)) return null;
     const rows = await this.sql<ExperimentRow[]>`
       SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-             e.params, e.results, e.status, e.state, e.forked_at, e.updated_at,
+             e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
              (SELECT count(*) FROM files f
               WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
              experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
@@ -200,11 +214,43 @@ export class ExperimentService {
     nodeId: string | null,
     input: ExperimentInput,
     inTx?: (tx: Tx, id: string) => Promise<unknown>,
+    run: { inputs?: LinkedInput[]; provenance?: Record<string, unknown> } = {},
   ): Promise<Experiment> {
-    return this.add(userId, nodeId, input, async (tx, id) => {
-      if (nodeId !== null) await this.copyNodeFiles(tx, nodeId, id);
-      await inTx?.(tx, id);
-    });
+    return this.add(
+      userId,
+      nodeId,
+      input,
+      async (tx, id) => {
+        if (nodeId !== null) await this.copyNodeFiles(tx, nodeId, id);
+        if (run.inputs?.length) await this.linkInputs(tx, id, run.inputs);
+        await inTx?.(tx, id);
+      },
+      run.provenance,
+    );
+  }
+
+  /**
+   * Read-only copies of other files' versions in experiment `id`, as a run's
+   * inputs. Their bytes are shared, and since each starts from the version it
+   * copies, promoting the run never proposes them back to its node.
+   */
+  private async linkInputs(tx: Tx, id: string, inputs: LinkedInput[]) {
+    for (const input of inputs) {
+      const [file] = await tx<{ id: string }[]>`
+        INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from, read_only)
+        SELECT ${this.workspaceId}, ${id}, ${input.path}, ${kindForPath(input.path)}, v.mime, v.id, true
+        FROM file_versions v WHERE v.id = ${input.versionId}
+        ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING
+        RETURNING id`;
+      if (!file) throw new ExperimentError(`The run already has a file at ${input.path}; pick another name for this input`);
+      await tx`
+        INSERT INTO file_versions (file_id, blob_sha256, size, mime, author_type, author_id, created_at)
+        SELECT ${file.id}, v.blob_sha256, v.size, v.mime, v.author_type, v.author_id, v.created_at
+        FROM file_versions v WHERE v.id = ${input.versionId}`;
+      await tx`
+        UPDATE files f SET current_version_id = v.id
+        FROM file_versions v WHERE v.file_id = f.id AND f.id = ${file.id}`;
+    }
   }
 
   /**
@@ -251,6 +297,7 @@ export class ExperimentService {
     nodeId: string | null,
     input: ExperimentInput,
     inTx: (tx: Tx, id: string) => Promise<unknown>,
+    provenance: Record<string, unknown> = {},
   ): Promise<Experiment> {
     const fields = cleanInput(input);
     if (!fields.title) throw new ExperimentError("An experiment needs a title");
@@ -262,10 +309,12 @@ export class ExperimentService {
       // The insert also checks and holds the node (experiments_place in
       // 005_experiments.sql), so a delete of it can't slip in between.
       await tx`
-        INSERT INTO experiments (id, workspace_id, node_id, author_id, title, hypothesis, params, results, state)
+        INSERT INTO experiments (id, workspace_id, node_id, author_id, title, hypothesis, params, results, state,
+                                 provenance)
         VALUES (${id}, ${this.workspaceId}, ${nodeId}, ${userId}, ${fields.title!},
                 ${fields.hypothesis ?? ""}, ${tx.json((fields.params ?? {}) as never)},
-                ${tx.json((fields.results ?? {}) as never)}, ${fields.state ?? "ready"})`;
+                ${tx.json((fields.results ?? {}) as never)}, ${fields.state ?? "ready"},
+                ${tx.json(provenance as never)})`;
       await inTx(tx, id);
       await this.events.notify(tx, { op: "experiment", change: "create", id, node: nodeId });
     }).catch((err: { code?: string; message?: string }) => {
@@ -297,8 +346,16 @@ export class ExperimentService {
       WHERE v.file_id = f.id AND f.experiment_id = ${id}`;
   }
 
-  /** Sets the given fields; false if the experiment is gone. */
-  async update(id: string, input: ExperimentInput, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
+  /**
+   * Sets the given fields; false if the experiment is gone. `provenance`
+   * keys are merged into the recorded provenance.
+   */
+  async update(
+    id: string,
+    input: ExperimentInput,
+    inTx?: (tx: Tx) => Promise<unknown>,
+    provenance?: Record<string, unknown>,
+  ): Promise<boolean> {
     const fields = cleanInput(input);
     if (!isNodeId(id)) return false;
     return this.sql.begin(async (tx) => {
@@ -317,6 +374,11 @@ export class ExperimentService {
       if (Object.keys(set).length) {
         await tx`
           UPDATE experiments SET ${tx(set as Record<string, never>)}, updated_at = now()
+          WHERE id = ${id}`;
+      }
+      if (provenance) {
+        await tx`
+          UPDATE experiments SET provenance = provenance || ${tx.json(provenance as never)}, updated_at = now()
           WHERE id = ${id}`;
       }
       await inTx?.(tx);

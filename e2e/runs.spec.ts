@@ -1,4 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+// The agent's database client: provenance is only written by Claude's tools,
+// which the mock agent doesn't run, so this test writes one directly.
+import postgres from "../agent/node_modules/postgres";
 
 /** Shows a sidebar view; clicking it while it is already shown would fold the sidebar away. */
 async function showView(page: Page, name: "Files" | "Runs") {
@@ -134,6 +137,48 @@ test("runs: a new run at the root starts empty and tracks its state", async ({ p
   await panel.getByRole("combobox", { name: "Run state" }).selectOption("running");
   await expect(page.getByTestId("run-list").locator('[data-state="running"]')).toBeVisible();
   await shot(page, "02c-run-state");
+});
+
+test("a run Claude started shows where it came from", async ({ page, request }) => {
+  const run = await makeRun(request, "Wafer analysis", {
+    "inputs/wafers.csv": "wafer,dose\n1,30\n",
+    "report.md": "# Wafer analysis\n\nDose is on target.\n",
+  });
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    const provenance = {
+      startedBy: { id: run.id, name: "Local user" },
+      startedAt: "2026-10-21T09:00:00.000Z",
+      finishedAt: "2026-10-21T09:02:00.000Z",
+      chat: "thread-e2e",
+      model: "claude-test",
+      skill: { name: "analysis", source: "workspace", sha256: "ab12cd34ef56" },
+      tools: { agent: "0.1.1", claudeAgentSdk: "0.3.296" },
+      inputs: [
+        {
+          path: "inputs/wafers.csv",
+          from: { node: null, experiment: null, path: "uploads/wafers.csv" },
+          version: run.id,
+          sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          size: 18,
+        },
+      ],
+    };
+    await sql`UPDATE experiments SET provenance = ${sql.json(provenance)}, state = 'done' WHERE id = ${run.id}`;
+  } finally {
+    await sql.end();
+  }
+  await gotoRun(page, run, "Dose is on target.");
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
+  const provenance = page.getByTestId("run-provenance");
+  await expect(provenance).toContainText("Local user");
+  await expect(provenance).toContainText("claude-test");
+  await expect(provenance).toContainText("analysis · ab12cd34");
+  const inputs = page.getByRole("list", { name: "Inputs" });
+  await expect(inputs).toContainText("from uploads/wafers.csv · 9f86d081");
+  await shot(page, "02d-run-provenance");
+  await inputs.getByRole("button", { name: "inputs/wafers.csv" }).click();
+  await expect(page.getByTestId("file-preview")).toContainText("dose");
 });
 
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {

@@ -7,6 +7,8 @@
  * to accept or reject.
  */
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -23,6 +25,48 @@ import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./path
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
 import { isInside } from "./workdir";
+import type { Skill } from "../skills/catalog";
+
+/** What a chat run knows about itself, for the provenance of runs it starts. */
+export interface RunMeta {
+  /** The chat (AG-UI thread) the run came from. */
+  chat?: string | null;
+  model?: string;
+  /** The run's skills, to record the version of the one a run used. */
+  skills?: Skill[];
+}
+
+/** This agent's version and its Claude Agent SDK's, as pinned in its package.json. */
+const TOOL_VERSIONS = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+      version: string;
+      dependencies: Record<string, string>;
+    };
+    return { agent: pkg.version, claudeAgentSdk: pkg.dependencies["@anthropic-ai/claude-agent-sdk"] };
+  } catch {
+    return {};
+  }
+})();
+
+/**
+ * A skill as a run records it: name, where it came from, its hub version if
+ * it has one, and a hash over its files, which changes with any edit.
+ */
+export function skillProvenance(name: string, skills: Skill[] = []) {
+  const skill = skills.find((s) => s.name === name);
+  if (!skill) return { name };
+  const hash = createHash("sha256");
+  for (const file of [...skill.files].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    hash.update(file.path).update("\0").update(file.bytes).update("\0");
+  }
+  return {
+    name,
+    source: skill.source,
+    ...(skill.hub ? { version: skill.hub.version } : {}),
+    sha256: hash.digest("hex"),
+  };
+}
 
 /** Keeps one tool result reasonable; Claude is told when a file was cut. */
 const MAX_READ_CHARS = 200_000;
@@ -152,6 +196,8 @@ export function createFileTools(
     s.config.authSecret ? null : s.access.localUserId(),
   /** The run's working folder (./workdir.ts); adds save_file. */
   workdir?: string,
+  /** About the chat run, for the provenance of runs Claude starts. */
+  meta: RunMeta = {},
 ) {
   // Storage starts in the background; a call before it is ready (or after it
   // failed) gets a clear error instead of a crash.
@@ -402,14 +448,13 @@ export function createFileTools(
         "root and in an experiment the file changes at once and opens for the user. In a " +
         "knowledge node, and for skills (skills/<name>/... at the root), it is PROPOSED " +
         "instead: the file stays as it was until someone who can edit there accepts the " +
-        "change (writing the same file again revises your proposal). Put new generated documents in the focused run's artifacts/ folder " +
-        "(<run>/artifacts/, see `run` in context), or under artifacts/ when there is no run, " +
-        "unless the user asks to change an existing file. Paths starting with notes/, " +
+        "change (writing the same file again revises your proposal). Put new generated documents under " +
+        "artifacts/ (in the run, when the user is in one), unless the user asks to change an existing file. Paths starting with notes/, " +
         "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed. " +
         "Every write is kept as a version. Read-only files (readOnly in list_files) can't be " +
         "written.",
       {
-        path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
+        path: z.string().describe("e.g. artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
         node: nodeParam,
         experiment: experimentParam,
@@ -507,39 +552,81 @@ export function createFileTools(
     ),
     tool(
       "create_experiment",
-      "Start an experiment (a run) for the user: a private draft on a knowledge node (usually " +
+      "Start a run (an experiment) for the user: a private draft on a knowledge node (usually " +
         "a process) with a copy of the node's files, where changes don't touch the node; or, " +
         "without node, at the workspace root, starting empty. Only when the user asks to try, " +
-        "explore or run something as an experiment. Then work in it by passing its id as " +
-        "`experiment` to the file tools; a run's report goes in its report.md.",
+        "explore, analyze or run something. List the files it works from as `inputs`: each is " +
+        "linked in read only under inputs/ at its current version, so the run keeps exactly what " +
+        "it read. The run starts in state running with a report.md whose front matter records " +
+        "where it came from (who, this chat, model, skill, input versions); write the report " +
+        "below the front matter. Work in it by passing its id as `experiment` to the file tools, " +
+        "and finish with set_experiment_results.",
       {
         node: z.string().optional().describe("Knowledge node id to fork; omit for the workspace root."),
         title: z.string().describe("Short name, e.g. 'Lower RF power, 40 W'"),
         hypothesis: z.string().optional().describe("What the user expects and why."),
         params: jsonObject.optional().describe('What is varied, e.g. {"rfPower_W": 40}'),
+        inputs: z
+          .array(
+            z.object({
+              path: z.string().describe("The file's path, e.g. uploads/wafer-map.csv"),
+              node: z.string().optional().describe("Its knowledge node; omit for the workspace root."),
+              experiment: z.string().optional().describe("Its experiment, if it is in one."),
+              as: z.string().optional().describe("Name under inputs/; defaults to its file name."),
+            }),
+          )
+          .optional()
+          .describe("Files the run reads (uploads, data, earlier results); the user must be able to read each."),
+        skill: z.string().optional().describe("The skill this run follows, if any, e.g. analysis."),
       },
-      ({ node, ...input }) =>
+      ({ node, inputs, skill, ...input }) =>
         run(async (session) => {
-          const created = await session.createExperiment(node || null, input);
-          return text({ ok: true, id: created.id, title: created.title, files: created.fileCount });
+          const created = await session.startRun(node || null, input, inputs, {
+            chat: meta.chat ?? null,
+            model: meta.model ?? null,
+            ...(skill ? { skill: skillProvenance(skill, meta.skills) } : {}),
+            tools: TOOL_VERSIONS,
+          });
+          return text({
+            ok: true,
+            id: created.id,
+            title: created.title,
+            state: created.state,
+            files: created.fileCount,
+            inputs: (created.provenance.inputs as { path: string }[]).map((i) => i.path),
+            report: "report.md",
+          });
+        }),
+    ),
+    tool(
+      "set_experiment_results",
+      "Record a run's results and finish it: state done, or failed when it couldn't be " +
+        "completed (say why in its report). Results replace the old ones whole, as numbers with " +
+        "units in the key where you can, e.g. {\"yield_pct\": 92.5}. Also refreshes the record " +
+        "in its report.md front matter. Only for runs the user authored.",
+      {
+        id: z.string().describe("Experiment id"),
+        results: jsonObject.describe('e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}'),
+        state: z.enum(["done", "failed"]).optional().describe("Defaults to done."),
+      },
+      ({ id, results, state }) =>
+        run(async (session) => {
+          const finished = await session.finishRun(id, results, state ?? "done");
+          return text({ ok: true, id: finished.id, state: finished.state, results: finished.results });
         }),
     ),
     tool(
       "update_experiment",
-      "Change an experiment the user authored: title, hypothesis, params or results (each " +
-        "replaces the old value whole, so send the complete object), or its status. Record " +
-        "results as numbers with units in the key where you can, e.g. {\"yield_pct\": 92.5}. " +
-        "Set state to running while you work on a run, then done (or failed) when its report " +
-        "and results are written. Only change status (shared shows it to everyone who can see the node; archived makes " +
+      "Change an experiment the user authored: title, hypothesis or params (each replaces " +
+        "the old value whole, so send the complete object), or its status. Record results and " +
+        "finish a run with set_experiment_results instead. Only change status (shared shows it to everyone who can see the node; archived makes " +
         "it read only) when the user asks.",
       {
         id: z.string().describe("Experiment id"),
         title: z.string().optional(),
         hypothesis: z.string().optional(),
         params: jsonObject.optional(),
-        results: jsonObject.optional(),
         status: z.enum(["draft", "shared", "archived"]).optional(),
-        state: z.enum(["ready", "running", "done", "failed"]).optional(),
       },
       ({ id, ...input }) =>
         run(async (session) => {
