@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { AccessService, atLeast, ForbiddenError, type Principal, type Role } from "./access";
 import { asUser, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
@@ -257,7 +259,9 @@ export class Session {
   /**
    * Records a run's results and how it ended (done or failed), and refreshes
    * the record in its report.md front matter (creating the report if it has
-   * none). Only its author can; see updateExperiment.
+   * none). Only its author can; see updateExperiment. A finished run stays
+   * as it ended (a rerun is a new run): the same call again, say a retry
+   * after a lost answer, changes nothing, and a different one is refused.
    */
   async finishRun(
     id: string,
@@ -269,6 +273,12 @@ export class Session {
     if (current.status === "archived") {
       throw new ForbiddenError("This experiment is archived; restore it to change it");
     }
+    if (current.state === "done" || current.state === "failed") {
+      if (current.state === state && isDeepStrictEqual(current.results, results)) return current;
+      throw new ExperimentError(
+        `This run already finished (${current.state}); start a new run to try again`,
+      );
+    }
     await this.scoped((db) =>
       on(this.parts.experiments, db).update(
         id,
@@ -278,12 +288,23 @@ export class Session {
       ),
     );
     const run = await this.experiment(id);
-    const files = await this.experimentFiles(id);
+    await this.refreshReport(run, true);
+    return run;
+  }
+
+  /**
+   * Brings the record in a run's report.md front matter up to date with the
+   * run, for runs Claude started (they have provenance). Makes the report
+   * when `create` is set and there is none. Archived runs are read only.
+   */
+  private async refreshReport(run: Experiment, create = false) {
+    if (!run.provenance.startedAt || run.status === "archived") return;
+    const files = await this.experimentFiles(run.id);
     const report = await files.read(REPORT_PATH);
+    if (!report && !create) return;
     const before = report ? new TextDecoder().decode(report.bytes) : `# ${run.title}\n`;
     const after = withFrontMatter(before, reportFrontMatter(run));
     if (after !== before) await files.write(REPORT_PATH, new TextEncoder().encode(after));
-    return run;
   }
 
   /**
@@ -322,7 +343,11 @@ export class Session {
         this.audit("experiment.update", { experiment: id, fields: Object.keys(input) }),
       ),
     );
-    return this.experiment(id);
+    // The report's record follows edits made after the run started (title,
+    // params, results, state, or a restore from archived).
+    const updated = await this.experiment(id);
+    await this.refreshReport(updated);
+    return updated;
   }
 
   async deleteExperiment(id: string): Promise<boolean> {

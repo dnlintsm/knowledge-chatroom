@@ -936,6 +936,20 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.match(finished, /\nresults: \{"tilt_urad":1.5\}\n/);
       assert.match(finished, /\n---\n\n# Leveling analysis\n\nTilt is fine.\n$/, "the report's text stays");
 
+      // A finished run stays as it ended: a retry changes nothing, another result is refused.
+      const again = await claude(carol).finishRun(run.id, { tilt_urad: 1.5 }, "done");
+      assert.equal(
+        (again.provenance as { finishedAt: string }).finishedAt,
+        (done.provenance as { finishedAt: string }).finishedAt,
+      );
+      await assert.rejects(claude(carol).finishRun(run.id, { tilt_urad: 9 }, "done"), ExperimentError);
+      // Edits after that keep the report's record in step.
+      await as(carol).updateExperiment(run.id, { title: "Leveling analysis v2", params: { wafers: 2 } });
+      const edited = await read(files, "report.md");
+      assert.match(edited, /\ntitle: "Leveling analysis v2"\n/);
+      assert.match(edited, /\nparams: \{"wafers":2\}\n/);
+      assert.match(edited, /\nTilt is fine.\n$/);
+
       // Bringing the run back to its node never proposes its inputs.
       const proposals = await claude(carol).promote(run.id);
       assert.deepEqual(proposals.map((x) => x.path), ["report.md"]);
