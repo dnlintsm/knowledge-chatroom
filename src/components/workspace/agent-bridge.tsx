@@ -8,6 +8,7 @@ import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { isInRun, normalizeRunDir, RUN_REPORT } from "./runs";
 import { isTextFile, TASKS_TAB } from "./types";
+import { useChatroomProps } from "./use-chatroom-props";
 import { useWorkbench } from "./workbench";
 
 const FILES_LOADING = "The workspace files are still loading; try again in a moment.";
@@ -19,6 +20,8 @@ const MAX_CONTEXT_CHARS = 20_000;
  * Connects the workspace to Claude:
  * - context: the open file, the user's selection, and the file list, sent with
  *   every run so "summarize this" or "rewrite the selected part" just works;
+ * - run payload: the user and their place as forwardedProps, for a backend to
+ *   set up its agent with (use-chatroom-props.ts);
  * - frontend tools: list / read / write / open files, open the task board, and
  *   the workbench: show or hide panes, list and focus runs, list and run the
  *   current run's actions (only those marked agentInvocable, with the user's
@@ -32,6 +35,7 @@ const MAX_CONTEXT_CHARS = 20_000;
  * file-refs.ts).
  */
 export function useWorkspaceAgent() {
+  useChatroomProps();
   const ws = useWorkspace();
   const workbench = useWorkbench();
   // Tools register once and read the latest workspace and workbench through these refs.

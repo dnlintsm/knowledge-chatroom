@@ -122,6 +122,9 @@ interface RunContext {
 
 const runContext = new AsyncLocalStorage<RunContext>();
 
+/** forwardedProps key of the app's run payload (src/lib/chatroom-props.ts). */
+const CHATROOM_PROPS = "knowledge_chatroom";
+
 /**
  * Runs `fn` (which starts an adapter run) for a storage user: that run's file
  * tools can do what the user can, and nothing else. null = no access;
@@ -170,7 +173,7 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
 
   // Called synchronously when a run starts, so runAs()'s context is in scope.
   override buildOptions(input: RunAgentInput, ...rest: OptionsRest) {
-    const options = super.buildOptions(input, ...rest);
+    const options = super.buildOptions(withoutChatroomProps(input), ...rest);
     const ctx = runContext.getStore();
     if (!ctx) return options;
     // Skills' scripts, when on, run in Bash inside the SDK's sandbox.
@@ -217,6 +220,19 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
       ],
     };
   }
+}
+
+/**
+ * The app's run payload (forwardedProps.knowledge_chatroom, for remote
+ * backends; docs/remote-agent.md) isn't an SDK option: the adapter would only
+ * warn about it. This agent learns the user from the signed header instead.
+ */
+function withoutChatroomProps(input: RunAgentInput): RunAgentInput {
+  const props = input.forwardedProps as Record<string, unknown> | undefined;
+  if (!props || !(CHATROOM_PROPS in props)) return input;
+  const rest = { ...props };
+  delete rest[CHATROOM_PROPS];
+  return { ...input, forwardedProps: rest };
 }
 
 export const adapter = new WorkspaceAgentAdapter({

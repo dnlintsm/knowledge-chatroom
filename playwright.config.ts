@@ -26,7 +26,9 @@ const AGENT_PORT = port("E2E_AGENT_PORT", 8000);
 const STORAGE_PORT = port("E2E_STORAGE_PORT", 8001);
 const OIDC_PORT = port("E2E_OIDC_PORT", 9400);
 const baseURL = `http://localhost:${UI_PORT}`;
-process.env.AGENT_URL = `http://localhost:${AGENT_PORT}`;
+process.env.LOCAL_AGENT_URL = `http://localhost:${AGENT_PORT}`;
+// The chat goes to this repo's agent (or the mock), never a remote backend.
+process.env.AGENT_URL = "";
 process.env.AGENT_PORT = String(AGENT_PORT);
 if (!useRealAgent) {
   process.env.ANTHROPIC_API_KEY = "";

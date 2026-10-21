@@ -492,3 +492,24 @@ test("chat suggestions: first round follows what is open, then follow-ups", asyn
   if (process.env.E2E_MODE !== "live") await expect(chip("Check the evidence")).toBeVisible();
   await shot(page, "17-chat-follow-ups");
 });
+
+test("each chat run tells the agent who the user is and where (docs/remote-agent.md)", async ({ page, request }) => {
+  test.skip(process.env.E2E_MODE === "live", "Reads the run input the mock agent kept.");
+  await openHome(page);
+  await page.getByRole("treeitem", { name: /effects\.csv/ }).click();
+  await send(page, "What does this file show?");
+  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
+
+  // The mock agent keeps what the CopilotKit runtime sent it (e2e/mock-agent.mjs).
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom).toEqual({
+    version: 1,
+    // No login here: the one local user, set by the server.
+    user: { id: "local", email: null, name: null, signed_in: false },
+    storage: "local",
+    node: null,
+    experiment: null,
+    run_dir: RUN,
+    selected_path: `${RUN}/xdoe-report/effects.csv`,
+  });
+});

@@ -102,7 +102,9 @@ services:
         # Fixed into the UI at build time; change it in .env, then rebuild.
         RUN_DIR_MARKERS: ${RUN_DIR_MARKERS:-xdoe-report}
     environment:
-      AGENT_URL: http://agent:8000
+      LOCAL_AGENT_URL: http://agent:8000
+      # A remote backend for the chat (docs/remote-agent.md); empty = the agent above.
+      AGENT_URL: ${AGENT_URL:-}
       AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
     ports:

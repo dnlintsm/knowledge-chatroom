@@ -15,15 +15,18 @@ import {
 } from "@/lib/auth";
 import type { NextRequest } from "next/server";
 
-// Claude Agent SDK: the agent runs as its own server (Express + tsx) and
-// speaks AG-UI directly over HTTP, so we connect to it with HttpAgent from
-// @ag-ui/client (not LangGraphAgent/LangGraphHttpAgent — those target
-// LangGraph-shaped endpoints). Everything else — runtime config, v2 endpoint
-// wiring, MCP apps, openGenerativeUI, a2ui — mirrors the canonical demo.
+// Claude Agent SDK: the agent runs as its own server and speaks AG-UI directly
+// over HTTP, so we connect to it with HttpAgent from @ag-ui/client (not
+// LangGraphAgent/LangGraphHttpAgent — those target LangGraph-shaped
+// endpoints). With AGENT_URL set that server is a remote backend's
+// `/agent/report`, else this repo's agent (src/lib/agent-target.ts). Everything
+// else — runtime config, v2 endpoint wiring, MCP apps, openGenerativeUI,
+// a2ui — mirrors the canonical demo.
 const defaultAgent = createDefaultAgent();
 
-// "suggester" writes the chat's follow-up chips; without it the browser keeps
-// the first-round chips (src/components/workspace/use-chat-suggestions.ts).
+// "suggester" writes the chat's follow-up chips; without it (a remote backend,
+// or CHAT_SUGGESTIONS=static) the browser keeps the first-round chips
+// (src/components/workspace/use-chat-suggestions.ts).
 const runtime = new CopilotRuntime({
   agents: dynamicSuggestions()
     ? { default: defaultAgent, suggester: createSuggesterAgent() }
@@ -77,7 +80,8 @@ const handler = handle(app);
 
 // The runtime forwards x-* request headers to the agent, so the agent server
 // learns who a run is for from the signed X-Knowledge-User header set here
-// (never one the browser sent). With login on, chat needs a signed-in user.
+// (never one the browser sent), and src/agent.ts copies that user into the
+// run's forwardedProps. With login on, chat needs a signed-in user.
 async function withUser(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete(IDENTITY_HEADER);

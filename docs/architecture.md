@@ -2,6 +2,9 @@
 
 The browser renders a Next.js workspace. CopilotKit's runtime route connects to
 an AG-UI agent on port 8000; `agent/src/server.ts` streams the Claude SDK adapter.
+With `AGENT_URL` set, the chat goes to a remote backend's `/agent/report` instead
+([Remote agent backend](remote-agent.md)), and each run carries the user and their
+place in `forwardedProps.knowledge_chatroom`.
 The agent also hosts storage HTTP routes and per-user file/node/experiment tools.
 `src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
 when login is enabled. Browser state and authenticated storage access meet in
