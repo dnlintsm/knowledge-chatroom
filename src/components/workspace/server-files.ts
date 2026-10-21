@@ -262,6 +262,8 @@ export interface RunProvenance {
   chat?: string | null;
   model?: string | null;
   skill?: { name: string; source?: string; version?: number; sha256?: string };
+  /** The run this one ran again. */
+  rerunOf?: { id: string };
   tools?: Record<string, string>;
   inputs?: {
     path: string;

@@ -24,7 +24,7 @@ import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
-import { isInside } from "./workdir";
+import { isInside, writeRunInputs } from "./workdir";
 import type { Skill } from "../skills/catalog";
 
 /** What a chat run knows about itself, for the provenance of runs it starts. */
@@ -560,10 +560,11 @@ export function createFileTools(
         "it read. The run starts in state running with a report.md whose front matter records " +
         "where it came from (who, this chat, model, skill, input versions); write the report " +
         "below the front matter. Work in it by passing its id as `experiment` to the file tools, " +
-        "and finish with set_experiment_results.",
+        "and finish with set_experiment_results. To run an earlier run again, pass rerunOf " +
+        "instead of changing it.",
       {
         node: z.string().optional().describe("Knowledge node id to fork; omit for the workspace root."),
-        title: z.string().describe("Short name, e.g. 'Lower RF power, 40 W'"),
+        title: z.string().optional().describe("Short name, e.g. 'Lower RF power, 40 W'; required unless rerunOf."),
         hypothesis: z.string().optional().describe("What the user expects and why."),
         params: jsonObject.optional().describe('What is varied, e.g. {"rfPower_W": 40}'),
         inputs: z
@@ -578,22 +579,38 @@ export function createFileTools(
           .optional()
           .describe("Files the run reads (uploads, data, earlier results); the user must be able to read each."),
         skill: z.string().optional().describe("The skill this run follows, if any, e.g. analysis."),
+        rerunOf: z
+          .string()
+          .optional()
+          .describe(
+            "Run this earlier run (experiment id) again as a new run: its place (node), params, hypothesis " +
+              "and the exact input versions it read are reused unless given here. The old run is left as it is.",
+          ),
       },
-      ({ node, inputs, skill, ...input }) =>
+      ({ node, inputs, skill, rerunOf, ...input }) =>
         run(async (session) => {
-          const created = await session.startRun(node || null, input, inputs, {
+          const provenance = {
             chat: meta.chat ?? null,
             model: meta.model ?? null,
             ...(skill ? { skill: skillProvenance(skill, meta.skills) } : {}),
             tools: TOOL_VERSIONS,
-          });
+          };
+          const created = rerunOf
+            ? await session.rerun(rerunOf, { ...input, inputs, ...(node !== undefined && { node: node || null }) }, provenance)
+            : await session.startRun(node || null, input, inputs, provenance);
+          const linked = (created.provenance.inputs as { path: string }[]).map((i) => i.path);
+          // The working folder's snapshot may be older than what the run linked: scripts read these.
+          const local = workdir
+            ? await writeRunInputs(workdir, created.id, await session.experimentFiles(created.id), linked)
+            : {};
           return text({
             ok: true,
             id: created.id,
             title: created.title,
             state: created.state,
             files: created.fileCount,
-            inputs: (created.provenance.inputs as { path: string }[]).map((i) => i.path),
+            inputs: linked,
+            ...(Object.keys(local).length && { inputsInWorkingFolder: local }),
             report: "report.md",
           });
         }),

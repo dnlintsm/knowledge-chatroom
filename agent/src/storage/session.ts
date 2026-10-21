@@ -257,6 +257,37 @@ export class Session {
   }
 
   /**
+   * Runs `id` again as a new run (issue #82): same place, parameters,
+   * hypothesis and inputs (the very versions the old run read, from its
+   * inputs/) unless `changes` says otherwise. The old run stays as it is;
+   * the new one's provenance names it. You need to be able to see the old run.
+   */
+  async rerun(
+    id: string,
+    changes: ExperimentInput & { inputs?: RunInputSource[]; node?: string | null } = {},
+    provenance: Record<string, unknown> = {},
+  ): Promise<Experiment> {
+    const old = await this.experiment(id);
+    const { inputs, node, ...input } = changes;
+    const oldInputs = ((old.provenance.inputs as { path: string }[] | undefined) ?? []).map((i) => ({
+      path: i.path,
+      experiment: old.id,
+      as: i.path.replace(/^inputs\//, ""),
+    }));
+    return this.startRun(
+      node === undefined ? old.nodeId : node,
+      {
+        title: input.title ?? `${old.title} (rerun)`,
+        hypothesis: input.hypothesis ?? old.hypothesis,
+        params: input.params ?? old.params,
+      },
+      inputs ?? oldInputs,
+      // Only the id: the old run may be a draft that viewers of this one can't see.
+      { ...provenance, rerunOf: { id: old.id } },
+    );
+  }
+
+  /**
    * Records a run's results and how it ended (done or failed), and refreshes
    * the record in its report.md front matter (creating the report if it has
    * none). Only its author can; see updateExperiment. A finished run stays

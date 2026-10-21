@@ -88,7 +88,13 @@ test("modes: a skill Claude may not invoke is never auto; one without /name is n
 
 test("the built-in skills load", () => {
   const names = builtinSkills().map((s) => s.name);
-  assert.deepEqual(names, ["tldr", "write-skill"]);
+  assert.deepEqual(names, ["analysis", "tldr", "write-skill"]);
+  const analysis = builtinSkills().find((s) => s.name === "analysis")!;
+  assert.equal(analysis.needsExecution, true, "it ships a script");
+  assert.deepEqual(
+    analysis.files.map((f) => f.path).sort(),
+    ["SKILL.md", "reference/report-template.md", "scripts/profile.mjs"],
+  );
   assert.equal(builtinSkills().find((s) => s.name === "write-skill")?.modelInvocable, false);
 });
 
@@ -326,4 +332,19 @@ test("hub scan: flags scripts, network, hidden text, odd instructions, big and b
   const many = scanSkill([{ path: "links.md", bytes: enc(Array.from({ length: 6 }, (_, i) => `https://a${i}.test`).join("\n")) }]);
   assert.deepEqual(many.map((f) => f.detail).slice(-1), ["and 3 more like this"]);
   assert.equal(many.length, 4);
+});
+
+test("the analysis skill's profile script reads CSV columns", async () => {
+  const url = new URL("../../skills/analysis/scripts/profile.mjs", import.meta.url).href;
+  const { profile } = (await import(url)) as {
+    profile: (text: string) => { rows: number; columns: Record<string, unknown>[] };
+  };
+  const out = profile('wafer,dose,lot\n1,30,A\n2,"31",B\n3,,"A, again"\n');
+  assert.equal(out.rows, 3);
+  assert.deepEqual(out.columns[1], { name: "dose", count: 2, missing: 1, type: "number", min: 30, max: 31, mean: 30.5, std: 0.707107 });
+  assert.equal(out.columns[2].type, "text");
+  assert.equal(out.columns[2].distinct, 3);
+  // A column too long to spread into Math.min/max.
+  const big = profile(`n\n${Array.from({ length: 300_000 }, (_, i) => i).join("\n")}\n`);
+  assert.deepEqual([big.columns[0].min, big.columns[0].max], [0, 299_999]);
 });

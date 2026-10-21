@@ -21,6 +21,7 @@ export function reportFrontMatter(run: Experiment): string {
     ["finished_at", p.finishedAt],
     ["chat", p.chat],
     ["model", p.model],
+    ["rerun_of", (p.rerunOf as { id?: string } | undefined)?.id],
     ["skill", p.skill],
     ["tools", p.tools],
     ["inputs", inputs(p.inputs)],

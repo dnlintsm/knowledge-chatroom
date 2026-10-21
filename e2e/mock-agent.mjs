@@ -79,6 +79,15 @@ const TOOL_REPLIES = {
 // The agent's built-in skills (agent/skills/), as GET /skills lists them.
 const SKILLS = [
   {
+    name: "analysis",
+    description:
+      "Analyze files the user uploaded (CSV, tables, measurement logs, notes) as a run - a new experiment with the files as inputs, a written report and recorded results. Use when the user asks to analyze, evaluate or run an analysis on their data, or to rerun an earlier analysis.",
+    argumentHint: "[files or question]",
+    modelInvocable: true,
+    defaultMode: "auto",
+    needsExecution: true,
+  },
+  {
     name: "tldr",
     description:
       "Summarize the open file (or the user's selection) as a TL;DR line plus a few bullets. Use when the user asks for a summary, gist or recap of a document.",
@@ -94,7 +103,7 @@ const SKILLS = [
     modelInvocable: false,
     defaultMode: "manual",
   },
-].map((s) => ({ ...s, source: "builtin", path: null, userInvocable: true, needsExecution: false }));
+].map((s) => ({ needsExecution: false, ...s, source: "builtin", path: null, userInvocable: true }));
 
 // Modes chosen for everyone, by the (one) user, and per chat: name → mode.
 const skillModes = { workspace: new Map(), user: new Map(), chat: new Map() };

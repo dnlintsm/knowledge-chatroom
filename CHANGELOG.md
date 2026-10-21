@@ -34,6 +34,11 @@
   results and finishes it. Each run records its provenance (who, when, which chat, model,
   skill and tool versions, input versions and hashes) in the report's front matter and in
   the run panel.
+- An `analysis` skill (#82, step 3), built in and Auto: Claude analyzes uploaded files as
+  a run, with a report template and, with `SKILL_SCRIPTS=on`, a CSV profiling script.
+  `create_experiment` takes `rerunOf` to run an earlier run again as a new run with the
+  same inputs; the panel links a rerun to its original. A finished run can't be finished
+  again with other results.
 
 ## 0.1.1
 

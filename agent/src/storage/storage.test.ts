@@ -31,7 +31,7 @@ import { initStorage, type Storage } from "./index";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
-import { clearWorkdir, confineTools, syncWorkdir } from "./workdir";
+import { clearWorkdir, confineTools, syncWorkdir, writeRunInputs } from "./workdir";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
 import { createSkillsHandler } from "../skills/http";
@@ -953,6 +953,24 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       // Bringing the run back to its node never proposes its inputs.
       const proposals = await claude(carol).promote(run.id);
       assert.deepEqual(proposals.map((x) => x.path), ["report.md"]);
+
+      // A rerun is a new run with the same inputs, at the versions the old one read.
+      await assert.rejects(claude(bob).rerun(run.id), NodeNotFoundError, "someone else's draft");
+      const rerun = await claude(carol).rerun(run.id, { params: { wafers: 3 } }, { chat: "thread-2" });
+      assert.notEqual(rerun.id, run.id);
+      assert.deepEqual(
+        [rerun.title, rerun.nodeId, rerun.state, rerun.params],
+        ["Leveling analysis v2 (rerun)", leveling, "running", { wafers: 3 }],
+      );
+      const rp = rerun.provenance as { rerunOf: { id: string }; chat: string; inputs: { path: string; sha256: string }[] };
+      assert.deepEqual([rp.rerunOf, rp.chat], [{ id: run.id }, "thread-2"], "no title: viewers may not see the old run");
+      assert.deepEqual(rp.inputs.map((i) => i.path), ["inputs/map.bin", "inputs/recipe.md"]);
+      assert.deepEqual(rp.inputs.map((i) => i.sha256), p.inputs.map((i) => i.sha256));
+      const rerunFiles = await claude(carol).experimentFiles(rerun.id);
+      assert.equal(await read(rerunFiles, "inputs/recipe.md"), "dose 30", "not the node's newer version");
+      assert.match(await read(rerunFiles, "report.md"), new RegExp(`\nrerun_of: "${run.id}"\n`));
+      const old = await as(carol).experiment(run.id);
+      assert.deepEqual([old.state, old.results], ["done", { tilt_urad: 1.5 }]);
     });
 
     test("changes are audited", async () => {
@@ -1662,6 +1680,23 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await syncWorkdir(as(erin), other, limits);
       assert.ok(await readFile(join(other, "workspace/nodes/Photonics/Optics-Lenses/notes/focus.md"), "utf8"));
       await rm(other, { recursive: true, force: true });
+    });
+
+    test("a new run's inputs are copied at the version it linked, until the next sync", async () => {
+      const owner = as(await storage.access.localUserId(), "user");
+      await syncWorkdir(owner, cwd, limits);
+      // Changed after this turn's snapshot: the run links the new version.
+      await (await owner.files(optics)).write("notes/focus.md", text("focal length 85 mm"));
+      const run = await owner.startRun(optics, { title: "Focus check" }, [{ path: "notes/focus.md", node: optics }]);
+      const local = await writeRunInputs(cwd, run.id, await owner.experimentFiles(run.id), ["inputs/focus.md"], limits);
+      assert.deepEqual(local, { "inputs/focus.md": `run-inputs/${run.id}/focus.md` });
+      const copy = join(cwd, "run-inputs", run.id, "focus.md");
+      assert.equal(await readFile(copy, "utf8"), "focal length 85 mm");
+      assert.equal((await stat(copy)).mode & 0o222, 0);
+      // The next turn's snapshot has them under the run's own folder instead.
+      await syncWorkdir(owner, cwd, limits);
+      await assert.rejects(stat(join(cwd, "run-inputs")));
+      await owner.deleteExperiment(run.id);
     });
 
     test("leaves out files over the size limits", async () => {
