@@ -11,7 +11,8 @@
  */
 
 export const CHATROOM_PROPS = "knowledge_chatroom";
-export const CHATROOM_PROPS_VERSION = 1;
+/** 2: runs are experiments, so `run_dir` is gone and `experiment` says how far the run got. */
+export const CHATROOM_PROPS_VERSION = 2;
 
 export interface ChatroomUser {
   /** "<issuer>|<subject>" from the login provider; "local" without login. */
@@ -39,10 +40,20 @@ export interface ChatroomPlace {
   storage: "server" | "local" | "loading";
   /** The knowledge node the user is in; null = the workspace root. */
   node: (ChatroomNode & { path: ChatroomNode[] }) | null;
-  /** The experiment the user is working in, on `node`. */
-  experiment: { id: string; node_id: string; title: string; status: string; can_change: boolean } | null;
-  /** The focused run (RUN_DIR), a folder path in the place's files. */
-  run_dir: string | null;
+  /**
+   * The experiment (run) the user is working in, on `node`; `node_id` null
+   * when it is at the workspace root. `report` is its report's path in it,
+   * null when it has none yet.
+   */
+  experiment: {
+    id: string;
+    node_id: string | null;
+    title: string;
+    status: string;
+    state: string;
+    can_change: boolean;
+    report: string | null;
+  } | null;
   /** The file open in the middle pane, a path in the place's files. */
   selected_path: string | null;
 }
@@ -56,12 +67,13 @@ export interface PlaceInput {
   storage: ChatroomPlace["storage"];
   /** Root to the current node, as the workspace's lineage; empty at the root. */
   lineage: { id: string; name: string; type: string }[];
-  experiment: { id: string; nodeId: string; title: string; status: string; access: string } | null;
-  runDir: string | null;
+  experiment: { id: string; nodeId: string | null; title: string; status: string; state: string; access: string } | null;
+  /** The experiment's report path, if it has one. */
+  report: string | null;
   selectedPath: string | null;
 }
 
-export function chatroomPlace({ storage, lineage, experiment, runDir, selectedPath }: PlaceInput): ChatroomPlace {
+export function chatroomPlace({ storage, lineage, experiment, report, selectedPath }: PlaceInput): ChatroomPlace {
   const path = lineage.map(({ id, name, type }) => ({ id, name, type }));
   const node = path.at(-1);
   return {
@@ -74,10 +86,11 @@ export function chatroomPlace({ storage, lineage, experiment, runDir, selectedPa
           node_id: experiment.nodeId,
           title: experiment.title,
           status: experiment.status,
+          state: experiment.state,
           can_change: experiment.access === "writer",
+          report,
         }
       : null,
-    run_dir: runDir,
     selected_path: selectedPath,
   };
 }

@@ -14,7 +14,6 @@ import {
   PanelLeft,
   PanelsTopLeft,
   Sun,
-  X,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
@@ -133,7 +132,6 @@ function TitleBar() {
       <HomeLink />
       <StorageStatus />
       <PlaceBreadcrumb />
-      <RunBreadcrumb />
       <div className="ml-auto flex items-center gap-0.5">
         <ShareButton />
         <AdminButton />
@@ -182,14 +180,14 @@ function TitleBar() {
 }
 
 /**
- * The app name, which goes back to where a fresh page load starts: Traverse
- * mode (all runs) in the current place. It leaves the knowledge tree place
- * alone, so Back returns to the run; the Location breadcrumb goes up the tree.
- * Open tabs and chats stay as they are. A real link to "/", so a middle-click
- * or Ctrl-click opens a new tab, which starts in the same place.
+ * The app name, which goes home: the workspace root with the Runs view, which
+ * there lists every run. Leaving a run changes the URL, so Back returns to
+ * it. Open tabs and chats stay as they are. A real link to "/", so a
+ * middle-click or Ctrl-click opens a new tab.
  */
 function HomeLink() {
-  const { run, sidebar } = useWorkbench();
+  const { sidebar } = useWorkbench();
+  const { enterNode } = useWorkspace();
   return (
     <a
       href="/"
@@ -197,7 +195,7 @@ function HomeLink() {
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
-        run.leave();
+        void enterNode(null);
         sidebar.show("runs");
       }}
       className="-ml-1.5 flex shrink-0 items-center gap-2 rounded px-1.5 py-0.5 hover:bg-[var(--secondary)]"
@@ -205,40 +203,6 @@ function HomeLink() {
       <span className="size-2.5 rounded-full bg-[image:var(--cpk-ambient-gradient)]" />
       <span className="text-sm font-bold tracking-tight">Knowledge Chatroom</span>
     </a>
-  );
-}
-
-/** The focused run (Focus mode) and a way back to Traverse. */
-function RunBreadcrumb() {
-  const { runDir, run } = useWorkbench();
-  if (!runDir) return null;
-  const parts = runDir.split("/");
-  return (
-    <nav aria-label="Current run" className="ml-3 flex min-w-0 items-center gap-1 text-xs">
-      <FlaskConical className="size-3.5 shrink-0 text-[var(--muted-foreground)]" />
-      {parts.map((part, i) => (
-        <span key={i} className="flex min-w-0 items-center gap-1">
-          {i > 0 && <ChevronRight className="size-3 shrink-0 text-[var(--muted-foreground)]" />}
-          <span
-            className={cn(
-              "truncate",
-              i === parts.length - 1 ? "font-medium" : "text-[var(--muted-foreground)] max-sm:hidden",
-            )}
-          >
-            {part}
-          </span>
-        </span>
-      ))}
-      <button
-        type="button"
-        title="Leave run (back to Traverse)"
-        aria-label="Leave run"
-        onClick={run.leave}
-        className="ml-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
-      >
-        <X className="size-3.5" />
-      </button>
-    </nav>
   );
 }
 

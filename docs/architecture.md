@@ -145,31 +145,40 @@ and `POST /api/skills/import?replace=1` move `.zip` files. For trust:
 `POST /api/hub/<name>/yank {version, yanked, reason?}`, `POST /api/hub/<name>/reports
 {reason, version?}` and `DELETE /api/hub/<name>/reports?id=`.
 
-### Runs: Focus and Traverse modes
+### Runs are experiments
 
-A **run** (RUN_DIR) is a plain folder holding one experiment run's artifacts. Any folder that
-contains a marker folder is a run, `xdoe-report/` by default (set `RUN_DIR_MARKERS`,
-comma-separated, to add more). The workspace works in one of two modes:
+A **run** is an experiment (see Experiments below) with a report: its `report.md`, or
+`xdoe-report/report.md` for one made from an xDOE run folder. There is no separate run
+folder or mode (issue #82):
 
-- **Traverse** (`/`): the **Traverse** view on the icon rail lists every run. The chat works
-  here too, about the files where you are, so a workspace with no runs yet can still chat.
-- **Focus** (`/?run=runs/etch-2026-10-01`): the panes work on that run. The Files view is
-  rooted at it (new notes and uploads land in it), the title bar shows where you are with a
-  button to leave, and Claude gets the run as context (its path, files and
-  `xdoe-report/report.md`). Picking a run opens its report.
+- The **Runs** view on the icon rail lists the runs where you are and below it. At the
+  workspace root that is every run you can see, so the app name in the title bar goes there.
+  **+** starts a run where you are (a fork of the node's files, or an empty run at the root),
+  and **Compare** opens the **Runs** tab: one row per run with its state, place, author and
+  every parameter and result as a column.
+- Opening a run moves the workspace into it and opens its report, unless one of its files is
+  already open. Claude gets it as `currentExperiment`, with its state and report.
+- A run's **state** says how far it got (ready, running, done, failed), apart from its
+  **status**, which says who sees it (draft, shared, archived).
+- The run you're in is in the URL (`/?experiment=<id>`), so links open a run directly and
+  back/forward move between runs. A link to one that isn't there, or isn't shared with you,
+  drops out of the URL with a notice. Old `?run=` links are dropped the same way.
+- **Run folders** from before (a folder holding `xdoe-report/`) are listed at the bottom of
+  the Runs view for anyone who can edit there. **Make run** moves the folder's files, with
+  their history, into a new draft run named after the folder (`POST
+  /experiments/from-folder`).
 
-The URL is the source of truth, so links open a run directly and back/forward move between
-runs. A link to a run that isn't there falls back to Traverse with a notice.
+Runs need server storage; a browser-only workspace has none.
 
 ### Actions
 
-In Focus mode the Files view ends with a foldable **Actions** block (like VS Code's Outline
+Inside a run the Files view ends with a foldable **Actions** block (like VS Code's Outline
 and Timeline sections), whose buttons act on the current run:
 
 | Action | Role | Does |
 | --- | --- | --- |
 | **New Chat** | viewer | starts an empty conversation, still about the same run |
-| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without `<run>/models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
+| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
 
 Actions are entries in one registry (`src/components/workspace/actions.tsx`), each with an
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
@@ -177,21 +186,21 @@ and state for the current run, and a `run(ctx)` that acts only through the workb
 contract and the file API. One runner serves the block and Claude: it refuses disabled,
 unauthorized or already-running actions, so a double click never runs one twice.
 
-The role is the user's role where the run lives (the knowledge node, experiment or workspace
-root), as the grants give it. A viewer there sees Generate Rules disabled, with a tooltip
-saying why, and Claude acting for them gets the same refusal. The server checks again: any
-write, a read-only file included, needs editor. Without server storage the single user owns
-everything.
+The role is the user's role in the run: editor for its author while it isn't archived, viewer
+for everyone else who can see it. A viewer sees Generate Rules disabled, with a tooltip saying
+why, and Claude acting for them gets the same refusal. The server checks again: any write, a
+read-only file included, needs editor.
 
 #### Rules API
 
-Generate Rules gets JSON from `GET /api/rules?run=<run>`. The Next.js server forwards that to
-`RULES_API_URL` (`GET <url>?run=<run>`), so the API's address stays off the browser. Without
+Generate Rules gets JSON from `GET /api/rules?run=<title>&experiment=<id>` (the run's title
+and experiment id). The Next.js server forwards that to `RULES_API_URL` (`GET
+<url>?run=<title>&experiment=<id>`), so the API's address stays off the browser. Without
 `RULES_API_URL` it answers with a built-in mock (`src/lib/rules-mock.ts`), which is also served
 at `/api/mock/rules`. The answer looks like this:
 
 ```json
-{ "run": "runs/etch-2026-10-01", "generatedAt": "2026-10-08T00:00:00.000Z",
+{ "run": "etch-2026-10-01", "generatedAt": "2026-10-08T00:00:00.000Z",
   "rules": [{ "id": "R1", "title": "…", "condition": "…", "action": "…", "confidence": 0.93 }] }
 ```
 
@@ -202,8 +211,7 @@ only previews it, and the file API refuses to change or delete it.
 The API is called at most once per run. The button is disabled while it works, and a lock
 shared by the browser's tabs, plus a check with the server just before the call, stops a
 second tab from asking again. The write only creates (`If-None-Match: *`), so even two
-browsers can't overwrite the file. Without server storage, files live in each tab separately,
-so only the first two guards apply.
+browsers can't overwrite the file.
 
 ### Workbench contract
 
@@ -213,8 +221,6 @@ switcher, file references in answers, and Claude's open-file tools.
 
 | Part | Does |
 | --- | --- |
-| `mode`, `runDir`, `runs` | Focus or Traverse, the focused run, every run in the workspace |
-| `run.focus(path) / leave()` | moves to a run (a new history entry) or back to Traverse |
 | `panes.isOpen / show / hide / toggle(pane)` | `"explorer"`, `"editor"` or `"chat"`; on phones `show` switches to that pane |
 | `panes.resize / resetSize(pane, width)` | splitter drags, clamped to each pane's range |
 | `sidebar.select / show(view)` | the icon rail (`select` on the active view collapses the panel) |
@@ -223,11 +229,12 @@ switcher, file references in answers, and Claude's open-file tools.
 | `notify(message, level)` | a short notice in the corner |
 
 Claude drives the same contract through frontend tools: `showPane` / `hidePane`,
-`listRuns` / `focusRun`, `openWorkspaceFile`, and `listActions` / `runAction`. `runAction`
+`listRuns` / `openRun`, `openWorkspaceFile`, and `listActions` / `runAction`. `runAction`
 goes through the Actions block's runner with the user's role, and only runs actions marked
 `agentInvocable` (Generate Rules is; New Chat isn't, since it would end Claude's own
-conversation). Claude can't leave the run; `focusRun` moves it to another run (or into one
-from Traverse), and the conversation carries on.
+conversation). `openRun` moves the workspace into another run, and the conversation carries
+on. Moving between runs and places goes through the workspace (`enterExperiment`,
+`enterNode`); the workbench keeps the URL in step.
 
 The layout itself is plain data changed by a reducer (`layout.ts`), so its rules are unit
 tested (`tests/unit/workbench.spec.ts`), and a test fails if anything outside the workbench starts
@@ -237,7 +244,7 @@ keeping its own pane state.
 
 The chips under the chat come in two rounds. Before the first message they follow what is
 open (`src/components/workspace/chat-suggestions.ts`): summarize the open file, draft a note,
-analyze the focused run's report, and, with server storage, search for similar experiments.
+analyze the open run's report, and, with server storage, search for similar experiments.
 After each reply CopilotKit asks a separate `suggester` agent for follow-ups. The chat agent
 can't serve that request, because CopilotKit forces a single tool call and the Claude Agent SDK
 would run a whole turn with file tools, so the agent's `POST /suggest` (`agent/src/suggest.ts`)
@@ -300,14 +307,17 @@ For local setup, see [Development](development.md).
 - **Experiments**: anyone who can view a node (usually a process) can fork it into an
   experiment. The experiment gets its own copy of the node's file list, pointing at the same
   stored bytes, and from then on every change, by the user or by Claude, stays in the
-  experiment. It records a hypothesis, parameters and results as JSON, so the experiments on
+  experiment. Anyone with a role at the workspace root can also start one there, which
+  starts empty (`015_runs.sql`). An experiment with a report is a run (above). It records a hypothesis, parameters and results as JSON, so the experiments on
   one node compare side by side. A draft is seen only by its author; shared and archived ones
   by everyone who can view the node; only the author changes it, and an archived one is read
-  only until restored. `GET|POST /api/experiments` lists (optionally `?node=<id>`) and
-  forks, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes one, and every
-  `/api/files` route takes `?experiment=<id>`. In the Knowledge view, experiments sit under
-  their node with their status, and the Experiment tab holds the details and a comparison
-  table. Its author brings its results to the node by proposing them (below).
+  only until restored. Its `state` (ready, running, done, failed) says how far the run got.
+  `GET|POST /api/experiments` lists (optionally `?node=<id>`, or `?node=root`) and forks
+  (`nodeId: null` for the root), `POST /api/experiments/from-folder {nodeId, folder}` moves a
+  folder into a new one, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
+  one, and every `/api/files` route takes `?experiment=<id>`. In the Knowledge view,
+  experiments sit under their node (root ones under Workspace) with their status and state,
+  and the Experiment tab holds the details and a comparison table. Its author brings its results to the node by proposing them (below).
 - **Proposed changes**: a change to a node's file can wait for review instead of landing at
   once (`008_proposals.sql`). Claude's edits in a node arrive this way, as do the skills
   Claude writes at the workspace root (`skills/<name>/`), and so does an
@@ -412,8 +422,8 @@ key a pending save only by file path. Navigation must flush the place being left
 and late network responses must not overwrite another place's files. Local edits
 and in-flight writes take priority over incoming SSE updates.
 
-Experiments are persisted forks of a node's file list. Workbench runs describe UI/workflow traversal in Focus/Traverse modes; they do not
-replace experiment storage.
+Experiments are persisted forks of a node's file list (or empty, at the workspace root). A
+run is an experiment with a report; there is no other kind of run.
 Coordinate changes with the feature PR stack before introducing new semantics.
 
 ## File contracts and validation

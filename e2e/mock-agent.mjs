@@ -14,8 +14,8 @@
  * lines, so the preview also shows file references opening the middle pane.
  *
  * A message asking for the "rules" calls the runAction tool (generate-rules),
- * and one naming the "litho" run calls focusRun, so the preview shows Claude
- * driving the workbench too.
+ * and one asking to open a run by its id calls openRun, so the preview shows
+ * Claude driving the workbench too.
  *
  * A message starting with "/<skill>" runs that skill: the run reports it with
  * a "skill_used" event (as the real agent does), so the preview shows the
@@ -73,7 +73,7 @@ const FOLLOW_UPS = [
 const TOOL_REPLIES = {
   writeWorkspaceFile: `Saved the summary to ${ARTIFACT_PATH} and opened it.`,
   runAction: "Generated the run's general rules and opened them.",
-  focusRun: "Switched to the litho-2026-10-03 run.",
+  openRun: "Switched to the other run.",
 };
 
 // The agent's built-in skills (agent/skills/), as GET /skills lists them.
@@ -217,8 +217,8 @@ const server = http.createServer(async (req, res) => {
     ? { name: "writeWorkspaceFile", args: { path: ARTIFACT_PATH, content: ARTIFACT } }
     : asked.includes("rules")
       ? { name: "runAction", args: { id: "generate-rules" } }
-      : asked.includes("litho")
-        ? { name: "focusRun", args: { path: "runs/litho-2026-10-03" } }
+      : /open the run [0-9a-f-]{36}/.test(asked)
+        ? { name: "openRun", args: { id: /[0-9a-f-]{36}/.exec(asked)[0] } }
         : null;
   // After a tool ran, one line about the tool that was called.
   const calledTool = messages

@@ -2,9 +2,10 @@ import type { NextRequest } from "next/server";
 import { mockRules } from "@/lib/rules-mock";
 
 /**
- * The rules API, as the browser sees it: GET /api/rules?run=<RUN_DIR> asks
- * RULES_API_URL (GET <url>?run=<RUN_DIR>, JSON back) from the server, so the
- * API's address and any credentials stay off the client. Without
+ * The rules API, as the browser sees it: GET /api/rules?run=<title>&experiment=<id>
+ * asks RULES_API_URL (GET <url>?run=<title>&experiment=<id>, JSON back) from
+ * the server, so the API's address and any credentials stay off the client.
+ * A run is an experiment: `run` is its title, `experiment` its id. Without
  * RULES_API_URL it answers with the built-in mock (src/lib/rules-mock.ts).
  */
 
@@ -21,6 +22,8 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(base);
     url.searchParams.set("run", run);
+    const experiment = req.nextUrl.searchParams.get("experiment");
+    if (experiment) url.searchParams.set("experiment", experiment);
     upstream = await fetch(url, {
       headers: { Accept: "application/json" },
       cache: "no-store",

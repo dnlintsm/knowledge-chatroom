@@ -19,8 +19,7 @@ COPY . .
 # doesn't need (and whose agent packages this stage doesn't install).
 RUN rm -rf agent tests e2e
 # NEXT_PUBLIC_* values are fixed at build time (see next.config.ts).
-ARG RUN_DIR_MARKERS=xdoe-report
-ENV RUN_DIR_MARKERS=${RUN_DIR_MARKERS} NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM ${NODE_IMAGE} AS app

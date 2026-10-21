@@ -6,7 +6,7 @@ import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilo
 import { useActions } from "./actions";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
-import { isInRun, normalizeRunDir, RUN_REPORT } from "./runs";
+import { findReport, runsUnder } from "./runs";
 import { isTextFile, TASKS_TAB } from "./types";
 import { useChatroomProps } from "./use-chatroom-props";
 import { useWorkbench } from "./workbench";
@@ -23,7 +23,7 @@ const MAX_CONTEXT_CHARS = 20_000;
  * - run payload: the user and their place as forwardedProps, for a backend to
  *   set up its agent with (use-chatroom-props.ts);
  * - frontend tools: list / read / write / open files, open the task board, and
- *   the workbench: show or hide panes, list and focus runs, list and run the
+ *   the workbench: show or hide panes, list and open runs, list and run the
  *   current run's actions (only those marked agentInvocable, with the user's
  *   role, through the same runner as the Actions block).
  *
@@ -48,13 +48,13 @@ export function useWorkspaceAgent() {
   latestActions.current = actions;
 
   const open = ws.activeFile;
-  const { runDir } = workbench;
-  const report = runDir ? ws.getFile(`${runDir}/${RUN_REPORT}`) : undefined;
+  const reportPath = ws.experiment ? findReport(ws.files.map((f) => f.path)) : null;
+  const report = reportPath ? ws.getFile(reportPath) : undefined;
   // Only while files are browser-only; see the comment above.
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment on that node the user is working in; `files` are the files where the user is. `run` is the experiment run (RUN_DIR, a folder among those files) the user is focused on: its folder, its files and its xDOE report; questions are about this run unless the user says otherwise, and files for it go inside its folder. `run` is null when no run is focused; then questions are about the files where the user is.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment the user is working in, on that node (or at the workspace root): a run, with its state (ready, running, done, failed) and its report (report.md, or xdoe-report/report.md) when it has one. Questions are about this run unless the user says otherwise, and `files` are its files. Without one, `files` are the files where the user is.",
     value: {
       currentNode: ws.node
         ? {
@@ -68,18 +68,13 @@ export function useWorkspaceAgent() {
             id: ws.experiment.id,
             title: ws.experiment.title,
             status: ws.experiment.status,
+            state: ws.experiment.state,
             author: ws.experiment.mine ? "the user" : ws.experiment.authorName,
             canChange: ws.experiment.access === "writer",
             hypothesis: ws.experiment.hypothesis,
             // Plain JSON from the server.
             params: ws.experiment.params as JsonSerializable,
             results: ws.experiment.results as JsonSerializable,
-          }
-        : null,
-      run: runDir
-        ? {
-            path: runDir,
-            files: ws.files.filter((f) => isInRun(f.path, runDir)).map((f) => f.path),
             report: !report
               ? null
               : report.path === open?.path
@@ -144,9 +139,9 @@ export function useWorkspaceAgent() {
     name: "writeWorkspaceFile",
     available: browserFiles,
     description:
-      "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents in the focused run's artifacts/ folder (<run>/artifacts/, see `run` in context), or under artifacts/ when there is no run, unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
+      "Create or overwrite a workspace file with the COMPLETE new content (no line numbers), then open it for the user. Put new generated documents under artifacts/, unless the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed.",
     parameters: z.object({
-      path: z.string().describe("e.g. runs/etch-2026-10-01/artifacts/summary.md"),
+      path: z.string().describe("e.g. artifacts/summary.md"),
       content: z.string().describe("The full file content (markdown for .md files)."),
     }),
     handler: async ({ path, content }) => {
@@ -222,31 +217,37 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "listRuns",
     description:
-      "List every experiment run (RUN_DIR) in the workspace, and which one the user is focused on.",
+      "List the runs (experiments, each maybe with a report) where the user is and below it, all of them at the workspace root, and which one the user is in.",
     parameters: z.object({}),
     handler: async () => {
-      if (latest.current.storageMode === "loading") return { error: FILES_LOADING };
-      const { runs, runDir } = latestWorkbench.current;
+      const ws = latest.current;
+      if (ws.storageMode === "loading") return { error: FILES_LOADING };
+      if (ws.storageMode !== "server") return { error: "Runs need server storage; there are none in this browser-only workspace." };
       return {
-        current: runDir,
-        runs: runs.map((r) => ({ path: r.path, files: r.fileCount, markers: r.markers })),
+        current: ws.experiment?.id ?? null,
+        runs: runsUnder(ws.experiments, ws.nodes, ws.node).map((e) => ({
+          id: e.id,
+          title: e.title,
+          node: e.nodeId,
+          state: e.state,
+          status: e.status,
+          files: e.fileCount,
+          mine: e.mine,
+        })),
       };
     },
   });
 
   useFrontendTool({
-    name: "focusRun",
+    name: "openRun",
     description:
-      "Focus the workspace on another run (path from listRuns): the panes and this chat then work on it, and its report opens.",
-    parameters: z.object({ path: z.string().describe("Run folder, e.g. runs/etch-2026-10-01") }),
-    handler: async ({ path }) => {
-      // Until the files load, the run list is the samples, not the user's runs.
-      if (latest.current.storageMode === "loading") return { error: FILES_LOADING };
-      const wb = latestWorkbench.current;
-      const run = wb.runs.find((r) => r.path === normalizeRunDir(path));
-      if (!run) return { error: `No run at ${path}. Call listRuns for the runs there are.` };
-      wb.run.focus(run.path);
-      return { ok: true, run: run.path };
+      "Move the workspace into a run (an id from listRuns): the panes and this chat then work on it, and its report opens.",
+    parameters: z.object({ id: z.string().describe("The run's experiment id") }),
+    handler: async ({ id }) => {
+      const ws = latest.current;
+      if (ws.storageMode === "loading") return { error: FILES_LOADING };
+      if (!(await ws.enterExperiment(id))) return { error: `No run ${id}. Call listRuns for the runs there are.` };
+      return { ok: true, run: id };
     },
   });
 
@@ -257,7 +258,7 @@ export function useWorkspaceAgent() {
     parameters: z.object({}),
     handler: async () => {
       const { items } = latestActions.current;
-      if (!items.length) return { error: "No run is focused, so there are no actions." };
+      if (!items.length) return { error: "The user isn't in a run, so there are no actions." };
       return items.map(({ def, view }) => ({
         id: def.id,
         label: view.label,

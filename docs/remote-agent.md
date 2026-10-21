@@ -61,7 +61,7 @@ from the signed-in session (`src/agent.ts`), replacing anything the browser sent
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "user": {
     "id": "https://login.example.com/realms/knowledge|8f2c…",
     "email": "ana@example.com",
@@ -79,21 +79,19 @@ from the signed-in session (`src/agent.ts`), replacing anything the browser sent
   },
   "experiment": {
     "id": "9f8e…", "node_id": "6d0e…", "title": "Lower RF power, 40 W",
-    "status": "draft", "can_change": true
+    "status": "draft", "state": "done", "can_change": true, "report": "report.md"
   },
-  "run_dir": "runs/etch-2026-10-01",
-  "selected_path": "runs/etch-2026-10-01/xdoe-report/report.md"
+  "selected_path": "report.md"
 }
 ```
 
 | Key | Meaning |
 | --- | --- |
-| `version` | `1`. Raised when a field changes meaning or goes away; new fields may appear without it. |
+| `version` | `2`. Raised when a field changes meaning or goes away; new fields may appear without it. Version 2 dropped `run_dir`: a run is now an experiment. |
 | `user.id` | The login's stable id, `"<issuer>|<subject>"` from OpenID Connect. Without login (`AUTH_MODE=local`) it is `"local"` with `signed_in: false`: one built-in user who owns everything. `user` is `null` when the server couldn't tell who the run is for; refuse such runs. |
 | `storage` | `"server"`: files live in the storage API on `LOCAL_AGENT_URL`. `"local"`: only in the user's browser, so only the browser's file tools can reach them. `"loading"`: the workspace hadn't loaded yet. |
 | `node` | The knowledge node the user is in, with `path` from the top level down to it. `null` = the workspace root. |
-| `experiment` | The experiment the user is working in, a sandbox on `node` with its own copy of the node's files. When set, file work belongs here, not in the node. `can_change` is false when the user isn't its author or it's archived. |
-| `run_dir` | The focused run (`?run=`), a folder in the place's files. The chat exists only while a run is focused. |
+| `experiment` | The experiment (run) the user is working in, a sandbox on `node` with its own copy of the node's files, or at the workspace root (`node_id` null). When set, file work belongs here, not in the node. `state` is how far the run got (`ready`, `running`, `done`, `failed`), `report` its report's path in it (`null` until it has one), and `can_change` is false when the user isn't its author or it's archived. |
 | `selected_path` | The file open in the middle pane. `null` when a non-file tab is open, such as the task board. |
 
 Paths are relative to the place: the experiment when there is one, else the node, else the
@@ -133,7 +131,7 @@ v1.<base64url JSON {sub, email, name, exp}>.<base64url HMAC-SHA256 of "v1.<paylo
    run with the result as a `tool` message. `ag_ui_claude_sdk` does this as
    `mcp__ag_ui__<name>`. The browser's tools are:
    - **Workbench**: `openWorkspaceFile`, `openTaskBoard`, `showPane`, `hidePane`, `listRuns`,
-     `focusRun`, `listActions`, `runAction`.
+     `openRun`, `listActions`, `runAction`.
    - **Files**, only while `storage` is `"local"`: `listWorkspaceFiles`, `readWorkspaceFile`,
      `writeWorkspaceFile`.
    - **Demo UI**: the chart components, the meeting picker and `toggleTheme`.
@@ -153,7 +151,7 @@ v1.<base64url JSON {sub, email, name, exp}>.<base64url HMAC-SHA256 of "v1.<paylo
 
    `agent/src/storage/tools.ts` is this repo's version, to copy from.
 6. **Cite files the way the chat can open them.** A Markdown link to the file's path in the
-   place, with GitHub-style lines: `[report.md:12-18](runs/etch-2026-10-01/xdoe-report/report.md#L12-L18)`.
+   place, with GitHub-style lines: `[report.md:12-18](report.md#L12-L18)`.
    The chat opens it in the middle pane (`src/components/workspace/file-refs.ts`). Teach it in
    the system prompt, as `agent/src/agent.ts` does, and number lines in file content your
    tools return, the same way. Links to working-folder copies or other places show greyed out.

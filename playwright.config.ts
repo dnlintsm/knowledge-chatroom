@@ -72,8 +72,8 @@ export default defineConfig({
   ...(withLogin
     ? { testMatch: "login.spec.ts" }
     : mode === "storage"
-      ? { testMatch: ["knowledge.spec.ts", "sync-storage.spec.ts"] }
-      : { testIgnore: ["login.spec.ts", "knowledge.spec.ts", "sync-storage.spec.ts"] }),
+      ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts"] }
+      : { testIgnore: ["login.spec.ts", "knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts"] }),
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,

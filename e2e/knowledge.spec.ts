@@ -1,6 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import { expectStoredNote } from "./storage-assertions";
 
+/** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
+async function showFiles(page: Page) {
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  if ((await files.getAttribute("aria-pressed")) !== "true") await files.click();
+}
+
 /**
  * Server storage and the knowledge tree. Runs when the agent has storage
  * (npm run test:e2e:storage); prerequisites are enforced by the config.
@@ -53,7 +59,7 @@ test("knowledge tree", async ({ page }) => {
   await shot(page, "14-knowledge-tree");
 
   // A note written in the module is saved there, not at the workspace root.
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(page);
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByTestId("file-editor").fill(`# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expectStoredNote(page, MODULE, `# ${MODULE} notes\n\nRecipe changes for this module go here.`);
@@ -101,7 +107,7 @@ test("experiments", async ({ page, request }) => {
   }
   await node("Main etch").click();
   await expect(location).toContainText("Main etch");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(page);
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByTestId("file-editor").fill("# Main etch recipe\n\nRF power: 300 W\nPressure: 30 mTorr");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();

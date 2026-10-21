@@ -224,11 +224,17 @@ export const deleteServerNode = (id: string) =>
   nodeRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
 export type ExperimentStatus = "draft" | "shared" | "archived";
+/** How far a run got, apart from who sees it (status). */
+export type ExperimentState = "ready" | "running" | "done" | "failed";
 
-/** A sandbox on a knowledge node, with its own copy of the node's files. */
+/**
+ * A sandbox on a knowledge node, with its own copy of the node's files, or
+ * at the workspace root (nodeId null), starting empty. One with a report.md
+ * is a run.
+ */
 export interface Experiment {
   id: string;
-  nodeId: string;
+  nodeId: string | null;
   authorId: string;
   authorName: string | null;
   title: string;
@@ -236,6 +242,7 @@ export interface Experiment {
   params: Record<string, unknown>;
   results: Record<string, unknown>;
   status: ExperimentStatus;
+  state: ExperimentState;
   forkedAt: string;
   updatedAt: string;
   fileCount: number;
@@ -246,7 +253,7 @@ export interface Experiment {
 }
 
 export type ExperimentChange = Partial<
-  Pick<Experiment, "title" | "hypothesis" | "params" | "results" | "status">
+  Pick<Experiment, "title" | "hypothesis" | "params" | "results" | "status" | "state">
 >;
 
 /** Experiments you can see, anywhere in the tree; null when they can't be read. */
@@ -270,8 +277,19 @@ async function experimentRequest(method: string, path: string, body?: unknown): 
   return data;
 }
 
-export const createServerExperiment = (nodeId: string, title: string) =>
+export const createServerExperiment = (nodeId: string | null, title: string) =>
   experimentRequest("POST", "", { nodeId, title });
+/** Moves a folder's files into a new experiment of yours (needs editor where the folder is). */
+export const serverExperimentFromFolder = (nodeId: string | null, folder: string) =>
+  apiFetch("/api/experiments/from-folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nodeId, folder }),
+  }).then(async (res) => {
+    const data = (await res.json().catch(() => ({}))) as { experiment?: Experiment; error?: string };
+    if (!res.ok || !data.experiment) throw new Error(data.error ?? `Convert folder: ${res.status}`);
+    return data.experiment;
+  });
 export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
 export const deleteServerExperiment = (id: string) =>

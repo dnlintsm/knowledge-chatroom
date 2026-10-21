@@ -34,8 +34,11 @@ export const TASKS_TAB: TabId = "::tasks";
 export const EXPERIMENT_TAB: TabId = "::experiment";
 /** Proposed changes to this place's files, waiting for review. */
 export const REVIEW_TAB: TabId = "::review";
+/** The runs here and below, side by side. */
+export const RUNS_TAB: TabId = "::runs";
 /** Tabs that aren't files. */
-export const isBuiltInTab = (tab: TabId) => tab === TASKS_TAB || tab === EXPERIMENT_TAB || tab === REVIEW_TAB;
+export const isBuiltInTab = (tab: TabId) =>
+  tab === TASKS_TAB || tab === EXPERIMENT_TAB || tab === REVIEW_TAB || tab === RUNS_TAB;
 
 export function fileName(path: string) {
   return path.split("/").pop() ?? path;

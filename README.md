@@ -9,8 +9,8 @@ work easier to find, understand, and reuse.
 
 ## Features
 
-- **Browse and focus on runs** — explore runs in Traverse mode, then open one in
-  Focus mode with its files, report, and chat together.
+- **Runs** — a run is an experiment with a report: list and compare runs in the Runs
+  view, then open one with its files, report, parameters, results, and chat together.
 - **Work with Claude in context** — discuss the open file or selected lines; follow
   file citations back to the editor and let Claude work with accessible files.
   Suggestion chips under the chat offer next steps based on what is open and what
@@ -78,7 +78,8 @@ npm ci                         # installs the UI and agent from their lockfiles
 npm run dev                    # UI :3000, agent :8000
 ```
 
-Open <http://localhost:3000> and choose a sample run in Traverse to enter Focus.
+Open <http://localhost:3000>, then start a run or turn a sample run folder into one
+from the Runs view (runs need server storage).
 Server storage and login are optional; see [Development](docs/development.md).
 
 ## Documentation

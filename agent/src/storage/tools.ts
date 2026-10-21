@@ -477,9 +477,10 @@ export function createFileTools(
     ),
     tool(
       "list_experiments",
-      "List the experiments the user can see, on one knowledge node or (without node) " +
-        "anywhere: id, title, status (draft = only its author sees it, shared, archived), " +
-        "author, hypothesis, params and results. Use it to compare experiments on a node.",
+      "List the experiments (runs) the user can see, on one knowledge node or (without node) " +
+        "anywhere: id, title, node (null = at the workspace root), status (draft = only its " +
+        "author sees it, shared, archived), state (ready, running, done, failed), author, " +
+        "hypothesis, params and results. Use it to compare experiments on a node.",
       { node: nodeParam },
       ({ node }) =>
         run(async (session) => {
@@ -491,6 +492,7 @@ export function createFileTools(
                   node: e.nodeId,
                   title: e.title,
                   status: e.status,
+                  state: e.state,
                   author: e.authorName,
                   canChange: e.access === "writer",
                   hypothesis: e.hypothesis,
@@ -505,19 +507,20 @@ export function createFileTools(
     ),
     tool(
       "create_experiment",
-      "Start an experiment on a knowledge node (usually a process) for the user: a private " +
-        "draft with a copy of the node's files, where changes don't touch the node. Only when " +
-        "the user asks to try or explore something as an experiment. Then work in it by " +
-        "passing its id as `experiment` to the file tools.",
+      "Start an experiment (a run) for the user: a private draft on a knowledge node (usually " +
+        "a process) with a copy of the node's files, where changes don't touch the node; or, " +
+        "without node, at the workspace root, starting empty. Only when the user asks to try, " +
+        "explore or run something as an experiment. Then work in it by passing its id as " +
+        "`experiment` to the file tools; a run's report goes in its report.md.",
       {
-        node: z.string().describe("Knowledge node id to fork."),
+        node: z.string().optional().describe("Knowledge node id to fork; omit for the workspace root."),
         title: z.string().describe("Short name, e.g. 'Lower RF power, 40 W'"),
         hypothesis: z.string().optional().describe("What the user expects and why."),
         params: jsonObject.optional().describe('What is varied, e.g. {"rfPower_W": 40}'),
       },
       ({ node, ...input }) =>
         run(async (session) => {
-          const created = await session.createExperiment(node, input);
+          const created = await session.createExperiment(node || null, input);
           return text({ ok: true, id: created.id, title: created.title, files: created.fileCount });
         }),
     ),
@@ -526,7 +529,8 @@ export function createFileTools(
       "Change an experiment the user authored: title, hypothesis, params or results (each " +
         "replaces the old value whole, so send the complete object), or its status. Record " +
         "results as numbers with units in the key where you can, e.g. {\"yield_pct\": 92.5}. " +
-        "Only change status (shared shows it to everyone who can see the node; archived makes " +
+        "Set state to running while you work on a run, then done (or failed) when its report " +
+        "and results are written. Only change status (shared shows it to everyone who can see the node; archived makes " +
         "it read only) when the user asks.",
       {
         id: z.string().describe("Experiment id"),
@@ -535,11 +539,12 @@ export function createFileTools(
         params: jsonObject.optional(),
         results: jsonObject.optional(),
         status: z.enum(["draft", "shared", "archived"]).optional(),
+        state: z.enum(["ready", "running", "done", "failed"]).optional(),
       },
       ({ id, ...input }) =>
         run(async (session) => {
           const updated = await session.updateExperiment(id, input);
-          return text({ ok: true, id: updated.id, status: updated.status });
+          return text({ ok: true, id: updated.id, status: updated.status, state: updated.state });
         }),
     ),
   ];

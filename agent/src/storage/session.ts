@@ -3,6 +3,7 @@ import { asUser, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
 import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
+import { normalizePath } from "./paths";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
 import {
   ProposalError,
@@ -142,11 +143,12 @@ export class Session {
     );
   }
 
-  // Experiments: anyone who can view a node may fork it into their own
-  // experiment; only its author changes it (see 005_experiments.sql).
+  // Experiments: anyone who can view a node (or the workspace root) may start
+  // their own experiment there; only its author changes it (see
+  // 005_experiments.sql). An experiment with a report.md is a run.
 
-  /** Experiments you can see, on one node or anywhere. */
-  async experiments(nodeId?: string): Promise<Experiment[]> {
+  /** Experiments you can see, on one node (null: at the root) or anywhere. */
+  async experiments(nodeId?: string | null): Promise<Experiment[]> {
     if (nodeId !== undefined) await this.need(nodeId, "viewer");
     const userId = this.principal.userId;
     return this.scoped((db) => on(this.parts.experiments, db).list(userId, nodeId));
@@ -159,12 +161,33 @@ export class Session {
     return found;
   }
 
-  async createExperiment(nodeId: string, input: ExperimentInput): Promise<Experiment> {
+  async createExperiment(nodeId: string | null, input: ExperimentInput): Promise<Experiment> {
     await this.need(nodeId, "viewer");
     const userId = this.principal.userId;
     return this.scoped((db) =>
       on(this.parts.experiments, db).create(userId, nodeId, input, (tx, id) =>
         this.audit("experiment.create", { experiment: id, node: nodeId, title: input.title })(tx),
+      ),
+    );
+  }
+
+  /**
+   * Moves the files of `folder` in a node (null: the root) into a new
+   * experiment of yours, e.g. a run folder from before runs were
+   * experiments. Moving files out of a place needs editor there.
+   */
+  async experimentFromFolder(
+    nodeId: string | null,
+    rawFolder: string,
+    input: ExperimentInput,
+  ): Promise<{ experiment: Experiment; moved: string[] }> {
+    await this.need(nodeId, "editor");
+    const folder = normalizePath(rawFolder.replace(/\/+$/, ""));
+    const userId = this.principal.userId;
+    const title = input.title ?? folder.split("/").pop()!;
+    return this.scoped((db) =>
+      on(this.parts.experiments, db).fromFolder(userId, nodeId, folder, { ...input, title }, (tx, id) =>
+        this.audit("experiment.from_folder", { experiment: id, node: nodeId, folder })(tx),
       ),
     );
   }

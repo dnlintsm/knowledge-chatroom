@@ -15,13 +15,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { generateRules } from "./rules-action";
 import { hasRole, roleName } from "./roles";
-import type { Role } from "./server-files";
+import type { Experiment, Role } from "./server-files";
 import { useWorkspace } from "./store";
 import { useWorkbench, type Workbench } from "./workbench";
 
 /**
- * Actions: buttons in the Actions block (bottom of the Files view in Focus
- * mode) that change the panes or write and open files for the current run.
+ * Actions: buttons in the Actions block (bottom of the Files view while in a
+ * run, i.e. an experiment) that change the panes or write and open files for
+ * the current run.
  * They are data in one registry, so adding one never touches layout code;
  * they act only through the workbench contract and the workspace file API,
  * and the same runner serves the block and Claude (agentInvocable actions).
@@ -31,13 +32,13 @@ export type { Role };
 export { hasRole };
 
 export interface ActionContext {
-  runDir: string;
+  /** The run (experiment) the user is in; file paths are relative to it. */
+  run: Experiment;
   workbench: Workbench;
   workspace: ReturnType<typeof useWorkspace>;
   /**
-   * The user's role where the run lives (the knowledge node, experiment or
-   * workspace root), as the server grants it; null when they have none.
-   * Without server storage the single user owns everything.
+   * The user's role in the run: editor for its author while it isn't
+   * archived, else viewer.
    */
   role: Role | null;
 }
@@ -88,7 +89,7 @@ export interface ActionItem {
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 interface ActionsValue {
-  /** Actions for the current run, in registry order; empty in Traverse mode. */
+  /** Actions for the current run, in registry order; empty outside a run. */
   items: ActionItem[];
   /** Runs an action unless it is unknown, disabled, not allowed or already running. */
   run(id: string, by?: "user" | "agent"): Promise<ActionResult>;
@@ -109,10 +110,10 @@ export function ActionsProvider({
   const workbench = useWorkbench();
   const workspace = useWorkspace();
   const role = workspace.placeRole;
-  const { runDir } = workbench;
+  const experiment = workspace.experiment;
   const ctx = useMemo<ActionContext | null>(
-    () => (runDir ? { runDir, workbench, workspace, role } : null),
-    [runDir, workbench, workspace, role],
+    () => (experiment ? { run: experiment, workbench, workspace, role } : null),
+    [experiment, workbench, workspace, role],
   );
   const latest = useRef(ctx);
   latest.current = ctx;
@@ -151,7 +152,7 @@ export function ActionsProvider({
       const c = latest.current;
       const def = actions.find((a) => a.id === id);
       if (!def) return { ok: false, error: `No action "${id}"` };
-      if (!c) return { ok: false, error: "Actions need a focused run" };
+      if (!c) return { ok: false, error: "Actions need a run: open one first" };
       if (by === "agent" && !def.agentInvocable) return { ok: false, error: `Claude can't run "${id}"` };
       const required = roleFor(def, c);
       if (!hasRole(c.role, required)) {

@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { runsUnder } from "./runs";
 import {
   listPromotable,
   type Experiment,
   type ExperimentChange,
+  type ExperimentState,
   type ExperimentStatus,
+  type KnowledgeNode,
   type Promotable,
 } from "./server-files";
 import { useWorkspace } from "./store";
@@ -35,6 +38,38 @@ export function StatusBadge({ status, className }: { status: ExperimentStatus; c
   );
 }
 
+const STATE_LABEL: Record<ExperimentState, string> = {
+  ready: "Ready",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+};
+const STATES = Object.keys(STATE_LABEL) as ExperimentState[];
+
+/** How far a run got. Ready, the usual state of a hand-made experiment, shows nothing. */
+export function StateBadge({ state, className }: { state: ExperimentState; className?: string }) {
+  if (state === "ready") return null;
+  return (
+    <span
+      data-state={state}
+      className={cn(
+        "shrink-0 rounded-full px-1.5 text-[10px] font-medium uppercase tracking-wide",
+        state === "running" && "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+        state === "done" && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+        state === "failed" && "bg-red-500/15 text-red-700 dark:text-red-300",
+        className,
+      )}
+    >
+      {STATE_LABEL[state]}
+    </span>
+  );
+}
+
+/** Where an experiment lives, by name: its node, or the workspace root. */
+export function placeName(nodes: KnowledgeNode[], nodeId: string | null) {
+  return nodeId === null ? "the workspace" : (nodes.find((n) => n.id === nodeId)?.name ?? "its node");
+}
+
 /**
  * The current experiment: what was tried (hypothesis, params), what came out
  * (results), and its status. Its author edits it; others who can see it read
@@ -47,8 +82,7 @@ export function ExperimentPanel() {
   if (!exp) {
     return <p className="p-8 text-sm text-[var(--muted-foreground)]">Loading the experiment…</p>;
   }
-  const node = ws.lineage[ws.lineage.length - 1];
-  const nodeName = node?.name ?? "its node";
+  const nodeName = placeName(ws.nodes, exp.nodeId);
   const canChange = exp.access === "writer";
 
   const save = async (change: ExperimentChange) => {
@@ -74,11 +108,12 @@ export function ExperimentPanel() {
         <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
           <FlaskConical className="size-3.5" />
           <span>
-            Experiment on {nodeName}
+            {exp.nodeId === null ? "Run in" : "Experiment on"} {nodeName}
             {exp.authorName && !exp.mine ? ` by ${exp.authorName}` : ""}, started{" "}
             {new Date(exp.forkedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
           </span>
           <StatusBadge status={exp.status} />
+          <StateBadge state={exp.state} />
           {!canChange && (
             <span className="flex items-center gap-1">
               <Lock className="size-3" /> Read only
@@ -120,13 +155,32 @@ export function ExperimentPanel() {
             <ActionButton onClick={remove} destructive>
               <Trash2 className="size-3.5" /> Delete
             </ActionButton>
+            {canChange && (
+              <label className="ml-auto flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                State
+                <select
+                  aria-label="Run state"
+                  value={exp.state}
+                  onChange={(e) => void save({ state: e.target.value as ExperimentState })}
+                  className="h-7 rounded-md border border-[var(--border)] bg-transparent px-1 text-xs text-[var(--foreground)] cursor-pointer"
+                >
+                  {STATES.map((s) => (
+                    <option key={s} value={s}>
+                      {STATE_LABEL[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
         )}
         <p className="text-xs text-[var(--muted-foreground)]">
           {exp.status === "draft"
             ? "Only you can see this draft. "
             : `Everyone who can view ${nodeName} can see this. `}
-          Its files started as a copy of {nodeName}&apos;s; changes here don&apos;t touch {nodeName}.
+          {exp.nodeId === null
+            ? "It started empty; changes here don't touch the workspace's files."
+            : <>Its files started as a copy of {nodeName}&apos;s; changes here don&apos;t touch {nodeName}.</>}
         </p>
         {error && (
           <p role="alert" className="text-xs text-red-500">
@@ -493,64 +547,111 @@ function KeyValues({
   );
 }
 
-/** The experiments on the same node, one row each, with every param and result as a column. */
+/** The experiments on the same node (or at the root), side by side. */
 function Compare({ current, nodeName }: { current: Experiment; nodeName: string }) {
   const ws = useWorkspace();
   const siblings = ws.experiments.filter((e) => e.nodeId === current.nodeId);
-  const paramKeys = [...new Set(siblings.flatMap((e) => Object.keys(e.params)))];
-  const resultKeys = [...new Set(siblings.flatMap((e) => Object.keys(e.results)))];
   if (siblings.length < 2) return null;
-  const cell = "border-b border-[var(--border)] px-2 py-1.5 text-left align-top";
   return (
     <Section title={`Experiments on ${nodeName}`}>
-      <div className="overflow-x-auto">
-        <table aria-label={`Experiments on ${nodeName}`} className="w-full border-collapse text-xs">
-          <thead className="text-[var(--muted-foreground)]">
-            <tr>
-              <th className={cell}>Experiment</th>
+      <RunsTable runs={siblings} current={current.id} label={`Experiments on ${nodeName}`} />
+    </Section>
+  );
+}
+
+/**
+ * The Runs tab: every run you can see here and below (all of them at the
+ * workspace root), one row each, with every param and result as a column.
+ */
+export function RunsPanel() {
+  const ws = useWorkspace();
+  const runs = runsUnder(ws.experiments, ws.nodes, ws.node);
+  const here = ws.node === null ? "the workspace" : placeName(ws.nodes, ws.node);
+  return (
+    <div data-testid="runs-panel" className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-6 text-sm">
+      <header className="flex items-center gap-2">
+        <FlaskConical className="size-4 text-[var(--muted-foreground)]" />
+        <h2 className="text-base font-semibold">Runs in {here}</h2>
+        <span className="text-xs text-[var(--muted-foreground)]">
+          {runs.length} {runs.length === 1 ? "run" : "runs"}
+        </span>
+      </header>
+      {runs.length ? (
+        <RunsTable runs={runs} current={ws.experiment?.id ?? null} label={`Runs in ${here}`} showPlace />
+      ) : (
+        <p className="text-[var(--muted-foreground)]">
+          No runs here yet. Start one from the Runs view, or ask Claude to run an analysis on your files.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RunsTable({
+  runs,
+  current,
+  label,
+  showPlace = false,
+}: {
+  runs: Experiment[];
+  current: string | null;
+  label: string;
+  showPlace?: boolean;
+}) {
+  const ws = useWorkspace();
+  const paramKeys = [...new Set(runs.flatMap((e) => Object.keys(e.params)))];
+  const resultKeys = [...new Set(runs.flatMap((e) => Object.keys(e.results)))];
+  const cell = "border-b border-[var(--border)] px-2 py-1.5 text-left align-top";
+  return (
+    <div className="overflow-x-auto">
+      <table aria-label={label} className="w-full border-collapse text-xs">
+        <thead className="text-[var(--muted-foreground)]">
+          <tr>
+            <th className={cell}>Run</th>
+            {showPlace && <th className={cn(cell, "font-normal")}>Where</th>}
+            {showPlace && <th className={cn(cell, "font-normal")}>By</th>}
+            {paramKeys.map((k) => (
+              <th key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-normal")}>
+                {k}
+              </th>
+            ))}
+            {resultKeys.map((k) => (
+              <th key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
+                {k}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((e) => (
+            <tr
+              key={e.id}
+              onClick={() => void ws.enterExperiment(e.id)}
+              className={cn("cursor-pointer hover:bg-[var(--secondary)]", e.id === current && "bg-[var(--secondary)]")}
+            >
+              <td className={cell}>
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate font-medium">{e.title}</span>
+                  <StatusBadge status={e.status} />
+                  <StateBadge state={e.state} />
+                </span>
+              </td>
+              {showPlace && <td className={cell}>{placeName(ws.nodes, e.nodeId)}</td>}
+              {showPlace && <td className={cell}>{e.mine ? "You" : (e.authorName ?? "Someone")}</td>}
               {paramKeys.map((k) => (
-                <th key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-normal")}>
-                  {k}
-                </th>
+                <td key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
+                  {k in e.params ? show(e.params[k]) : ""}
+                </td>
               ))}
               {resultKeys.map((k) => (
-                <th key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
-                  {k}
-                </th>
+                <td key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-semibold")}>
+                  {k in e.results ? show(e.results[k]) : ""}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {siblings.map((e) => (
-              <tr
-                key={e.id}
-                onClick={() => void ws.enterExperiment(e.id)}
-                className={cn(
-                  "cursor-pointer hover:bg-[var(--secondary)]",
-                  e.id === current.id && "bg-[var(--secondary)]",
-                )}
-              >
-                <td className={cell}>
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{e.title}</span>
-                    <StatusBadge status={e.status} />
-                  </span>
-                </td>
-                {paramKeys.map((k) => (
-                  <td key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
-                    {k in e.params ? show(e.params[k]) : ""}
-                  </td>
-                ))}
-                {resultKeys.map((k) => (
-                  <td key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-semibold")}>
-                    {k in e.results ? show(e.results[k]) : ""}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Section>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

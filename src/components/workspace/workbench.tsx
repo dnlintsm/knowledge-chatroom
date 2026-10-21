@@ -25,9 +25,9 @@ import {
   type ResizablePane,
   type SidebarView,
 } from "./layout";
-import { findRunDirs, isInRun, normalizeRunDir, RUN_REPORT, runFromSearch, searchWithRun, type RunDir } from "./runs";
+import { experimentFromSearch, findReport, searchWithExperiment } from "./runs";
 import { useHydrated, useWorkspace } from "./store";
-import type { TabId } from "./types";
+import { EXPERIMENT_TAB, type TabId } from "./types";
 
 /**
  * The workbench contract: the one typed API that moves panes, opens files,
@@ -36,21 +36,6 @@ import type { TabId } from "./types";
  * through it; nothing else changes pane layout state (see layout.ts).
  */
 export interface Workbench {
-  /**
-   * Focus: the panes work on one run (RUN_DIR). Traverse: no run is picked
-   * and the Traverse view lists them. The chat works in both; without a run
-   * it is about the current place.
-   */
-  mode: "focus" | "traverse";
-  runDir: string | null;
-  /** Every run in the workspace (see runs.ts). */
-  runs: RunDir[];
-  run: {
-    /** Focuses a run and puts it in the URL (a new history entry). */
-    focus(runDir: string): void;
-    /** Back to Traverse mode. */
-    leave(): void;
-  };
   /** Current layout as shown, read-only; change it through the commands below. */
   layout: Layout;
   panes: {
@@ -104,38 +89,6 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // The run comes from the URL (?run=<path>), so links and back/forward work.
-  // undefined until the URL has been read after mount.
-  const [runDir, setRunDir] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    const sync = () => setRunDir(runFromSearch(window.location.search));
-    sync();
-    window.addEventListener("popstate", sync);
-    return () => window.removeEventListener("popstate", sync);
-  }, []);
-  const navigate = useCallback((dir: string | null, how: "push" | "replace" = "push") => {
-    const { pathname, search, hash } = window.location;
-    const url = pathname + searchWithRun(search, dir) + hash;
-    if (how === "push") window.history.pushState(null, "", url);
-    else window.history.replaceState(null, "", url);
-    setRunDir(dir);
-  }, []);
-  const mode = runDir ? "focus" : "traverse";
-  const runs = useMemo(() => findRunDirs(ws.files.map((f) => f.path)), [ws.files]);
-
-  // Entering Traverse shows the run list; entering a run shows its files.
-  // On page load this happens just after the first render, so a view the
-  // user picked in that moment wins over it.
-  const shownRun = useRef<string | null | undefined>(undefined);
-  const pickedView = useRef(false);
-  useEffect(() => {
-    if (runDir === undefined || shownRun.current === runDir) return;
-    const first = shownRun.current === undefined;
-    shownRun.current = runDir;
-    if (first && pickedView.current) return;
-    apply(runDir ? { type: "setView", view: "files" } : { type: "showView", view: "runs" });
-  }, [runDir, apply]);
-
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(LAYOUT_KEY);
@@ -176,40 +129,59 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // A link to a run that isn't there (or a run deleted meanwhile) falls back
-  // to Traverse, once the files have loaded.
+  // The run (experiment) the user is in is in the URL as ?experiment=<id>,
+  // so links open it and back/forward move between runs. The store opens a
+  // linked one on load; a link to one that isn't there (or that you can't
+  // see) drops out of the URL with a notice once the workspace has loaded.
+  const { open, files, active, storageMode, enterNode, enterExperiment } = ws;
+  const experimentId = ws.experiment?.id ?? null;
+  const experimentNode = ws.experiment?.nodeId ?? null;
+  const urlChecked = useRef(false);
   useEffect(() => {
-    if (!runDir || ws.storageMode === "loading") return;
-    if (runs.some((r) => r.path === runDir)) return;
-    notify(`There is no run at ${runDir}.`, "warning");
-    navigate(null, "replace");
-  }, [runDir, runs, ws.storageMode, notify, navigate]);
+    if (storageMode === "loading") return;
+    const linked = experimentFromSearch(window.location.search);
+    const { pathname, search, hash } = window.location;
+    const go = (how: "push" | "replace") => {
+      const url = pathname + searchWithExperiment(search, experimentId) + hash;
+      if (how === "push") window.history.pushState(null, "", url);
+      else window.history.replaceState(null, "", url);
+    };
+    if (!urlChecked.current) {
+      urlChecked.current = true;
+      if (linked && linked !== experimentId) notify("That run isn't there, or isn't shared with you.", "warning");
+      if (linked !== experimentId || new URLSearchParams(search).has("run")) go("replace");
+      return;
+    }
+    if (linked !== experimentId) go("push");
+  }, [storageMode, experimentId, notify]);
+  useEffect(() => {
+    const onPop = () => {
+      const linked = experimentFromSearch(window.location.search);
+      if (linked) {
+        void enterExperiment(linked).then((ok) => !ok && notify("That run is gone.", "warning"));
+      } else if (experimentId) {
+        void enterNode(experimentNode);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [experimentId, experimentNode, enterExperiment, enterNode, notify]);
 
-  const { open, getFile } = ws;
-  const focusRun = useCallback(
-    (dir: string) => {
-      const next = normalizeRunDir(dir);
-      if (next && next !== runDir) navigate(next);
-    },
-    [runDir, navigate],
-  );
-
-  // However a run gets focused (a pick, a link, back/forward), the middle pane
-  // shows that run: its report opens unless a file of the run is already open,
-  // so the editor never shows another run's report beside this run's context.
-  // Waits for the files, as a linked run's report may not have loaded yet.
+  // Entering a run (a pick, a link, back/forward) opens its report, unless a
+  // file of it is already open (this browser's tabs for the place came back).
+  // Waits for the files, as the report may not have loaded yet.
   const shownReportFor = useRef<string | null>(null);
-  const { active } = ws;
   useEffect(() => {
-    if (!runDir) {
+    if (!experimentId) {
       shownReportFor.current = null;
       return;
     }
-    if (ws.storageMode === "loading" || shownReportFor.current === runDir) return;
-    shownReportFor.current = runDir;
-    const report = `${runDir}/${RUN_REPORT}`;
-    if (!(active && isInRun(active, runDir)) && getFile(report)) open(report);
-  }, [runDir, ws.storageMode, active, getFile, open]);
+    if (shownReportFor.current === experimentId || !files.length) return;
+    shownReportFor.current = experimentId;
+    const report = findReport(files.map((f) => f.path));
+    const fileOpen = active !== null && files.some((f) => f.path === active);
+    if (report && !fileOpen && (active === null || active === EXPERIMENT_TAB)) open(report);
+  }, [experimentId, files, active, open]);
 
   const startNewThread = chatConfig?.startNewThread;
   const setDrawerOpen = chatConfig?.setDrawerOpen;
@@ -225,10 +197,6 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Workbench>(() => {
     return {
-      mode,
-      runDir: runDir ?? null,
-      runs,
-      run: { focus: focusRun, leave: () => runDir && navigate(null) },
       layout,
       panes: {
         isOpen: (pane) => isPaneOpen(layout, pane),
@@ -240,14 +208,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       },
       sidebar: {
         view: layout.view,
-        select: (view) => {
-          pickedView.current = true;
-          apply({ type: "selectView", view });
-        },
-        show: (view) => {
-          pickedView.current = true;
-          apply({ type: "showView", view });
-        },
+        select: (view) => apply({ type: "selectView", view }),
+        show: (view) => apply({ type: "showView", view }),
       },
       editor: { open },
       chat: {
@@ -259,7 +221,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       },
       notify,
     };
-  }, [mode, runDir, runs, focusRun, navigate, layout, apply, open, startNewThread, focusChat, notify]);
+  }, [layout, apply, open, startNewThread, focusChat, notify]);
 
   return (
     <WorkbenchContext.Provider value={value}>

@@ -17,6 +17,7 @@ import type { LineRange } from "./file-refs";
 import type { Reveal } from "./file-focus";
 export type { Reveal } from "./file-focus";
 import { useFileFocus } from "./use-file-focus";
+import { experimentFromSearch } from "./runs";
 import { usePlaceNavigation } from "./use-place-navigation";
 import { useWorkspaceCatalog } from "./use-workspace-catalog";
 import { lineageOf, resolvePlaceContext } from "./workspace-context";
@@ -42,6 +43,7 @@ import {
   putServerFile,
   renameServerFile,
   renameServerNode,
+  serverExperimentFromFolder,
   updateServerExperiment,
   WATCH_URL,
   type Account,
@@ -169,8 +171,13 @@ interface WorkspaceValue {
   enterNode: (id: NodeId) => Promise<boolean>;
   /** Moves into an experiment; false if it's gone. */
   enterExperiment: (id: string) => Promise<boolean>;
-  /** Forks a node into a new experiment of yours and moves into it. These throw with a message too. */
-  createExperiment: (nodeId: string, title: string) => Promise<Experiment>;
+  /**
+   * Starts a new experiment of yours on a node (a fork of its files) or at
+   * the root (null, empty) and moves into it. These throw with a message too.
+   */
+  createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
+  /** Moves a folder here into a new experiment of yours and moves into it. */
+  experimentFromFolder: (folder: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
   /** Open proposals you can see, anywhere, newest first. */
@@ -409,8 +416,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
 
-      // Return to the place this browser was last in, if it still exists.
-      const lastNode = window.localStorage.getItem(NODE_KEY);
+      // Open the run a link names (?experiment=), else return to the place
+      // this browser was last in, if it still exists.
+      const linked = experimentFromSearch(window.location.search);
+      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
       const there = lastNode ? await listServerFiles(lastNode) : null;
       if (cancelled) return;
       if (lastNode && Array.isArray(there)) {
@@ -653,10 +662,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const createExperiment = useCallback(
-    async (nodeId: string, title: string) => {
+    async (nodeId: NodeId, title: string) => {
       // The fork copies what the server has, so recent edits go first.
       if (placeRef.current === nodeId) await settleSaves(nodeId);
       const created = await createServerExperiment(nodeId, title);
+      await refreshExperiments();
+      await enterExperiment(created.id);
+      return created;
+    },
+    [refreshExperiments, enterExperiment, settleSaves],
+  );
+  const experimentFromFolder = useCallback(
+    async (folder: string) => {
+      const at = placeRef.current;
+      if (experimentOf(at)) throw new Error("This is already an experiment; go to its node to turn a folder into a run");
+      // The move takes what the server has, so recent edits go first.
+      await settleSaves(at);
+      const created = await serverExperimentFromFolder(at, folder);
       await refreshExperiments();
       await enterExperiment(created.id);
       return created;
@@ -747,6 +769,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       renameNode,
       deleteNode,
       createExperiment,
+      experimentFromFolder,
       updateExperiment,
       deleteExperiment,
       proposals,
@@ -756,7 +779,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [
     state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
-    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, experimentFromFolder,
     updateExperiment, deleteExperiment, proposals, decideProposal, promote,
   ]);
 

@@ -228,7 +228,8 @@ export class SearchService {
   private async experimentPath(userId: string, id: string): Promise<string | null> {
     if (!isNodeId(id)) return null;
     const [row] = await this.sql<{ path: string }[]>`
-      SELECT n.path::text FROM experiments e JOIN nodes n ON n.id = e.node_id
+      SELECT coalesce(n.path, ''::ltree)::text AS path
+      FROM experiments e LEFT JOIN nodes n ON n.id = e.node_id
       WHERE e.id = ${id} AND e.workspace_id = ${this.workspaceId}
         AND experiment_access(${userId}, e.id) IS NOT NULL`;
     return row?.path ?? null;

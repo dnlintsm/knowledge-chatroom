@@ -7,7 +7,7 @@ const child: KnowledgeNode = { ...parent, id: "module", parentId: "tech", name: 
 const tree: KnowledgeTree = { types: [], rootRole: "editor", nodes: [child, parent] };
 const experiment: Experiment = {
   id: "exp", nodeId: "module", authorId: "alice", authorName: "Alice", title: "Draft",
-  hypothesis: "", params: {}, results: {}, status: "draft", forkedAt: "2026-10-12",
+  hypothesis: "", params: {}, results: {}, status: "draft", state: "ready", forkedAt: "2026-10-12",
   updatedAt: "2026-10-12", fileCount: 0, access: "writer", mine: true,
 };
 

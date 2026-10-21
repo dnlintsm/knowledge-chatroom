@@ -33,10 +33,10 @@ shown in [Testing](testing.md).
 
 ## Runs, rules and semantic search
 
-`RUN_DIR_MARKERS` is a comma-separated list of marker folders (default
-`xdoe-report`) used to discover runs. Choose a run in Traverse to enter Focus.
-`RULES_API_URL` configures the server-side rules provider; when unset, the built-in
-mock answers. Actions use the user's role where the run lives, and generated
+A run is an experiment with a report (`report.md`, or `xdoe-report/report.md`), so runs
+need server storage. Old run folders (holding `xdoe-report/`) show in the Runs view with
+a **Make run** button. `RULES_API_URL` configures the server-side rules provider; when
+unset, the built-in mock answers. Actions use the user's role in the run, and generated
 rules files are read-only. See [Architecture](architecture.md).
 
 With pgvector, semantic search downloads a local embedding model on first use
