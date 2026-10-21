@@ -246,10 +246,30 @@ export interface Experiment {
   forkedAt: string;
   updatedAt: string;
   fileCount: number;
+  /** Where a run came from, when Claude started it (agent/src/storage/run-report.ts); else {}. */
+  provenance?: RunProvenance;
   /** writer: you are its author and it isn't archived. */
   access: "writer" | "reader";
   /** You are its author: you may share, archive, restore or delete it. */
   mine: boolean;
+}
+
+/** Recorded by the agent; every field may be missing on older or hand-made runs. */
+export interface RunProvenance {
+  startedBy?: { id: string; name: string | null };
+  startedAt?: string;
+  finishedAt?: string;
+  chat?: string | null;
+  model?: string | null;
+  skill?: { name: string; source?: string; version?: number; sha256?: string };
+  tools?: Record<string, string>;
+  inputs?: {
+    path: string;
+    from: { node: string | null; experiment: string | null; path: string };
+    version: string;
+    sha256: string;
+    size: number;
+  }[];
 }
 
 export type ExperimentChange = Partial<

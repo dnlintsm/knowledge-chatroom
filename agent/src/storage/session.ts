@@ -1,9 +1,18 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { AccessService, atLeast, ForbiddenError, type Principal, type Role } from "./access";
 import { asUser, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
-import type { Experiment, ExperimentInput, ExperimentService } from "./experiments";
+import {
+  ExperimentError,
+  type Experiment,
+  type ExperimentInput,
+  type ExperimentService,
+  type LinkedInput,
+} from "./experiments";
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { normalizePath } from "./paths";
+import { newReport, REPORT_PATH, reportFrontMatter, withFrontMatter } from "./run-report";
 import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
 import {
   ProposalError,
@@ -25,6 +34,17 @@ import type { SearchHit, SearchOptions, SearchService } from "./search";
  * restricted database role for this principal (db.ts asUser), so Postgres
  * enforces the same rules if a check here is ever missed.
  */
+
+/** A file a run reads: where it is now, and (optionally) its name under inputs/. */
+export interface RunInputSource {
+  path: string;
+  /** Its knowledge node; omitted or null for the workspace root. */
+  node?: string | null;
+  /** Its experiment, instead of a node. */
+  experiment?: string | null;
+  /** Its name under inputs/; its own file name by default. */
+  as?: string;
+}
 
 export interface VisibleNode extends KnowledgeNode {
   /** null for a node shown only because something below it is visible. */
@@ -172,6 +192,122 @@ export class Session {
   }
 
   /**
+   * Starts a run for you (create_experiment with inputs, issue #82): a new
+   * draft experiment like createExperiment's, in state running unless
+   * `input.state` says otherwise, with each input file linked in read only
+   * under inputs/, and a report.md whose front matter holds the run's
+   * record. You need to be able to read every input. `provenance` is what
+   * the caller knows (chat, model, skill, tools); who started it, when, and
+   * the exact input versions are added here.
+   */
+  async startRun(
+    nodeId: string | null,
+    input: ExperimentInput,
+    inputs: RunInputSource[] = [],
+    provenance: Record<string, unknown> = {},
+  ): Promise<Experiment> {
+    await this.need(nodeId, "viewer");
+    const userId = this.principal.userId;
+    const links: LinkedInput[] = [];
+    const recorded: Record<string, unknown>[] = [];
+    for (const source of inputs) {
+      const from = normalizePath(source.path);
+      const place = source.experiment
+        ? await this.experimentFiles(source.experiment)
+        : await this.files(source.node ?? null);
+      const [current] = (await place.history(from)) ?? [];
+      if (!current) throw new ExperimentError(`No file at ${from} to use as an input`);
+      const path = normalizePath(`inputs/${source.as ?? from.split("/").pop()}`);
+      if (links.some((l) => l.path === path)) {
+        throw new ExperimentError(`Two inputs would both be ${path}; give one of them another name`);
+      }
+      links.push({ path, versionId: current.id });
+      recorded.push({
+        path,
+        from: { node: place.nodeId, experiment: place.experimentId, path: from },
+        version: current.id,
+        sha256: current.sha256,
+        size: current.size,
+      });
+    }
+    const who = await this.parts.access.user(userId);
+    const record = {
+      ...provenance,
+      startedBy: { id: userId, name: who?.name ?? who?.email ?? null },
+      startedAt: new Date().toISOString(),
+      inputs: recorded,
+    };
+    const run = await this.scoped((db) =>
+      on(this.parts.experiments, db).create(
+        userId,
+        nodeId,
+        { ...input, state: input.state ?? "running" },
+        (tx, id) =>
+          this.audit("experiment.create", {
+            experiment: id, node: nodeId, title: input.title, inputs: links.map((l) => l.path),
+          })(tx),
+        { inputs: links, provenance: record },
+      ),
+    );
+    const files = await this.experimentFiles(run.id);
+    if (!(await files.stat(REPORT_PATH))) {
+      await files.write(REPORT_PATH, new TextEncoder().encode(newReport(run)));
+    }
+    return this.experiment(run.id);
+  }
+
+  /**
+   * Records a run's results and how it ended (done or failed), and refreshes
+   * the record in its report.md front matter (creating the report if it has
+   * none). Only its author can; see updateExperiment. A finished run stays
+   * as it ended (a rerun is a new run): the same call again, say a retry
+   * after a lost answer, changes nothing, and a different one is refused.
+   */
+  async finishRun(
+    id: string,
+    results: Record<string, unknown>,
+    state: "done" | "failed",
+  ): Promise<Experiment> {
+    const current = await this.experiment(id);
+    this.needAuthor(current);
+    if (current.status === "archived") {
+      throw new ForbiddenError("This experiment is archived; restore it to change it");
+    }
+    if (current.state === "done" || current.state === "failed") {
+      if (current.state === state && isDeepStrictEqual(current.results, results)) return current;
+      throw new ExperimentError(
+        `This run already finished (${current.state}); start a new run to try again`,
+      );
+    }
+    await this.scoped((db) =>
+      on(this.parts.experiments, db).update(
+        id,
+        { results, state },
+        this.audit("experiment.update", { experiment: id, fields: ["results", "state"] }),
+        { finishedAt: new Date().toISOString() },
+      ),
+    );
+    const run = await this.experiment(id);
+    await this.refreshReport(run, true);
+    return run;
+  }
+
+  /**
+   * Brings the record in a run's report.md front matter up to date with the
+   * run, for runs Claude started (they have provenance). Makes the report
+   * when `create` is set and there is none. Archived runs are read only.
+   */
+  private async refreshReport(run: Experiment, create = false) {
+    if (!run.provenance.startedAt || run.status === "archived") return;
+    const files = await this.experimentFiles(run.id);
+    const report = await files.read(REPORT_PATH);
+    if (!report && !create) return;
+    const before = report ? new TextDecoder().decode(report.bytes) : `# ${run.title}\n`;
+    const after = withFrontMatter(before, reportFrontMatter(run));
+    if (after !== before) await files.write(REPORT_PATH, new TextEncoder().encode(after));
+  }
+
+  /**
    * Moves the files of `folder` in a node (null: the root) into a new
    * experiment of yours, e.g. a run folder from before runs were
    * experiments. Moving files out of a place needs editor there.
@@ -207,7 +343,11 @@ export class Session {
         this.audit("experiment.update", { experiment: id, fields: Object.keys(input) }),
       ),
     );
-    return this.experiment(id);
+    // The report's record follows edits made after the run started (title,
+    // params, results, state, or a restore from archived).
+    const updated = await this.experiment(id);
+    await this.refreshReport(updated);
+    return updated;
   }
 
   async deleteExperiment(id: string): Promise<boolean> {

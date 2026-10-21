@@ -218,6 +218,7 @@ export function ExperimentPanel() {
           onSave={(results) => save({ results })}
         />
       </Section>
+      <Provenance experiment={exp} />
       {canChange && <Promote experiment={exp} nodeName={nodeName} />}
       <Compare current={exp} nodeName={nodeName} />
     </div>
@@ -344,6 +345,61 @@ function Promote({ experiment, nodeName }: { experiment: Experiment; nodeName: s
         <p role={message.error ? "alert" : "status"} className={cn("text-xs", message.error ? "text-red-500" : "text-[var(--muted-foreground)]")}>
           {message.text}
         </p>
+      )}
+    </Section>
+  );
+}
+
+/** Where a run came from: who started it, from which chat, with what, and the exact inputs. */
+function Provenance({ experiment }: { experiment: Experiment }) {
+  const ws = useWorkspace();
+  const p = experiment.provenance;
+  if (!p || !p.startedAt) return null;
+  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : null);
+  const rows: [string, ReactNode][] = [
+    ["Started", [p.startedBy?.name, when(p.startedAt)].filter(Boolean).join(", ")],
+    ["Finished", when(p.finishedAt)],
+    ["Model", p.model],
+    [
+      "Skill",
+      p.skill &&
+        [p.skill.name, p.skill.version && `v${p.skill.version}`, p.skill.sha256?.slice(0, 8)]
+          .filter(Boolean)
+          .join(" · "),
+    ],
+    ["Tools", p.tools && Object.entries(p.tools).map(([k, v]) => `${k} ${v}`).join(", ")],
+    ["Chat", p.chat],
+  ];
+  return (
+    <Section title="Provenance">
+      <dl data-testid="run-provenance" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        {rows
+          .filter(([, value]) => value)
+          .map(([label, value]) => (
+            <div key={label} className="contents">
+              <dt className="text-[var(--muted-foreground)]">{label}</dt>
+              <dd className="min-w-0 break-words">{value}</dd>
+            </div>
+          ))}
+      </dl>
+      {p.inputs && p.inputs.length > 0 && (
+        <ul aria-label="Inputs" className="flex flex-col gap-1 text-xs">
+          {p.inputs.map((input) => (
+            <li key={input.path} className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                className="cursor-pointer truncate text-left underline-offset-2 hover:underline"
+                onClick={() => ws.open(input.path)}
+                title={`Open ${input.path}`}
+              >
+                {input.path}
+              </button>
+              <span className="truncate text-[var(--muted-foreground)]" title={input.sha256}>
+                from {input.from.path} · {input.sha256.slice(0, 8)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </Section>
   );

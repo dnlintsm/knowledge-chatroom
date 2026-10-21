@@ -137,6 +137,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const experimentId = ws.experiment?.id ?? null;
   const experimentNode = ws.experiment?.nodeId ?? null;
   const urlChecked = useRef(false);
+  // Where back/forward is taking the workspace (undefined: nowhere). Entering
+  // a place takes a moment, so a second back can come before the first one
+  // lands; until the last one does, the URL already says where to be.
+  const popTarget = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (storageMode === "loading") return;
     const linked = experimentFromSearch(window.location.search);
@@ -152,17 +156,32 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       if (linked !== experimentId || new URLSearchParams(search).has("run")) go("replace");
       return;
     }
+    if (popTarget.current !== undefined) {
+      if (popTarget.current !== experimentId) return;
+      popTarget.current = undefined;
+      // Back or forward again while this one landed: follow the URL.
+      if (linked !== experimentId) followUrl.current();
+      return;
+    }
     if (linked !== experimentId) go("push");
   }, [storageMode, experimentId, notify]);
+  const followUrl = useRef(() => {});
   useEffect(() => {
     const onPop = () => {
       const linked = experimentFromSearch(window.location.search);
+      if (linked === experimentId && popTarget.current === undefined) return;
+      popTarget.current = linked;
       if (linked) {
-        void enterExperiment(linked).then((ok) => !ok && notify("That run is gone.", "warning"));
-      } else if (experimentId) {
+        void enterExperiment(linked).then((ok) => {
+          if (ok || popTarget.current !== linked) return;
+          popTarget.current = undefined;
+          notify("That run is gone.", "warning");
+        });
+      } else {
         void enterNode(experimentNode);
       }
     };
+    followUrl.current = onPop;
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [experimentId, experimentNode, enterExperiment, enterNode, notify]);

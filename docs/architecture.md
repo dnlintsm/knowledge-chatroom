@@ -168,6 +168,21 @@ folder or mode (issue #82):
   their history, into a new draft run named after the folder (`POST
   /experiments/from-folder`).
 
+- **Runs Claude starts** (`create_experiment`, `agent/src/storage/session.ts` `startRun`)
+  begin in state running. The files the run works from are its **inputs**: each is linked
+  in read only under `inputs/`, at the version it had then and sharing its stored bytes, so
+  later changes to the original don't change what the run read, and promoting the run never
+  proposes them back. Starting one needs view access where it goes and read access to each
+  input; it is a draft of the signed-in user's, and Claude writes only into runs that user
+  authored. `set_experiment_results` records the results and ends it (done or failed).
+- **Provenance**: the run records who started it and when, the chat it came from, the
+  model, the skill it followed (name, source, hub version, and a hash of its files), the
+  agent and Claude Agent SDK versions, and each input's original place, version and
+  SHA-256 (`experiments.provenance`, migration `016_run_provenance.sql`; set by the agent
+  only, never by the API). The run's `report.md` carries the same record in its front
+  matter, refreshed when the results are set (`agent/src/storage/run-report.ts`), and the
+  run panel shows it under **Provenance**, with the inputs to open.
+
 Runs need server storage; a browser-only workspace has none.
 
 ### Actions
@@ -393,8 +408,8 @@ For local setup, see [Development](development.md).
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
-  `write_file`, `list_experiments`, `create_experiment`, `update_experiment` and
-  `propose_experiment` tools on the agent server
+  `write_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
+  `update_experiment` and `propose_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in

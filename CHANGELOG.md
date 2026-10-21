@@ -7,8 +7,8 @@
 - Runs are experiments now (#82). The Traverse view, Focus mode, `?run=` links and
   `RUN_DIR_MARKERS` are gone; a run is an experiment with a `report.md`. Existing run
   folders (holding `xdoe-report/`) are listed in the Runs view, where **Make run** moves
-  each into a new experiment with its history. Runs need server storage. Migration
-  `015_runs.sql` runs on start.
+  each into a new experiment with its history. Runs need server storage. Migrations
+  `015_runs.sql` and `016_run_provenance.sql` run on start.
 - The rules API (`RULES_API_URL`) is now asked `?run=<run title>&experiment=<id>`
   instead of `?run=<folder>`.
 - `AGENT_URL` now names a remote agent backend for the chat. This repo's agent server
@@ -28,6 +28,12 @@
   and a **Runs** tab comparing them by state, place, parameters and results. Runs can
   sit at the workspace root, have a state (ready, running, done, failed), and open from a
   link (`?experiment=<id>`). The app name goes to the workspace root's Runs view.
+- Runs Claude starts (#82, step 2): `create_experiment` takes the files a run works from
+  as `inputs`, linked in read only under `inputs/` at their current versions, and starts
+  the run in state running with a `report.md`. `set_experiment_results` records the
+  results and finishes it. Each run records its provenance (who, when, which chat, model,
+  skill and tool versions, input versions and hashes) in the report's front matter and in
+  the run panel.
 
 ## 0.1.1
 
