@@ -51,7 +51,7 @@ export function parseDelimited(text, delimiter = text.split("\n", 1)[0].includes
 const MISSING = new Set(["", "na", "n/a", "nan", "null", "none", "-"]);
 
 export function profile(text, top = 5) {
-  const [header = [], ...rows] = parseDelimited(text.replace(/^﻿/, ""));
+  const [header = [], ...rows] = parseDelimited(text.replace(/^\uFEFF/, ""));
   const columns = header.map((name, c) => {
     const values = rows.map((r) => (r[c] ?? "").trim());
     const present = values.filter((v) => !MISSING.has(v.toLowerCase()));
