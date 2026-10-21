@@ -64,8 +64,9 @@ export function profile(text, top = 5) {
       return {
         ...out,
         type: "number",
-        min: Math.min(...numbers),
-        max: Math.max(...numbers),
+        // Not Math.min(...numbers): spreading a large column overflows the stack.
+        min: numbers.reduce((a, b) => (b < a ? b : a)),
+        max: numbers.reduce((a, b) => (b > a ? b : a)),
         mean: round(mean),
         std: round(Math.sqrt(variance)),
       };

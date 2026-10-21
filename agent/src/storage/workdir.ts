@@ -19,6 +19,11 @@
  *
  * Claude reads it with Read/Glob/Grep, confined to the run folder
  * (confineTools); changes still go through write_file / save_file.
+ *
+ * A run started during the turn gets its linked inputs copied to
+ * `run-inputs/<run id>/` (writeRunInputs), since the snapshot may hold an
+ * older version than the one the run linked. Later turns find them under the
+ * run's own folder in workspace/experiments/.
  */
 
 import { createHash } from "node:crypto";
@@ -33,6 +38,8 @@ export const WORKSPACE_DIR = "workspace";
 /** Kept in the run folder, outside workspace/: path → sha256 of what was written. */
 export const MANIFEST = ".workspace-manifest.json";
 const PLACES = ".places.json";
+/** Inputs of runs started this turn: run-inputs/<run id>/<name>. */
+export const RUN_INPUTS_DIR = "run-inputs";
 
 /** On by default with storage; AGENT_WORKDIR=off turns it off. */
 export const workdirEnabled = () => process.env.AGENT_WORKDIR !== "off";
@@ -116,6 +123,8 @@ export async function syncWorkdir(
 
 async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promise<WorkdirSummary> {
   const dir = path.join(cwd, WORKSPACE_DIR);
+  // Last turn's run inputs: this snapshot has them, under the runs' folders.
+  await rm(path.join(cwd, RUN_INPUTS_DIR), { recursive: true, force: true });
   const places: Place[] = [];
   const skipped: WorkdirSummary["skipped"] = [];
   const wanted = new Map<string, Wanted>();
@@ -259,6 +268,7 @@ export async function clearWorkdir(cwd: string): Promise<void> {
   const previous = syncing.get(cwd) ?? Promise.resolve();
   const done = previous.catch(() => {}).then(async () => {
     await rm(path.join(cwd, WORKSPACE_DIR), { recursive: true, force: true });
+    await rm(path.join(cwd, RUN_INPUTS_DIR), { recursive: true, force: true });
     await rm(path.join(cwd, MANIFEST), { force: true });
   });
   syncing.set(cwd, done);
@@ -267,6 +277,35 @@ export async function clearWorkdir(cwd: string): Promise<void> {
   } finally {
     if (syncing.get(cwd) === done) syncing.delete(cwd);
   }
+}
+
+/**
+ * Copies a new run's inputs (the exact versions it linked) into
+ * `run-inputs/<run id>/`, read only, for scripts this turn. Returns each
+ * input's path in the run → its path in the run folder; files over the
+ * size limit are left out.
+ */
+export async function writeRunInputs(
+  cwd: string,
+  runId: string,
+  files: FilesSession,
+  paths: string[],
+  limits: WorkdirLimits = workdirLimitsFromEnv(),
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const input of paths) {
+    const got = await files.read(input).catch(() => null);
+    if (!got || got.bytes.length > limits.maxFileBytes) continue;
+    const rel = `${RUN_INPUTS_DIR}/${runId}/${input.replace(/^inputs\//, "")}`;
+    const target = path.join(cwd, ...rel.split("/"));
+    if (!(await isInside(path.join(cwd, RUN_INPUTS_DIR), target))) continue;
+    await mkdir(path.dirname(target), { recursive: true });
+    await rm(target, { force: true });
+    await writeFile(target, got.bytes);
+    await chmod(target, 0o444);
+    out[input] = rel;
+  }
+  return out;
 }
 
 async function pool<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {

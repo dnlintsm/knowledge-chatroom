@@ -90,6 +90,9 @@ the workspace like on a local project:
 - **Sync**: at the start of each run, through the user's own session (the same permission checks
   and row security as the file tools). Only files whose content changed are downloaded; deleted
   ones are removed. It is a snapshot: changes made during a run show up in the next one.
+  A run Claude starts in the turn gets its linked inputs copied to `run-inputs/<run id>/`
+  (the exact versions the run read, which the snapshot may predate); the next sync drops
+  them, since the run's own folder then holds them.
   `AGENT_WORKDIR_MAX_MB` (default 500) caps the copy, smallest files first, and
   `AGENT_WORKDIR_MAX_FILE_MB` (default 25) leaves out larger files.
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
@@ -184,14 +187,16 @@ folder or mode (issue #82):
   run panel shows it under **Provenance**, with the inputs to open.
 - **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
   place with the old run's parameters, hypothesis and the very input versions it read (from
-  its `inputs/`), unless changed. The old run stays as it ended; a finished run can't be
+  its `inputs/`), unless changed (including `node`, to rerun elsewhere). The old run stays as it ended; a finished run can't be
   finished again with other results. The new run's provenance and front matter name the old
-  one (`rerun_of`), and its panel links back to it.
+  one (`rerun_of`) by id only, since the old run may be a draft its viewers can't see; the
+  panel links back to it for those who can see it.
 - **Analysis** is the built-in `analysis` skill (`agent/skills/analysis/`, Auto by default):
   Claude starts a run with the user's files as inputs, reads them from the run, writes the
   report from `reference/report-template.md` and records the results. With
-  `SKILL_SCRIPTS=on` it can also profile CSV files with its `scripts/profile.mjs` (plain
-  Node: per-column counts, missing values, numeric statistics, top values) and save what
+  `SKILL_SCRIPTS=on` it can also profile the run's copy of CSV inputs with its
+  `scripts/profile.mjs` (plain Node: per-column counts, missing values, numeric statistics,
+  top values) and save what
   scripts make into the run. Long analyses still run within one chat turn; background jobs
   with progress are a later step.
 

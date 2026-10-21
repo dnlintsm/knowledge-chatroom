@@ -155,7 +155,7 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
       model: "claude-test",
       skill: { name: "analysis", source: "workspace", sha256: "ab12cd34ef56" },
       tools: { agent: "0.1.1", claudeAgentSdk: "0.3.296" },
-      rerunOf: { id: first.id, title: first.title },
+      rerunOf: { id: first.id },
       inputs: [
         {
           path: "inputs/wafers.csv",

@@ -31,13 +31,16 @@ straight into notes or artifacts outside a run.
    profile CSV files with the bundled script instead of reading every row:
 
    ```bash
-   mkdir -p out && node .claude/skills/analysis/scripts/profile.mjs workspace/root/uploads/data.csv > out/profile.json
+   mkdir -p out && node .claude/skills/analysis/scripts/profile.mjs run-inputs/<run id>/data.csv > out/profile.json
    ```
 
-   It reads the copy of the original file under `workspace/` (the same
-   version the run linked, since both were taken this turn) and prints
-   per-column counts, missing values, numeric min/max/mean/std and top
-   values as JSON. Save figures or tables a script makes with `save_file`
+   Always profile the run's own copy: `create_experiment` returns where each
+   input is in the working folder (`inputsInWorkingFolder`), the exact
+   version the run linked. In a later turn it is under the run's folder,
+   `workspace/experiments/<title> (<id>)/inputs/`. Not the file under
+   `workspace/root/` or `workspace/nodes/`, which may be an older snapshot.
+   The script prints per-column counts, missing values, numeric
+   min/max/mean/std and top values as JSON. Save figures or tables a script makes with `save_file`
    into the run's `artifacts/`.
 5. **Write the report** in the run's `report.md`, below its front matter
    (keep the front matter as it is), following

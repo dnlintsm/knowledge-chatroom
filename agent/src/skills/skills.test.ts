@@ -344,4 +344,7 @@ test("the analysis skill's profile script reads CSV columns", async () => {
   assert.deepEqual(out.columns[1], { name: "dose", count: 2, missing: 1, type: "number", min: 30, max: 31, mean: 30.5, std: 0.707107 });
   assert.equal(out.columns[2].type, "text");
   assert.equal(out.columns[2].distinct, 3);
+  // A column too long to spread into Math.min/max.
+  const big = profile(`n\n${Array.from({ length: 300_000 }, (_, i) => i).join("\n")}\n`);
+  assert.deepEqual([big.columns[0].min, big.columns[0].max], [0, 299_999]);
 });

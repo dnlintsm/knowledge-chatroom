@@ -264,25 +264,26 @@ export class Session {
    */
   async rerun(
     id: string,
-    changes: ExperimentInput & { inputs?: RunInputSource[] } = {},
+    changes: ExperimentInput & { inputs?: RunInputSource[]; node?: string | null } = {},
     provenance: Record<string, unknown> = {},
   ): Promise<Experiment> {
     const old = await this.experiment(id);
-    const { inputs, ...input } = changes;
+    const { inputs, node, ...input } = changes;
     const oldInputs = ((old.provenance.inputs as { path: string }[] | undefined) ?? []).map((i) => ({
       path: i.path,
       experiment: old.id,
       as: i.path.replace(/^inputs\//, ""),
     }));
     return this.startRun(
-      old.nodeId,
+      node === undefined ? old.nodeId : node,
       {
         title: input.title ?? `${old.title} (rerun)`,
         hypothesis: input.hypothesis ?? old.hypothesis,
         params: input.params ?? old.params,
       },
       inputs ?? oldInputs,
-      { ...provenance, rerunOf: { id: old.id, title: old.title } },
+      // Only the id: the old run may be a draft that viewers of this one can't see.
+      { ...provenance, rerunOf: { id: old.id } },
     );
   }
 

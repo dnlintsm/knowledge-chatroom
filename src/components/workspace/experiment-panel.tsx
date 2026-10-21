@@ -356,6 +356,8 @@ function Provenance({ experiment }: { experiment: Experiment }) {
   const p = experiment.provenance;
   if (!p || !p.startedAt) return null;
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : null);
+  // The record keeps only the old run's id; its title shows only to those who can see it.
+  const source = p.rerunOf && ws.experiments.find((e) => e.id === p.rerunOf!.id);
   const rows: [string, ReactNode][] = [
     ["Started", [p.startedBy?.name, when(p.startedAt)].filter(Boolean).join(", ")],
     ["Finished", when(p.finishedAt)],
@@ -371,15 +373,18 @@ function Provenance({ experiment }: { experiment: Experiment }) {
     ["Chat", p.chat],
     [
       "Rerun of",
-      p.rerunOf && (
-        <button
-          type="button"
-          className="cursor-pointer text-left underline-offset-2 hover:underline"
-          onClick={() => void ws.enterExperiment(p.rerunOf!.id)}
-        >
-          {p.rerunOf.title}
-        </button>
-      ),
+      p.rerunOf &&
+        (source ? (
+          <button
+            type="button"
+            className="cursor-pointer text-left underline-offset-2 hover:underline"
+            onClick={() => void ws.enterExperiment(source.id)}
+          >
+            {source.title}
+          </button>
+        ) : (
+          "a run you can't open"
+        )),
     ],
   ];
   return (

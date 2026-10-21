@@ -263,7 +263,7 @@ export interface RunProvenance {
   model?: string | null;
   skill?: { name: string; source?: string; version?: number; sha256?: string };
   /** The run this one ran again. */
-  rerunOf?: { id: string; title: string };
+  rerunOf?: { id: string };
   tools?: Record<string, string>;
   inputs?: {
     path: string;
