@@ -55,14 +55,21 @@ import type { Session } from "./session";
  *   DELETE /nodes/<id>              soft delete, with everything below it
  *
  *   GET    /experiments?node=<id>   {experiments}: the ones you can see, on
- *                                   that node or (without node) anywhere, each
+ *                                   that node (node=root: at the workspace
+ *                                   root) or (without node) anywhere, each
  *                                   with your access: writer (its author) or reader
- *   POST   /experiments             {nodeId, title, hypothesis?, params?,
- *                                   results?} → a new draft, with a copy of
- *                                   the node's files
+ *   POST   /experiments             {nodeId|null, title, hypothesis?, params?,
+ *                                   results?, state?} → a new draft: on a node
+ *                                   with a copy of the node's files, at the
+ *                                   root (null) empty. A run is an experiment
+ *                                   with a report.md.
+ *   POST   /experiments/from-folder {nodeId|null, folder, title?} →
+ *                                   {experiment, moved}: moves a folder's files
+ *                                   into a new draft (editor of the place)
  *   GET    /experiments/<id>        one experiment
  *   PATCH  /experiments/<id>        {title?, hypothesis?, params?, results?,
- *                                   status?: draft|shared|archived}
+ *                                   status?: draft|shared|archived,
+ *                                   state?: ready|running|done|failed}
  *   DELETE /experiments/<id>        soft delete, with its files
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
@@ -233,7 +240,7 @@ async function handleNodes(req: IncomingMessage, res: ServerResponse, url: URL, 
 /** The experiment fields in a request body; undefined when one has the wrong type. */
 function experimentInput(body: Record<string, unknown>): ExperimentInput | undefined {
   const input: ExperimentInput = {};
-  for (const key of ["title", "hypothesis", "status"] as const) {
+  for (const key of ["title", "hypothesis", "status", "state"] as const) {
     if (body[key] === undefined) continue;
     if (typeof body[key] !== "string") return undefined;
     (input as Record<string, unknown>)[key] = body[key];
@@ -247,15 +254,27 @@ function experimentInput(body: Record<string, unknown>): ExperimentInput | undef
 async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
   const expected =
-    "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived}";
+    "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived, state?: ready|running|done|failed}";
+  const place = (v: unknown): v is string | null => v === null || typeof v === "string";
+  if (id === "from-folder") {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    const body = await readJson(req);
+    const input = body && experimentInput(body);
+    if (!body || !place(body.nodeId) || typeof body.folder !== "string" || !input) {
+      return json(res, 400, { error: "Expected {nodeId: string|null, folder: string, title?: string}" });
+    }
+    json(res, 201, await session.experimentFromFolder(body.nodeId, body.folder, input));
+    return;
+  }
   if (!id) {
     if (req.method === "GET") {
-      json(res, 200, { experiments: await session.experiments(url.searchParams.get("node") || undefined) });
+      const node = url.searchParams.get("node");
+      json(res, 200, { experiments: await session.experiments(node === "root" ? null : node || undefined) });
     } else if (req.method === "POST") {
       const body = await readJson(req);
       const input = body && experimentInput(body);
-      if (!body || typeof body.nodeId !== "string" || !input) {
-        json(res, 400, { error: `Expected {nodeId: string, title: string, …}; ${expected}` });
+      if (!body || !place(body.nodeId) || !input) {
+        json(res, 400, { error: `Expected {nodeId: string|null, title: string, …}; ${expected}` });
         return;
       }
       json(res, 201, await session.createExperiment(body.nodeId, input));

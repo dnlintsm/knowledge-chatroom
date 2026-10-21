@@ -12,19 +12,22 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png` });
 }
 
-// A sample run from the seed files (src/components/workspace/seed.ts).
+// A sample run folder from the seed files (src/components/workspace/seed.ts).
+// Without server storage it is only a folder: runs are experiments, which
+// live on the server (runs.spec.ts shows them).
 const RUN = "runs/etch-2026-10-01";
-const RUN_URL = `/?run=${RUN}`;
+const REPORT = `${RUN}/xdoe-report/report.md`;
 
-/** Opens the sample run and waits until the page has focused it. */
-async function gotoRun(page: Page) {
-  await page.goto(RUN_URL);
-  await expect(page.getByRole("navigation", { name: "Current run" })).toBeVisible();
+/** The file list, with the sample run folder's report open. */
+async function gotoReport(page: Page) {
+  await page.goto("/");
+  await page.locator(`[role="treeitem"][title="${REPORT}"]`).click();
+  await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
 }
 
-/** Focus mode on the sample run, with the chat ready. */
+/** The sample report open, with the chat ready. */
 async function openHome(page: Page) {
-  await gotoRun(page);
+  await gotoReport(page);
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible();
 }
@@ -46,23 +49,19 @@ async function send(page: Page, text: string) {
 }
 
 test("workspace walkthrough", async ({ page }) => {
-  // Traverse mode: the runs in the workspace, and the chat beside them.
+  // The files, and the chat beside them.
   await page.goto("/");
-  await expect(page.getByTestId("run-list")).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toBeVisible();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await expect(page.getByTestId("chat-context-run")).toHaveCount(0);
-  await shot(page, "01-traverse");
+  await shot(page, "01-workspace");
 
-  // Focusing a run opens its report, roots the file tree at it and scopes the chat to it.
-  await page.getByRole("button", { name: /etch-2026-10-01/ }).click();
-  await expect(page).toHaveURL(new RegExp(`\\?run=${RUN}$`));
-  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
+  // A report from a sample run folder, and Claude seeing it.
+  await page.locator(`[role="treeitem"][title="${REPORT}"]`).click();
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
-  await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
   await expect(page.getByRole("treeitem", { name: /effects\.csv/ })).toBeVisible();
-  await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toHaveCount(0);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible();
-  await shot(page, "02-focus-run");
+  await shot(page, "02-report");
 
   // Selecting text in the preview shows up as chat context.
   await page.getByTestId("file-preview").getByText("RF power dominates etch rate").selectText();
@@ -75,7 +74,7 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
   await shot(page, "03-claude-writes-artifact");
 
-  await page.getByRole("treeitem", { name: /report\.md/ }).click();
+  await page.locator(`[role="treeitem"][title="${REPORT}"]`).click();
   await expect(page.getByTestId("file-preview").locator("table").first()).toBeVisible();
   await page.getByRole("button", { name: "edit", exact: true }).click();
   await expect(page.getByTestId("file-editor")).toBeVisible();
@@ -109,19 +108,10 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
   await shot(page, "08b-chat-reopened");
 
-  // Leaving the run goes back to Traverse; the browser's back button returns to it.
-  await page.getByRole("button", { name: "Leave run" }).click();
-  await expect(page.getByTestId("run-list")).toBeVisible();
-  await expect(page).toHaveURL(/\/$/);
-  await page.goBack();
-  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
-
-  // The app name at the top-left goes home: back to all runs, tabs kept.
+  // The app name at the top-left goes home to the Runs view, which needs server storage.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
-  await expect(page.getByTestId("run-list")).toBeVisible();
+  await expect(page.getByText("Runs need server storage.")).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("navigation", { name: "Current run" })).toHaveCount(0);
-  await shot(page, "19-home-link");
 });
 
 test("skills: modes, the / menu and the status bar", async ({ page }) => {
@@ -209,20 +199,8 @@ test("skills: defaults for everyone, your choice, and one chat's own", async ({ 
   await expect(tldr).toContainText("Default");
 });
 
-test("links and back/forward show the focused run's own report", async ({ page }) => {
-  await gotoRun(page);
-  const preview = page.getByTestId("file-preview");
-  await expect(preview).toContainText("xDOE report: etch rate");
-  await page.getByRole("button", { name: "Traverse", exact: true }).click();
-  await page.getByRole("button", { name: /litho-2026-10-03/ }).click();
-  await expect(preview).toContainText("xDOE report: CD vs. dose and focus");
-  await page.goBack();
-  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("etch-2026-10-01");
-  await expect(preview).toContainText("xDOE report: etch rate");
-});
-
 test("a workspace with no runs still has the chat", async ({ page }) => {
-  // A first start with no run folders: one note, nothing to focus.
+  // A first start with one note and no run folders.
   await page.addInitScript((key) => {
     if (window.localStorage.getItem(key)) return;
     const note = {
@@ -232,7 +210,6 @@ test("a workspace with no runs still has the chat", async ({ page }) => {
     window.localStorage.setItem(key, JSON.stringify({ files: [note], tabs: [], active: null }));
   }, "knowledge-chatroom.workspace.v1");
   await page.goto("/");
-  await expect(page.getByText("No runs yet.")).toBeVisible();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await page.getByRole("button", { name: "Hide chat" }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
@@ -241,102 +218,8 @@ test("a workspace with no runs still has the chat", async ({ page }) => {
   await shot(page, "20-chat-without-runs");
 });
 
-test("a link to a missing run falls back to Traverse", async ({ page }) => {
-  await page.goto("/?run=runs/nope");
-  await expect(page.getByTestId("notices")).toContainText("There is no run at runs/nope.");
-  await expect(page.getByTestId("run-list")).toBeVisible();
-  await expect(page).not.toHaveURL(/run=/);
-});
-
-test("the Actions block starts a new chat about the run", async ({ page }) => {
-  await openHome(page);
-  const actions = page.getByTestId("actions");
-  await expect(actions).toBeVisible();
-  await send(page, "Hello there");
-  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
-  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
-  await shot(page, "09-actions");
-
-  // A double click starts one new chat, not two (the runner refuses quick repeats).
-  await actions.getByRole("button", { name: "New Chat" }).dblclick();
-  await expect(page.getByText("Hello there")).toHaveCount(0);
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
-  await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
-
-  // The block folds away and stays folded.
-  await actions.getByRole("button", { name: "Actions" }).click();
-  await expect(actions.getByRole("button", { name: "New Chat" })).toBeHidden();
-  await page.reload();
-  await expect(page.getByTestId("actions").getByRole("button", { name: "Actions" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-
-  // Traverse mode has no run, so no actions.
-  await page.getByRole("button", { name: "Leave run" }).click();
-  await page.getByRole("button", { name: "Files", exact: true }).click();
-  await expect(page.getByTestId("actions")).toHaveCount(0);
-});
-
-test("Generate Rules writes the run's rules once, read-only, then opens them", async ({ page }) => {
-  const apiCalls: string[] = [];
-  page.on("request", (req) => {
-    if (new URL(req.url()).pathname === "/api/rules") apiCalls.push(req.url());
-  });
-  await gotoRun(page);
-  const actions = page.getByTestId("actions");
-  const generate = actions.getByRole("button", { name: "Generate Rules" });
-  await expect(generate).toBeEnabled();
-  // A double click still asks the API once.
-  await generate.dblclick();
-  const preview = page.getByTestId("file-preview");
-  await expect(preview).toContainText("General rules: etch-2026-10-01");
-  await expect(page.getByTestId("read-only-badge")).toBeVisible();
-  await expect(page.getByRole("group", { name: "View mode" })).toHaveCount(0);
-  await expect(page.getByTestId("notices")).toContainText("Generated models/general_rules.md");
-  await expect(actions.getByRole("button", { name: "Open Rules" })).toBeVisible();
-  const row = page.getByRole("treeitem", { name: /general_rules\.md/ });
-  await expect(row).toHaveAttribute("title", `${RUN}/models/general_rules.md`);
-  await expect(row.getByRole("button", { name: /Delete/ })).toHaveCount(0);
-  await shot(page, "10-generated-rules");
-  expect(apiCalls).toHaveLength(1);
-  expect(apiCalls[0]).toContain(`run=${encodeURIComponent(RUN)}`);
-
-  // After a reload the rules are there, so the action only opens them.
-  await page.reload();
-  await expect(page.getByRole("navigation", { name: "Current run" })).toBeVisible();
-  await page.getByRole("tab", { name: /welcome\.md/ }).click();
-  await page.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
-  await expect(preview).toContainText("General rules: etch-2026-10-01");
-  expect(apiCalls).toHaveLength(1);
-
-  // The other run has no rules yet.
-  await page.getByRole("button", { name: "Traverse", exact: true }).click();
-  await page.getByRole("button", { name: /litho-2026-10-03/ }).click();
-  await expect(page.getByTestId("actions").getByRole("button", { name: "Generate Rules" })).toBeVisible();
-});
-
-test("Claude runs actions and switches runs through the workbench", async ({ page }) => {
-  test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned tool calls.");
-  await openHome(page);
-  await send(page, "Please generate the rules for this run");
-  await expect(page.getByTestId("file-preview")).toContainText("General rules: etch-2026-10-01", reply);
-  await expect(page.getByTestId("read-only-badge")).toBeVisible();
-  await expect(page.getByText("Generated the run's general rules")).toBeVisible(reply);
-  await expect(page.getByTestId("actions").getByRole("button", { name: "Open Rules" })).toBeVisible();
-  await shot(page, "11-claude-runs-action");
-
-  await send(page, "Now show me the litho run");
-  await expect(page.getByRole("navigation", { name: "Current run" })).toContainText("litho-2026-10-03", reply);
-  await expect(page.getByTestId("file-preview")).toContainText("xDOE report: CD vs. dose and focus");
-  // The conversation carries on in the other run.
-  await expect(page.getByText("Switched to the litho-2026-10-03 run.")).toBeVisible(reply);
-  await expect(page.getByTestId("chat-context-run")).toContainText("litho-2026-10-03");
-});
-
 test("selection is dropped when its file closes", async ({ page }) => {
-  await gotoRun(page);
-  await page.getByRole("treeitem", { name: /report\.md/ }).click();
+  await gotoReport(page);
   const preview = page.getByTestId("file-preview");
   await preview.getByRole("heading", { name: "Findings" }).selectText();
   await preview.dispatchEvent("mouseup");
@@ -348,33 +231,32 @@ test("selection is dropped when its file closes", async ({ page }) => {
 });
 
 test("files and layout survive a reload", async ({ page }) => {
-  await gotoRun(page);
-  await expect(page.getByTestId("file-preview")).toBeVisible();
+  await gotoReport(page);
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByTestId("file-editor").fill("# Kept after reload");
   await page.getByRole("button", { name: "Hide chat" }).click();
   await page.reload();
-  // New notes go into the focused run.
   await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveAttribute(
     "title",
-    `${RUN}/untitled-1.md`,
+    "notes/untitled-1.md",
   );
   await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
 });
 
 test("rename a file", async ({ page }) => {
-  await gotoRun(page);
+  const NOTES = "notes";
+  await gotoReport(page);
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByTestId("file-editor").fill("# Etch plan");
   const row = page.getByRole("treeitem", { name: /untitled-1\.md/ });
-  await row.getByRole("button", { name: `Rename ${RUN}/untitled-1.md` }).click();
-  const input = page.getByRole("textbox", { name: `New name for ${RUN}/untitled-1.md` });
+  await row.getByRole("button", { name: `Rename ${NOTES}/untitled-1.md` }).click();
+  const input = page.getByRole("textbox", { name: `New name for ${NOTES}/untitled-1.md` });
   await expect(input).toBeFocused();
   await input.fill("etch-plan.md");
   await shot(page, "18-file-rename");
   await page.keyboard.press("Enter");
   const renamed = page.getByRole("treeitem", { name: /etch-plan\.md/ });
-  await expect(renamed).toHaveAttribute("title", `${RUN}/etch-plan.md`);
+  await expect(renamed).toHaveAttribute("title", `${NOTES}/etch-plan.md`);
   await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveCount(0);
   // The open tab follows the file.
   await expect(page.getByRole("tab", { name: /etch-plan\.md/ })).toBeVisible();
@@ -384,8 +266,8 @@ test("rename a file", async ({ page }) => {
   await page.getByRole("button", { name: "New note" }).click();
   const taken = (await page.getByRole("treeitem", { name: /untitled-\d+\.md/ }).innerText()).trim();
   await renamed.hover();
-  await renamed.getByRole("button", { name: `Rename ${RUN}/etch-plan.md` }).click();
-  await page.getByRole("textbox", { name: `New name for ${RUN}/etch-plan.md` }).fill(taken);
+  await renamed.getByRole("button", { name: `Rename ${NOTES}/etch-plan.md` }).click();
+  await page.getByRole("textbox", { name: `New name for ${NOTES}/etch-plan.md` }).fill(taken);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("alert").filter({ hasText: `${taken} already exists here` })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -400,17 +282,14 @@ test("dark mode", async ({ page }) => {
 
 test("mobile layout", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  // Traverse mode has a Chat tab too.
   await page.goto("/");
-  await expect(page.getByTestId("run-list")).toBeVisible();
   await expect(page.getByRole("button", { name: "Chat", exact: true })).toBeVisible();
-  await gotoRun(page);
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await shot(page, "13-mobile-editor");
   await page.getByRole("button", { name: "Files" }).last().click();
   await shot(page, "14-mobile-files");
   // Tapping a file switches to the editor.
-  await page.getByRole("treeitem", { name: /report\.md/ }).click();
+  await page.locator(`[role="treeitem"][title="${REPORT}"]`).click();
   await expect(page.getByTestId("file-preview")).toBeVisible();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
@@ -454,7 +333,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
 test("file references on a phone show the editor", async ({ page }) => {
   test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await page.setViewportSize({ width: 390, height: 844 });
-  await gotoRun(page);
+  await page.goto("/");
   await page.getByRole("button", { name: "Files" }).last().click();
   await page.getByRole("button", { name: "Uploads", exact: true }).click();
   await page.getByRole("treeitem", { name: /sales\.csv/ }).click();
@@ -470,19 +349,19 @@ test("file references on a phone show the editor", async ({ page }) => {
 test("chat suggestions: first round follows what is open, then follow-ups", async ({ page }) => {
   await openHome(page);
   const chip = (name: string | RegExp) => page.getByTestId("copilot-suggestion").filter({ hasText: name });
-  // Focusing the run opens its report: summarize it, draft a note, analyze the report.
+  // The open report: summarize it or draft a note. Analyzing a run's report
+  // and similar experiments need a run, which needs server storage (runs.spec.ts).
   await expect(chip("Summarize report.md")).toBeVisible();
   await expect(chip("Draft a note")).toBeVisible();
-  await expect(chip("Analyze the etch-2026-10-01 report")).toBeVisible();
-  // Similar experiments needs server storage (its tools live there).
+  await expect(chip("Analyze the report")).toHaveCount(0);
   await expect(chip("Search similar experiments")).toHaveCount(0);
   await shot(page, "17-chat-suggestions");
 
   // The summarize chip follows the open file.
   await page.getByRole("treeitem", { name: /effects\.csv/ }).click();
   await expect(chip("Summarize effects.csv")).toBeVisible();
-  await chip("Analyze the etch-2026-10-01 report").click();
-  await expect(page.getByText(`Analyze the report at ${RUN}/xdoe-report/report.md`)).toBeVisible();
+  await chip("Draft a note").click();
+  await expect(page.getByText("draft a short note at notes/next-steps.md")).toBeVisible();
 
   // After the reply, the suggester's follow-ups replace the first round
   // (the mock agent's canned ones without an API key).
@@ -503,13 +382,12 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
   // The mock agent keeps what the CopilotKit runtime sent it (e2e/mock-agent.mjs).
   const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
   expect(lastRun.forwardedProps.knowledge_chatroom).toEqual({
-    version: 1,
+    version: 2,
     // No login here: the one local user, set by the server.
     user: { id: "local", email: null, name: null, signed_in: false },
     storage: "local",
     node: null,
     experiment: null,
-    run_dir: RUN,
     selected_path: `${RUN}/xdoe-report/effects.csv`,
   });
 });

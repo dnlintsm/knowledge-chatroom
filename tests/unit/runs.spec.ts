@@ -1,53 +1,61 @@
 import { test, expect } from "@playwright/test";
-import { findRunDirs, isInRun, parseMarkers, runFromSearch, searchWithRun } from "../../src/components/workspace/runs";
+import {
+  experimentFromSearch,
+  findReport,
+  findRunFolders,
+  runsUnder,
+  searchWithExperiment,
+} from "../../src/components/workspace/runs";
+import type { Experiment, KnowledgeNode } from "../../src/components/workspace/server-files";
 
-/** Run discovery and the ?run= URL (src/components/workspace/runs.ts), no browser needed. */
+/** Runs are experiments (src/components/workspace/runs.ts), no browser needed. */
 
-test("finds run folders by their marker folders", () => {
+test("a run's report is its report.md, or an xDOE folder's", () => {
+  expect(findReport(["data.csv", "report.md", "xdoe-report/report.md"])).toBe("report.md");
+  expect(findReport(["xdoe-report/report.md", "xdoe-report/effects.csv"])).toBe("xdoe-report/report.md");
+  expect(findReport(["notes/report.md", "data.csv"])).toBeNull();
+});
+
+test("finds old run folders by their xdoe-report folder", () => {
   const paths = [
     "runs/etch-01/xdoe-report/report.md",
     "runs/etch-01/xdoe-report/effects.csv",
     "runs/etch-01/notes.md",
+    "runs/etch-011/notes.md",
     "runs/litho-02/xdoe-report/report.md",
     "lab/2026/q4/cvd-07/xdoe-report/report.md",
-    // A marker at the root, a marker that's a file and unrelated files make no run.
+    // A marker at the top, a marker that's a file and unrelated files make no run.
     "xdoe-report/report.md",
     "runs/odd/xdoe-report",
     "notes/welcome.md",
   ];
-  expect(findRunDirs(paths, ["xdoe-report"])).toEqual([
-    { path: "lab/2026/q4/cvd-07", name: "cvd-07", parent: "lab/2026/q4", markers: ["xdoe-report"], fileCount: 1 },
-    { path: "runs/etch-01", name: "etch-01", parent: "runs", markers: ["xdoe-report"], fileCount: 3 },
-    { path: "runs/litho-02", name: "litho-02", parent: "runs", markers: ["xdoe-report"], fileCount: 1 },
+  expect(findRunFolders(paths)).toEqual([
+    { path: "lab/2026/q4/cvd-07", name: "cvd-07", fileCount: 1 },
+    { path: "runs/etch-01", name: "etch-01", fileCount: 3 },
+    { path: "runs/litho-02", name: "litho-02", fileCount: 1 },
   ]);
-  // Any configured marker counts, and a top-level folder can be a run.
-  expect(findRunDirs(["r1/xdoe-report/a.md", "r1/sem-images/b.png", "r2/sem-images/c.png"], ["xdoe-report", "sem-images"]))
-    .toEqual([
-      { path: "r1", name: "r1", parent: "", markers: ["sem-images", "xdoe-report"], fileCount: 2 },
-      { path: "r2", name: "r2", parent: "", markers: ["sem-images"], fileCount: 1 },
-    ]);
 });
 
-test("reads RUN_DIR_MARKERS", () => {
-  expect(parseMarkers(undefined)).toEqual(["xdoe-report"]);
-  expect(parseMarkers("")).toEqual(["xdoe-report"]);
-  expect(parseMarkers(" xdoe-report, sem-images/ ,,bad/path,sem-images")).toEqual(["xdoe-report", "sem-images"]);
+const node = (id: string, parentId: string | null) => ({ id, parentId }) as KnowledgeNode;
+const run = (id: string, nodeId: string | null) => ({ id, nodeId }) as Experiment;
+
+test("the runs at a place are those on it and below it; at the root, all of them", () => {
+  const nodes = [node("tech", null), node("module", "tech"), node("loop", "module"), node("other", null)];
+  const runs = [run("r-root", null), run("r-tech", "tech"), run("r-loop", "loop"), run("r-other", "other")];
+  const ids = (nodeId: string | null) => runsUnder(runs, nodes, nodeId).map((r) => r.id);
+  expect(ids(null)).toEqual(["r-root", "r-tech", "r-loop", "r-other"]);
+  expect(ids("tech")).toEqual(["r-tech", "r-loop"]);
+  expect(ids("module")).toEqual(["r-loop"]);
+  expect(ids("other")).toEqual(["r-other"]);
 });
 
-test("files belong to a run by path prefix", () => {
-  expect(isInRun("runs/a/x.md", "runs/a")).toBe(true);
-  expect(isInRun("runs/ab/x.md", "runs/a")).toBe(false);
-  expect(isInRun("runs/a", "runs/a")).toBe(false);
-});
-
-test("keeps the run in the URL", () => {
-  expect(runFromSearch("")).toBeNull();
-  expect(runFromSearch("?run=")).toBeNull();
-  expect(runFromSearch("?run=runs/etch-01")).toBe("runs/etch-01");
-  expect(runFromSearch("?run=%2Fruns%2F%2Fetch-01%2F")).toBe("runs/etch-01");
-  expect(searchWithRun("", "runs/etch 01")).toBe("?run=runs/etch%2001");
-  expect(searchWithRun("?run=a&debug=1", "runs/b")).toBe("?run=runs/b&debug=1");
-  expect(searchWithRun("?run=a&debug=1", null)).toBe("?debug=1");
-  expect(searchWithRun("?run=a", null)).toBe("");
-  expect(runFromSearch(searchWithRun("", "runs/a&b=c"))).toBe("runs/a&b=c");
+test("keeps the run in the URL, and drops old ?run= links", () => {
+  expect(experimentFromSearch("")).toBeNull();
+  expect(experimentFromSearch("?experiment=")).toBeNull();
+  expect(experimentFromSearch("?experiment=9f8e")).toBe("9f8e");
+  expect(searchWithExperiment("", "9f8e")).toBe("?experiment=9f8e");
+  expect(searchWithExperiment("?debug=1", "9f8e")).toBe("?debug=1&experiment=9f8e");
+  expect(searchWithExperiment("?experiment=a&debug=1", null)).toBe("?debug=1");
+  expect(searchWithExperiment("?run=runs/etch-01", null)).toBe("");
+  expect(experimentFromSearch(searchWithExperiment("?run=x", "a&b=c"))).toBe("a&b=c");
 });

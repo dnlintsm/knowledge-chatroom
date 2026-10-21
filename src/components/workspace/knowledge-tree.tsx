@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, FlaskConical, House, Pencil, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { StatusBadge } from "./experiment-panel";
+import { StateBadge, StatusBadge } from "./experiment-panel";
 import type { Experiment, KnowledgeNode, NodeId, Role } from "./server-files";
 import { FileTree } from "./sidebar";
 import { useWorkspace } from "./store";
@@ -14,7 +14,7 @@ const atLeast = (role: Role | null, min: Role) => role !== null && RANK[role] >=
 type Editing =
   | { mode: "add"; parentId: NodeId }
   | { mode: "rename"; id: string }
-  | { mode: "experiment"; nodeId: string }
+  | { mode: "experiment"; nodeId: string | null }
   | null;
 
 /**
@@ -35,7 +35,7 @@ export function KnowledgeTree() {
     return map;
   }, [ws.nodes]);
   const experimentsOn = useMemo(() => {
-    const map = new Map<string, Experiment[]>();
+    const map = new Map<string | null, Experiment[]>();
     for (const e of ws.experiments) map.set(e.nodeId, [...(map.get(e.nodeId) ?? []), e]);
     return map;
   }, [ws.experiments]);
@@ -83,7 +83,7 @@ export function KnowledgeTree() {
 
   const here = (depth: number) => <FileTree files={ws.files} depth={depth} />;
 
-  const experimentRows = (nodeId: string, depth: number) => (
+  const experimentRows = (nodeId: string | null, depth: number) => (
     <>
       {(experimentsOn.get(nodeId) ?? []).map((e) => {
         const current = ws.experiment?.id === e.id;
@@ -113,6 +113,7 @@ export function KnowledgeTree() {
                 <FlaskConical className="size-3.5" />
               </span>
               <span className="min-w-0 flex-1 truncate">{e.title}</span>
+              <StateBadge state={e.state} />
               <StatusBadge status={e.status} />
             </div>
             {current && here(depth + 1)}
@@ -122,7 +123,7 @@ export function KnowledgeTree() {
       {editing?.mode === "experiment" && editing.nodeId === nodeId && (
         <NameInput
           depth={depth}
-          placeholder="New experiment title"
+          placeholder={nodeId === null ? "New run title" : "New experiment title"}
           onCancel={() => setEditing(null)}
           onSubmit={(title) => run(() => ws.createExperiment(nodeId, title))}
         />
@@ -267,30 +268,37 @@ export function KnowledgeTree() {
     });
 
   const top = typeAt(1);
+  const atRoot = ws.node === null && !ws.experiment;
   return (
     <div role="tree" aria-label="Knowledge tree">
       <div
         role="treeitem"
-        aria-selected={ws.node === null}
+        aria-selected={atRoot}
         tabIndex={0}
         onClick={() => enter(null)}
-        onKeyDown={(e) => e.key === "Enter" && enter(null)}
+        onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && enter(null)}
         className={cn(
           "group flex h-7 cursor-pointer items-center gap-1.5 pl-2 pr-2",
-          ws.node === null
+          atRoot
             ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
             : "hover:bg-[var(--secondary)]",
         )}
       >
         <House className="size-4 text-[var(--muted-foreground)]" />
         <span className="min-w-0 flex-1 truncate font-medium">Workspace</span>
+        {ws.rootRole && (
+          <RowAction label="Start a run in the workspace" onClick={() => setEditing({ mode: "experiment", nodeId: null })}>
+            <FlaskConical className="size-3.5" />
+          </RowAction>
+        )}
         {top && atLeast(ws.rootRole, "editor") && (
           <RowAction label={`New ${top}`} onClick={() => setEditing({ mode: "add", parentId: null })}>
             <Plus className="size-3.5" />
           </RowAction>
         )}
       </div>
-      {ws.node === null && here(1)}
+      {atRoot && here(1)}
+      {experimentRows(null, 1)}
       {render(null, 0)}
       {addInput(null, 0)}
       {!ws.nodes.length && editing === null && (

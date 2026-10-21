@@ -1,6 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Role, ServerEvent, ServerFile } from "../src/components/workspace/server-files";
 
+/** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
+async function showFiles(page: Page) {
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  if ((await files.getAttribute("aria-pressed")) !== "true") await files.click();
+}
+
 const PATH = "notes/sync.md";
 const otherNode = "other-node";
 
@@ -89,8 +95,7 @@ async function storage(page: Page) {
   });
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  // The current workbench starts in Traverse; choose the file view explicitly.
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  // A fresh browser starts in the Files view.
   await page.getByRole("treeitem", { name: /sync\.md/ }).click();
   await expect(page.getByTestId("file-preview")).toContainText("Original");
   await page.getByRole("button", { name: "edit", exact: true }).click();
@@ -175,7 +180,7 @@ test("a remote response from the previous place cannot replace the current file"
     await page.getByRole("button", { name: "Knowledge", exact: true }).click();
     await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
-    await page.getByRole("button", { name: "Files", exact: true }).click();
+    await showFiles(page);
     await page.getByRole("treeitem", { name: /sync\.md/ }).click();
     read.release();
     await (await oldResponse).finished();

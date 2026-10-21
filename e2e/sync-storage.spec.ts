@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 
+/** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
+async function showFiles(page: Page) {
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  if ((await files.getAttribute("aria-pressed")) !== "true") await files.click();
+}
+
 const path = "notes/multi-tab.md";
 const url = `/api/files/${path}`;
 const headers = { "Content-Type": "text/markdown" };
@@ -7,7 +13,7 @@ const headers = { "Content-Type": "text/markdown" };
 async function openEditor(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(page);
   await page.getByRole("treeitem", { name: /multi-tab\.md/ }).click();
   await page.getByRole("button", { name: "edit", exact: true }).dispatchEvent("click");
   await expect(page.getByTestId("file-editor")).toHaveValue("# Initial shared note");

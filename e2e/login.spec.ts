@@ -1,6 +1,12 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { expectStoredNote } from "./storage-assertions";
 
+/** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
+async function showFiles(page: Page) {
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  if ((await files.getAttribute("aria-pressed")) !== "true") await files.click();
+}
+
 /**
  * Login and sharing: npm run test:e2e:login.
  * The config supplies the test OIDC provider and public signing key.
@@ -43,7 +49,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await alice.keyboard.press("Enter");
   await aliceTree.getByTestId("knowledge-node").filter({ hasText: TECH }).click();
   await expect(alice.getByRole("navigation", { name: "Location" })).toContainText(TECH);
-  await alice.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(alice);
   await alice.getByRole("button", { name: "New note" }).click();
   await alice.getByTestId("file-editor").fill("# Overlay\n\nAlignment marks moved to the scribe line.");
   await expectStoredNote(alice, TECH, "# Overlay\n\nAlignment marks moved to the scribe line.");
@@ -72,7 +78,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.getByRole("button", { name: "Knowledge", exact: true }).click();
   const bobTree = bob.getByRole("tree", { name: "Knowledge tree" });
   await bobTree.getByTestId("knowledge-node").filter({ hasText: TECH }).click();
-  await bob.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(bob);
   await bob.getByRole("treeitem", { name: /untitled-1\.md/ }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("Alignment marks moved");
   await expect(bob.getByText("Read only")).toBeVisible();
@@ -88,7 +94,12 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
     nodes: { id: string; name: string }[];
   };
   const techId = nodes.find((n) => n.name === TECH)!.id;
-  const report = await alice.request.put(`/api/files/runs/r1/xdoe-report/report.md?node=${techId}`, {
+  const created = await alice.request.post("/api/experiments", { data: { nodeId: techId, title: "r1" } });
+  expect(created.ok()).toBe(true);
+  const run = (await created.json()) as { id: string };
+  // A run is private to its author until shared.
+  expect((await alice.request.patch(`/api/experiments/${run.id}`, { data: { status: "shared" } })).ok()).toBe(true);
+  const report = await alice.request.put(`/api/files/report.md?experiment=${run.id}`, {
     headers: { "Content-Type": "text/markdown" },
     data: "# xDOE report\n\nOverlay run.",
   });
@@ -97,8 +108,10 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
     ["Bob", bob, false],
     ["Alice", alice, true],
   ] as const) {
-    await page.goto("/?run=runs/r1");
-    await expect(page.getByRole("navigation", { name: "Current run" }), who).toContainText("r1");
+    await page.goto(`/?experiment=${run.id}`);
+    await expect(page.getByRole("navigation", { name: "Location" }), who).toContainText("r1");
+    await expect(page.getByTestId("file-preview"), who).toContainText("Overlay run.");
+    await showFiles(page);
     const actions = page.getByTestId("actions");
     await expect(actions.getByRole("button", { name: "New Chat" }), who).toBeEnabled();
     const generate = actions.getByRole("button", { name: "Generate Rules" });
@@ -152,7 +165,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
 
   // The workspace role reaches Bob on his next request.
   await bob.goto("/");
-  await bob.getByRole("button", { name: "Files", exact: true }).click();
+  await showFiles(bob);
   await expect(bob.getByRole("button", { name: "New note" })).toBeVisible();
 
   // Alice hands ownership to Bob and steps down to editor: the app reloads

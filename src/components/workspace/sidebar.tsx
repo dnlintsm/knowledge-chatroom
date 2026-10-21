@@ -8,13 +8,15 @@ import {
   Files,
   FilePlus,
   FlaskConical,
+  FolderInput,
   ListTodo,
   Lock,
   Network,
   Package,
   Pencil,
-  Route,
+  Plus,
   Search,
+  Table2,
   Sparkles,
   Trash2,
   Upload,
@@ -24,19 +26,20 @@ import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
-import { isInRun, RUN_DIR_MARKERS, type RunDir } from "./runs";
+import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
+import { findRunFolders, runsUnder, type RunFolder } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
-import { fileName, FileExistsError, isTextFile, mimeForPath, ReadOnlyFileError, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { fileName, FileExistsError, isTextFile, mimeForPath, ReadOnlyFileError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
   { id: "search", label: "Search", icon: Search },
-  { id: "runs", label: "Traverse", icon: Route },
+  { id: "runs", label: "Runs", icon: FlaskConical },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "uploads", label: "Uploads", icon: Upload },
@@ -97,10 +100,8 @@ async function readUpload(file: File): Promise<{ content: string; mime: string }
 
 export function SidePanel({ view }: { view: SidebarView }) {
   const { files, write, canEdit } = useWorkspace();
-  const { editor, runDir, notify } = useWorkbench();
+  const { editor, notify } = useWorkbench();
   const { open } = editor;
-  // In Focus mode the Files view shows the run, and new files go into it.
-  const root = view === "files" ? runDir : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -108,7 +109,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
     let last: string | null = null;
     for (const file of Array.from(list ?? [])) {
       const { content, mime } = await readUpload(file);
-      const path = root ? `${root}/${file.name}` : `uploads/${file.name}`;
+      const path = `uploads/${file.name}`;
       try {
         last = write(path, content, { mime }).path;
       } catch (err) {
@@ -125,9 +126,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
     const pathFor = (i: number) =>
       kind === "skill"
         ? `skills/new-skill-${i}/SKILL.md`
-        : root
-          ? `${root}/untitled-${i}.md`
-          : `notes/untitled-${i}.md`;
+        : `notes/untitled-${i}.md`;
     while (taken.has(pathFor(n))) n++;
     const content =
       kind === "skill"
@@ -143,7 +142,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
   };
 
   const label = VIEWS.find((v) => v.id === view)?.label ?? "";
-  const title = root ? `${label} · ${root.split("/").pop()}` : label;
+  const title = label;
   // Viewers see the files but get no controls that change them.
   const actions: ReactNode = canEdit && (
     <>
@@ -197,9 +196,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         }}
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
-        {view === "files" && (
-          <FileTree files={root ? files.filter((f) => isInRun(f.path, root)) : files} root={root} />
-        )}
+        {view === "files" && <FileTree files={files} />}
         {view === "runs" && <RunList />}
         {view === "search" && <SearchPanel />}
         {view === "knowledge" && <KnowledgeTree />}
@@ -227,7 +224,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           />
         )}
       </div>
-      {root && <ActionsBlock />}
+      {view === "files" && <ActionsBlock />}
       {view !== "runs" && (
         <button
           type="button"
@@ -448,11 +445,10 @@ interface Folder {
   files: WorkspaceFile[];
 }
 
-/** Folders under `base` (a run, in Focus mode) are shown relative to it. */
-function buildTree(files: WorkspaceFile[], base: string | null): Folder {
-  const root: Folder = { name: "", path: base ?? "", folders: [], files: [] };
+function buildTree(files: WorkspaceFile[]): Folder {
+  const root: Folder = { name: "", path: "", folders: [], files: [] };
   for (const file of files) {
-    const parts = (base ? file.path.slice(base.length + 1) : file.path).split("/");
+    const parts = file.path.split("/");
     let node = root;
     for (const part of parts.slice(0, -1)) {
       const path = node.path ? `${node.path}/${part}` : part;
@@ -474,16 +470,8 @@ function buildTree(files: WorkspaceFile[], base: string | null): Folder {
   return root;
 }
 
-export function FileTree({
-  files,
-  root = null,
-  depth: start = 0,
-}: {
-  files: WorkspaceFile[];
-  root?: string | null;
-  depth?: number;
-}) {
-  const tree = useMemo(() => buildTree(files, root), [files, root]);
+export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
+  const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) =>
     setCollapsed((s) => {
@@ -524,34 +512,175 @@ export function FileTree({
   return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
 }
 
-/** Traverse view: every run in the workspace; picking one focuses it. */
+/**
+ * Runs view: every run here and below (all of them at the workspace root),
+ * newest first; picking one moves into it and opens its report. Below, old
+ * run folders here that can become runs.
+ */
 function RunList() {
-  const { runs, runDir, run } = useWorkbench();
-  if (!runs.length) {
+  const ws = useWorkspace();
+  const { editor, notify } = useWorkbench();
+  const [adding, setAdding] = useState(false);
+  if (ws.storageMode !== "server") {
     return (
       <p className="px-3 py-2 text-[var(--muted-foreground)]">
-        No runs yet. A run is a folder that contains{" "}
-        {RUN_DIR_MARKERS.map((m) => `${m}/`).join(" or ")}.
+        Runs need server storage. Set DATABASE_URL for the agent (see the README) to keep runs
+        with their reports, parameters and results.
       </p>
     );
   }
+  const runs = runsUnder(ws.experiments, ws.nodes, ws.node);
+  // You can start a run wherever you can see the files (as for experiments).
+  const role = ws.node === null ? ws.rootRole : (ws.nodes.find((n) => n.id === ws.node)?.role ?? null);
+  const here = placeName(ws.nodes, ws.node);
+  const start = async (title: string) => {
+    try {
+      await ws.createExperiment(ws.node, title);
+      setAdding(false);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), "error");
+    }
+  };
   return (
-    <ul aria-label="Runs" data-testid="run-list">
-      {runs.map((r) => (
-        <RunRow key={r.path} run={r} current={r.path === runDir} onFocus={() => run.focus(r.path)} />
-      ))}
-    </ul>
+    <div>
+      <div className="flex items-center gap-1 px-3 pb-1 text-xs text-[var(--muted-foreground)]">
+        <span className="min-w-0 flex-1 truncate">
+          {ws.node === null ? "All runs" : `Runs in ${here}`}
+        </span>
+        {runs.length > 0 && (
+          <IconButton label="Compare runs" onClick={() => editor.open(RUNS_TAB)}>
+            <Table2 className="size-4" />
+          </IconButton>
+        )}
+        {role && (
+          <IconButton label={`New run in ${here}`} onClick={() => setAdding(true)}>
+            <Plus className="size-4" />
+          </IconButton>
+        )}
+      </div>
+      {adding && <RunTitleInput onSubmit={(t) => void start(t)} onCancel={() => setAdding(false)} />}
+      {runs.length ? (
+        <ul aria-label="Runs" data-testid="run-list">
+          {runs.map((e) => (
+            <RunRow
+              key={e.id}
+              title={e.title}
+              detail={[ws.node === e.nodeId ? null : placeName(ws.nodes, e.nodeId), e.mine ? null : e.authorName]
+                .filter(Boolean)
+                .join(" · ")}
+              badges={
+                <>
+                  <StateBadge state={e.state} />
+                  <StatusBadge status={e.status} />
+                </>
+              }
+              current={ws.experiment?.id === e.id}
+              onPick={() => void ws.enterExperiment(e.id)}
+            />
+          ))}
+        </ul>
+      ) : (
+        !adding && (
+          <p className="px-3 py-2 text-[var(--muted-foreground)]">
+            No runs {ws.node === null ? "yet" : "here yet"}. A run is an experiment with a report.md:
+            start one with +, or ask Claude to analyze your uploads.
+          </p>
+        )
+      )}
+      {!ws.experiment && ws.canEdit && <RunFolders />}
+    </div>
   );
 }
 
-function RunRow({ run, current, onFocus }: { run: RunDir; current: boolean; onFocus: () => void }) {
+/** Folders here from before runs were experiments (holding xdoe-report/), each one click from being a run. */
+function RunFolders() {
+  const ws = useWorkspace();
+  const { notify } = useWorkbench();
+  const [busy, setBusy] = useState<string | null>(null);
+  const folders = useMemo(() => findRunFolders(ws.files.map((f) => f.path)), [ws.files]);
+  if (!folders.length) return null;
+  const convert = async (folder: RunFolder) => {
+    setBusy(folder.path);
+    try {
+      await ws.experimentFromFolder(folder.path);
+      notify(`${folder.name} is a run now; its files moved into it.`, "success");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section aria-label="Run folders" data-testid="run-folders" className="mt-3 border-t border-[var(--border)] pt-2">
+      <p className="px-3 pb-1 text-xs text-[var(--muted-foreground)]">
+        Run folders here. Turn one into a run to give it a state, parameters and results; its files move into it.
+      </p>
+      <ul>
+        {folders.map((f) => (
+          <li key={f.path} className="flex items-center gap-2 px-3 py-1">
+            <FolderInput className="size-4 shrink-0 text-[var(--muted-foreground)]" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{f.name}</span>
+              <span className="block truncate text-xs text-[var(--muted-foreground)]">
+                {f.path} · {f.fileCount} file{f.fileCount === 1 ? "" : "s"}
+              </span>
+            </span>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void convert(f)}
+              className="h-6 shrink-0 rounded-md border border-[var(--border)] px-2 text-xs hover:bg-[var(--secondary)] cursor-pointer disabled:cursor-default disabled:opacity-50"
+            >
+              {busy === f.path ? "Moving…" : "Make run"}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function RunTitleInput({ onSubmit, onCancel }: { onSubmit: (title: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="flex h-7 items-center px-3">
+      <input
+        autoFocus
+        aria-label="New run title"
+        placeholder="New run title"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && value.trim()) onSubmit(value);
+          if (e.key === "Escape") onCancel();
+        }}
+        onBlur={onCancel}
+        className="h-6 w-full rounded border border-[var(--ring)] bg-[var(--background)] px-1.5 text-[13px] outline-none"
+      />
+    </div>
+  );
+}
+
+function RunRow({
+  title,
+  detail,
+  badges,
+  current,
+  onPick,
+}: {
+  title: string;
+  detail: string;
+  badges: ReactNode;
+  current: boolean;
+  onPick: () => void;
+}) {
   return (
     <li>
       <button
         type="button"
         aria-current={current ? "true" : undefined}
-        title={`Focus on ${run.path}`}
-        onClick={onFocus}
+        title={`Open ${title}`}
+        onClick={onPick}
         className={cn(
           "flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer",
           current ? "bg-[var(--accent)] text-[var(--accent-foreground)]" : "hover:bg-[var(--secondary)]",
@@ -559,12 +688,11 @@ function RunRow({ run, current, onFocus }: { run: RunDir; current: boolean; onFo
       >
         <FlaskConical className="mt-0.5 size-4 shrink-0 text-[var(--muted-foreground)]" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium">{run.name}</span>
-          <span className="block truncate text-xs text-[var(--muted-foreground)]">
-            {[run.parent, `${run.fileCount} file${run.fileCount === 1 ? "" : "s"}`, run.markers.join(", ")]
-              .filter(Boolean)
-              .join(" · ")}
+          <span className="flex items-center gap-1.5">
+            <span className="truncate font-medium">{title}</span>
+            {badges}
           </span>
+          {detail && <span className="block truncate text-xs text-[var(--muted-foreground)]">{detail}</span>}
         </span>
       </button>
     </li>

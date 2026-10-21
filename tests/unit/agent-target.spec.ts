@@ -45,33 +45,44 @@ test("follow-up chips come from this repo's agent only without a remote backend"
 const etch = { id: "n1", name: "Etch", type: "tech" };
 const module3 = { id: "n2", name: "Module 3", type: "module" };
 
-test("the place: root, node path, experiment, run and open file", () => {
+test("the place: root, node path, experiment (a run) and open file", () => {
   expect(
-    chatroomPlace({ storage: "local", lineage: [], experiment: null, runDir: null, selectedPath: null }),
+    chatroomPlace({ storage: "local", lineage: [], experiment: null, report: null, selectedPath: null }),
   ).toEqual({
-    version: 1,
+    version: 2,
     storage: "local",
     node: null,
     experiment: null,
-    run_dir: null,
     selected_path: null,
   });
 
   const place = chatroomPlace({
     storage: "server",
     lineage: [etch, module3],
-    experiment: { id: "x1", nodeId: "n2", title: "Lower RF", status: "draft", access: "writer" },
-    runDir: "runs/etch-2026-10-01",
-    selectedPath: "runs/etch-2026-10-01/xdoe-report/report.md",
+    experiment: { id: "x1", nodeId: "n2", title: "Lower RF", status: "draft", state: "done", access: "writer" },
+    report: "report.md",
+    selectedPath: "report.md",
   });
   expect(place.node).toEqual({ ...module3, path: [etch, module3] });
-  expect(place.experiment).toEqual({ id: "x1", node_id: "n2", title: "Lower RF", status: "draft", can_change: true });
-  expect(place.run_dir).toBe("runs/etch-2026-10-01");
-  expect(place.selected_path).toBe("runs/etch-2026-10-01/xdoe-report/report.md");
+  expect(place.experiment).toEqual({
+    id: "x1", node_id: "n2", title: "Lower RF", status: "draft", state: "done", can_change: true, report: "report.md",
+  });
+  expect(place).not.toHaveProperty("run_dir");
+  expect(place.selected_path).toBe("report.md");
+
+  // A run at the workspace root has no node.
+  const atRoot = chatroomPlace({
+    storage: "server",
+    lineage: [],
+    experiment: { id: "x2", nodeId: null, title: "Uploads", status: "draft", state: "ready", access: "reader" },
+    report: null,
+    selectedPath: null,
+  });
+  expect([atRoot.node, atRoot.experiment?.node_id, atRoot.experiment?.can_change]).toEqual([null, null, false]);
 });
 
 test("the server's user replaces whatever the browser sent, and the rest is kept", () => {
-  const place = chatroomPlace({ storage: "server", lineage: [etch], experiment: null, runDir: null, selectedPath: "a.md" });
+  const place = chatroomPlace({ storage: "server", lineage: [etch], experiment: null, report: null, selectedPath: "a.md" });
   const user = { id: "https://login.example.com|42", email: "a@example.com", name: "A", signed_in: true };
   const input = {
     threadId: "t1",
@@ -88,9 +99,9 @@ test("the server's user replaces whatever the browser sent, and the rest is kept
   expect((input.forwardedProps[CHATROOM_PROPS] as ChatroomProps).user?.id).toBe("someone-else");
 
   // Runs without a place (e.g. before the workspace loads) still name the user.
-  expect(withChatroomUser({}, LOCAL_USER).forwardedProps).toEqual({ [CHATROOM_PROPS]: { version: 1, user: LOCAL_USER } });
+  expect(withChatroomUser({}, LOCAL_USER).forwardedProps).toEqual({ [CHATROOM_PROPS]: { version: 2, user: LOCAL_USER } });
   expect(withChatroomUser({ forwardedProps: null }, null).forwardedProps).toEqual({
-    [CHATROOM_PROPS]: { version: 1, user: null },
+    [CHATROOM_PROPS]: { version: 2, user: null },
   });
 });
 

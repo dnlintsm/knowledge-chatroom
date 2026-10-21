@@ -805,6 +805,66 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(await read(inDraft, "notes/rls.md"), "ok");
     });
 
+    test("runs: an experiment at the workspace root starts empty and tracks its state", async () => {
+      const root = await (await as(alice).files(null)).list();
+      const run = await as(alice).createExperiment(null, { title: "First upload", params: { wafers: 3 } });
+      assert.deepEqual([run.nodeId, run.state, run.status, run.fileCount], [null, "ready", "draft", 0]);
+      assert.ok(root.length > 0, "the root has files, and none are copied in");
+      assert.ok((await as(alice).experiments(null)).some((e) => e.id === run.id));
+      assert.ok(!(await as(alice).experiments(leveling)).some((e) => e.id === run.id));
+      assert.ok((await as(alice).experiments()).some((e) => e.id === run.id));
+
+      const running = await as(alice).updateExperiment(run.id, { state: "running" });
+      assert.equal(running.state, "running");
+      await assert.rejects(as(alice).updateExperiment(run.id, { state: "paused" as never }), ExperimentError);
+      const files = await as(alice).experimentFiles(run.id);
+      await files.write("report.md", text("# Report"));
+      assert.equal((await as(alice).updateExperiment(run.id, { state: "done" })).state, "done");
+
+      // Its report can be proposed to the root, like a node experiment's to its node.
+      assert.deepEqual((await as(alice).promotable(run.id)).map((f) => [f.path, f.change]), [["report.md", "new"]]);
+      const [proposal] = await as(alice).promote(run.id, ["report.md"]);
+      assert.equal(proposal.node, null);
+
+      // Without a role at the root, no runs there: Carol can't start one, Bob can't see a shared one.
+      await assert.rejects(as(carol).createExperiment(null, { title: "x" }), ForbiddenError);
+      await as(alice).updateExperiment(run.id, { status: "shared" });
+      await assert.rejects(as(bob).experiment(run.id), NodeNotFoundError);
+      assert.equal(await as(bob).canSee({ op: "experiment", change: "update", id: run.id, node: null }), false);
+      // Under row-level security too.
+      const [row] = await asDbUser(storage.sql, bob, (db) => db`SELECT count(*) AS n FROM experiments WHERE id = ${run.id}`);
+      assert.equal(Number(row.n), 0);
+    });
+
+    test("a folder becomes an experiment, its files moving in with their history", async () => {
+      const node = await as(alice).files(leveling);
+      await node.write("runs/etch-1/xdoe-report/report.md", text("v1"));
+      await node.write("runs/etch-1/xdoe-report/report.md", text("v2"));
+      await node.write("runs/etch-1/data.csv", text("a,b"));
+      await node.write("runs/etch-10/other.md", text("not in etch-1"));
+
+      // Moving files out of a place takes editor there.
+      await assert.rejects(as(carol).experimentFromFolder(leveling, "runs/etch-1", {}), ForbiddenError);
+      const { experiment, moved } = await as(bob).experimentFromFolder(leveling, "runs/etch-1/", {});
+      assert.deepEqual(moved, ["runs/etch-1/data.csv", "runs/etch-1/xdoe-report/report.md"]);
+      assert.deepEqual(
+        [experiment.title, experiment.nodeId, experiment.mine, experiment.status, experiment.fileCount],
+        ["etch-1", leveling, true, "draft", 2],
+      );
+      const files = await as(bob).experimentFiles(experiment.id);
+      assert.deepEqual((await files.list()).map((f) => f.path), ["data.csv", "xdoe-report/report.md"]);
+      assert.equal(await read(files, "xdoe-report/report.md"), "v2");
+      assert.equal((await files.history("xdoe-report/report.md"))!.length, 2);
+      assert.equal(await node.stat("runs/etch-1/data.csv"), null);
+      assert.ok(await node.stat("runs/etch-10/other.md"), "a folder with a longer name stays");
+      // Nothing else of the node's is copied in, unlike a fork.
+      assert.equal(await files.stat("notes/recipe.md"), null);
+
+      await assert.rejects(as(bob).experimentFromFolder(leveling, "runs/nothing-here", {}), ExperimentError);
+      const log = await as(alice).auditLog(1000);
+      assert.ok(log.some((e) => e.action === "experiment.from_folder" && e.target.folder === "runs/etch-1"));
+    });
+
     test("changes are audited", async () => {
       const log = await as(alice).auditLog(1000);
       const created = log.find((e) => e.action === "experiment.create" && e.target.title === "Shared run")!;

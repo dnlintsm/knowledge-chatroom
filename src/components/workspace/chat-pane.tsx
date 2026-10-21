@@ -32,8 +32,8 @@ const MESSAGE_VIEW = {
 };
 
 export function ChatPane() {
-  const { activeFile, selection } = useWorkspace();
-  const { chat, runDir } = useWorkbench();
+  const { activeFile, selection, experiment } = useWorkspace();
+  const { chat } = useWorkbench();
   // Past chats show in place of the conversation (on phones the list slides
   // over it). Picking one, or starting a new one, changes the thread, which
   // brings the conversation back.
@@ -87,14 +87,14 @@ export function ChatPane() {
         className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]"
       >
         <span>Claude sees:</span>
-        {runDir && (
+        {experiment && (
           <span
             data-testid="chat-context-run"
-            title={`Run ${runDir}: its files and report`}
+            title={`Run "${experiment.title}": its files, report, parameters and results`}
             className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
           >
             <FlaskConical className="size-3 shrink-0" />
-            <span className="truncate">{runDir.split("/").pop()}</span>
+            <span className="truncate">{experiment.title}</span>
           </span>
         )}
         {activeFile ? (

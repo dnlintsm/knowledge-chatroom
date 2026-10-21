@@ -1,14 +1,11 @@
 /**
  * A run's general rules: fetched as JSON from the rules API (RULES_API_URL,
- * via /api/rules) and turned into <RUN_DIR>/models/general_rules.md by a fixed
+ * via /api/rules) and turned into the run's models/general_rules.md by a fixed
  * transform. The file is written once, read-only, and never regenerated.
  */
 
+/** Where the rules go, relative to the run (an experiment). */
 export const RULES_FILE = "models/general_rules.md";
-
-export function rulesPath(runDir: string) {
-  return `${runDir}/${RULES_FILE}`;
-}
 
 export interface Rule {
   id: string;

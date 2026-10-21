@@ -3,10 +3,9 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import { useAgent, useConfigureSuggestions, useCopilotKit, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import { FOLLOW_UP_INSTRUCTIONS, firstRoundSuggestions } from "./chat-suggestions";
-import { RUN_REPORT } from "./runs";
+import { findReport } from "./runs";
 import { useWorkspace } from "./store";
 import { isTextFile } from "./types";
-import { useWorkbench } from "./workbench";
 
 /** The runtime's chip writer (route.ts); absent with CHAT_SUGGESTIONS=static. */
 const SUGGESTER = "suggester";
@@ -30,16 +29,15 @@ function useRuntimeHasAgent(id: string): boolean {
  */
 export function useChatSuggestions() {
   const ws = useWorkspace();
-  const { runDir } = useWorkbench();
   const open = ws.activeFile && isTextFile(ws.activeFile) ? ws.activeFile.path : null;
-  const hasReport = runDir ? Boolean(ws.getFile(`${runDir}/${RUN_REPORT}`)) : false;
+  const runTitle = ws.experiment?.title ?? null;
+  const report = runTitle ? findReport(ws.files.map((f) => f.path)) : null;
   const nodeName = ws.node ? (ws.lineage.at(-1)?.name ?? null) : null;
-  const experimentTitle = ws.experiment?.title ?? null;
   const serverStorage = ws.storageMode === "server";
 
   const firstRound = useMemo(
-    () => firstRoundSuggestions({ openFile: open, runDir, hasReport, nodeName, experimentTitle, serverStorage }),
-    [open, runDir, hasReport, nodeName, experimentTitle, serverStorage],
+    () => firstRoundSuggestions({ openFile: open, runTitle, report, nodeName, serverStorage }),
+    [open, runTitle, report, nodeName, serverStorage],
   );
 
   const followUps = useRuntimeHasAgent(SUGGESTER);

@@ -1,11 +1,11 @@
 import { BookOpenCheck, Wand2 } from "lucide-react";
 import type { ActionContext, ActionDef } from "./actions";
-import { parseRulesResponse, RULES_FILE, rulesPath, rulesToMarkdown } from "./rules";
+import { parseRulesResponse, RULES_FILE, rulesToMarkdown } from "./rules";
 import { experimentPlace, serverFileExists } from "./server-files";
 import { FileExistsError } from "./types";
 
 /**
- * Generate Rules → Open Rules. Without <RUN_DIR>/models/general_rules.md the
+ * Generate Rules → Open Rules. Without the run's models/general_rules.md the
  * action asks the rules API once, writes the file read-only and opens it;
  * once the file exists it only opens it. Calls to the API are kept to one:
  * - the runner never starts the action twice at once (one tab);
@@ -16,13 +16,13 @@ import { FileExistsError } from "./types";
 export const generateRules: ActionDef = {
   id: "generate-rules",
   // Opening the rules needs to see the run; generating them writes a file.
-  requiredRole: ({ runDir, workspace }) => (workspace.getFile(rulesPath(runDir)) ? "viewer" : "editor"),
+  requiredRole: ({ workspace }) => (workspace.getFile(RULES_FILE) ? "viewer" : "editor"),
   agentInvocable: true,
   description:
     `Open the run's ${RULES_FILE}. If it doesn't exist yet, first generate it (once, read-only) ` +
     "from the rules API.",
-  view: ({ runDir, workspace }) => {
-    if (workspace.getFile(rulesPath(runDir))) {
+  view: ({ workspace }) => {
+    if (workspace.getFile(RULES_FILE)) {
       return { label: "Open Rules", icon: BookOpenCheck, enabled: true, hint: `Open ${RULES_FILE}` };
     }
     const loading = workspace.storageMode === "loading";
@@ -36,23 +36,17 @@ export const generateRules: ActionDef = {
   run: generateOrOpenRules,
 };
 
-async function generateOrOpenRules({ runDir, workbench, workspace }: ActionContext) {
-  const path = rulesPath(runDir);
+async function generateOrOpenRules({ run, workbench, workspace }: ActionContext) {
+  const path = RULES_FILE;
   if (workspace.getFile(path)) {
     workbench.editor.open(path);
     return;
   }
-  await withLock(`knowledge-chatroom:generate-rules:${path}`, async () => {
-    const exists =
-      workspace.storageMode === "server"
-        ? await serverFileExists(
-            path,
-            workspace.experiment ? experimentPlace(workspace.experiment.id) : workspace.node,
-          )
-        : Boolean(workspace.getFile(path));
-    if (exists) return alreadyGenerated();
+  await withLock(`knowledge-chatroom:generate-rules:${run.id}`, async () => {
+    if (await serverFileExists(path, experimentPlace(run.id))) return alreadyGenerated();
 
-    const res = await fetch(`/api/rules?run=${encodeURIComponent(runDir)}`, { cache: "no-store" });
+    const query = new URLSearchParams({ run: run.title, experiment: run.id });
+    const res = await fetch(`/api/rules?${query}`, { cache: "no-store" });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const message = (json as { error?: unknown } | null)?.error;

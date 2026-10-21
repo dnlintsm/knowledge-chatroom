@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { parseRulesResponse, rulesPath, rulesToMarkdown } from "../../src/components/workspace/rules";
+import { parseRulesResponse, RULES_FILE, rulesToMarkdown } from "../../src/components/workspace/rules";
 import { mockRules } from "../../src/lib/rules-mock";
 
 /** The rules API answer and its fixed markdown transform (src/components/workspace/rules.ts). */
 
 test("the rules file lives in the run's models folder", () => {
-  expect(rulesPath("runs/etch-01")).toBe("runs/etch-01/models/general_rules.md");
+  expect(RULES_FILE).toBe("models/general_rules.md");
 });
 
 test("turns the API's JSON into a fixed markdown table", () => {

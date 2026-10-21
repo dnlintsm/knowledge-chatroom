@@ -6,7 +6,7 @@ on expiring workflow artifacts or preview folders removed when a PR closes.
 
 | Asset | Original capture | What it shows |
 | --- | --- | --- |
-| `workspace.png` | `02-focus-run.png` | Focus mode: run files, report, chat, skills status, and actions |
+| `workspace.png` | `02-focus-run.png` | A run (captured before runs became experiments, #82): files, report, chat, skills status, and actions |
 | `experiments.png` | `19-experiment-compare.png` | Knowledge tree, experiment details, and results comparison |
 | `review-changes.png` | `21-review.png` | Proposed changes and file diffs before acceptance |
 

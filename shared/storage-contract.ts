@@ -33,7 +33,8 @@ export interface ExperimentEvent {
   op: "experiment";
   change: "create" | "update" | "status" | "delete";
   id: string;
-  node: string;
+  /** null: an experiment at the workspace root. */
+  node: string | null;
 }
 
 export interface ProposalEvent {
@@ -93,7 +94,7 @@ export function parseWorkspaceEvent(value: unknown): WorkspaceEvent {
   } else if (item.op === "node") {
     if (text(item.id) && text(item.change) && ["create", "rename", "delete"].includes(item.change)) return item as unknown as NodeEvent;
   } else if (item.op === "experiment") {
-    if (text(item.id) && text(item.node) && text(item.change) && ["create", "update", "status", "delete"].includes(item.change)) return item as unknown as ExperimentEvent;
+    if (text(item.id) && (item.node === null || text(item.node)) && text(item.change) && ["create", "update", "status", "delete"].includes(item.change)) return item as unknown as ExperimentEvent;
   }
   if (item.op === "proposal" && text(item.id) && (item.node === null || text(item.node)) &&
       canonicalPath(item.path) && author(item.author) && text(item.authorId) && text(item.change) &&

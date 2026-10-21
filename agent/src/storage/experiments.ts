@@ -5,20 +5,25 @@ import type { EventHub } from "./events";
 import { isNodeId, NodeNotFoundError } from "./nodes";
 
 /**
- * Experiments: a user's sandbox on one knowledge node (005_experiments.sql).
- * Forking copies the node's file list into the experiment; the bytes are
- * shared, since blobs are stored once by content. After that the experiment's
- * files change on their own, and the node's stay as they were.
+ * Experiments: a user's sandbox on one knowledge node, or at the workspace
+ * root (005_experiments.sql, 015_runs.sql). Forking copies the node's file
+ * list into the experiment; the bytes are shared, since blobs are stored once
+ * by content. After that the experiment's files change on their own, and the
+ * node's stay as they were. An experiment with a report.md is a run.
  */
 
 export type ExperimentStatus = "draft" | "shared" | "archived";
 export const STATUSES: ExperimentStatus[] = ["draft", "shared", "archived"];
+/** How far a run got; apart from status, which says who sees it. */
+export type ExperimentState = "ready" | "running" | "done" | "failed";
+export const STATES: ExperimentState[] = ["ready", "running", "done", "failed"];
 /** writer: its author, while it isn't archived. reader: may look. */
 export type ExperimentAccess = "writer" | "reader";
 
 export interface Experiment {
   id: string;
-  nodeId: string;
+  /** null: at the workspace root. */
+  nodeId: string | null;
   authorId: string;
   authorName: string | null;
   title: string;
@@ -26,6 +31,7 @@ export interface Experiment {
   params: Record<string, unknown>;
   results: Record<string, unknown>;
   status: ExperimentStatus;
+  state: ExperimentState;
   forkedAt: string;
   updatedAt: string;
   fileCount: number;
@@ -41,6 +47,7 @@ export interface ExperimentInput {
   params?: Record<string, unknown>;
   results?: Record<string, unknown>;
   status?: ExperimentStatus;
+  state?: ExperimentState;
 }
 
 /** The request can't be done as asked (no title, params not an object, …). */
@@ -77,12 +84,16 @@ export function cleanInput(input: ExperimentInput): ExperimentInput {
     if (!STATUSES.includes(input.status)) throw new ExperimentError("Status must be draft, shared or archived");
     out.status = input.status;
   }
+  if (input.state !== undefined) {
+    if (!STATES.includes(input.state)) throw new ExperimentError("State must be ready, running, done or failed");
+    out.state = input.state;
+  }
   return out;
 }
 
 interface ExperimentRow {
   id: string;
-  node_id: string;
+  node_id: string | null;
   author_id: string;
   author_name: string | null;
   title: string;
@@ -90,6 +101,7 @@ interface ExperimentRow {
   params: Record<string, unknown>;
   results: Record<string, unknown>;
   status: ExperimentStatus;
+  state: ExperimentState;
   forked_at: Date;
   updated_at: Date;
   file_count: string;
@@ -107,6 +119,7 @@ const toExperiment = (r: ExperimentRow): Experiment => ({
   params: r.params,
   results: r.results,
   status: r.status,
+  state: r.state,
   forkedAt: r.forked_at.toISOString(),
   updatedAt: r.updated_at.toISOString(),
   fileCount: Number(r.file_count),
@@ -138,21 +151,24 @@ export class ExperimentService {
     return new ExperimentService(sql, this.events, this.workspaceId);
   }
 
-  /** Experiments `userId` can see, on one node or (without `nodeId`) anywhere; newest first. */
-  async list(userId: string, nodeId?: string): Promise<Experiment[]> {
-    if (nodeId !== undefined && !isNodeId(nodeId)) return [];
+  /**
+   * Experiments `userId` can see, on one node (null: at the workspace root)
+   * or, without `nodeId`, anywhere; newest first.
+   */
+  async list(userId: string, nodeId?: string | null): Promise<Experiment[]> {
+    if (nodeId && !isNodeId(nodeId)) return [];
     const rows = await this.sql<ExperimentRow[]>`
       SELECT * FROM (
         SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-               e.params, e.results, e.status, e.forked_at, e.updated_at,
+               e.params, e.results, e.status, e.state, e.forked_at, e.updated_at,
                (SELECT count(*) FROM files f
                 WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
                experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
-        FROM experiments e JOIN nodes n ON n.id = e.node_id
+        FROM experiments e LEFT JOIN nodes n ON n.id = e.node_id
         LEFT JOIN users u ON u.id = e.author_id
         WHERE e.workspace_id = ${this.workspaceId} AND e.deleted_at IS NULL
-          AND n.deleted_at IS NULL
-          ${nodeId === undefined ? this.sql`` : this.sql`AND e.node_id = ${nodeId}`}
+          AND (e.node_id IS NULL OR n.deleted_at IS NULL)
+          ${nodeId === undefined ? this.sql`` : this.sql`AND e.node_id IS NOT DISTINCT FROM ${nodeId}::uuid`}
       ) x
       WHERE access IS NOT NULL
       ORDER BY forked_at DESC, id`;
@@ -163,7 +179,7 @@ export class ExperimentService {
     if (!isNodeId(id)) return null;
     const rows = await this.sql<ExperimentRow[]>`
       SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-             e.params, e.results, e.status, e.forked_at, e.updated_at,
+             e.params, e.results, e.status, e.state, e.forked_at, e.updated_at,
              (SELECT count(*) FROM files f
               WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
              experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
@@ -174,18 +190,71 @@ export class ExperimentService {
   }
 
   /**
-   * Forks `nodeId` into a new draft for `userId`: the node's live files are
-   * copied in at their current versions.
+   * A new draft for `userId` on `nodeId`, or at the workspace root (null).
+   * On a node it is a fork: the node's live files are copied in at their
+   * current versions. At the root it starts empty, since the root's files are
+   * the whole workspace's, not one subject's.
    */
   async create(
     userId: string,
-    nodeId: string,
+    nodeId: string | null,
     input: ExperimentInput,
     inTx?: (tx: Tx, id: string) => Promise<unknown>,
   ): Promise<Experiment> {
+    return this.add(userId, nodeId, input, async (tx, id) => {
+      if (nodeId !== null) await this.copyNodeFiles(tx, nodeId, id);
+      await inTx?.(tx, id);
+    });
+  }
+
+  /**
+   * Turns a folder of `nodeId` (null: the workspace root) into a new draft
+   * experiment of `userId`'s: the folder's files move into it, keeping their
+   * history, at paths relative to the folder. Nothing else is copied in. For
+   * the run folders from before runs were experiments. Throws ExperimentError
+   * when the folder holds no files.
+   */
+  async fromFolder(
+    userId: string,
+    nodeId: string | null,
+    folder: string,
+    input: ExperimentInput,
+    inTx?: (tx: Tx, id: string) => Promise<unknown>,
+  ): Promise<{ experiment: Experiment; moved: string[] }> {
+    const prefix = `${folder}/`;
+    let moved: string[] = [];
+    const experiment = await this.add(userId, nodeId, input, async (tx, id) => {
+      const rows = await tx<{ path: string; sha256: string }[]>`
+        UPDATE files f SET node_id = NULL, experiment_id = ${id},
+               path = substr(f.path, ${prefix.length + 1}), updated_at = now()
+        FROM file_versions v
+        WHERE v.id = f.current_version_id
+          AND f.workspace_id = ${this.workspaceId} AND f.experiment_id IS NULL
+          AND f.node_id IS NOT DISTINCT FROM ${nodeId}::uuid
+          AND starts_with(f.path, ${prefix}) AND f.deleted_at IS NULL
+        RETURNING f.path, v.blob_sha256 AS sha256`;
+      if (!rows.length) throw new ExperimentError(`There are no files in ${folder}`);
+      moved = rows.map((r) => `${prefix}${r.path}`).sort();
+      for (const row of rows) {
+        await this.events.notify(tx, { op: "delete", node: nodeId, path: `${prefix}${row.path}` });
+        await this.events.notify(tx, {
+          op: "write", node: null, experiment: id, path: row.path, sha256: row.sha256, author: "user",
+        });
+      }
+      await inTx?.(tx, id);
+    });
+    return { experiment, moved };
+  }
+
+  private async add(
+    userId: string,
+    nodeId: string | null,
+    input: ExperimentInput,
+    inTx: (tx: Tx, id: string) => Promise<unknown>,
+  ): Promise<Experiment> {
     const fields = cleanInput(input);
     if (!fields.title) throw new ExperimentError("An experiment needs a title");
-    if (!isNodeId(nodeId)) throw new NodeNotFoundError("Node not found");
+    if (nodeId !== null && !isNodeId(nodeId)) throw new NodeNotFoundError("Node not found");
     // Chosen here, not by the database: with row-level security the new row
     // can't be read back in the statement that adds it.
     const id = randomUUID();
@@ -193,27 +262,11 @@ export class ExperimentService {
       // The insert also checks and holds the node (experiments_place in
       // 005_experiments.sql), so a delete of it can't slip in between.
       await tx`
-        INSERT INTO experiments (id, workspace_id, node_id, author_id, title, hypothesis, params, results)
+        INSERT INTO experiments (id, workspace_id, node_id, author_id, title, hypothesis, params, results, state)
         VALUES (${id}, ${this.workspaceId}, ${nodeId}, ${userId}, ${fields.title!},
                 ${fields.hypothesis ?? ""}, ${tx.json((fields.params ?? {}) as never)},
-                ${tx.json((fields.results ?? {}) as never)})`;
-      // The node's files, each at its current version; bytes are shared.
-      await tx`
-        INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from, updated_at)
-        SELECT f.workspace_id, ${id}, f.path, f.kind, f.mime, f.current_version_id, f.updated_at
-        FROM files f
-        WHERE f.workspace_id = ${this.workspaceId} AND f.node_id = ${nodeId}
-          AND f.deleted_at IS NULL AND f.current_version_id IS NOT NULL`;
-      await tx`
-        INSERT INTO file_versions (file_id, blob_sha256, size, mime, author_type, author_id, created_at)
-        SELECT f.id, v.blob_sha256, v.size, v.mime, v.author_type, v.author_id, v.created_at
-        FROM files f JOIN file_versions v ON v.id = f.forked_from
-        WHERE f.experiment_id = ${id}`;
-      await tx`
-        UPDATE files f SET current_version_id = v.id
-        FROM file_versions v
-        WHERE v.file_id = f.id AND f.experiment_id = ${id}`;
-      await inTx?.(tx, id);
+                ${tx.json((fields.results ?? {}) as never)}, ${fields.state ?? "ready"})`;
+      await inTx(tx, id);
       await this.events.notify(tx, { op: "experiment", change: "create", id, node: nodeId });
     }).catch((err: { code?: string; message?: string }) => {
       if (err.code === "P0001" && err.message === "Node not found") throw new NodeNotFoundError("Node not found");
@@ -225,12 +278,31 @@ export class ExperimentService {
     return created;
   }
 
+  /** The node's live files into experiment `id`, each at its current version; bytes are shared. */
+  private async copyNodeFiles(tx: Tx, nodeId: string, id: string) {
+    await tx`
+      INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from, updated_at)
+      SELECT f.workspace_id, ${id}, f.path, f.kind, f.mime, f.current_version_id, f.updated_at
+      FROM files f
+      WHERE f.workspace_id = ${this.workspaceId} AND f.node_id = ${nodeId}
+        AND f.deleted_at IS NULL AND f.current_version_id IS NOT NULL`;
+    await tx`
+      INSERT INTO file_versions (file_id, blob_sha256, size, mime, author_type, author_id, created_at)
+      SELECT f.id, v.blob_sha256, v.size, v.mime, v.author_type, v.author_id, v.created_at
+      FROM files f JOIN file_versions v ON v.id = f.forked_from
+      WHERE f.experiment_id = ${id}`;
+    await tx`
+      UPDATE files f SET current_version_id = v.id
+      FROM file_versions v
+      WHERE v.file_id = f.id AND f.experiment_id = ${id}`;
+  }
+
   /** Sets the given fields; false if the experiment is gone. */
   async update(id: string, input: ExperimentInput, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     const fields = cleanInput(input);
     if (!isNodeId(id)) return false;
     return this.sql.begin(async (tx) => {
-      const [before] = await tx<{ status: ExperimentStatus; node_id: string }[]>`
+      const [before] = await tx<{ status: ExperimentStatus; node_id: string | null }[]>`
         SELECT status, node_id FROM experiments
         WHERE id = ${id} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL
         FOR UPDATE`;
@@ -241,6 +313,7 @@ export class ExperimentService {
       if (fields.params !== undefined) set.params = tx.json(fields.params as never);
       if (fields.results !== undefined) set.results = tx.json(fields.results as never);
       if (fields.status !== undefined) set.status = fields.status;
+      if (fields.state !== undefined) set.state = fields.state;
       if (Object.keys(set).length) {
         await tx`
           UPDATE experiments SET ${tx(set as Record<string, never>)}, updated_at = now()
@@ -257,7 +330,7 @@ export class ExperimentService {
   async remove(id: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     if (!isNodeId(id)) return false;
     return this.sql.begin(async (tx) => {
-      const [gone] = await tx<{ node_id: string }[]>`
+      const [gone] = await tx<{ node_id: string | null }[]>`
         UPDATE experiments SET deleted_at = now()
         WHERE id = ${id} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL
         RETURNING node_id`;

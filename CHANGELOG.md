@@ -4,6 +4,13 @@
 
 ### Upgrading
 
+- Runs are experiments now (#82). The Traverse view, Focus mode, `?run=` links and
+  `RUN_DIR_MARKERS` are gone; a run is an experiment with a `report.md`. Existing run
+  folders (holding `xdoe-report/`) are listed in the Runs view, where **Make run** moves
+  each into a new experiment with its history. Runs need server storage. Migration
+  `015_runs.sql` runs on start.
+- The rules API (`RULES_API_URL`) is now asked `?run=<run title>&experiment=<id>`
+  instead of `?run=<folder>`.
 - `AGENT_URL` now names a remote agent backend for the chat. This repo's agent server
   moved to `LOCAL_AGENT_URL` (default `http://localhost:8000`). Remove
   `AGENT_URL=http://localhost:8000` from your `.env`, or rename it to
@@ -14,8 +21,13 @@
 - A remote agent backend for the chat (`AGENT_URL`): runs go to
   `${AGENT_URL}/agent/report`, and this repo's own Claude agent and follow-up chips are
   off while storage and skills stay on this repo's server. Every chat run carries the
-  user and where they are (node, experiment, run, open file) in
-  `forwardedProps.knowledge_chatroom`. See `docs/remote-agent.md`.
+  user and where they are (node, experiment, open file) in
+  `forwardedProps.knowledge_chatroom` (version 2: `experiment` with its `state` and
+  `report`, no `run_dir`). See `docs/remote-agent.md`.
+- The Runs view (#82) replaces Traverse: every run here and below, a **+** to start one,
+  and a **Runs** tab comparing them by state, place, parameters and results. Runs can
+  sit at the workspace root, have a state (ready, running, done, failed), and open from a
+  link (`?experiment=<id>`). The app name goes to the workspace root's Runs view.
 
 ## 0.1.1
 

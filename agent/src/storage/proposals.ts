@@ -351,13 +351,13 @@ export class ProposalService {
              CASE WHEN nf.id IS NULL THEN 'new' ELSE 'changed' END AS change,
              (SELECT p.id FROM proposals p
               WHERE p.experiment_id = e.id AND p.status = 'open' AND p.path = f.path
-                AND p.node_id = e.node_id AND p.blob_sha256 = v.blob_sha256 AND p.mime = f.mime
+                AND p.node_id IS NOT DISTINCT FROM e.node_id AND p.blob_sha256 = v.blob_sha256 AND p.mime = f.mime
               LIMIT 1) AS proposal
       FROM experiments e
       JOIN files f ON f.experiment_id = e.id AND f.deleted_at IS NULL
       JOIN file_versions v ON v.id = f.current_version_id
       LEFT JOIN file_versions fv ON fv.id = f.forked_from
-      LEFT JOIN files nf ON nf.workspace_id = e.workspace_id AND nf.node_id = e.node_id
+      LEFT JOIN files nf ON nf.workspace_id = e.workspace_id AND nf.node_id IS NOT DISTINCT FROM e.node_id
         AND nf.experiment_id IS NULL AND nf.path = f.path AND nf.deleted_at IS NULL
       LEFT JOIN file_versions nv ON nv.id = nf.current_version_id
       WHERE e.id = ${experimentId} AND e.workspace_id = ${this.workspaceId} AND e.deleted_at IS NULL

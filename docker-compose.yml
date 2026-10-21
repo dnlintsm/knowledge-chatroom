@@ -98,9 +98,6 @@ services:
     build:
       context: .
       target: app
-      args:
-        # Fixed into the UI at build time; change it in .env, then rebuild.
-        RUN_DIR_MARKERS: ${RUN_DIR_MARKERS:-xdoe-report}
     environment:
       LOCAL_AGENT_URL: http://agent:8000
       # A remote backend for the chat (docs/remote-agent.md); empty = the agent above.
