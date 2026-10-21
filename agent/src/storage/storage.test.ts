@@ -953,6 +953,24 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       // Bringing the run back to its node never proposes its inputs.
       const proposals = await claude(carol).promote(run.id);
       assert.deepEqual(proposals.map((x) => x.path), ["report.md"]);
+
+      // A rerun is a new run with the same inputs, at the versions the old one read.
+      await assert.rejects(claude(bob).rerun(run.id), NodeNotFoundError, "someone else's draft");
+      const rerun = await claude(carol).rerun(run.id, { params: { wafers: 3 } }, { chat: "thread-2" });
+      assert.notEqual(rerun.id, run.id);
+      assert.deepEqual(
+        [rerun.title, rerun.nodeId, rerun.state, rerun.params],
+        ["Leveling analysis v2 (rerun)", leveling, "running", { wafers: 3 }],
+      );
+      const rp = rerun.provenance as { rerunOf: { id: string }; chat: string; inputs: { path: string; sha256: string }[] };
+      assert.deepEqual([rp.rerunOf.id, rp.chat], [run.id, "thread-2"]);
+      assert.deepEqual(rp.inputs.map((i) => i.path), ["inputs/map.bin", "inputs/recipe.md"]);
+      assert.deepEqual(rp.inputs.map((i) => i.sha256), p.inputs.map((i) => i.sha256));
+      const rerunFiles = await claude(carol).experimentFiles(rerun.id);
+      assert.equal(await read(rerunFiles, "inputs/recipe.md"), "dose 30", "not the node's newer version");
+      assert.match(await read(rerunFiles, "report.md"), new RegExp(`\nrerun_of: "${run.id}"\n`));
+      const old = await as(carol).experiment(run.id);
+      assert.deepEqual([old.state, old.results], ["done", { tilt_urad: 1.5 }]);
     });
 
     test("changes are audited", async () => {

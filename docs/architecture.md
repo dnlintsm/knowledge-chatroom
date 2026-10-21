@@ -182,6 +182,18 @@ folder or mode (issue #82):
   only, never by the API). The run's `report.md` carries the same record in its front
   matter, refreshed when the results are set (`agent/src/storage/run-report.ts`), and the
   run panel shows it under **Provenance**, with the inputs to open.
+- **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
+  place with the old run's parameters, hypothesis and the very input versions it read (from
+  its `inputs/`), unless changed. The old run stays as it ended; a finished run can't be
+  finished again with other results. The new run's provenance and front matter name the old
+  one (`rerun_of`), and its panel links back to it.
+- **Analysis** is the built-in `analysis` skill (`agent/skills/analysis/`, Auto by default):
+  Claude starts a run with the user's files as inputs, reads them from the run, writes the
+  report from `reference/report-template.md` and records the results. With
+  `SKILL_SCRIPTS=on` it can also profile CSV files with its `scripts/profile.mjs` (plain
+  Node: per-column counts, missing values, numeric statistics, top values) and save what
+  scripts make into the run. Long analyses still run within one chat turn; background jobs
+  with progress are a later step.
 
 Runs need server storage; a browser-only workspace has none.
 

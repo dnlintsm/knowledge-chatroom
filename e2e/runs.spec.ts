@@ -140,6 +140,7 @@ test("runs: a new run at the root starts empty and tracks its state", async ({ p
 });
 
 test("a run Claude started shows where it came from", async ({ page, request }) => {
+  const first = await makeRun(request, "Wafer analysis, first try", { "report.md": "# First try\n" });
   const run = await makeRun(request, "Wafer analysis", {
     "inputs/wafers.csv": "wafer,dose\n1,30\n",
     "report.md": "# Wafer analysis\n\nDose is on target.\n",
@@ -154,6 +155,7 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
       model: "claude-test",
       skill: { name: "analysis", source: "workspace", sha256: "ab12cd34ef56" },
       tools: { agent: "0.1.1", claudeAgentSdk: "0.3.296" },
+      rerunOf: { id: first.id, title: first.title },
       inputs: [
         {
           path: "inputs/wafers.csv",
@@ -179,6 +181,12 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   await shot(page, "02d-run-provenance");
   await inputs.getByRole("button", { name: "inputs/wafers.csv" }).click();
   await expect(page.getByTestId("file-preview")).toContainText("dose");
+
+  // A rerun links back to the run it ran again.
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
+  await provenance.getByRole("button", { name: first.title }).click();
+  await expect(page).toHaveURL(new RegExp(`experiment=${first.id}$`));
+  await expect(page.getByRole("navigation", { name: "Location" })).toContainText(first.title);
 });
 
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {

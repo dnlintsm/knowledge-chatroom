@@ -369,6 +369,18 @@ function Provenance({ experiment }: { experiment: Experiment }) {
     ],
     ["Tools", p.tools && Object.entries(p.tools).map(([k, v]) => `${k} ${v}`).join(", ")],
     ["Chat", p.chat],
+    [
+      "Rerun of",
+      p.rerunOf && (
+        <button
+          type="button"
+          className="cursor-pointer text-left underline-offset-2 hover:underline"
+          onClick={() => void ws.enterExperiment(p.rerunOf!.id)}
+        >
+          {p.rerunOf.title}
+        </button>
+      ),
+    ],
   ];
   return (
     <Section title="Provenance">

@@ -125,11 +125,11 @@ test("skills: modes, the / menu and the status bar", async ({ page }) => {
   const writeSkill = panel.locator('[data-skill="write-skill"]');
   await expect(writeSkill.getByRole("radio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
   await expect(writeSkill.getByRole("radio", { name: "Auto" })).toBeDisabled();
-  await expect(page.getByTestId("skill-status")).toContainText("1 auto · 1 manual skills");
+  await expect(page.getByTestId("skill-status")).toContainText("2 auto · 1 manual skills");
 
   // Off takes it out of the / menu; back to the default brings it back.
   await tldr.getByRole("radio", { name: "Off" }).click();
-  await expect(page.getByTestId("skill-status")).toContainText("0 auto · 1 manual skills");
+  await expect(page.getByTestId("skill-status")).toContainText("1 auto · 1 manual skills");
   await page.getByTestId("copilot-chat-textarea").fill("/");
   await expect(page.getByTestId("skill-menu")).not.toContainText("/tldr");
   await tldr.getByTestId("skill-use-default").click();
@@ -166,7 +166,7 @@ test("skills: defaults for everyone, your choice, and one chat's own", async ({ 
   // Your own choice wins until you go back to the default.
   await tldr.getByRole("radio", { name: "Auto" }).click();
   await expect(tldr.getByTestId("skill-use-default")).toBeVisible();
-  await expect(status).toContainText("1 auto · 1 manual skills");
+  await expect(status).toContainText("2 auto · 1 manual skills");
   await shot(page, "05d-skill-defaults");
 
   // Off in this chat only: the / command no longer runs it here.
@@ -175,7 +175,7 @@ test("skills: defaults for everyone, your choice, and one chat's own", async ({ 
   await expect(chat.getByTestId("skill-chat-mode")).toHaveValue("");
   await chat.getByTestId("skill-chat-mode").selectOption("off");
   await expect(page.getByTestId("chat-skills-toggle")).toHaveText("This chat · 1 changed");
-  await expect(status).toContainText("0 auto · 1 manual skills");
+  await expect(status).toContainText("1 auto · 1 manual skills");
   await shot(page, "05e-skill-this-chat");
   await page.getByTestId("chat-skills-toggle").click();
   // Your choice in the panel is unchanged.
