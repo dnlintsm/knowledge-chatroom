@@ -14,7 +14,10 @@ import { after, before, describe, test } from "node:test";
 
 import { strFromU8, unzipSync } from "fflate";
 
+import type Anthropic from "@anthropic-ai/sdk";
+
 import { AccessService } from "./access";
+import { ChatService } from "./chats";
 import { asUser, connect, migrate, prepareRowSecurity, type Sql } from "./db";
 import {
   MemoryConflictError,
@@ -25,7 +28,8 @@ import {
 } from "./memory";
 import type { Storage } from "./index";
 import { createMemoryHandler } from "../memory/http";
-import { memoryPrompt, memoryTools, prepareMemory } from "../memory/run";
+import { memoryPrompt, memoryTools, prepareMemory, taintHook, type RunMemory } from "../memory/run";
+import { LEARN_TOOL, MemoryLearner } from "../memory/learn";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -68,6 +72,9 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     const updated = await memory.save(me, "reply-style", note("Short replies, no em-dashes."), "agent", { run });
     assert.equal(updated.note.version, 2);
     assert.equal(updated.event?.kind, "update");
+    const undoable = new Map((await memory.activity(me)).map((a) => [a.id, a.undoable]));
+    assert.equal(undoable.get(updated.event!.id), true);
+    assert.equal(undoable.get(created.event!.id), false, "only the latest change can be undone");
 
     const undone = await memory.undo(me, updated.event!.id);
     assert.equal(undone.note?.body, "Short replies.");
@@ -234,6 +241,191 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     }
   });
 
+  test("the inbox: proposals wait, accept makes them as Claude's, reject drops them", async () => {
+    const chat = { source: "chat" as const, threadId: "chat-1" };
+    const added = await memory.propose(me, { op: "add", name: "inbox-note", input: note("Proposed body", "Proposed"), reason: "Said so" }, chat);
+    assert.equal(added.baseVersion, null);
+    // The same change again replaces the waiting one.
+    await memory.propose(me, { op: "add", name: "inbox-note", input: note("Newer body", "Proposed") }, chat);
+    assert.deepEqual((await memory.inbox(me)).map((i) => [i.name, i.body]), [["inbox-note", "Newer body"]]);
+    assert.deepEqual(await memory.inbox(other), [], "inboxes are private");
+
+    await assert.rejects(memory.propose(me, { op: "update", name: "nope", input: note("x") }, chat), MemoryNotFoundError);
+    await assert.rejects(memory.propose(me, { op: "add", name: "reply-style", input: note("x") }, chat), MemoryConflictError);
+
+    const accepted = await memory.accept(me, added.id);
+    assert.equal(accepted.note?.body, "Newer body");
+    assert.equal(accepted.event?.kind, "create");
+    await assert.rejects(memory.accept(me, added.id), MemoryNotFoundError, "decided once");
+
+    // A change proposed against an older version is refused, and waits again.
+    const change = await memory.propose(me, { op: "update", name: "inbox-note", input: note("Claude's edit", "Proposed") }, chat);
+    await memory.save(me, "inbox-note", note("The user's edit", "Proposed"), "user");
+    await assert.rejects(memory.accept(me, change.id), MemoryConflictError);
+    assert.equal((await memory.inbox(me)).length, 1);
+    await memory.reject(me, change.id);
+    assert.equal((await memory.inbox(me)).length, 0);
+    assert.equal((await memory.get(me, "inbox-note"))?.body, "The user's edit");
+
+    const activity = await memory.activity(me);
+    assert.ok(activity.some((a) => a.name === "inbox-note" && a.source === "inbox" && a.kind === "create"));
+    assert.ok(activity.every((a) => a.kind !== "read"));
+  });
+
+  test("ask mode and outside content send Claude's changes to the inbox", async () => {
+    const storage = { memory } as unknown as Storage;
+    process.env.MEMORY = "on";
+    try {
+      const events: string[] = [];
+      const runMemory = (await prepareMemory(storage, me, { threadId: "chat-ask", runId: "r" }, (e) => events.push(`${e.kind}:${e.name}`)))!;
+      const call = (m: RunMemory, name: string, args: Record<string, unknown>) =>
+        (memoryTools(m).find((t) => t.name === name)!.handler as (a: unknown, extra: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(args, {});
+
+      // Reading a file first (any other tool) marks the run.
+      const hook = taintHook(runMemory).hooks[0];
+      await hook({ hook_event_name: "PreToolUse", tool_name: "mcp__copilotkit__memory_view" } as never, undefined, { signal: new AbortController().signal });
+      assert.equal(runMemory.tainted, false);
+      await hook({ hook_event_name: "PreToolUse", tool_name: "mcp__copilotkit__read_file" } as never, undefined, { signal: new AbortController().signal });
+      assert.equal(runMemory.tainted, true);
+      const proposed = await call(runMemory, "memory_save", { name: "from-file", description: "From a file", type: "reference", body: "x" });
+      assert.match(proposed.content[0].text, /Memory inbox/);
+      assert.equal(await memory.get(me, "from-file"), null);
+      assert.deepEqual(events, ["propose:from-file"]);
+
+      await memory.setMode(me, "ask");
+      const asking = (await prepareMemory(storage, me, { threadId: "chat-ask2", runId: "r" }, () => {}))!;
+      assert.equal(asking.mode, "ask");
+      assert.match(memoryPrompt(asking), /Memory inbox/);
+      await call(asking, "memory_edit", { name: "reply-style", old_text: "Short", new_text: "Brief" });
+      await call(asking, "memory_delete", { name: "private" });
+      const inbox = await memory.inbox(me);
+      assert.deepEqual(inbox.map((i) => [i.op, i.name]).sort(), [["add", "from-file"], ["delete", "private"], ["update", "reply-style"]]);
+      assert.equal((await memory.get(me, "private"))?.archived, false, "nothing changed yet");
+      for (const item of inbox) await memory.reject(me, item.id);
+    } finally {
+      delete process.env.MEMORY;
+      await memory.setMode(me, "on");
+    }
+  });
+
+  test("the learner learns from quiet chats once, as the user's mode says", async () => {
+    const chats = new ChatService(sql, workspaceId, rowSecurity);
+    const storage = { sql, workspaceId, memory, chats } as unknown as Storage;
+    const say = (id: string, text: string) =>
+      chats.appendRun(me, id, {
+        agentId: "a",
+        runId: `run-${id}`,
+        events: [],
+        messages: [
+          { id: "1", role: "user", content: text },
+          { id: "2", role: "assistant", content: "Noted." },
+        ],
+      });
+    const quiet = (id: string) => sql`UPDATE chats SET last_run_at = now() - interval '1 hour' WHERE id = ${id}`;
+    let calls = 0;
+    let seen = "";
+    const create = (async (params: Anthropic.MessageCreateParamsNonStreaming) => {
+      calls++;
+      seen = String(params.messages[0].content);
+      return {
+        content: [
+          {
+            type: "tool_use",
+            id: "t",
+            name: LEARN_TOOL,
+            input: {
+              changes: [
+                { op: "add", name: "lab-team", description: "Works in the etch team", type: "profile", body: "Etch team, fab 2.", reason: "Said so" },
+                { op: "update", name: "missing-note", description: "x", type: "profile", body: "x", reason: "skipped" },
+              ],
+            },
+          },
+        ],
+      } as unknown as Anthropic.Message;
+    }) as never;
+    const learner = new MemoryLearner(() => storage, create);
+    process.env.MEMORY = "on";
+    try {
+      await say("learn-1", "I work in the etch team in fab 2.");
+      assert.equal((await learner.due()).some((c) => c.id === "learn-1"), false, "not while the chat is active");
+      await quiet("learn-1");
+      const [due] = (await learner.due()).filter((c) => c.id === "learn-1");
+      assert.ok(due);
+      assert.deepEqual(await learner.learn(due), { made: 1, proposed: 0 });
+      assert.match(seen, /etch team/);
+      assert.match(seen, /<note name="reply-style"/, "the model sees the notes");
+      assert.equal((await memory.get(me, "lab-team"))?.createdBy, "agent");
+      const [change] = (await memory.activity(me)).filter((a) => a.name === "lab-team");
+      assert.equal(change.source, "learn");
+      assert.equal((await learner.due()).some((c) => c.id === "learn-1"), false, "learned once");
+
+      // Incognito chats are skipped; with memory set to ask, changes wait.
+      await say("learn-2", "Secret plans.");
+      await quiet("learn-2");
+      await memory.setIncognito(me, "learn-2", true);
+      assert.equal((await learner.due()).some((c) => c.id === "learn-2"), false);
+      await memory.setIncognito(me, "learn-2", false);
+      await memory.remove(me, "lab-team");
+      await memory.setMode(me, "ask");
+      const [ask] = (await learner.due()).filter((c) => c.id === "learn-2");
+      assert.deepEqual(await learner.learn(ask), { made: 0, proposed: 1 });
+      assert.deepEqual((await memory.inbox(me)).map((i) => [i.source, i.name]), [["learn", "lab-team"]]);
+
+      // A failed call is recorded and not retried until the chat moves on.
+      const failing = new MemoryLearner(() => storage, (async () => {
+        throw new Error("no key");
+      }) as never);
+      await say("learn-3", "More.");
+      await quiet("learn-3");
+      const [fail] = (await failing.due()).filter((c) => c.id === "learn-3");
+      assert.equal((await failing.learn(fail)).error, "no key");
+      assert.equal((await failing.due()).some((c) => c.id === "learn-3"), false);
+      assert.equal(calls, 2);
+    } finally {
+      delete process.env.MEMORY;
+      await memory.setMode(me, "on");
+      for (const item of await memory.inbox(me)) await memory.reject(me, item.id);
+    }
+  });
+
+  test("the learner leaves notes it didn't see in full, or that changed meanwhile", async () => {
+    const chats = new ChatService(sql, workspaceId, rowSecurity);
+    const storage = { sql, workspaceId, memory, chats } as unknown as Storage;
+    await memory.save(me, "big-note", note("x".repeat(3000), "A long note"), "user");
+    const short = await memory.notesForLearning(me, 2000);
+    assert.equal(short.versions.has("big-note"), false);
+    assert.match(short.text, /leave this note as it is/);
+
+    const before = (await memory.get(me, "reply-style"))!;
+    const create = (async () => {
+      // You edit the note while the model is still working.
+      await memory.save(me, "reply-style", note("Your own edit."), "user");
+      return {
+        content: [{
+          type: "tool_use", id: "t", name: LEARN_TOOL,
+          input: { changes: [{ op: "update", name: "reply-style", description: "Reply style", type: "preference", body: "Stale rewrite.", reason: "x" }] },
+        }],
+      } as unknown as Anthropic.Message;
+    }) as never;
+    const learner = new MemoryLearner(() => storage, create);
+    process.env.MEMORY = "on";
+    try {
+      await chats.appendRun(me, "learn-4", {
+        agentId: "a", runId: "run-learn-4", events: [],
+        messages: [{ id: "1", role: "user", content: "Hi" }],
+      });
+      await sql`UPDATE chats SET last_run_at = now() - interval '1 hour' WHERE id = 'learn-4'`;
+      const [due] = (await learner.due()).filter((c) => c.id === "learn-4");
+      assert.deepEqual(await learner.learn(due), { made: 0, proposed: 0 });
+      const after = (await memory.get(me, "reply-style"))!;
+      assert.equal(after.body, "Your own edit.");
+      assert.equal(after.version, before.version + 1);
+    } finally {
+      delete process.env.MEMORY;
+      await memory.remove(me, "big-note");
+    }
+  });
+
   test("the /memory API", async () => {
     const storage = {
       memory,
@@ -269,6 +461,16 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
 
       const settings = await (await put("/memory/settings", { thread: "chat-9", incognito: true })).json();
       assert.deepEqual(settings, { mode: "on", incognito: true });
+
+      const activity = (await (await call("/memory/activity")).json()) as { activity: unknown[] };
+      assert.ok(Array.isArray(activity.activity));
+      const item = await memory.propose(me, { op: "add", name: "api-proposed", input: note("p", "P") }, { source: "chat" });
+      assert.equal(((await (await call("/memory")).json()) as { inbox: { id: string }[] }).inbox[0].id, item.id);
+      assert.equal((await call(`/memory/inbox/${item.id}/accept`, { method: "POST" })).status, 200);
+      assert.equal((await call(`/memory/inbox/${item.id}/reject`, { method: "POST" })).status, 404);
+      assert.equal((await put("/memory/settings", { mode: "ask" })).status, 200);
+      assert.equal((await put("/memory/settings", { mode: "maybe" })).status, 400);
+      await put("/memory/settings", { mode: "on" });
 
       const zip = await call("/memory/export");
       assert.equal(zip.headers.get("content-type"), "application/zip");

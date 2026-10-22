@@ -26,7 +26,9 @@ work easier to find, understand, and reuse.
 - **Personalized memory (experimental)** — with `MEMORY=on`, Claude keeps short notes
   about you across chats: who you are, how you like to work, your ongoing projects. Only
   you see them. Each change shows under the reply with Undo, every note can be edited or
-  restored to an earlier version, and incognito chats leave memory alone.
+  restored to an earlier version, and incognito chats leave memory alone. Claude also
+  learns from chats once they go quiet, and with "Ask first" every change waits for your
+  review.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

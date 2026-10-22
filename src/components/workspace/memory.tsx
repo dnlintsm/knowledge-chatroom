@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Archive, Bot, Brain, Download, EyeOff, History, Plus, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { Archive, Bot, Brain, Check, Download, EyeOff, History, Inbox, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { MEMORY_TAB } from "./types";
@@ -10,9 +10,10 @@ import { useWorkbench } from "./workbench";
 /**
  * Personalized memory (issue #93): notes Claude keeps about you across chats,
  * that only you can see.
- * - the Memory view of the side panel lists your notes, turns memory on or
- *   off for you, and exports them; a note opens in the middle pane to edit,
- *   with its versions;
+ * - the Memory view of the side panel lists your notes, sets memory on, ask
+ *   first or off for you, and exports them; it also holds the inbox (changes
+ *   Claude proposed, to accept or reject) and Claude's recent changes, with
+ *   Undo; a note opens in the middle pane to edit, with its versions;
  * - under the chat input, a line says which notes Claude read or changed in
  *   the current turn (the agent sends a "memory" event for each), with Undo
  *   for its changes, and makes the chat incognito: no memory read or saved.
@@ -48,12 +49,37 @@ export interface MemoryVersion {
   createdAt: string;
 }
 
-/** A note Claude read or changed in this turn (the agent's "memory" event). */
+/** A change Claude proposed, waiting for you. */
+export interface InboxItem {
+  id: string;
+  op: "add" | "update" | "delete";
+  name: string;
+  description: string | null;
+  type: MemoryType | null;
+  body: string | null;
+  source: "chat" | "learn";
+  reason: string | null;
+  createdAt: string;
+}
+
+/** One of Claude's changes, in the activity list. */
+export interface MemoryActivity {
+  id: string;
+  name: string;
+  kind: "create" | "update" | "archive";
+  source: "chat" | "learn" | "inbox";
+  at: string;
+  undone: boolean;
+  /** Still the note's latest change, so it can be undone. */
+  undoable: boolean;
+}
+
+/** A note Claude read, changed or proposed a change to in this turn (the agent's "memory" event). */
 export interface MemoryEvent {
   id: string;
   name: string;
   description: string;
-  kind: "read" | "create" | "update" | "archive";
+  kind: "read" | "create" | "update" | "archive" | "propose";
   version: number;
   /** Set here once the user undid it. */
   undone?: boolean;
@@ -81,19 +107,29 @@ interface Turn {
   events: MemoryEvent[];
 }
 
+export type MemoryMode = "on" | "ask" | "off";
+
 interface Memory {
   status: "loading" | "ready" | "unavailable";
-  /** Memory on or off for you (all chats). */
-  mode: "on" | "off";
+  /** For you, in all chats: on (Claude changes notes, with Undo), ask (changes wait in the inbox) or off. */
+  mode: MemoryMode;
   /** This chat is incognito: Claude neither reads nor saves memory in it. */
   incognito: boolean;
   notes: MemorySummary[];
+  /** Changes Claude proposed, waiting for you. */
+  inbox: InboxItem[];
+  accept: (id: string) => Promise<void>;
+  reject: (id: string) => Promise<void>;
+  /** Claude's recent changes; loads them. */
+  activity: () => Promise<MemoryActivity[]>;
+  /** Undoes one of Claude's changes, by its id. */
+  undoChange: (id: string) => Promise<void>;
   /** The note open in the editor; NEW_NOTE for a new one; null for none. */
   selected: string | null;
   /** Opens a note (or a new one) in the middle pane. */
   openNote: (name: string) => void;
   reload: () => Promise<void>;
-  setMode: (mode: "on" | "off") => Promise<void>;
+  setMode: (mode: MemoryMode) => Promise<void>;
   setIncognito: (incognito: boolean) => Promise<void>;
   detail: (name: string) => Promise<{ note: MemoryNote; versions: MemoryVersion[] }>;
   save: (name: string, input: MemoryInput, create?: boolean) => Promise<MemoryNote>;
@@ -135,6 +171,7 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<Memory["mode"]>("on");
   const [incognito, setIncognitoState] = useState(false);
   const [notes, setNotes] = useState<MemorySummary[]>([]);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const threadId = useCopilotChatConfiguration()?.threadId;
   const { editor } = useWorkbench();
@@ -142,10 +179,13 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     try {
       const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
-      const data = await call<{ mode: Memory["mode"]; incognito: boolean; notes: MemorySummary[] }>(`/api/memory${query}`);
+      const data = await call<{ mode: Memory["mode"]; incognito: boolean; notes: MemorySummary[]; inbox?: InboxItem[] }>(
+        `/api/memory${query}`,
+      );
       setModeState(data.mode);
       setIncognitoState(data.incognito);
       setNotes(data.notes);
+      setInbox(data.inbox ?? []);
       setStatus("ready");
     } catch {
       setStatus("unavailable");
@@ -228,6 +268,35 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
     [reload],
   );
 
+  const decide = useCallback(
+    async (id: string, action: "accept" | "reject") => {
+      try {
+        await call(`/api/memory/inbox/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+      } finally {
+        await reload();
+      }
+    },
+    [reload],
+  );
+  const accept = useCallback((id: string) => decide(id, "accept"), [decide]);
+  const reject = useCallback((id: string) => decide(id, "reject"), [decide]);
+
+  const activity = useCallback(
+    async () => (await call<{ activity: MemoryActivity[] }>("/api/memory/activity")).activity,
+    [],
+  );
+
+  const undoChange = useCallback(
+    async (id: string) => {
+      try {
+        await call(`/api/memory/events/${encodeURIComponent(id)}/undo`, { method: "POST" });
+      } finally {
+        await reload();
+      }
+    },
+    [reload],
+  );
+
   // What the current turn read and changed, from the agent's "memory" events.
   const { agent } = useAgent();
   const [turn, setTurn] = useState<Turn>({ running: false, events: [] });
@@ -257,10 +326,13 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      status, mode, incognito, notes, selected, openNote, reload, setMode, setIncognito,
-      detail, save, remove, archive, restore, undo, turn,
+      status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
+      setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
     }),
-    [status, mode, incognito, notes, selected, openNote, reload, setMode, setIncognito, detail, save, remove, archive, restore, undo, turn],
+    [
+      status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
+      setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
+    ],
   );
   return <MemoryContext.Provider value={value}>{children}</MemoryContext.Provider>;
 }
@@ -269,6 +341,120 @@ const typeLabel = (type: MemoryType) => TYPES.find((t) => t.type === type)?.labe
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+const STALE_DAYS = 60;
+const isStale = (note: MemorySummary) =>
+  !note.archived && Date.now() - Date.parse(note.lastUsedAt ?? note.updatedAt) > STALE_DAYS * 86_400_000;
+
+const OP_LABEL: Record<InboxItem["op"], string> = { add: "New", update: "Change", delete: "Delete" };
+
+function InboxRow({ item }: { item: InboxItem }) {
+  const { accept, reject } = useMemory();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const act = (fn: (id: string) => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    fn(item.id)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div data-testid="memory-inbox-item" data-memory={item.name} className="border-b border-[var(--border)] px-3 py-2 last:border-b-0">
+      <div className="flex items-center gap-1.5">
+        <span className="rounded bg-violet-100 px-1.5 text-[10px] uppercase tracking-wide text-violet-900 dark:bg-violet-950 dark:text-violet-200">
+          {OP_LABEL[item.op]}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+        <button
+          type="button"
+          disabled={busy}
+          title="Accept"
+          aria-label={`Accept ${item.name}`}
+          onClick={() => act(accept)}
+          className="flex size-6 items-center justify-center rounded text-green-700 hover:bg-[var(--secondary)] cursor-pointer"
+        >
+          <Check className="size-4" />
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Reject"
+          aria-label={`Reject ${item.name}`}
+          onClick={() => act(reject)}
+          className="flex size-6 items-center justify-center rounded text-red-600 hover:bg-[var(--secondary)] cursor-pointer"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      {item.description && <p className="mt-0.5 text-xs">{item.description}</p>}
+      <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+        {item.reason ?? (item.source === "learn" ? "From a past chat" : "From a chat")}
+      </p>
+      {item.body && (
+        <details className="mt-1 text-xs">
+          <summary className="cursor-pointer text-[var(--muted-foreground)]">Note</summary>
+          <pre className="mt-1 whitespace-pre-wrap rounded bg-[var(--secondary)] p-1.5">{item.body}</pre>
+        </details>
+      )}
+      {error && <p role="alert" className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+const ACTIVITY_LABEL: Record<MemoryActivity["kind"], string> = { create: "saved", update: "updated", archive: "deleted" };
+const SOURCE_LABEL: Record<MemoryActivity["source"], string> = {
+  chat: "in a chat",
+  learn: "from a past chat",
+  inbox: "accepted from the inbox",
+};
+
+/** Claude's recent changes, with Undo while each is the note's latest. */
+function ActivityList() {
+  const { activity, undoChange, notes } = useMemory();
+  const [items, setItems] = useState<MemoryActivity[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Reloads when the notes change (Claude saved, you undid).
+  const stamp = notes.map((n) => `${n.name}:${n.version}:${n.archived}`).join("|");
+  useEffect(() => {
+    let live = true;
+    activity()
+      .then((list) => live && setItems(list))
+      .catch(() => live && setItems([]));
+    return () => {
+      live = false;
+    };
+  }, [activity, stamp]);
+  if (!items) return <p className="px-3 py-1 text-xs text-[var(--muted-foreground)]">Loading…</p>;
+  if (!items.length) return <p className="px-3 py-1 text-xs text-[var(--muted-foreground)]">No changes by Claude yet.</p>;
+  return (
+    <div data-testid="memory-activity">
+      {error && <p role="alert" className="px-3 text-xs text-red-600">{error}</p>}
+      {items.map((item) => (
+        <div key={item.id} data-testid="memory-activity-item" className="flex items-center gap-1.5 px-3 py-1 text-xs">
+          <span className={cn("min-w-0 flex-1 truncate", item.undone && "line-through opacity-60")}>
+            <span className="font-medium">{item.name}</span> {ACTIVITY_LABEL[item.kind]} {SOURCE_LABEL[item.source]} ·{" "}
+            {when(item.at)}
+          </span>
+          {item.undoable && (
+            <button
+              type="button"
+              title="Undo this change"
+              aria-label={`Undo ${item.name}`}
+              onClick={() => {
+                setError(null);
+                undoChange(item.id).catch((err: Error) => setError(err.message));
+              }}
+              className="rounded p-0.5 hover:bg-[var(--secondary)] cursor-pointer"
+            >
+              <Undo2 className="size-3" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function NoteRow({ note }: { note: MemorySummary }) {
   const { selected, openNote } = useMemory();
@@ -287,6 +473,11 @@ function NoteRow({ note }: { note: MemorySummary }) {
       <span className="flex items-center gap-1.5">
         <Brain className="size-3.5 shrink-0 text-violet-500" />
         <span className="min-w-0 flex-1 truncate font-medium">{note.name}</span>
+        {isStale(note) && (
+          <span title="Not used or changed in 60 days: still true?" className="text-[10px] text-amber-600">
+            stale
+          </span>
+        )}
         {note.updatedBy === "agent" && (
           <span title="Claude changed it last">
             <Bot className="size-3.5 text-[var(--muted-foreground)]" />
@@ -303,8 +494,17 @@ function NoteRow({ note }: { note: MemorySummary }) {
 
 /** The Memory view of the side panel. */
 export function MemoryPanel() {
-  const { status, mode, notes, setMode, openNote } = useMemory();
+  const { status, mode, notes, inbox, setMode, openNote, reload } = useMemory();
   const [showArchived, setShowArchived] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  // Claude also learns from past chats in the background: catch up when the
+  // panel opens and when you come back to the tab.
+  useEffect(() => {
+    void reload();
+    const onVisible = () => document.visibilityState === "visible" && void reload();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reload]);
   if (status === "loading") return <p className="px-3 py-2 text-[var(--muted-foreground)]">Loading memory…</p>;
   if (status === "unavailable") {
     return <p className="px-3 py-2 text-[var(--muted-foreground)]">Memory isn&apos;t available on this server.</p>;
@@ -315,14 +515,17 @@ export function MemoryPanel() {
     <div data-testid="memory-panel" className="flex flex-col">
       <div className="flex items-center gap-2 px-3 pb-2">
         <label className="flex flex-1 items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            role="switch"
+          Memory
+          <select
             data-testid="memory-mode"
-            checked={mode === "on"}
-            onChange={(e) => void setMode(e.target.checked ? "on" : "off")}
-          />
-          Claude remembers
+            value={mode}
+            onChange={(e) => void setMode(e.target.value as MemoryMode)}
+            className="rounded border border-[var(--border)] bg-[var(--background)] px-1 py-0.5 text-xs"
+          >
+            <option value="on">On</option>
+            <option value="ask">Ask first</option>
+            <option value="off">Off</option>
+          </select>
         </label>
         <button
           type="button"
@@ -344,10 +547,22 @@ export function MemoryPanel() {
         </a>
       </div>
       <p className="px-3 pb-2 text-xs text-[var(--muted-foreground)]">
-        {mode === "on"
-          ? "Notes Claude keeps about you across chats. Only you can see them; edit or delete any. Incognito chats leave them alone."
-          : "Memory is off: Claude doesn't read or save notes in any chat. Your notes stay here."}
+        {mode === "off"
+          ? "Memory is off: Claude doesn't read or save notes in any chat. Your notes stay here."
+          : `Notes Claude keeps about you across chats, also learned from chats after they go quiet. Only you can see them; edit or delete any. Incognito chats leave them alone.${
+              mode === "ask" ? " Claude's changes wait below for you to accept." : ""
+            }`}
       </p>
+      {inbox.length > 0 && (
+        <section aria-label="For review" className="mb-2 border-y border-[var(--border)] bg-[var(--secondary)]/40">
+          <h3 className="flex items-center gap-1.5 px-3 pt-2 text-xs font-semibold">
+            <Inbox className="size-3.5 text-violet-500" /> For review ({inbox.length})
+          </h3>
+          {inbox.map((item) => (
+            <InboxRow key={item.id} item={item} />
+          ))}
+        </section>
+      )}
       {active.length === 0 && (
         <p className="px-3 py-2 text-[var(--muted-foreground)]">
           No memories yet. Tell Claude &ldquo;remember that…&rdquo;, or add one with +.
@@ -369,6 +584,15 @@ export function MemoryPanel() {
           {showArchived && archived.map((note) => <NoteRow key={note.name} note={note} />)}
         </>
       )}
+      <button
+        type="button"
+        aria-expanded={showActivity}
+        onClick={() => setShowActivity((s) => !s)}
+        className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+      >
+        <History className="size-3.5" /> Recent changes by Claude
+      </button>
+      {showActivity && <ActivityList />}
     </div>
   );
 }
@@ -588,11 +812,13 @@ const CHANGE_LABEL: Record<MemoryEvent["kind"], string> = {
   create: "saved",
   update: "updated",
   archive: "deleted",
+  propose: "for review",
 };
 
 /** Under the chat input: what Claude read and changed in this turn, Undo, and incognito. */
 export function MemoryStatus() {
   const { status, mode, incognito, setIncognito, turn, undo, openNote } = useMemory();
+  const { sidebar } = useWorkbench();
   const [failed, setFailed] = useState<string | null>(null);
   if (status !== "ready") return null;
   // One chip per note: its latest change, else that Claude read it.
@@ -625,11 +851,16 @@ export function MemoryStatus() {
               event.undone && "line-through opacity-60",
             )}
           >
-            <button type="button" title={event.description} onClick={() => openNote(event.name)} className="cursor-pointer hover:underline">
+            <button
+              type="button"
+              title={event.kind === "propose" ? "Waiting in your Memory inbox" : event.description}
+              onClick={() => (event.kind === "propose" ? sidebar.show("memory") : openNote(event.name))}
+              className="cursor-pointer hover:underline"
+            >
               {event.name}
             </button>
             <span className="opacity-70">· {CHANGE_LABEL[event.kind]}</span>
-            {event.kind !== "read" && !event.undone && (
+            {event.kind !== "read" && event.kind !== "propose" && !event.undone && (
               <button
                 type="button"
                 data-testid="memory-undo"

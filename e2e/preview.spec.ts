@@ -238,6 +238,24 @@ test("Claude remembers across chats, and you see, undo and edit it", async ({ pa
   await shot(page, "29c-memory-incognito");
   await page.getByTestId("memory-incognito").click();
   await expect(page.getByTestId("memory-incognito")).toHaveAttribute("aria-pressed", "false");
+
+  // Ask first: Claude's change waits in the inbox until accepted.
+  await page.getByTestId("memory-mode").selectOption("ask");
+  await expect(page.getByTestId("memory-mode")).toHaveValue("ask");
+  await send(page, "Remember that I prefer tables for comparisons.");
+  await expect(chip).toHaveAttribute("data-kind", "propose", reply);
+  const item = page.getByTestId("memory-inbox-item").filter({ hasText: "reply-style" });
+  await expect(item).toBeVisible();
+  await expect(item).toContainText("Change");
+  await page.getByRole("button", { name: "Recent changes by Claude" }).click();
+  await expect(page.getByTestId("memory-activity-item").first()).toContainText("reply-style");
+  await expect(page.getByTestId("skill-status")).toContainText("auto ·");
+  await shot(page, "29d-memory-inbox");
+  await item.getByRole("button", { name: "Accept reply-style" }).click();
+  await expect(item).toHaveCount(0);
+  await expect(editor.getByLabel("Note")).toHaveValue("I prefer tables for comparisons.");
+  await expect(page.getByTestId("memory-activity-item").first()).toContainText("accepted from the inbox");
+  await page.getByTestId("memory-mode").selectOption("on");
 });
 
 test("a workspace with no runs still has the chat", async ({ page }) => {

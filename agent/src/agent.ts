@@ -27,7 +27,7 @@ import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
 import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
-import { MEMORY_TOOLS, memoryPrompt, memoryTools, type RunMemory } from "./memory/run";
+import { MEMORY_TOOLS, memoryPrompt, memoryTools, taintHook, type RunMemory } from "./memory/run";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
@@ -228,7 +228,10 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
     ];
     return {
       ...withIdentity,
-      ...(memory && { systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory)}` }),
+      ...(memory && {
+        systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory)}`,
+        hooks: { ...withIdentity.hooks, PreToolUse: [...(withIdentity.hooks?.PreToolUse ?? []), taintHook(memory)] },
+      }),
       mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) },
       // save_file is only in runs with a working folder, the memory tools in runs with memory.
       allowedTools: [

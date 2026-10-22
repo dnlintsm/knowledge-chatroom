@@ -73,7 +73,7 @@ function line(message: Message): string | null {
 }
 
 /** The newest lines of the conversation that fit. */
-function transcript(messages: Message[]): string {
+export function transcript(messages: Message[]): string {
   const lines: string[] = [];
   let size = 0;
   for (const message of [...messages].reverse()) {

@@ -87,7 +87,7 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON chats, chat_runs TO ${role}`);
     // Personalized memory (018_memory.sql): likewise only its owner's.
     await tx.unsafe(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats TO ${role}`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, memory_learned_chats TO ${role}`,
     );
     return true;
   }) as Promise<boolean>;
