@@ -213,9 +213,10 @@ export class MemoryLearner {
       const found = await s.chats.get(userId, chat.id);
       const { mode } = await memory.settings(userId, chat.id);
       if (found && mode !== "off") {
-        const changes = await proposeChanges(await memory.notesForLearning(userId), found.messages as Message[], this.create);
+        const notes = await memory.notesForLearning(userId);
+        const changes = await proposeChanges(notes.text, found.messages as Message[], this.create);
         for (const change of changes) {
-          const done = await this.apply(userId, chat.id, mode, change);
+          const done = await this.apply(userId, chat.id, mode, change, notes.versions);
           if (done === "made") made++;
           if (done === "proposed") proposed++;
         }
@@ -238,25 +239,34 @@ export class MemoryLearner {
     chatId: string,
     mode: Exclude<MemoryMode, "off">,
     change: LearnChange,
+    versions: Map<string, number>,
   ): Promise<"made" | "proposed" | "skipped"> {
     const memory = this.storage()!.memory;
     const input = { description: change.description ?? "", type: change.type ?? "", body: change.body ?? "" };
+    // The model saw this version of the note; a note it didn't see in full,
+    // or one changed since (the user may edit while the model works), stays.
+    const seen = versions.get(change.name);
+    if (change.op !== "add" && seen === undefined) return "skipped";
     try {
       if (mode === "ask") {
-        await memory.propose(userId, { op: change.op, name: change.name, input, reason: change.reason }, { source: "learn", threadId: chatId });
+        await memory.propose(
+          userId,
+          { op: change.op, name: change.name, input, reason: change.reason, ...(seen !== undefined ? { baseVersion: seen } : {}) },
+          { source: "learn", threadId: chatId },
+        );
         return "proposed";
       }
       const run = { threadId: chatId, runId: LEARN_RUN };
       if (change.op === "delete") {
+        const existing = await memory.get(userId, change.name);
+        if (!existing || existing.archived || existing.version !== seen) return "skipped";
         const { event } = await memory.archive(userId, change.name, true, run);
         return event ? "made" : "skipped";
       }
-      const existing = await memory.get(userId, change.name);
-      if (change.op === "update" && (!existing || existing.archived)) return "skipped";
       const { event } = await memory.save(userId, change.name, input, "agent", {
         run,
         create: change.op === "add",
-        ...(existing && change.op === "update" ? { ifVersion: existing.version } : {}),
+        ...(change.op === "update" ? { ifVersion: seen } : {}),
       });
       return event ? "made" : "skipped";
     } catch (err) {

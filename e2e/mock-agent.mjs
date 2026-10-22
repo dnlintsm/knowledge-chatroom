@@ -174,10 +174,11 @@ function saveMemory(name, input, by) {
   };
   const versions = [{ version, description: note.description, type: note.type, body: note.body, changedBy: by, threadId: null, createdAt: now }, ...(entry?.versions ?? [])];
   memory.notes.set(name, { note, versions });
+  for (const older of memory.activity) if (older.name === name) older.undoable = false;
   if (by !== "agent") return { note, event: null };
   const event = { id: randomUUID(), name, description: note.description, kind, version };
   memory.events.set(event.id, { ...event, before: entry ?? null });
-  memory.activity.unshift({ id: event.id, name, kind, source: "chat", at: now, undone: false });
+  memory.activity.unshift({ id: event.id, name, kind, source: "chat", at: now, undone: false, undoable: true });
   return { note, event };
 }
 
@@ -241,7 +242,7 @@ async function handleMemory(req, res, url) {
     if (!event || event.undone) return json({ error: "Nothing to undo" }, 409);
     event.undone = true;
     const listed = memory.activity.find((a) => a.id === event.id);
-    if (listed) listed.undone = true;
+    if (listed) Object.assign(listed, { undone: true, undoable: false });
     if (event.before) memory.notes.set(event.name, event.before);
     else memory.notes.delete(event.name);
     return json({ name: event.name, note: memory.notes.get(event.name)?.note ?? null });

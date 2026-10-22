@@ -101,6 +101,8 @@ export interface MemoryActivity extends MemoryEvent {
   source: "chat" | "learn" | "inbox";
   at: string;
   undone: boolean;
+  /** Still the note's latest change, so Undo can take it back. */
+  undoable: boolean;
 }
 
 /** The chat run a change or read happened in; none for the user's own edits. */
@@ -599,7 +601,11 @@ export class MemoryService {
    */
   propose(
     userId: string,
-    change: { op: InboxOp; name: string; input?: Partial<MemoryInput>; reason?: string | null },
+    change: {
+      op: InboxOp; name: string; input?: Partial<MemoryInput>; reason?: string | null;
+      /** The version the change was made against; a newer note is a conflict. */
+      baseVersion?: number;
+    },
     origin: { source: "chat" | "learn"; threadId?: string | null },
   ): Promise<InboxItem> {
     const { op, name } = change;
@@ -616,6 +622,9 @@ export class MemoryService {
       const row = await this.row(db, userId, name);
       if (op === "add" && row && !row.archived_at) throw new MemoryConflictError(`A memory named ${name} already exists`);
       if (op !== "add" && (!row || row.archived_at)) throw new MemoryNotFoundError(name);
+      if (op !== "add" && change.baseVersion !== undefined && row!.version !== change.baseVersion) {
+        throw new MemoryConflictError(`${name} changed since`);
+      }
       const base = op === "add" ? null : row!.version;
       const [pending] = await db<{ id: string }[]>`
         SELECT id FROM memory_inbox
@@ -709,9 +718,12 @@ export class MemoryService {
     return this.as(userId, async (db) => {
       const rows = await db<{
         id: string; name: string; description: string; kind: MemoryEventKind; version: number;
-        thread_id: string; run_id: string; created_at: Date; undone_at: Date | null;
+        thread_id: string; run_id: string; created_at: Date; undone_at: Date | null; undoable: boolean;
       }[]>`
-        SELECT e.id, m.name, m.description, e.kind, e.version, e.thread_id, e.run_id, e.created_at, e.undone_at
+        SELECT e.id, m.name, m.description, e.kind, e.version, e.thread_id, e.run_id, e.created_at, e.undone_at,
+          -- The same test undo() makes.
+          e.undone_at IS NULL AND m.updated_at <= e.created_at AND m.version = e.version
+            AND (e.kind = 'archive') = (m.archived_at IS NOT NULL) AS undoable
         FROM memory_events e JOIN memories m ON m.id = e.memory_id
         WHERE e.workspace_id = ${this.workspaceId} AND e.user_id = ${userId} AND e.kind <> 'read'
         ORDER BY e.created_at DESC, e.id
@@ -726,31 +738,36 @@ export class MemoryService {
         source: r.run_id === LEARN_RUN ? "learn" : r.run_id === "inbox" ? "inbox" : "chat",
         at: r.created_at.toISOString(),
         undone: r.undone_at !== null,
+        undoable: r.undoable,
       }));
     });
   }
 
   /**
    * The notes in use, in full where they fit in `maxChars`, for the
-   * background learner to compare a chat against.
+   * background learner to compare a chat against. `versions` has the notes
+   * shown in full, at the version shown: only those may be changed.
    */
-  async notesForLearning(userId: string, maxChars = 24_000): Promise<string> {
+  async notesForLearning(userId: string, maxChars = 24_000): Promise<{ text: string; versions: Map<string, number> }> {
     const rows = await this.as(userId, (db) => db<MemoryRow[]>`
       SELECT * FROM memories
       WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND archived_at IS NULL
       ORDER BY coalesce(last_used_at, updated_at) DESC, name`);
     const parts: string[] = [];
+    const versions = new Map<string, number>();
     let size = 0;
     for (const row of rows) {
       const used = row.last_used_at ? row.last_used_at.toISOString().slice(0, 10) : "never";
       const head = `<note name="${row.name}" type="${row.type}" updated="${row.updated_at.toISOString().slice(0, 10)}" last_used="${used}">`;
       const full = `${head}\n${row.description}\n\n${row.body}\n</note>`;
-      const text = size + full.length <= maxChars ? full : `${head}\n${row.description}\n(body left out for length)\n</note>`;
+      const whole = size + full.length <= maxChars;
+      const text = whole ? full : `${head}\n${row.description}\n(body left out for length; leave this note as it is)\n</note>`;
       if (size + text.length > maxChars) break;
       parts.push(text);
+      if (whole) versions.set(row.name, row.version);
       size += text.length;
     }
-    return parts.join("\n");
+    return { text: parts.join("\n"), versions };
   }
 
   /** Every note as memory/<name>.md (archived ones under memory/archived/), zipped. */

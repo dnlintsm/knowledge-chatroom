@@ -72,6 +72,9 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     const updated = await memory.save(me, "reply-style", note("Short replies, no em-dashes."), "agent", { run });
     assert.equal(updated.note.version, 2);
     assert.equal(updated.event?.kind, "update");
+    const undoable = new Map((await memory.activity(me)).map((a) => [a.id, a.undoable]));
+    assert.equal(undoable.get(updated.event!.id), true);
+    assert.equal(undoable.get(created.event!.id), false, "only the latest change can be undone");
 
     const undone = await memory.undo(me, updated.event!.id);
     assert.equal(undone.note?.body, "Short replies.");
@@ -382,6 +385,44 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
       delete process.env.MEMORY;
       await memory.setMode(me, "on");
       for (const item of await memory.inbox(me)) await memory.reject(me, item.id);
+    }
+  });
+
+  test("the learner leaves notes it didn't see in full, or that changed meanwhile", async () => {
+    const chats = new ChatService(sql, workspaceId, rowSecurity);
+    const storage = { sql, workspaceId, memory, chats } as unknown as Storage;
+    await memory.save(me, "big-note", note("x".repeat(3000), "A long note"), "user");
+    const short = await memory.notesForLearning(me, 2000);
+    assert.equal(short.versions.has("big-note"), false);
+    assert.match(short.text, /leave this note as it is/);
+
+    const before = (await memory.get(me, "reply-style"))!;
+    const create = (async () => {
+      // You edit the note while the model is still working.
+      await memory.save(me, "reply-style", note("Your own edit."), "user");
+      return {
+        content: [{
+          type: "tool_use", id: "t", name: LEARN_TOOL,
+          input: { changes: [{ op: "update", name: "reply-style", description: "Reply style", type: "preference", body: "Stale rewrite.", reason: "x" }] },
+        }],
+      } as unknown as Anthropic.Message;
+    }) as never;
+    const learner = new MemoryLearner(() => storage, create);
+    process.env.MEMORY = "on";
+    try {
+      await chats.appendRun(me, "learn-4", {
+        agentId: "a", runId: "run-learn-4", events: [],
+        messages: [{ id: "1", role: "user", content: "Hi" }],
+      });
+      await sql`UPDATE chats SET last_run_at = now() - interval '1 hour' WHERE id = 'learn-4'`;
+      const [due] = (await learner.due()).filter((c) => c.id === "learn-4");
+      assert.deepEqual(await learner.learn(due), { made: 0, proposed: 0 });
+      const after = (await memory.get(me, "reply-style"))!;
+      assert.equal(after.body, "Your own edit.");
+      assert.equal(after.version, before.version + 1);
+    } finally {
+      delete process.env.MEMORY;
+      await memory.remove(me, "big-note");
     }
   });
 

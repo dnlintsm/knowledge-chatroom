@@ -70,6 +70,8 @@ export interface MemoryActivity {
   source: "chat" | "learn" | "inbox";
   at: string;
   undone: boolean;
+  /** Still the note's latest change, so it can be undone. */
+  undoable: boolean;
 }
 
 /** A note Claude read, changed or proposed a change to in this turn (the agent's "memory" event). */
@@ -434,7 +436,7 @@ function ActivityList() {
             <span className="font-medium">{item.name}</span> {ACTIVITY_LABEL[item.kind]} {SOURCE_LABEL[item.source]} ·{" "}
             {when(item.at)}
           </span>
-          {!item.undone && (
+          {item.undoable && (
             <button
               type="button"
               title="Undo this change"
@@ -492,9 +494,17 @@ function NoteRow({ note }: { note: MemorySummary }) {
 
 /** The Memory view of the side panel. */
 export function MemoryPanel() {
-  const { status, mode, notes, inbox, setMode, openNote } = useMemory();
+  const { status, mode, notes, inbox, setMode, openNote, reload } = useMemory();
   const [showArchived, setShowArchived] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
+  // Claude also learns from past chats in the background: catch up when the
+  // panel opens and when you come back to the tab.
+  useEffect(() => {
+    void reload();
+    const onVisible = () => document.visibilityState === "visible" && void reload();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reload]);
   if (status === "loading") return <p className="px-3 py-2 text-[var(--muted-foreground)]">Loading memory…</p>;
   if (status === "unavailable") {
     return <p className="px-3 py-2 text-[var(--muted-foreground)]">Memory isn&apos;t available on this server.</p>;
