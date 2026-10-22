@@ -19,7 +19,7 @@ import { AccessService } from "./access";
 import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
 import { MemoryConflictError, MemoryError, MemoryNotFoundError, MemoryService } from "./memory";
 import { MemoryPackHub } from "./memory-packs";
-import { SharedMemoryService } from "./shared-memory";
+import { MAX_SHARED_NOTES, SharedMemoryService } from "./shared-memory";
 import type { Storage } from "./index";
 import { createMemoryHandler } from "../memory/http";
 import { IMPORT_TOOL, importMemory, parseNotes, parseZip } from "../memory/import";
@@ -60,6 +60,9 @@ Process engineer.`);
   });
   assert.deepEqual(parseZip(zip).map((n) => n.name), ["a"]);
   assert.throws(() => parseZip(strToU8("not a zip")), MemoryError);
+  const many = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`memory/n${i}.md`, strToU8("---\nname: n\n---\nx")]));
+  assert.throws(() => parseZip(zipSync(many)), /too much to import/);
+  assert.throws(() => parseZip(zipSync({ "big.md": new Uint8Array(5 * 1024 * 1024) })), /too much to import/);
 });
 
 describe("memory packs", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" }, () => {
@@ -217,6 +220,16 @@ describe("memory packs", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not se
     await hub.uninstall(member, again.id);
     assert.ok(!(await notesIn(member, lab)).some((n) => n.name === "sample-ids" || n.name === "film-terms"));
     await assert.rejects(hub.uninstall(member, again.id), MemoryNotFoundError);
+  });
+
+  test("a pack can't take a place past its note limit", async () => {
+    const before = (await notesIn(member, lab)).length;
+    await sql`
+      INSERT INTO shared_memories (workspace_id, scope, node_id, name, description, type, body, created_by, updated_by)
+      SELECT ${workspaceId}, 'node', ${lab}, 'filler-' || i, 'Filler', 'reference', 'x', ${member}, ${member}
+      FROM generate_series(1, ${MAX_SHARED_NOTES - before - 1}) AS i`;
+    await assert.rejects(hub.install(member, labPlace(), "glossary", 1), /at most 200 shared notes/);
+    await sql`DELETE FROM shared_memories WHERE name LIKE 'filler-%'`;
   });
 
   test("importing memory puts every note in the inbox", async () => {

@@ -29,6 +29,9 @@ import { learnModel } from "./learn";
 export const IMPORT_TOOL = "memory_import";
 /** Notes taken from one import at most. */
 export const MAX_IMPORT = 30;
+/** A .zip's markdown files at most, and their size in all (as the .zip declares it). */
+const MAX_ZIP_FILES = 200;
+const MAX_ZIP_BYTES = 4 * 1024 * 1024;
 /** Text the model reads at most, in characters. */
 const MAX_TEXT = 60_000;
 
@@ -70,9 +73,23 @@ export function parseNotes(text: string): ImportedNote[] {
 /** This app's export, or any .zip of markdown notes (archived ones left out). */
 export function parseZip(bytes: Uint8Array): ImportedNote[] {
   let files: Record<string, Uint8Array>;
+  let count = 0;
+  let size = 0;
   try {
-    files = unzipSync(bytes, { filter: (f) => /\.md$/i.test(f.name) && !/(^|\/)archived\//.test(f.name) && f.originalSize < 1_000_000 });
-  } catch {
+    files = unzipSync(bytes, {
+      // Counted before each file is inflated, so a small .zip can't expand to a huge one.
+      filter: (f) => {
+        if (!/\.md$/i.test(f.name) || /(^|\/)archived\//.test(f.name)) return false;
+        count += 1;
+        size += f.originalSize;
+        if (count > MAX_ZIP_FILES || size > MAX_ZIP_BYTES) throw new MemoryError("too big");
+        return true;
+      },
+    });
+  } catch (err) {
+    if (err instanceof MemoryError) {
+      throw new MemoryError(`That .zip has too much to import (at most ${MAX_ZIP_FILES} notes, ${MAX_ZIP_BYTES / 1024 / 1024} MB unpacked)`);
+    }
     throw new MemoryError("That isn't a .zip file we can read");
   }
   return Object.keys(files)

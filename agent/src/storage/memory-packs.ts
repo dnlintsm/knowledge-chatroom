@@ -12,7 +12,7 @@ import {
   validName,
   type MemoryType,
 } from "./memory";
-import { SHARED_SCOPES, type SharedScope } from "./shared-memory";
+import { MAX_SHARED_NOTES, SHARED_SCOPES, type SharedScope } from "./shared-memory";
 
 /**
  * Memory packs (issue #93, step 4; migrations/021_memory_packs.sql): a place's
@@ -291,6 +291,13 @@ export class MemoryPackHub {
           ${current ? db`AND (pack_install_id IS NULL OR pack_install_id <> ${current.id})` : db``}`;
       if (taken.length) {
         throw new MemoryConflictError(`The place already has notes named ${taken.map((t) => t.name).join(", ")}; rename them first`);
+      }
+      // The install's own notes are replaced, so they don't count.
+      const [{ count }] = await db<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM shared_memories
+        WHERE ${samePlace} ${current ? db`AND (pack_install_id IS NULL OR pack_install_id <> ${current.id})` : db``}`;
+      if (count + chosen.notes.length > MAX_SHARED_NOTES) {
+        throw new MemoryError(`A place has at most ${MAX_SHARED_NOTES} shared notes; this pack would make ${count + chosen.notes.length}`);
       }
       let installId: string;
       if (current) {
