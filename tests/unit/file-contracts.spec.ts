@@ -25,6 +25,26 @@ test("MIME/kind compatibility is shared with an explicit SVG representation poli
   expect(backend.isTextFile("uploads/a.svg", "image/svg+xml")).toBe(true);
 });
 
+test("the editor pane picks a preview from the type, or the extension for untyped files", () => {
+  const kinds: [string, string, browser.PreviewKind][] = [
+    ["notes/a.md", "text/markdown", "markdown"],
+    ["uploads/a.tsv", "text/tab-separated-values", "table"],
+    ["uploads/a.htm", "text/html", "html"],
+    // Browsers type .ts uploads as MPEG transport streams.
+    ["uploads/a.ts", "video/mp2t", "code"],
+    ["uploads/a.go", "application/octet-stream", "code"],
+    ["uploads/a.txt", "text/plain", "text"],
+    ["uploads/a.svg", "image/svg+xml", "image"],
+    ["uploads/a.bmp", "application/octet-stream", "image"],
+    ["uploads/a.heic", "image/heic", "image"],
+    ["uploads/a.pdf", "application/pdf", "pdf"],
+    ["uploads/a.mp3", "audio/mpeg", "audio"],
+    ["uploads/a.mov", "application/octet-stream", "video"],
+    ["uploads/a.zip", "application/zip", "none"],
+  ];
+  for (const [path, mime, kind] of kinds) expect(browser.previewKind({ path, mime }), path).toBe(kind);
+});
+
 test("metadata allows additive fields and legacy missing readOnly but rejects bad payloads", () => {
   expect(parseFileList({ files: [{ ...info, futureField: true }] })).toMatchObject([info]);
   const legacy = { ...info, readOnly: undefined };

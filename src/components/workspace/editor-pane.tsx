@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
 import { ExperimentPanel, RunsPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
+import { Centered, CodePreview, HtmlPreview, MediaPreview, NoPreview } from "./file-previews";
 import { MemoryEditor } from "./memory";
 import { ReviewPanel } from "./review-panel";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
@@ -18,8 +19,8 @@ import {
   fileName,
   isBuiltInTab,
   isMarkdown,
-  isTextFile,
   MEMORY_TAB,
+  previewKind,
   REVIEW_TAB,
   RUNS_TAB,
   TASKS_TAB,
@@ -38,8 +39,11 @@ type Mode = "preview" | "edit";
 
 const PREVIEW_REHYPE_PLUGINS = [...Object.values(defaultRehypePlugins), sourceLines];
 
+// Text files with a rendered view besides the editor.
+const RENDERED = new Set(["markdown", "table", "html", "code"]);
+
 function canPreview(file: WorkspaceFile) {
-  return isMarkdown(file) || extension(file.path) === "csv";
+  return RENDERED.has(previewKind(file));
 }
 
 export function EditorPane() {
@@ -218,21 +222,12 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
 
   const captureSelection = () => setSelection(window.getSelection()?.toString().trim() ?? "");
 
-  if (file.mime.startsWith("image/")) {
-    return (
-      <div className="flex h-full items-center justify-center p-8">
-        <img src={file.content} alt={file.path} className="max-h-full max-w-full rounded-lg shadow" />
-      </div>
-    );
+  const kind = previewKind(file);
+  if (kind === "image" || kind === "pdf" || kind === "audio" || kind === "video") {
+    return <MediaPreview file={file} kind={kind} />;
   }
-
-  if (!isTextFile(file)) {
-    return (
-      <Centered>
-        No preview for this file type yet. Claude can still see that it exists.
-      </Centered>
-    );
-  }
+  if (kind === "none") return <NoPreview file={file} />;
+  if (mode === "preview" && kind === "html") return <HtmlPreview file={file} />;
 
   if (mode === "preview") {
     return (
@@ -243,7 +238,13 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
         onKeyUp={captureSelection}
         className="mx-auto max-w-3xl px-8 py-8 text-[15px] leading-relaxed"
       >
-        {isMarkdown(file) ? <Markdown text={file.content} /> : <CsvTable text={file.content} />}
+        {kind === "markdown" ? (
+          <Markdown text={file.content} />
+        ) : kind === "code" ? (
+          <CodePreview file={file} />
+        ) : (
+          <CsvTable text={file.content} separator={extension(file.path) === "tsv" ? "\t" : ","} />
+        )}
       </article>
     );
   }
@@ -303,8 +304,8 @@ function Markdown({ text }: { text: string }) {
   );
 }
 
-function CsvTable({ text }: { text: string }) {
-  const [head, ...body] = parseCsv(text);
+function CsvTable({ text, separator }: { text: string; separator: string }) {
+  const [head, ...body] = parseCsv(text, separator);
   return (
     <table className="w-full border-collapse text-sm">
       <thead>
@@ -331,14 +332,33 @@ function CsvTable({ text }: { text: string }) {
   );
 }
 
-/** Marks the preview blocks `lines` came from and centers the first; returns the undo. */
+/**
+ * Marks the preview blocks `lines` came from and centers the first; returns the undo.
+ * Highlighted code renders after a moment, so this waits for its lines to appear.
+ */
 function highlightLines(root: HTMLElement, lines: LineRange) {
-  const blocks = Array.from(root.querySelectorAll<HTMLElement>("[data-line]"));
-  const spans = blocks.map((el) => ({ start: Number(el.dataset.line), end: Number(el.dataset.lineEnd) }));
-  const hits = blocksForLines(spans, lines).map((i) => blocks[i]);
-  hits.forEach((el) => (el.dataset.revealed = ""));
-  hits[0]?.scrollIntoView({ block: "center" });
-  return () => hits.forEach((el) => delete el.dataset.revealed);
+  let undo = () => {};
+  const apply = () => {
+    // Each line of a code preview is a block of its own.
+    root.querySelectorAll<HTMLElement>('[data-testid="code-preview"] code > span').forEach((el, i) => {
+      el.dataset.line = el.dataset.lineEnd = String(i + 1);
+    });
+    const blocks = Array.from(root.querySelectorAll<HTMLElement>("[data-line]"));
+    if (blocks.length === 0) return false;
+    const spans = blocks.map((el) => ({ start: Number(el.dataset.line), end: Number(el.dataset.lineEnd) }));
+    const hits = blocksForLines(spans, lines).map((i) => blocks[i]);
+    hits.forEach((el) => (el.dataset.revealed = ""));
+    hits[0]?.scrollIntoView({ block: "center" });
+    undo = () => hits.forEach((el) => delete el.dataset.revealed);
+    return true;
+  };
+  if (apply()) return () => undo();
+  const observer = new MutationObserver(() => apply() && observer.disconnect());
+  observer.observe(root, { childList: true, subtree: true });
+  return () => {
+    observer.disconnect();
+    undo();
+  };
 }
 
 /** Selects `lines` in the editor and scrolls them a third of the way down. */
@@ -375,14 +395,6 @@ function lineTop(textarea: HTMLTextAreaElement, index: number) {
   const top = marker.offsetTop;
   mirror.remove();
   return top;
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center p-8 text-center text-sm text-[var(--muted-foreground)]">
-      <div className="max-w-sm">{children}</div>
-    </div>
-  );
 }
 
 function EmptyState() {

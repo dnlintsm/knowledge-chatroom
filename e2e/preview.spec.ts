@@ -523,3 +523,68 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
     selected_path: `${RUN}/xdoe-report/effects.csv`,
   });
 });
+
+/** A short 440 Hz tone as a WAV file. */
+function toneWav(seconds = 1, rate = 8000) {
+  const samples = seconds * rate;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write("RIFF", 0);
+  wav.writeUInt32LE(36 + samples * 2, 4);
+  wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36);
+  wav.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+  return wav;
+}
+
+test("preview images, code, HTML, tables, audio and other files", async ({ page }) => {
+  await gotoReport(page);
+  // A real PNG: a capture of the report that is open.
+  const png = await page.getByTestId("file-preview").screenshot();
+  await page.getByTestId("upload-input").setInputFiles([
+    { name: "etch-report.png", mimeType: "image/png", buffer: png },
+    { name: "fit.py", mimeType: "text/x-python", buffer: Buffer.from("import numpy as np\n\n\ndef etch_rate(power: float, pressure: float) -> float:\n    \"\"\"Fitted rate in nm/min.\"\"\"\n    return 12.5 + 0.8 * power - 0.05 * pressure ** 2\n\n\nprint(etch_rate(300, 40))\n") },
+    { name: "summary.html", mimeType: "text/html", buffer: Buffer.from("<h1 style=\"font-family:sans-serif\">Etch summary</h1><p>Rate rose with <b>power</b>.</p><script>document.body.append('scripts ran')</script>") },
+    { name: "rates.tsv", mimeType: "text/tab-separated-values", buffer: Buffer.from("run\tpower\trate\nA\t200\t171\nB\t300\t252\n") },
+    { name: "chamber-tone.wav", mimeType: "audio/wav", buffer: toneWav() },
+    { name: "photo.heic", mimeType: "image/heic", buffer: Buffer.from("not an image the browser can show") },
+    { name: "raw-data.zip", mimeType: "application/zip", buffer: Buffer.from("PK") },
+  ]);
+  const openFile = (name: string) => page.getByRole("treeitem", { name: new RegExp(name.replace(".", "\\.")) }).click();
+
+  await openFile("etch-report.png");
+  await expect(page.getByTestId("image-size")).toContainText("×");
+  await shot(page, "30-image-preview");
+
+  await openFile("fit.py");
+  await expect(page.getByTestId("code-preview")).toContainText("def etch_rate");
+  await shot(page, "30b-code-preview");
+
+  await openFile("summary.html");
+  const html = page.frameLocator('[data-testid="html-preview"]');
+  await expect(html.getByRole("heading", { name: "Etch summary" })).toBeVisible();
+  // Sandboxed: the page's own scripts don't run.
+  await expect(html.locator("body")).not.toContainText("scripts ran");
+  await shot(page, "30c-html-preview");
+
+  await openFile("rates.tsv");
+  await expect(page.getByTestId("file-preview").getByRole("cell", { name: "252" })).toBeVisible();
+
+  await openFile("chamber-tone.wav");
+  await expect(page.getByTestId("audio-preview")).toBeVisible();
+  await shot(page, "30d-audio-preview");
+
+  await openFile("photo.heic");
+  await expect(page.getByTestId("preview-error")).toContainText("Couldn't show this image");
+  await shot(page, "30e-image-unsupported");
+
+  await openFile("raw-data.zip");
+  await expect(page.getByRole("link", { name: "Download" })).toBeVisible();
+});
