@@ -18,8 +18,8 @@ services verify users with a public key and get their own storage tokens.
   a small model call per chat once it has been quiet for `MEMORY_IDLE_MINUTES` (default
   10). `MEMORY_LEARN=off` keeps memory but stops learning.
 - MCP servers get nothing new unless their `MCP_SERVERS` entry opts in with
-  `"storageAccess": true`. Remote backends (`AGENT_URL`) now receive an
-  `X-Knowledge-Storage` token with every run.
+  `"storageAccess": true` or `"memoryAccess": true`. Remote backends (`AGENT_URL`) now
+  receive an `X-Knowledge-Storage` token with every run.
 - Identity tokens (`X-Knowledge-User`) are now signed with a key pair derived from
   `AUTH_SECRET` (`v2`, Ed25519) instead of HMAC with the secret itself (#88). Outside
   services verify them with the public key from the agent's `GET /identity/public-key`
