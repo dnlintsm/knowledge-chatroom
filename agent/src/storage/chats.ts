@@ -100,6 +100,50 @@ const cleanName = (name: string | null | undefined) => {
   return clean || null;
 };
 
+/** A past chat that matched a search, with lines around the words found. */
+export interface ChatHit {
+  id: string;
+  name: string | null;
+  updatedAt: string;
+  /** How many of the query's words it has. */
+  matched: number;
+  snippets: string[];
+}
+
+/** One user or assistant message's text. */
+export interface ChatLine {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** The text of a chat's user and assistant messages (AG-UI), in order. */
+export function chatLines(messages: unknown[]): ChatLine[] {
+  const lines: ChatLine[] = [];
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!m || typeof m !== "object") continue;
+    const { role, content } = m as { role?: unknown; content?: unknown };
+    if (role !== "user" && role !== "assistant") continue;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content
+              .map((p) => (p && typeof p === "object" && (p as { type?: unknown }).type === "text" ? String((p as { text?: unknown }).text ?? "") : ""))
+              .filter(Boolean)
+              .join("\n")
+          : "";
+    if (text.trim()) lines.push({ role, text });
+  }
+  return lines;
+}
+
+/** Words searched for at most, and chats looked through. */
+const MAX_WORDS = 8;
+const CANDIDATES = 100;
+const SNIPPET = 160;
+
+const likePattern = (word: string) => `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
 export class ChatService {
   constructor(
     private readonly sql: Sql,
@@ -165,6 +209,65 @@ export class ChatService {
         events: r.events,
         createdAt: r.created_at.toISOString(),
       }));
+    });
+  }
+
+  /**
+   * The user's past chats with the query's words in their name or messages,
+   * those with the most words first, then the latest. Incognito chats, and
+   * `exclude` (the chat asking), are never results.
+   */
+  async search(userId: string, query: string, options: { exclude?: string | null; limit?: number } = {}): Promise<ChatHit[]> {
+    const words = [...new Set(query.toLowerCase().split(/\s+/).filter((w) => w.length > 1))].slice(0, MAX_WORDS);
+    if (!words.length) return [];
+    const limit = Math.min(Math.max(Math.trunc(options.limit ?? 5) || 5, 1), 20);
+    const rows = await this.as(userId, (db) =>
+      db<{ id: string; name: string | null; updated_at: Date; messages: unknown[] }[]>`
+        SELECT c.id, c.name, c.updated_at, c.messages FROM chats c
+        WHERE c.user_id = ${userId} AND c.workspace_id = ${this.workspaceId}
+          ${options.exclude ? db`AND c.id <> ${options.exclude}` : db``}
+          AND NOT EXISTS (
+            SELECT 1 FROM memory_incognito_chats i
+            WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)
+          AND (coalesce(c.name, '') || ' ' || c.messages::text) ILIKE ANY (${words.map(likePattern)}::text[])
+        ORDER BY c.updated_at DESC
+        LIMIT ${CANDIDATES}`,
+    );
+    const hits: ChatHit[] = [];
+    for (const row of rows) {
+      // The JSON matched; look again in just what was said.
+      const lines = chatLines(row.messages);
+      const said = [row.name ?? "", ...lines.map((l) => l.text)].join("\n").toLowerCase();
+      const found = words.filter((w) => said.includes(w));
+      if (!found.length) continue;
+      const snippets: string[] = [];
+      for (const line of lines) {
+        const at = Math.min(...found.map((w) => line.text.toLowerCase().indexOf(w)).filter((i) => i >= 0));
+        if (!Number.isFinite(at)) continue;
+        const start = Math.max(0, at - SNIPPET / 2);
+        const cut = line.text.slice(start, start + SNIPPET).replace(/\s+/g, " ").trim();
+        snippets.push(`${line.role}: ${start > 0 ? "…" : ""}${cut}${start + SNIPPET < line.text.length ? "…" : ""}`);
+        if (snippets.length === 2) break;
+      }
+      hits.push({ id: row.id, name: row.name, updatedAt: row.updated_at.toISOString(), matched: found.length, snippets });
+    }
+    return hits.sort((a, b) => b.matched - a.matched).slice(0, limit);
+  }
+
+  /**
+   * One of the user's chats, as what was said; null when it isn't theirs,
+   * doesn't exist, or is incognito.
+   */
+  async lines(userId: string, id: string): Promise<{ chat: ChatSummary; lines: ChatLine[] } | null> {
+    if (!validChatId(id)) return null;
+    return this.as(userId, async (db) => {
+      const [row] = await db<(ChatRow & { messages: unknown[] })[]>`
+        SELECT ${COLUMNS(db)}, c.messages FROM chats c
+        WHERE c.id = ${id} AND c.user_id = ${userId} AND c.workspace_id = ${this.workspaceId}
+          AND NOT EXISTS (
+            SELECT 1 FROM memory_incognito_chats i
+            WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)`;
+      return row ? { chat: toSummary(row), lines: chatLines(row.messages) } : null;
     });
   }
 

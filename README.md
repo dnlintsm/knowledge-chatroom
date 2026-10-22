@@ -31,7 +31,8 @@ work easier to find, understand, and reuse.
   review. Teams share memory too: notes for the whole workspace, a knowledge node or a
   group, which Claude reads but only proposes changes to. Bring your memory from ChatGPT
   or Claude by pasting it in, and publish or install memory packs (a team's shared notes)
-  on the hub.
+  on the hub. Claude can also look back through your earlier chats, and with an
+  embedding model it finds notes by meaning, not just by words.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

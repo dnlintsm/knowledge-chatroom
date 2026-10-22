@@ -23,6 +23,8 @@ import {
   type RunSharedNote,
   type SharedMemoryService,
 } from "../storage/shared-memory";
+import type { ChatService } from "../storage/chats";
+import { recallFor, type MemoryRecall, type RecallHit } from "./recall";
 
 /**
  * How a chat run gets the user's memory (issue #93): with MEMORY=on, server
@@ -63,6 +65,10 @@ export interface RunMemory {
   nodeId: string | null;
   /** Hears each note Claude reads or changes. */
   onEvent: (event: MemoryEvent) => void;
+  /** Search by meaning, when the agent runs an embedding model (./recall.ts). */
+  recall: MemoryRecall | null;
+  /** The user's past chats, for chats_search and chats_read. */
+  chats: ChatService | null;
 }
 
 /** The run's memory; null when it has none (off, incognito, no storage or user). */
@@ -89,6 +95,8 @@ export async function prepareMemory(
     sharedService,
     nodeId,
     onEvent,
+    recall: recallFor(storage.semantic),
+    chats: storage.chats ?? null,
   };
 }
 
@@ -137,8 +145,11 @@ function sharedIndex(notes: RunSharedNote[]): string[] {
   ];
 }
 
-/** The system prompt's memory section, with the index of notes. */
-export function memoryPrompt(memory: RunMemory): string {
+/**
+ * The system prompt's memory section, with the index of notes. `chats`: the
+ * run has the past-chat tools too.
+ */
+export function memoryPrompt(memory: RunMemory, chats = false): string {
   const { text, shown, total } = memory.index;
   const more = total > shown ? `\n(${total - shown} more notes not listed: memory_search finds them.)` : "";
   return [
@@ -156,6 +167,12 @@ export function memoryPrompt(memory: RunMemory): string {
       ? "  The user reviews your changes first: they wait in their Memory inbox."
       : "  The user sees each change under your reply with Undo. Once you have used other\n" +
         "  tools in a turn, your changes wait in their Memory inbox instead.",
+    ...(chats
+      ? [
+          "  chats_search and chats_read find what was said in the user's earlier chats with",
+          "  you, when they refer to past work or the notes don't cover it.",
+        ]
+      : []),
     "<memory-index>",
     text || "(no notes yet)",
     `</memory-index>${more}`,
@@ -183,6 +200,17 @@ const nameParam = z
   .string()
   .describe("The note's name: lowercase letters, digits and dashes, e.g. writing-style; or a shared note's shared:<id>");
 
+/** memory_search's hits by meaning; none when that's off or the model fails. */
+async function closeInMeaning(memory: RunMemory, query: string): Promise<RecallHit[]> {
+  if (!memory.recall) return [];
+  try {
+    return await memory.recall.search(memory.service, memory.sharedService, memory.userId, memory.nodeId, query);
+  } catch (err) {
+    console.warn("memory: search by meaning failed:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 export const MEMORY_TOOLS = ["memory_view", "memory_search", "memory_save", "memory_edit", "memory_delete"];
 
 const isMemoryTool = (name: string) => MEMORY_TOOLS.some((t) => name === t || name.endsWith(`__${t}`));
@@ -208,20 +236,24 @@ export function taintHook(memory: RunMemory): HookCallbackMatcher {
   };
 }
 
+/**
+ * Runs a memory or chats tool. The user can turn memory off or make the chat
+ * incognito mid-run: each call checks again, so nothing is read or saved after that.
+ */
+const attemptFor = (memory: RunMemory) => (fn: () => Promise<ToolResult>) =>
+  tryTool(async () => {
+    const { mode, incognito } = await memory.service.settings(memory.userId, memory.run.threadId);
+    if (mode === "off" || incognito) {
+      return error("Memory is off in this chat now (the user turned it off or made the chat incognito): don't read or save notes.");
+    }
+    memory.mode = mode;
+    return fn();
+  });
+
 /** The memory_* tools for one run. */
 export function memoryTools(memory: RunMemory) {
   const { service, sharedService, userId, run, onEvent } = memory;
-  // The user can turn memory off or make the chat incognito mid-run: each
-  // call checks again, so nothing is read or saved after that.
-  const attempt = (fn: () => Promise<ToolResult>) =>
-    tryTool(async () => {
-      const { mode, incognito } = await service.settings(userId, run.threadId);
-      if (mode === "off" || incognito) {
-        return error("Memory is off in this chat now (the user turned it off or made the chat incognito): don't read or save notes.");
-      }
-      memory.mode = mode;
-      return fn();
-    });
+  const attempt = attemptFor(memory);
   const changed = (result: { event: MemoryEvent | null }, done: string) => {
     if (result.event) onEvent(result.event);
     return text(result.event ? `${done} The user sees the change under your reply and can undo it.` : `${done} (No change.)`);
@@ -293,7 +325,8 @@ export function memoryTools(memory: RunMemory) {
     ),
     tool(
       "memory_search",
-      "Search your notes about the user, and the shared notes, by words in their name, description or text.",
+      "Search your notes about the user, and the shared notes, by words in their name, description or text " +
+        "(and by meaning, when the agent has an embedding model).",
       { query: z.string().describe("Words to look for") },
       ({ query }) =>
         attempt(async () => {
@@ -301,13 +334,27 @@ export function memoryTools(memory: RunMemory) {
             service.search(userId, query),
             sharedService.search(userId, memory.nodeId, query),
           ]);
-          if (sharedHits.length) memory.tainted = true;
+          // Notes close in meaning that the words missed, after the word matches.
+          const close = (await closeInMeaning(memory, query)).filter((h) =>
+            h.shared ? !sharedHits.some((s) => s.id === h.shared!.id) : !hits.some((w) => w.name === h.name),
+          );
+          if (sharedHits.length || close.some((h) => h.shared)) memory.tainted = true;
           const lines = [
             ...hits.map((h) => `- ${h.name} (${h.type}): ${h.description}${h.snippet ? `\n  ${h.snippet}` : ""}`),
             ...sharedHits.map(
               (h) => `- ${sharedRef(h.id)} [${h.label}] ${h.name} (${h.type}): ${h.description}${h.snippet ? `\n  ${h.snippet}` : ""}`,
             ),
           ];
+          if (close.length) {
+            lines.push(
+              "Close in meaning:",
+              ...close.map((h) =>
+                h.shared
+                  ? `- ${sharedRef(h.shared.id)} [${h.shared.label}] ${h.name} (${h.type}): ${h.description}`
+                  : `- ${h.name} (${h.type}): ${h.description}`,
+              ),
+            );
+          }
           return text(lines.length ? lines.join("\n") : "No notes match.");
         }),
     ),
@@ -376,6 +423,69 @@ export function memoryTools(memory: RunMemory) {
           const id = await sharedId(name);
           if (id) return proposeShared({ op: "delete", id });
           return reviewed() ? propose("delete", name) : changed(await service.archive(userId, name, true, run), `Deleted ${name}.`);
+        }),
+    ),
+  ];
+}
+
+/** Past-chat tools (issue #93, step 5): not memory's, so using one marks the run. */
+export const CHAT_TOOLS = ["chats_search", "chats_read"];
+
+/** Characters of a past chat chats_read returns at once. */
+const READ_CHARS = 12_000;
+
+/**
+ * Searching and reading the user's past chats, in runs with memory: chats are
+ * the user's own (row security), but what was said in them may have come
+ * from files or web pages, so memory changes after a read wait for review.
+ * Incognito chats are never found or read.
+ */
+export function chatTools(memory: RunMemory) {
+  const chats = memory.chats;
+  if (!chats) return [];
+  const { userId, run } = memory;
+  const attempt = attemptFor(memory);
+  return [
+    tool(
+      "chats_search",
+      "Search the user's past chats with you by words in what was said, to pick up earlier work or " +
+        "something they told you before. Returns chats (id, name, when) with matching lines; chats_read reads one.",
+      {
+        query: z.string().describe("Words to look for"),
+        limit: z.number().int().min(1).max(20).optional().describe("Chats at most (default 5)"),
+      },
+      ({ query, limit }) =>
+        attempt(async () => {
+          memory.tainted = true;
+          const hits = await chats.search(userId, query, { exclude: run.threadId, limit });
+          if (!hits.length) return text("No past chats match.");
+          return text(
+            hits
+              .map((h) =>
+                [`- ${h.id}: ${h.name ?? "(untitled)"} (last active ${h.updatedAt})`, ...h.snippets.map((l) => `  ${l}`)].join("\n"),
+              )
+              .join("\n"),
+          );
+        }),
+    ),
+    tool(
+      "chats_read",
+      "Read one of the user's past chats (an id from chats_search): what the user and you said, in order. " +
+        "Long chats come in parts: pass the offset it gives to read on.",
+      {
+        id: z.string().describe("The chat's id"),
+        offset: z.number().int().min(0).optional().describe("Characters to skip (from the previous part)"),
+      },
+      ({ id, offset }) =>
+        attempt(async () => {
+          memory.tainted = true;
+          const found = await chats.lines(userId, id);
+          if (!found) return error(`No past chat ${id} (or it is incognito).`);
+          const all = found.lines.map((l) => `${l.role === "user" ? "User" : "You"}: ${l.text}`).join("\n\n");
+          const start = offset ?? 0;
+          const part = all.slice(start, start + READ_CHARS);
+          const next = start + READ_CHARS < all.length ? `\n\n(more: chats_read with offset ${start + READ_CHARS})` : "";
+          return text(`${found.chat.name ?? "(untitled)"}, last active ${found.chat.updatedAt}\n\n${part || "(nothing more)"}${next}`);
         }),
     ),
   ];
