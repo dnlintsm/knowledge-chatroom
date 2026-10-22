@@ -1,12 +1,14 @@
 import {
+  FileAudio,
   FileCode,
   FileImage,
   FileSpreadsheet,
   FileText,
+  FileVideo,
   File as FileIcon_,
   Sparkles,
 } from "lucide-react";
-import { extension, type WorkspaceFile } from "./types";
+import { previewKind, type WorkspaceFile } from "./types";
 
 export function FileIcon({
   file,
@@ -15,13 +17,25 @@ export function FileIcon({
   file: Pick<WorkspaceFile, "path" | "mime" | "kind">;
   className?: string;
 }) {
-  const ext = extension(file.path);
   if (file.kind === "skill") return <Sparkles className={`${className} text-amber-500`} />;
-  if (file.mime.startsWith("image/")) return <FileImage className={`${className} text-pink-500`} />;
-  if (ext === "csv") return <FileSpreadsheet className={`${className} text-emerald-600`} />;
-  if (ext === "md" || ext === "markdown" || ext === "txt")
-    return <FileText className={`${className} text-sky-600`} />;
-  if (["ts", "tsx", "js", "jsx", "py", "json", "html", "css", "sql", "sh"].includes(ext))
-    return <FileCode className={`${className} text-violet-500`} />;
-  return <FileIcon_ className={`${className} text-[var(--muted-foreground)]`} />;
+  switch (previewKind(file)) {
+    case "image":
+      return <FileImage className={`${className} text-pink-500`} />;
+    case "audio":
+      return <FileAudio className={`${className} text-orange-500`} />;
+    case "video":
+      return <FileVideo className={`${className} text-orange-500`} />;
+    case "table":
+      return <FileSpreadsheet className={`${className} text-emerald-600`} />;
+    case "pdf":
+      return <FileText className={`${className} text-red-500`} />;
+    case "markdown":
+    case "text":
+      return <FileText className={`${className} text-sky-600`} />;
+    case "code":
+    case "html":
+      return <FileCode className={`${className} text-violet-500`} />;
+    default:
+      return <FileIcon_ className={`${className} text-[var(--muted-foreground)]`} />;
+  }
 }

@@ -2119,6 +2119,16 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         const text = await fetch(`${url}/files/notes/plain.md`, { redirect: "manual" });
         assert.equal(text.status, 200);
         assert.equal(await text.text(), "plain");
+        // SVG is text too: opened as a page from this origin, it must not run scripts.
+        await fetch(`${url}/files/uploads/logo.svg`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/svg+xml" },
+          body: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
+        });
+        const svg = await fetch(`${url}/files/uploads/logo.svg`, { redirect: "manual" });
+        assert.equal(svg.status, 200);
+        assert.equal(svg.headers.get("content-security-policy"), "sandbox");
+        assert.equal(svg.headers.get("x-content-type-options"), "nosniff");
         assert.equal((await fetch(`${url}/files/uploads/missing.png`, { redirect: "manual" })).status, 404);
       } finally {
         await new Promise<void>((resolve) => srv.close(() => resolve()));

@@ -536,6 +536,9 @@ For local setup, see [Development](development.md).
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
+  The editor pane shows images, PDFs, audio and video from those links; when the
+  browser can't load one (the store unreachable from the browser, or a format it can't
+  show, like HEIC) it says so and offers Open and Download instead of a broken image.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
   `write_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
   `update_experiment` and `propose_experiment` tools on the agent server
