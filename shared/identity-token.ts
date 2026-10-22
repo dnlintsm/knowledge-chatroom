@@ -9,8 +9,14 @@
  *   itself. Still accepted, and made when IDENTITY_FORMAT=v1, for one release
  *   so services that verify v1 keep working while they move to the public key.
  *
- * The payload is base64url JSON {sub, email?, name?, exp, aud?}; `exp` is in
- * seconds since the epoch.
+ * The payload is base64url JSON {sub, email?, name?, exp, aud?, via?}; `exp`
+ * is in seconds since the epoch.
+ *
+ * Storage tokens (X-Knowledge-Storage) are the same tokens with aud "storage"
+ * and `via` naming the outside service they were made for ("mcp:<name>",
+ * "remote"). Only the storage API accepts them, and it treats their requests
+ * as Claude acting for the user: node writes must be proposals, and nothing
+ * is deleted or shared (agent/src/storage/http.ts).
  */
 
 import {
@@ -30,6 +36,22 @@ export interface IdentityClaims {
   name?: string;
   exp: number;
   aud?: string;
+  /** Storage tokens: the outside service acting for the user. */
+  via?: string;
+}
+
+export const STORAGE_HEADER = "x-knowledge-storage";
+export const STORAGE_AUDIENCE = "storage";
+
+/** How long a storage token lasts: STORAGE_TOKEN_SECONDS, default an hour (a long run). */
+export function storageTokenSeconds(env: Env = process.env): number {
+  const value = env.STORAGE_TOKEN_SECONDS?.trim();
+  if (!value) return 3600;
+  const seconds = Number(value);
+  if (!Number.isInteger(seconds) || seconds < 60 || seconds > 24 * 3600) {
+    throw new Error(`STORAGE_TOKEN_SECONDS must be whole seconds from 60 to 86400, not "${value}"`);
+  }
+  return seconds;
 }
 
 export type IdentityFormat = "v1" | "v2";

@@ -112,12 +112,14 @@ services:
 
   # --- Sample Python tools (examples/python-agent) for the demo's agent ---
   # Add `--profile python-sample` and, in .env,
-  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true}}}
+  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
   lab-tools:
     profiles: [python-sample]
     build: ./examples/python-agent
     environment:
       LAB_TOOLS_NAME: lab
+      # Workspace files, read through the storage API as the calling user.
+      KNOWLEDGE_STORAGE_URL: http://agent:8000
       # The demo has no login, so every call is the local user. With login, give
       # this server the agent's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).

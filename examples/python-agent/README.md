@@ -36,11 +36,13 @@ and `whoami` shows the forwarded user.
    (`npm run dev`):
 
    ```bash
-   MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true}}}
+   MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
    ```
 
-   Claude now has `mcp__lab__describe_metric`, `mcp__lab__compare_runs` and
-   `mcp__lab__whoami`, with no permission prompt.
+   Claude now has `mcp__lab__describe_metric`, `mcp__lab__compare_runs`,
+   `mcp__lab__describe_column` (a CSV column in the workspace) and
+   `mcp__lab__whoami`, with no permission prompt. Set `KNOWLEDGE_STORAGE_URL`
+   to the chatroom's agent server if it isn't `http://127.0.0.1:8000`.
 
 3. Add the skill. In the Skills panel, choose **Import .zip** and pick a zip of
    `skills/lab-analyst` (`cd skills && zip -r lab-analyst.zip lab-analyst`).
@@ -55,7 +57,7 @@ demo. The demo has no login, so the server treats every call as the local user.
 Use the service name in `.env`:
 
 ```bash
-MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true}}}
+MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
 docker compose --profile demo --profile python-sample up --build
 ```
 
@@ -74,9 +76,25 @@ The agent refuses that token, so a tools server can't use it to call the
 chatroom. `require_user()` in `server.py` checks it on every tool. Keep that call
 in your tools when they act for a person.
 
-These tools run outside the workspace's storage and permissions. If a tool needs
-a workspace file, have Claude read the file with its own file tools and pass the
-content in as an argument. Don't read the store directly.
+## Workspace files
+
+A tool that needs workspace files reads or writes them through the chatroom's
+storage API (its agent server's `/files`, `/nodes`, `/experiments`, ...), never
+the database or object store directly: the API is where each user's access is
+checked. With `"storageAccess": true`, each run sends the server an
+`X-Knowledge-Storage` token. Pass it on unchanged, as `workspace.py` does for
+`describe_column`. Requests with it act as Claude for the signed-in user:
+
+- Only what that user can read or edit.
+- Writes in a knowledge node need `?propose`, so the node's editors review them.
+  Writes in an experiment or at the workspace root go straight in.
+- No renaming, deleting, reviewing proposals, sharing or archiving experiments, or
+  managing access.
+- The workspace's activity log records them as Claude's, via `mcp:<name>`.
+
+The token lasts an hour (`STORAGE_TOKEN_SECONDS` on the agent), and only the
+storage API accepts it. Small inputs can still come in as arguments, read by
+Claude with its own file tools.
 
 ## Turning your agent into this
 

@@ -3,7 +3,13 @@ import type { NextRequest } from "next/server";
 import * as oidc from "openid-client";
 
 import { authSettings, checkOidcSettings, httpAllowed } from "../../shared/auth-mode";
-import { readIdentityToken, signIdentityToken } from "../../shared/identity-token";
+import {
+  STORAGE_AUDIENCE,
+  STORAGE_HEADER,
+  readIdentityToken,
+  signIdentityToken,
+  storageTokenSeconds,
+} from "../../shared/identity-token";
 
 /**
  * Login, for deployments that set AUTH_SECRET (the agent server must have the
@@ -21,6 +27,7 @@ import { readIdentityToken, signIdentityToken } from "../../shared/identity-toke
 export const SESSION_COOKIE = "kc_session";
 export const LOGIN_COOKIE = "kc_login";
 export const IDENTITY_HEADER = "x-knowledge-user";
+export { STORAGE_HEADER };
 
 const SESSION_SECONDS = 7 * 24 * 3600;
 const LOGIN_SECONDS = 10 * 60;
@@ -96,6 +103,19 @@ export function sessionFromRequest(req: Request): SessionUser | null {
 /** The X-Knowledge-User value for a request made for `user`. */
 export function identityHeader(user: SessionUser): string {
   return signIdentityToken({ ...user, exp: now() + HEADER_SECONDS }, authSecret()!);
+}
+
+/**
+ * An X-Knowledge-Storage token for a remote backend (`via` "remote"): it lets
+ * the backend use the storage API as Claude acting for this user for as long
+ * as a run may take (STORAGE_TOKEN_SECONDS), where X-Knowledge-User lasts
+ * minutes. docs/remote-agent.md.
+ */
+export function storageHeader(user: SessionUser, via: string): string {
+  return signIdentityToken(
+    { ...user, aud: STORAGE_AUDIENCE, via, exp: now() + storageTokenSeconds() },
+    authSecret()!,
+  );
 }
 
 /** The user an X-Knowledge-User value names, when this app signed it for the agent and it hasn't expired. */

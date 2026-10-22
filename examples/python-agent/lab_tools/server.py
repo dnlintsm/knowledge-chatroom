@@ -6,7 +6,7 @@ Run it:
 
 and point the chatroom at it (see ../README.md):
 
-    MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true}}}
+    MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
 
 Claude sees these tools as mcp__lab__<tool>. Each tool's docstring and type
 hints become what Claude reads, so write them for Claude.
@@ -14,18 +14,22 @@ hints become what Claude reads, so write them for Claude.
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import identity, stats
+from . import identity, stats, workspace
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
 # The chatroom's public key (agent GET /identity/public-key) when login is on;
 # unset = no login. Never give this server AUTH_SECRET.
 PUBLIC_KEY = identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
+# The chatroom's storage API (its agent server, LOCAL_AGENT_URL), for workspace files.
+STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
 mcp = MCPServer(
     SERVER_NAME,
@@ -67,6 +71,33 @@ def compare_runs(baseline: list[float], candidate: list[float], ctx: Context, hi
         return stats.as_dict(stats.compare_runs(baseline, candidate, higher_is_better))
     except ValueError as err:
         raise ToolError(str(err)) from err
+
+
+@mcp.tool()
+def describe_column(
+    path: str, column: str, ctx: Context, node: str | None = None, experiment: str | None = None
+) -> dict:
+    """Summarize one numeric column of a CSV file in the user's workspace (count, mean, std, median, min, max).
+
+    `path` is the file's path in its place: the workspace root, a knowledge node (`node` id)
+    or an experiment (`experiment` id). Reads only files the user may read.
+    """
+    require_user(ctx)
+    token = (ctx.headers or {}).get(workspace.STORAGE_HEADER)
+    if PUBLIC_KEY and not token:
+        raise ToolError('Workspace files need "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.')
+    try:
+        content = workspace.read_text(STORAGE_URL, path, token, node=node, experiment=experiment)
+    except workspace.WorkspaceError as err:
+        raise ToolError(str(err)) from err
+    rows = list(csv.DictReader(io.StringIO(content)))
+    if rows and column not in rows[0]:
+        raise ToolError(f"{path} has no column {column!r}; it has {', '.join(rows[0])}")
+    try:
+        values = [float(row[column]) for row in rows if row.get(column, "").strip()]
+        return {"path": path, "column": column, **stats.as_dict(stats.describe_metric(values))}
+    except ValueError as err:
+        raise ToolError(f"{column}: {err}") from err
 
 
 @mcp.tool()

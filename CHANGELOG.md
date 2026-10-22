@@ -13,6 +13,17 @@
   you do. `IDENTITY_FORMAT=v1` will be removed in the next release.
   Deployments without outside services need no change.
 
+### Added
+
+- Storage tokens for outside services (#88). MCP servers with `"storageAccess": true` and
+  remote backends (`AGENT_URL`) get an `X-Knowledge-Storage` token with each run. With it they
+  read and write workspace files through the storage API as Claude acting for the signed-in
+  user: only that user's files, node writes as proposals, and no renaming, deleting, reviewing
+  or sharing. The activity log records these changes as Claude's, with the service they came
+  through. Tokens last `STORAGE_TOKEN_SECONDS` (default an hour), so long remote runs keep
+  access. The Python sample gains `describe_column`, which reads a CSV from the workspace
+  this way.
+
 ## 0.1.2
 
 Runs become experiments: the Runs view replaces Traverse, Claude starts runs from your

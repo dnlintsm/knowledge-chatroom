@@ -5,7 +5,8 @@ import {
   localSuggester,
   remoteAgentUrl,
 } from "../../src/lib/agent-target";
-import { identityHeader, readIdentityHeader } from "../../src/lib/auth";
+import { identityHeader, readIdentityHeader, storageHeader } from "../../src/lib/auth";
+import { readIdentityToken } from "../../shared/identity-token";
 import {
   CHATROOM_PROPS,
   LOCAL_USER,
@@ -135,5 +136,15 @@ test.describe("with login on", () => {
     expect(readIdentityHeader(`${kind}.${forged}.${signature}`)).toBeNull();
     expect(readIdentityHeader(`${kind}.${payload}`)).toBeNull();
     expect(readIdentityHeader(undefined)).toBeNull();
+  });
+
+  test("a remote backend's storage token is for the storage API only and lasts a run", () => {
+    const ana = { sub: "https://login.example.com|42", email: "ana@example.com", name: "Ana" };
+    const token = storageHeader(ana, "remote");
+    const claims = readIdentityToken(token, process.env.AUTH_SECRET!);
+    expect(claims).toMatchObject({ ...ana, aud: "storage", via: "remote" });
+    expect(claims!.exp - Date.now() / 1000).toBeGreaterThan(50 * 60);
+    // Not the agent's own header, so it can't start chat runs.
+    expect(readIdentityHeader(token)).toBeNull();
   });
 });

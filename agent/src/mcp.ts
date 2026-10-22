@@ -18,6 +18,12 @@
  *   with AUTH_SECRET as in ./storage/identity.ts and check `aud` is
  *   "mcp:<name>": it is signed for that server only, and the agent refuses it.
  *   Without login there is no header and the run is the local user's.
+ * - storageAccess (http/sse): each run also sends an X-Knowledge-Storage
+ *   token, which the server passes on unchanged to the storage API (the agent
+ *   server's /files, /nodes, ...) to read and write files as Claude acting for
+ *   that user (issue #88): only what the user can reach, node writes as
+ *   proposals, recorded as Claude's via "mcp:<name>". Only the storage API
+ *   accepts it.
  *
  * Every tool of a configured server is pre-approved. A server that is down or
  * misconfigured leaves its tools out of the run; the chat carries on.
@@ -27,13 +33,14 @@ import { readFileSync } from "node:fs";
 
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 
-import { IDENTITY_HEADER } from "./storage/identity";
+import { IDENTITY_HEADER, STORAGE_HEADER } from "./storage/identity";
 
 type Env = Record<string, string | undefined>;
 
 export interface ExternalServer {
   config: McpServerConfig;
   forwardIdentity: boolean;
+  storageAccess: boolean;
 }
 
 export type ExternalServers = Record<string, ExternalServer>;
@@ -70,12 +77,15 @@ function parseServer(name: string, raw: unknown, env: Env): ExternalServer {
   if (!record(raw)) throw new Error("must be an object");
   const type = raw.type ?? "http";
   const forwardIdentity = raw.forwardIdentity === true;
+  const storageAccess = raw.storageAccess === true;
   if (type === "stdio") {
     if (typeof raw.command !== "string" || !raw.command) throw new Error("stdio needs a command");
     if (raw.args !== undefined && !(Array.isArray(raw.args) && raw.args.every((a) => typeof a === "string"))) {
       throw new Error("args must be a list of strings");
     }
-    if (forwardIdentity) throw new Error("forwardIdentity needs an http or sse server");
+    if (forwardIdentity || storageAccess) {
+      throw new Error("forwardIdentity and storageAccess need an http or sse server");
+    }
     const envVars = strings(raw.env, env, `${name}.env`);
     return {
       config: {
@@ -85,6 +95,7 @@ function parseServer(name: string, raw: unknown, env: Env): ExternalServer {
         ...(envVars ? { env: envVars } : {}),
       },
       forwardIdentity,
+      storageAccess,
     };
   }
   if (type !== "http" && type !== "sse") throw new Error(`unknown type ${JSON.stringify(type)}`);
@@ -92,13 +103,16 @@ function parseServer(name: string, raw: unknown, env: Env): ExternalServer {
     throw new Error("needs an http(s) url");
   }
   const headers = strings(raw.headers, env, `${name}.headers`);
-  if (headers && Object.keys(headers).some((h) => h.toLowerCase() === IDENTITY_HEADER)) {
-    throw new Error(`${IDENTITY_HEADER} is set by the agent (forwardIdentity)`);
+  for (const header of [IDENTITY_HEADER, STORAGE_HEADER]) {
+    if (headers && Object.keys(headers).some((h) => h.toLowerCase() === header)) {
+      throw new Error(`${header} is set by the agent (forwardIdentity, storageAccess)`);
+    }
   }
   return {
     // alwaysLoad: the agent has no tool search, so tools must not be deferred.
     config: { type, url: raw.url, ...(headers ? { headers } : {}), alwaysLoad: true },
     forwardIdentity,
+    storageAccess,
   };
 }
 
@@ -132,20 +146,26 @@ export function externalServersFromEnv(env: Env = process.env): ExternalServers 
 /** Permission rule that approves every tool of a server. */
 export const allowServer = (name: string) => `mcp__${name}`;
 
+/** Signs the run's user for one server: its identity, or (storage) a storage token. */
+export type RunTokens = (server: string, kind?: "identity" | "storage") => string;
+
 /**
  * The SDK configs for one run: servers with forwardIdentity carry the run's
- * user, signed for that server, when the run has one.
+ * user, signed for that server, and those with storageAccess a storage token,
+ * when the run has a user.
  */
 export function serverConfigs(
   servers: ExternalServers,
-  identity?: (server: string) => string,
+  tokens?: RunTokens,
 ): Record<string, McpServerConfig> {
   return Object.fromEntries(
-    Object.entries(servers).map(([name, { config, forwardIdentity }]) => [
-      name,
-      forwardIdentity && identity && (config.type === "http" || config.type === "sse")
-        ? { ...config, headers: { ...config.headers, [IDENTITY_HEADER]: identity(name) } }
-        : config,
-    ]),
+    Object.entries(servers).map(([name, { config, forwardIdentity, storageAccess }]) => {
+      if (!tokens || (config.type !== "http" && config.type !== "sse")) return [name, config];
+      const added = {
+        ...(forwardIdentity ? { [IDENTITY_HEADER]: tokens(name, "identity") } : {}),
+        ...(storageAccess ? { [STORAGE_HEADER]: tokens(name, "storage") } : {}),
+      };
+      return [name, Object.keys(added).length ? { ...config, headers: { ...config.headers, ...added } } : config];
+    }),
   );
 }

@@ -7,6 +7,7 @@ import {
   identityPublicKey,
   readIdentityToken,
   signIdentityToken,
+  storageTokenSeconds,
 } from "../../shared/identity-token";
 
 /** Identity tokens shared by the app, the agent and outside services (shared/identity-token.ts, issue #88). */
@@ -54,4 +55,12 @@ test("v1 tokens are still accepted during the move, and IDENTITY_FORMAT=v1 makes
   expect(identityFormat({ IDENTITY_FORMAT: "V1" })).toBe("v1");
   expect(() => identityFormat({ IDENTITY_FORMAT: "jwt" })).toThrow(/IDENTITY_FORMAT/);
   expect(signIdentityToken(ALICE, SECRET, identityFormat({ IDENTITY_FORMAT: "v1" }))).toMatch(/^v1\./);
+});
+
+test("storage tokens last an hour unless STORAGE_TOKEN_SECONDS says otherwise", () => {
+  expect(storageTokenSeconds({})).toBe(3600);
+  expect(storageTokenSeconds({ STORAGE_TOKEN_SECONDS: "7200" })).toBe(7200);
+  for (const bad of ["10", "1.5", "two hours", "999999"]) {
+    expect(() => storageTokenSeconds({ STORAGE_TOKEN_SECONDS: bad })).toThrow(/STORAGE_TOKEN_SECONDS/);
+  }
 });

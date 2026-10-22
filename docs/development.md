@@ -88,7 +88,7 @@ or a path to a JSON file, shaped like Claude's `.mcp.json`:
 
 ```json
 {"mcpServers": {
-  "lab": {"url": "http://localhost:9100/mcp", "forwardIdentity": true,
+  "lab": {"url": "http://localhost:9100/mcp", "forwardIdentity": true, "storageAccess": true,
           "headers": {"Authorization": "Bearer ${LAB_TOKEN}"}},
   "local": {"type": "stdio", "command": "python", "args": ["tools.py"]}
 }}
@@ -104,9 +104,19 @@ signature>`, valid for an hour; verify it with the public key from the agent's
 and check its `aud` is `mcp:<name>`). Give the server that public key, never
 `AUTH_SECRET`: with the key it can check tokens but not sign them. The token is
 signed for that server only, and the agent refuses it, so a server can't call the
-agent's own APIs as the user. These tools act outside workspace storage and its
-permissions: a server that needs workspace files should take them as arguments or
-check the forwarded user itself.
+agent's own APIs as the user.
+
+`storageAccess` gives a server workspace files (#88): each run also sends an
+`X-Knowledge-Storage` token, which the server passes on unchanged to the storage
+API (`/files`, `/nodes`, `/experiments`, `/search`, `/proposals` on this agent
+server). Requests with it are Claude acting for the signed-in user. They get that
+user's access and nothing more, with the same limits as Claude's own file tools:
+writes in a knowledge node (and to skills at the root) need `?propose`, and
+nothing is renamed, deleted, reviewed or shared (experiments included). The activity log credits them to
+Claude, `via` `mcp:<name>`. The token lasts `STORAGE_TOKEN_SECONDS` (default an
+hour), and only the storage API takes it. Servers must not connect to the database
+or object store directly: the app's connection owns the tables, so row security
+doesn't apply to it, and presigned links skip every check.
 
 [examples/python-agent](../examples/python-agent/README.md) is a complete sample:
 a Python agent's prompt moved into a skill and its tools into an MCP server, with

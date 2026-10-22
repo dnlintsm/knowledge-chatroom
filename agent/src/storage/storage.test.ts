@@ -22,7 +22,7 @@ import { asUser as asDbUser, connect } from "./db";
 import type { WorkspaceEvent } from "./events";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { createStorageHandler } from "./http";
-import { IDENTITY_HEADER, signIdentity, verifyIdentity } from "./identity";
+import { IDENTITY_HEADER, STORAGE_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { FileExistsError, ReadOnlyFileError } from "./files";
@@ -576,6 +576,65 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
           groups: { name: string }[];
         };
         assert.ok(groups.groups.some((g) => g.name === "Etch dept"));
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
+    });
+
+    test("a storage token is Claude acting for its user, within the user's access", async () => {
+      const secret = "k".repeat(32);
+      const signed = { ...storage, config: { ...storage.config, authSecret: secret } };
+      const handle = createStorageHandler(() => signed, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const viaLab = (sub: string, aud = "storage") => ({
+        [STORAGE_HEADER]: signIdentity({ sub, exp, aud, via: "mcp:lab" }, secret),
+      });
+      try {
+        // Only storage tokens: not one signed for the MCP server, nor the app's header.
+        assert.equal((await fetch(`${url}/nodes`, { headers: viaLab("test|bob", "mcp:lab") })).status, 401);
+        assert.equal(
+          (await fetch(`${url}/nodes`, { headers: { [IDENTITY_HEADER]: viaLab("test|bob")[STORAGE_HEADER] } })).status,
+          401,
+        );
+        assert.equal((await fetch(`${url}/nodes`, { headers: { [STORAGE_HEADER]: signIdentity({ sub: "test|bob", exp, aud: "storage" }, secret) } })).status, 401);
+
+        // The user's access: bob reads Module X, not Tech Y.
+        const read = await fetch(`${url}/files/notes/x.md?node=${moduleX}`, { headers: viaLab("test|bob") });
+        assert.equal(read.status, 200);
+        assert.equal((await fetch(`${url}/files?node=${techY}`, { headers: viaLab("test|bob") })).status, 404);
+
+        // Node writes are proposals, credited to Claude via the server.
+        const write = (query: string, sub = "test|bob", method = "PUT") =>
+          fetch(`${url}/files/notes/lab.md?node=${moduleX}${query}`, { method, headers: viaLab(sub), body: method === "PUT" ? "lab" : undefined });
+        assert.equal((await write("")).status, 403);
+        const proposed = await write("&propose");
+        assert.equal(proposed.status, 201);
+        const proposal = (await proposed.json()) as { id: string; author: string; authorId: string };
+        assert.deepEqual([proposal.author, proposal.authorId], ["agent", bob]);
+        assert.equal(await (await as(bob).files(moduleX)).stat("notes/lab.md"), null);
+        assert.equal((await fetch(`${url}/proposals/${proposal.id}/accept`, { method: "POST", headers: viaLab("test|bob") })).status, 403);
+        assert.equal((await write("", "test|bob", "DELETE")).status, 403);
+        assert.equal((await fetch(`${url}/access/grants`, { method: "POST", headers: viaLab("test|alice"), body: "{}" })).status, 403);
+
+        // Experiments: Claude records runs, but sharing or archiving one is the user's call.
+        const post = (body: object) =>
+          fetch(`${url}/experiments`, { method: "POST", headers: { ...viaLab("test|bob"), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await post({ nodeId: moduleX, title: "Lab", status: "shared" })).status, 403);
+        const created = await post({ nodeId: moduleX, title: "Lab" });
+        assert.equal(created.status, 201);
+        const { id: lab } = (await created.json()) as { id: string };
+        const patch = (body: object) =>
+          fetch(`${url}/experiments/${lab}`, { method: "PATCH", headers: { ...viaLab("test|bob"), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await patch({ state: "done", results: { loss: 0.5 } })).status, 200);
+        for (const status of ["shared", "archived", "draft"]) assert.equal((await patch({ status })).status, 403, status);
+        assert.equal((await as(bob).experiment(lab)).status, "draft");
+
+        const log = await as(alice).auditLog(500);
+        const entry = log.find((e) => e.action === "proposal.create" && e.target.path === "notes/lab.md")!;
+        assert.deepEqual([entry.actorType, entry.actorId, entry.target.via], ["agent", bob, "mcp:lab"]);
       } finally {
         await new Promise<void>((resolve) => srv.close(() => resolve()));
       }

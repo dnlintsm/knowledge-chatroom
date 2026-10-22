@@ -7,7 +7,7 @@ import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { FileExistsError, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
-import { InvalidPathError, isTextFile } from "./paths";
+import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
 import { SearchError } from "./search";
 import type { Session } from "./session";
@@ -130,7 +130,50 @@ import type { Session } from "./session";
  * a draft is seen by its author only, a shared or archived one by everyone
  * who can view the node, and only its author changes it. Who is asking comes from identity.ts: the
  * local user without AUTH_SECRET, the signed-in user with it.
+ *
+ * An X-Knowledge-Storage token (shared/identity-token.ts) instead is Claude
+ * acting for its user through an outside service (an MCP server, a remote
+ * backend), with that user's access and the same limits as this agent's own
+ * file tools (tools.ts): in a knowledge node, and for skills at the root, it
+ * writes with ?propose; it doesn't rename, delete, review proposals, share or
+ * archive experiments, or manage access (agentRefusal, refusesStatus below).
  */
+
+/** Why Claude, acting through a storage token, may not make this request; null when it may. */
+export function agentRefusal(method: string, url: URL): string | null {
+  const [section, ...rest] = url.pathname.split("/").slice(1);
+  const sub = rest.join("/");
+  if (method === "GET" || method === "HEAD") {
+    return section === "access" && sub !== "" ? "Claude doesn't manage access" : null;
+  }
+  switch (section) {
+    case "files": {
+      if (method !== "PUT") return "Claude doesn't rename or delete files";
+      if (url.searchParams.has("propose") || url.searchParams.get("experiment")) return null;
+      if (url.searchParams.get("node")) {
+        return "Claude's writes in a knowledge node are proposals: add ?propose";
+      }
+      try {
+        const skill = kindForPath(normalizePath(sub.split("/").map(decodeURIComponent).join("/"))) === "skill";
+        return skill ? "Claude's changes to skills are proposals: add ?propose" : null;
+      } catch {
+        return null; // the file route answers bad paths itself
+      }
+    }
+    case "nodes":
+      return method === "POST" && sub === "" ? null : "Claude doesn't rename or delete nodes";
+    case "experiments":
+      if (method === "POST" && sub === "") return null;
+      if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
+      return "Claude doesn't delete experiments or move folders into them";
+    case "proposals":
+      return method === "POST" && sub === "" ? null : "Claude doesn't accept, reject or withdraw proposals";
+    case "access":
+      return "Claude doesn't manage access";
+    default:
+      return "Claude can't do that with a storage token";
+  }
+}
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -251,6 +294,12 @@ function experimentInput(body: Record<string, unknown>): ExperimentInput | undef
   return input;
 }
 
+// Sharing or archiving an experiment changes who sees it: the user's call,
+// not an outside service's, so storage tokens (principal.via) leave status alone.
+const STATUS_REFUSED = "Claude doesn't share or archive experiments with a storage token: leave out status";
+const refusesStatus = (session: Session, input: ExperimentInput) =>
+  Boolean(session.principal.via) && input.status !== undefined && input.status !== "draft";
+
 async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
   const expected =
@@ -277,6 +326,7 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
         json(res, 400, { error: `Expected {nodeId: string|null, title: string, …}; ${expected}` });
         return;
       }
+      if (refusesStatus(session, input)) return json(res, 403, { error: STATUS_REFUSED });
       json(res, 201, await session.createExperiment(body.nodeId, input));
     } else {
       json(res, 405, { error: "Method not allowed" });
@@ -295,6 +345,8 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
         json(res, 400, { error: expected });
         return;
       }
+      // Any status change: back to draft from archived would make it writable again.
+      if (session.principal.via && input.status !== undefined) return json(res, 403, { error: STATUS_REFUSED });
       json(res, 200, await session.updateExperiment(id, input));
       return;
     }
@@ -493,10 +545,17 @@ export function createStorageHandler(
     }
 
     try {
-      const principal = await identify(req, current);
+      const principal = await identify(req, current, "user", { storageTokens: true });
       if (!principal) {
         json(res, 401, { error: "Sign in to use the workspace" });
         return;
+      }
+      if (principal.via) {
+        const refusal = agentRefusal(req.method ?? "GET", url);
+        if (refusal) {
+          json(res, 403, { error: refusal });
+          return;
+        }
       }
       const session = current.session(principal);
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
