@@ -37,6 +37,8 @@ export class MemoryRecall {
     private readonly embedder: Embedder,
     /** Notes less similar to the query than this aren't results. */
     private readonly minSimilarity: number,
+    /** Vectors kept, across users. */
+    private readonly cacheSize = CACHE_SIZE,
   ) {}
 
   private key(text: string) {
@@ -46,23 +48,30 @@ export class MemoryRecall {
   /** The texts' vectors, embedding the ones not cached yet in one batch. */
   private async vectors(texts: string[]): Promise<number[][]> {
     const keys = texts.map((t) => this.key(t));
-    const missing = [...new Set(keys.map((k, i) => (this.cache.has(k) ? -1 : i)).filter((i) => i >= 0))];
-    if (missing.length) {
-      const made = await this.embedder.embed(missing.map((i) => texts[i]), "passage");
-      missing.forEach((i, j) => this.cache.set(keys[i], made[j]));
-      // Oldest first out.
-      for (const old of this.cache.keys()) {
-        if (this.cache.size <= CACHE_SIZE) break;
-        this.cache.delete(old);
-      }
-    }
-    return keys.map((k) => {
-      const vector = this.cache.get(k)!;
+    const found = new Map<string, number[]>();
+    for (const k of keys) {
+      const vector = this.cache.get(k);
+      if (!vector) continue;
+      found.set(k, vector);
       // Recently used ones last, so they stay.
       this.cache.delete(k);
       this.cache.set(k, vector);
-      return vector;
-    });
+    }
+    const missing = [...new Set(keys.filter((k) => !found.has(k)))];
+    if (missing.length) {
+      const made = await this.embedder.embed(missing.map((k) => texts[keys.indexOf(k)]), "passage");
+      missing.forEach((k, j) => {
+        found.set(k, made[j]);
+        this.cache.set(k, made[j]);
+      });
+      // Oldest first out. This batch is already in hand, even if it alone
+      // is more than the cache holds.
+      for (const old of this.cache.keys()) {
+        if (this.cache.size <= this.cacheSize) break;
+        this.cache.delete(old);
+      }
+    }
+    return keys.map((k) => found.get(k)!);
   }
 
   /** The run's notes closest in meaning to `query`, most similar first. */

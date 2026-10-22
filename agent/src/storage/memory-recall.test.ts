@@ -109,6 +109,10 @@ describe("memory recall and past chats", { skip: !TEST_DATABASE_URL && "TEST_DAT
     await recall.search(memory, shared, me, null, "what do they drink");
     assert.equal(embedder.calls - before, 1, "only the query is embedded again");
     assert.deepEqual(await recall.search(memory, shared, other, null, "charts"), [], "only the user's own notes");
+
+    // A run with more notes than the cache holds still gets every vector.
+    const tiny = new MemoryRecall(embedder, 0.5, 1);
+    assert.deepEqual((await tiny.search(memory, shared, me, null, "charts")).map((h) => h.name), ["plot-style"]);
   });
 
   test("memory_search adds notes close in meaning after the word matches", async () => {
@@ -151,6 +155,13 @@ describe("memory recall and past chats", { skip: !TEST_DATABASE_URL && "TEST_DAT
     assert.equal((await call("chats_search", { query: "anodize" })).text, "No past chats match.");
     // LIKE's wildcards are plain characters.
     assert.equal((await call("chats_search", { query: "%_" })).text, "No past chats match.");
+
+    // Chats with more of the words come first, however old; the messages'
+    // JSON ("type": "text") isn't what was said.
+    await say(me, "c-newer", "wafer only", "ok");
+    const ranked = await call("chats_search", { query: "wafer etch rate", limit: 1 });
+    assert.match(ranked.text, /^- c-etch:/);
+    assert.equal((await call("chats_search", { query: "text" })).text, "No past chats match.");
 
     const read = await call("chats_read", { id: "c-etch" });
     assert.match(read.text, /User: What was the etch rate on the wafer line\?\n\nYou: About 40 nm\/min/);

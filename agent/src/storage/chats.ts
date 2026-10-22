@@ -137,9 +137,8 @@ export function chatLines(messages: unknown[]): ChatLine[] {
   return lines;
 }
 
-/** Words searched for at most, and chats looked through. */
+/** Words searched for at most. */
 const MAX_WORDS = 8;
-const CANDIDATES = 100;
 const SNIPPET = 160;
 
 const likePattern = (word: string) => `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -221,25 +220,41 @@ export class ChatService {
     const words = [...new Set(query.toLowerCase().split(/\s+/).filter((w) => w.length > 1))].slice(0, MAX_WORDS);
     if (!words.length) return [];
     const limit = Math.min(Math.max(Math.trunc(options.limit ?? 5) || 5, 1), 20);
+    const patterns = words.map(likePattern);
+    // Ranked on what the user and Claude said (as chatLines reads it), not on
+    // the messages' JSON, before the limit.
     const rows = await this.as(userId, (db) =>
-      db<{ id: string; name: string | null; updated_at: Date; messages: unknown[] }[]>`
-        SELECT c.id, c.name, c.updated_at, c.messages FROM chats c
+      db<{ id: string; name: string | null; updated_at: Date; messages: unknown[]; matched: number }[]>`
+        SELECT c.id, c.name, c.updated_at, c.messages, m.matched FROM chats c
+        CROSS JOIN LATERAL (
+          SELECT coalesce(c.name, '') || E'\n' || coalesce(string_agg(
+            CASE jsonb_typeof(e->'content')
+              WHEN 'string' THEN e->>'content'
+              WHEN 'array' THEN (
+                SELECT string_agg(p->>'text', E'\n') FROM jsonb_array_elements(e->'content') p
+                WHERE jsonb_typeof(p) = 'object' AND p->>'type' = 'text')
+            END, E'\n'), '') AS said
+          FROM jsonb_array_elements(CASE jsonb_typeof(c.messages) WHEN 'array' THEN c.messages ELSE '[]'::jsonb END) e
+          WHERE e->>'role' IN ('user', 'assistant')
+        ) t
+        CROSS JOIN LATERAL (
+          SELECT count(*)::int AS matched FROM unnest(${patterns}::text[]) w WHERE t.said ILIKE w
+        ) m
         WHERE c.user_id = ${userId} AND c.workspace_id = ${this.workspaceId}
           ${options.exclude ? db`AND c.id <> ${options.exclude}` : db``}
           AND NOT EXISTS (
             SELECT 1 FROM memory_incognito_chats i
             WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)
-          AND (coalesce(c.name, '') || ' ' || c.messages::text) ILIKE ANY (${words.map(likePattern)}::text[])
-        ORDER BY c.updated_at DESC
-        LIMIT ${CANDIDATES}`,
+          AND m.matched > 0
+        ORDER BY m.matched DESC, c.updated_at DESC
+        LIMIT ${limit}`,
     );
     const hits: ChatHit[] = [];
     for (const row of rows) {
-      // The JSON matched; look again in just what was said.
+      // Lines around the words found.
       const lines = chatLines(row.messages);
       const said = [row.name ?? "", ...lines.map((l) => l.text)].join("\n").toLowerCase();
       const found = words.filter((w) => said.includes(w));
-      if (!found.length) continue;
       const snippets: string[] = [];
       for (const line of lines) {
         const at = Math.min(...found.map((w) => line.text.toLowerCase().indexOf(w)).filter((i) => i >= 0));
@@ -249,9 +264,9 @@ export class ChatService {
         snippets.push(`${line.role}: ${start > 0 ? "…" : ""}${cut}${start + SNIPPET < line.text.length ? "…" : ""}`);
         if (snippets.length === 2) break;
       }
-      hits.push({ id: row.id, name: row.name, updatedAt: row.updated_at.toISOString(), matched: found.length, snippets });
+      hits.push({ id: row.id, name: row.name, updatedAt: row.updated_at.toISOString(), matched: row.matched, snippets });
     }
-    return hits.sort((a, b) => b.matched - a.matched).slice(0, limit);
+    return hits;
   }
 
   /**
