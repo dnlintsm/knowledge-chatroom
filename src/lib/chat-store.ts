@@ -148,6 +148,8 @@ export class AgentChatStore implements ChatStore {
 
 interface MemoryChat extends ChatSummary {
   owner: string;
+  /** Who it is for, to hand it on to the server store (AutoChatStore). */
+  user: ChatUser;
   runs: StoredRun[];
   messages: unknown[];
 }
@@ -186,6 +188,7 @@ export class MemoryChatStore implements ChatStore {
       chat = {
         id,
         owner: ownerKey(user),
+        user,
         name: null,
         agentId: run.agentId,
         archived: false,
@@ -237,6 +240,21 @@ export class MemoryChatStore implements ChatStore {
   async remove(user: ChatUser, id: string) {
     return this.find(user, id) ? this.chats.delete(id) : false;
   }
+
+  /** Hands every chat, oldest first, to `save` run by run, and forgets those it took. */
+  async handOver(save: (user: ChatUser, id: string, run: NewRun) => Promise<void>) {
+    for (const chat of [...this.chats.values()]) {
+      for (const [i, run] of chat.runs.entries()) {
+        await save(chat.user, chat.id, {
+          ...run,
+          agentId: chat.agentId,
+          messages: i === chat.runs.length - 1 ? chat.messages : [],
+          name: chat.name,
+        });
+      }
+      this.chats.delete(chat.id);
+    }
+  }
 }
 
 const summary = ({ id, name, agentId, archived, createdAt, updatedAt, lastRunAt }: MemoryChat): ChatSummary => ({
@@ -253,14 +271,16 @@ const summary = ({ id, name, agentId, archived, createdAt, updatedAt, lastRunAt 
  * The agent server's store when it has server storage, else memory. Which one
  * is asked of the agent server (its /chats answers 404 without DATABASE_URL,
  * 500 when storage failed to start) and remembered; until it answers (still
- * starting, or unreachable) memory stands in.
+ * starting, or unreachable) memory stands in, and what it kept moves to the
+ * server once that is ready.
  */
 export class AutoChatStore implements ChatStore {
   private chosen: ChatStore | null = null;
+  private handingOver: Promise<void> | null = null;
 
   constructor(
     private readonly server: ChatStore = new AgentChatStore(),
-    private readonly memory: ChatStore = new MemoryChatStore(),
+    private readonly memory = new MemoryChatStore(),
     private readonly probe: () => Promise<number | null> = () => probeAgent(localAgentUrl()),
   ) {}
 
@@ -268,7 +288,15 @@ export class AutoChatStore implements ChatStore {
     if (this.chosen) return this.chosen;
     const status = await this.probe();
     if (status === 404 || status === 500) this.chosen = this.memory;
-    else if (status !== null && status !== 503) this.chosen = this.server;
+    else if (status !== null && status !== 503) {
+      this.handingOver ??= this.memory
+        .handOver((user, id, run) => this.server.save(user, id, run))
+        .catch((err) => console.error("[chat] moving chats kept in memory to the server failed:", err))
+        .then(() => {
+          this.chosen = this.server;
+        });
+      await this.handingOver;
+    }
     return this.chosen ?? this.memory;
   }
 

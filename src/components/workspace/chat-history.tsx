@@ -38,16 +38,20 @@ export function ChatHistory({ onOpen }: { onOpen: () => void }) {
   const config = useCopilotChatConfiguration();
   const activeId = config?.threadId;
   const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
 
-  const load = useCallback(async () => {
+  /** The first page, or with `cursor` the next one added below. */
+  const load = useCallback(async (cursor?: string) => {
     try {
-      const query = new URLSearchParams({ agentId: AGENT, limit: "200" });
+      const query = new URLSearchParams({ agentId: AGENT, limit: "100" });
       if (showArchived) query.set("includeArchived", "true");
-      const { threads } = (await (await call(`/threads?${query}`)).json()) as { threads: Thread[] };
-      setThreads(threads);
+      if (cursor) query.set("cursor", cursor);
+      const page = (await (await call(`/threads?${query}`)).json()) as { threads: Thread[]; nextCursor: string | null };
+      setThreads((shown) => (cursor ? [...(shown ?? []), ...page.threads] : page.threads));
+      setNextCursor(page.nextCursor);
       setError(null);
     } catch {
       setError("Couldn't load your chats.");
@@ -190,6 +194,17 @@ export function ChatHistory({ onOpen }: { onOpen: () => void }) {
             </li>
           );
         })}
+        {nextCursor && (
+          <li className="px-1.5 py-1">
+            <button
+              type="button"
+              onClick={() => void load(nextCursor)}
+              className="text-xs text-[var(--muted-foreground)] underline hover:text-[var(--foreground)] cursor-pointer"
+            >
+              Show older chats
+            </button>
+          </li>
+        )}
       </ul>
     </div>
   );

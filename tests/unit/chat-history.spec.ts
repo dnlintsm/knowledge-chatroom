@@ -93,11 +93,12 @@ test("without server storage, memory stands in until the agent server says which
   const store = new AutoChatStore(server, memory, async () => status);
   await store.save(null, "early", { agentId: "default", runId: "r", parentRunId: null, events: [], messages: [], name: "Early" });
   expect((await memory.list(null, {})).threads).toHaveLength(1);
-  status = 401; // storage on, login on
+  status = 401; // storage on, login on: what memory kept moves to the server
   await store.save(null, "later", { agentId: "default", runId: "r", parentRunId: null, events: [], messages: [], name: "Later" });
-  expect((await server.list(null, {})).threads.map((t) => t.id)).toEqual(["later"]);
+  expect((await server.list(null, {})).threads.map((t) => t.id)).toEqual(["later", "early"]);
+  expect((await memory.list(null, {})).threads).toEqual([]);
   status = 404; // remembered: no more asking
-  expect((await store.list(null, {})).threads.map((t) => t.id)).toEqual(["later"]);
+  expect((await store.list(null, {})).threads.map((t) => t.id)).toEqual(["later", "early"]);
 });
 
 test.describe("with login on", () => {

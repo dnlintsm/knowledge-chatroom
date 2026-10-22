@@ -1,4 +1,4 @@
-import { asUser, type Sql } from "./db";
+import { asUser, inTransaction, type Sql, type Tx } from "./db";
 
 /**
  * Chat history (issue #91, migrations/017_chats.sql): each AG-UI thread the
@@ -107,9 +107,13 @@ export class ChatService {
     private readonly rowSecurity: boolean,
   ) {}
 
-  /** Runs `fn` for `userId`: as that user when row-level security is on. */
+  /**
+   * Runs `fn` for `userId` in one transaction (so appendRun's row lock holds),
+   * as that user when row-level security is on.
+   */
   private as<T>(userId: string, fn: (db: Sql) => Promise<T>): Promise<T> {
-    return this.rowSecurity ? asUser(this.sql, userId, fn) : fn(this.sql);
+    if (this.rowSecurity) return asUser(this.sql, userId, fn);
+    return this.sql.begin((tx) => fn(inTransaction(tx as Tx))) as Promise<T>;
   }
 
   /** The user's chats, most recently active first. */
