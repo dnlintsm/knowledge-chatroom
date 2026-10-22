@@ -162,10 +162,16 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
     [editor],
   );
 
+  // Privacy switches show as set only once the server has them, so the UI
+  // never claims memory is off while a run could still use it.
   const setMode = useCallback(
     async (next: Memory["mode"]) => {
-      setModeState(next);
-      await call(`/api/memory/settings`, json("PUT", { mode: next })).finally(() => void reload());
+      try {
+        const saved = await call<{ mode: Memory["mode"] }>(`/api/memory/settings`, json("PUT", { mode: next }));
+        setModeState(saved.mode);
+      } catch {
+        await reload();
+      }
     },
     [reload],
   );
@@ -173,8 +179,12 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const setIncognito = useCallback(
     async (next: boolean) => {
       if (!threadId) return;
-      setIncognitoState(next);
-      await call(`/api/memory/settings`, json("PUT", { thread: threadId, incognito: next })).finally(() => void reload());
+      try {
+        const saved = await call<{ incognito: boolean }>(`/api/memory/settings`, json("PUT", { thread: threadId, incognito: next }));
+        setIncognitoState(saved.incognito);
+      } catch {
+        await reload();
+      }
     },
     [reload, threadId],
   );

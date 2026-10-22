@@ -102,6 +102,14 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     const back = await memory.undo(me, revived.event!.id);
     assert.equal(back.note?.archived, true);
     assert.equal(back.note?.body, "Etch team");
+
+    // Undo refuses a change that isn't the latest, archiving included.
+    await memory.archive(me, "lab", false);
+    const gone = await memory.archive(me, "lab", true, run);
+    await memory.archive(me, "lab", false);
+    await memory.archive(me, "lab", true);
+    await assert.rejects(memory.undo(me, gone.event!.id), MemoryConflictError);
+    assert.equal((await memory.get(me, "lab"))?.archived, true);
   });
 
   test("edits replace exactly one occurrence", async () => {
@@ -111,6 +119,11 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     const { note: edited } = await memory.replaceText(me, "tools", "vim daily", "emacs daily", "agent", run);
     assert.equal(edited.body, "Uses vim. Uses emacs daily.");
     await assert.rejects(memory.replaceText(me, "missing", "a", "b", "agent", run), MemoryNotFoundError);
+    // Edits apply only to the version they read.
+    await assert.rejects(
+      memory.save(me, "tools", { ...edited, body: "stale" }, "agent", { run, ifVersion: edited.version - 1 }),
+      MemoryConflictError,
+    );
   });
 
   test("input is checked", async () => {
@@ -195,6 +208,13 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
       assert.equal((await call("memory_view", { name: "gone" })).isError, true);
       await call("memory_delete", { name: "tool-note" });
       assert.deepEqual(events, ["create:tool-note", "read:tool-note", "archive:tool-note"]);
+
+      // Made incognito mid-run: the run's tools stop reading and saving.
+      await memory.setIncognito(me, run.threadId, true);
+      const refused = await call("memory_view", { name: "private" });
+      assert.equal(refused.isError, true);
+      assert.match(refused.content[0].text, /incognito/);
+      await memory.setIncognito(me, run.threadId, false);
 
       await memory.setIncognito(me, "chat-2", true);
       assert.deepEqual(await memory.settings(me, "chat-2"), { mode: "on", incognito: true });

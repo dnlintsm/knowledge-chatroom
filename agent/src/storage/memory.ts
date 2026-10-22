@@ -262,21 +262,25 @@ export class MemoryService {
 
   /**
    * Creates or replaces a note. `run` (Claude's writes) records an event the
-   * chat shows and the user can undo. `create` refuses a name in use. Saving
-   * the same content again changes nothing and records nothing.
+   * chat shows and the user can undo. `create` refuses a name in use;
+   * `ifVersion` refuses a note that is at another version by now. Saving the
+   * same content again changes nothing and records nothing.
    */
   async save(
     userId: string,
     name: string,
     input: Partial<MemoryInput>,
     by: MemoryAuthor,
-    { run, create = false }: { run?: MemoryRun; create?: boolean } = {},
+    { run, create = false, ifVersion }: { run?: MemoryRun; create?: boolean; ifVersion?: number } = {},
   ): Promise<{ note: MemoryNote; event: MemoryEvent | null }> {
     checkName(name);
     const clean = checkInput(input);
     return this.as(userId, async (db) => {
       const row = await this.row(db, userId, name, true);
       if (row && create && !row.archived_at) throw new MemoryConflictError(`A memory named ${name} already exists`);
+      if (ifVersion !== undefined && (!row || row.archived_at || row.version !== ifVersion)) {
+        throw new MemoryConflictError(`${name} changed meanwhile; view it again`);
+      }
       if (!row || row.archived_at) await this.checkRoom(db, userId);
       if (!row) {
         const [created] = await db<MemoryRow[]>`
@@ -326,7 +330,9 @@ export class MemoryService {
           : `That text is in ${name} ${count} times; include more around it so it's unique`,
       );
     }
-    return this.save(userId, name, { ...note, body: note.body.replace(oldText, () => newText) }, by, { run });
+    // Only onto the version just read, so a change made meanwhile isn't lost.
+    const body = note.body.replace(oldText, () => newText);
+    return this.save(userId, name, { ...note, body }, by, { run, ifVersion: note.version });
   }
 
   /**
@@ -393,9 +399,15 @@ export class MemoryService {
         WHERE id = ${eventId} AND user_id = ${userId} AND workspace_id = ${this.workspaceId}`;
       if (!event || event.kind === "read") throw new MemoryNotFoundError("for that change");
       if (event.undone_at) throw new MemoryConflictError("That change was already undone");
-      const [row] = await db<MemoryRow[]>`SELECT * FROM memories WHERE id = ${event.memory_id} FOR UPDATE`;
+      // Every change (archiving included) sets updated_at in the transaction
+      // that records its event, so a later one shows as a later updated_at.
+      const [row] = await db<(MemoryRow & { fresh: boolean })[]>`
+        SELECT m.*, m.updated_at <= e.created_at AS fresh
+        FROM memories m JOIN memory_events e ON e.memory_id = m.id
+        WHERE e.id = ${eventId}
+        FOR UPDATE OF m`;
       if (!row) throw new MemoryNotFoundError("for that change");
-      const latest = row.version === event.version && (event.kind === "archive") === Boolean(row.archived_at);
+      const latest = row.fresh && row.version === event.version && (event.kind === "archive") === Boolean(row.archived_at);
       if (!latest) throw new MemoryConflictError(`${row.name} changed since; restore an earlier version instead`);
       await db`UPDATE memory_events SET undone_at = now() WHERE id = ${eventId}`;
       if (event.kind === "archive") {

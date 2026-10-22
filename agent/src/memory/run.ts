@@ -82,7 +82,7 @@ type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean
 const text = (value: string): ToolResult => ({ content: [{ type: "text", text: value }] });
 const error = (message: string): ToolResult => ({ ...text(message), isError: true });
 
-async function attempt(fn: () => Promise<ToolResult>): Promise<ToolResult> {
+async function tryTool(fn: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await fn();
   } catch (err) {
@@ -101,6 +101,16 @@ export const MEMORY_TOOLS = ["memory_view", "memory_search", "memory_save", "mem
 /** The memory_* tools for one run. */
 export function memoryTools(memory: RunMemory) {
   const { service, userId, run, onEvent } = memory;
+  // The user can turn memory off or make the chat incognito mid-run: each
+  // call checks again, so nothing is read or saved after that.
+  const attempt = (fn: () => Promise<ToolResult>) =>
+    tryTool(async () => {
+      const { mode, incognito } = await service.settings(userId, run.threadId);
+      if (mode === "off" || incognito) {
+        return error("Memory is off in this chat now (the user turned it off or made the chat incognito): don't read or save notes.");
+      }
+      return fn();
+    });
   const changed = (result: { event: MemoryEvent | null }, done: string) => {
     if (result.event) onEvent(result.event);
     return text(result.event ? `${done} The user sees the change under your reply and can undo it.` : `${done} (No change.)`);
