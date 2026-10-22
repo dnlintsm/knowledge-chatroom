@@ -164,15 +164,27 @@ const summary = (note) => ({ ...note, body: undefined });
 // Shared memory (step 3): one workspace note to start with, which you edit.
 const WORKSPACE = { scope: "workspace", nodeId: null, groupId: null, label: "Workspace" };
 const shared = new Map();
-function putShared(place, name, input) {
+function putShared(place, name, input, pack = null, mode = "auto") {
   const id = randomUUID();
   shared.set(id, {
     id, name, description: input.description, type: input.type ?? "reference", body: input.body ?? "", version: 1,
-    place, canEdit: true, mode: "auto", myMode: null, everyoneMode: "auto", updatedAt: new Date().toISOString(),
+    place, canEdit: true, mode, myMode: null, everyoneMode: mode, pack, updatedAt: new Date().toISOString(),
   });
   return shared.get(id);
 }
 putShared(WORKSPACE, "lab-conventions", { description: "How the lab names runs and units", body: "Units are nm. Runs are named <tool>-<date>." });
+
+// Memory packs (step 4): one on the hub; installing adds its notes, Manual.
+const PACK_VERSION = {
+  version: 1, description: "Terms the thin-film team uses, and what they mean", notes: 2, flags: [], publishedBy: "Ana",
+  publishedAt: new Date().toISOString(), verified: true, yanked: false, yankReason: null,
+};
+const PACK_NOTES = [
+  { name: "film-terms", description: "What the team means by film, stack and anneal", type: "reference", body: "A stack is the layers of one sample, bottom first. Anneal = 1 h at 400 C unless said." },
+  { name: "sample-ids", description: "How samples are numbered", type: "reference", body: "Samples are TF-<year>-<n>, n from 1 each year." },
+];
+const packs = [{ name: "thin-film-glossary", owner: "Ana", mine: false, latest: PACK_VERSION, updatedAt: PACK_VERSION.publishedAt }];
+const installs = [];
 
 /** Saves a note as the user or Claude; returns the event for Claude's changes. */
 function saveMemory(name, input, by) {
@@ -211,8 +223,48 @@ async function handleMemory(req, res, url) {
     notes.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updatedAt.localeCompare(a.updatedAt));
     return json({
       mode: memory.mode, incognito: memory.incognito.has(thread), notes, inbox: memory.inbox, types: MEMORY_TYPES,
-      shared: [...shared.values()].map(summary), sharedProposals: [], targets: [{ ...WORKSPACE, canEdit: true }],
+      shared: [...shared.values()].map(summary), sharedProposals: [], targets: [{ ...WORKSPACE, canEdit: true }], installs,
     });
+  }
+  if (req.method === "POST" && section === "import") {
+    const text = String(input.text ?? "").trim();
+    if (!text) return json({ error: "Nothing to import: paste the memory or pick a file" }, 400);
+    // Claude sorts each line into a note; here, one note per "- " line.
+    const lines = text.split("\n").map((l) => l.replace(/^[-*]\s*/, "").trim()).filter(Boolean);
+    lines.forEach((line, i) => {
+      const name = i === 0 ? "work-role" : `imported-${i + 1}`;
+      memory.inbox.push({
+        id: randomUUID(), op: memory.notes.has(name) ? "update" : "add", name, description: line.slice(0, 80), type: "profile",
+        body: line, source: "import", reason: `Imported from ${input.label ?? "another assistant"}`, createdAt: new Date().toISOString(),
+      });
+    });
+    return json({ proposed: lines.length, skipped: 0, how: "text" });
+  }
+  if (section === "packs") {
+    if (req.method === "GET" && !name) return json({ packs, isAdmin: false });
+    const pack = packs.find((p) => p.name === name);
+    if (!pack) return json({ error: `No pack ${name}` }, 404);
+    if (req.method === "GET") {
+      return json({ pack: { ...pack, versions: [PACK_VERSION], version: PACK_VERSION, notes: PACK_NOTES, isAdmin: false } });
+    }
+    if (req.method === "POST" && action === "install") {
+      if (installs.some((i) => i.name === name)) return json({ install: installs.find((i) => i.name === name) });
+      const install = { id: randomUUID(), name, version: 1, latest: null, place: WORKSPACE, canEdit: true, notes: PACK_NOTES.length, installedAt: new Date().toISOString() };
+      installs.push(install);
+      for (const note of PACK_NOTES) putShared(WORKSPACE, note.name, note, { installId: install.id, name, version: 1 }, "manual");
+      return json({ install });
+    }
+  }
+  if (section === "installs" && name) {
+    const at = installs.findIndex((i) => i.id === name);
+    if (at < 0) return json({ error: "No such install" }, 404);
+    const [install] = installs.splice(at, 1);
+    for (const [id, note] of shared) {
+      if (note.pack?.installId !== install.id) continue;
+      if (action === "fork") note.pack = null;
+      else shared.delete(id);
+    }
+    return json({ id: name, deleted: true });
   }
   if (section === "shared") {
     if (req.method === "POST" && !name) {

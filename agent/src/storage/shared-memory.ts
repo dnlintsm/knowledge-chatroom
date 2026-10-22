@@ -60,6 +60,8 @@ export interface SharedSummary {
   myMode: SharedMode | null;
   everyoneMode: SharedMode;
   updatedAt: string;
+  /** Installed from a memory pack (step 4): read-only until the pack is forked. */
+  pack: { installId: string; name: string; version: number } | null;
 }
 
 export interface SharedNote extends SharedSummary {
@@ -125,6 +127,9 @@ interface Row {
   version: number;
   updated_at: Date;
   rank: number;
+  pack_install_id: string | null;
+  pack_name: string | null;
+  pack_version: number | null;
   my_mode: SharedMode | null;
   everyone_mode: SharedMode | null;
   label: string | null;
@@ -173,10 +178,18 @@ const toSummary = (row: Row): SharedSummary => {
     myMode: row.my_mode,
     everyoneMode,
     updatedAt: row.updated_at.toISOString(),
+    pack: row.pack_install_id ? { installId: row.pack_install_id, name: row.pack_name ?? "", version: row.pack_version ?? 0 } : null,
   };
 };
 
 const toNote = (row: Row): SharedNote => ({ ...toSummary(row), body: row.body });
+
+/** A memory pack's notes change only with the pack. */
+function fromPack(row: Row) {
+  if (row.pack_install_id) {
+    throw new MemoryError(`${row.name} comes from the memory pack ${row.pack_name}: update or fork the pack to change it`);
+  }
+}
 
 export class SharedMemoryService {
   constructor(
@@ -206,10 +219,14 @@ export class SharedMemoryService {
       SELECT * FROM (
         SELECT m.id, m.scope, m.node_id, m.group_id, m.name, m.description, m.type, m.body, m.version, m.updated_at,
           shared_memory_rank(m.workspace_id, ${userId}, m.scope, m.node_id, m.group_id) AS rank,
+          m.pack_install_id, pk.name AS pack_name, pv.version AS pack_version,
           (SELECT s.mode FROM shared_memory_settings s WHERE s.memory_id = m.id AND s.user_id = ${userId}) AS my_mode,
           (SELECT s.mode FROM shared_memory_settings s WHERE s.memory_id = m.id AND s.user_id IS NULL) AS everyone_mode
         FROM shared_memories m
         LEFT JOIN nodes n ON n.id = m.node_id
+        LEFT JOIN memory_pack_installs pi ON pi.id = m.pack_install_id
+        LEFT JOIN hub_memory_packs pk ON pk.id = pi.pack_id
+        LEFT JOIN hub_memory_pack_versions pv ON pv.id = pi.version_id
         WHERE m.workspace_id = ${this.workspaceId} AND (m.node_id IS NULL OR n.deleted_at IS NULL) AND ${where}
       ) r
       WHERE r.rank >= 1
@@ -376,6 +393,7 @@ export class SharedMemoryService {
       await this.lock(db, id);
       const row = await this.one(db, userId, id);
       if (row.rank < 2) throw new MemoryError("Only its place's editors change a shared note; Claude can propose a change");
+      fromPack(row);
       if (ifVersion !== undefined && row.version !== ifVersion) throw new MemoryConflictError(`${row.name} changed since`);
       if (row.description === clean.description && row.type === clean.type && row.body === clean.body) return toNote(row);
       await this.write(db, row, placeOf(row), row.name, clean, userId, "user");
@@ -388,6 +406,7 @@ export class SharedMemoryService {
     return this.as(userId, async (db) => {
       const row = await this.one(db, userId, id);
       if (row.rank < 2) throw new MemoryError("Only its place's editors delete a shared note");
+      fromPack(row);
       await db`DELETE FROM shared_memories WHERE id = ${row.id}`;
     });
   }
@@ -427,6 +446,7 @@ export class SharedMemoryService {
         }
       } else {
         const row = await this.one(db, userId, change.id ?? "");
+        fromPack(row);
         place = placeOf(row);
         memoryId = row.id;
         name = row.name;

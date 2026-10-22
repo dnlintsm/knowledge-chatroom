@@ -12,6 +12,7 @@ import {
   MemoryError,
   MemoryNotFoundError,
 } from "../storage/memory";
+import { importMemory } from "./import";
 import { memoryEnabled } from "./run";
 
 /**
@@ -55,23 +56,51 @@ import { memoryEnabled } from "./run";
  *   DELETE /memory/shared/<id>    deletes it for good (editors)
  *   PUT /memory/shared/<id>/mode  {mode: auto | manual | off | null, everyone?}
  *   POST /memory/shared/proposals/<id>/accept | reject | withdraw
+ *
+ * Import and memory packs (step 4):
+ *
+ *   POST /memory/import           {text, label?} (pasted memory or a .md file)
+ *                                 or a raw application/zip body (an export):
+ *                                 {proposed, skipped, how}, all in the inbox
+ *   GET /memory also has {installs}: packs installed in places you read
+ *   GET /memory/packs?q=          {packs, isAdmin}: the hub's memory packs
+ *   GET /memory/packs/<name>?version=   {pack}: versions, and that one's notes
+ *   POST /memory/packs            {scope, nodeId?, groupId?, name, description}
+ *                                 publishes the place's own notes (editors)
+ *   POST /memory/packs/<name>/install   {scope, nodeId?, groupId?, version?}
+ *                                 installs it there, or moves the install to
+ *                                 that version (editors)
+ *   POST /memory/packs/<name>/verify    {version, verified} (hub admins)
+ *   POST /memory/packs/<name>/yank      {version, yanked, reason?} (publisher
+ *                                 or hub admins)
+ *   DELETE /memory/installs/<id>  uninstalls it, with its notes (editors)
+ *   POST /memory/installs/<id>/fork     makes its notes the place's own
  */
+/** An import's body at most: a pasted memory, a file or a .zip export. */
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+
 export function createMemoryHandler(storage: () => Storage | null, state: () => StorageState) {
   const send = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(JSON.stringify(body));
   };
 
-  async function json(req: IncomingMessage): Promise<Record<string, unknown> | undefined> {
+  async function body(req: IncomingMessage, limit: number): Promise<Buffer | undefined> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).byteLength;
-      if (size > 64 * 1024) return undefined;
+      if (size > limit) return undefined;
       chunks.push(chunk as Buffer);
     }
+    return Buffer.concat(chunks);
+  }
+
+  async function json(req: IncomingMessage, limit = 64 * 1024): Promise<Record<string, unknown> | undefined> {
+    const bytes = await body(req, limit);
+    if (!bytes) return undefined;
     try {
-      const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      const parsed = JSON.parse(bytes.toString("utf8") || "{}");
       return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
     } catch {
       return undefined;
@@ -84,13 +113,14 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     if (req.method === "GET" && !section) {
       const thread = url.searchParams.get("thread");
       const node = url.searchParams.get("node");
-      const [settings, notes, inbox, shared, sharedProposals, targets] = await Promise.all([
+      const [settings, notes, inbox, shared, sharedProposals, targets, installs] = await Promise.all([
         memory.settings(userId, thread),
         memory.list(userId),
         memory.inbox(userId),
         s.sharedMemory.list(userId),
         s.sharedMemory.proposals(userId),
         s.sharedMemory.targets(userId, node),
+        s.memoryPacks.installs(userId),
       ]);
       return send(res, 200, {
         ...settings,
@@ -99,6 +129,7 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
         shared,
         sharedProposals,
         targets,
+        installs,
         types: MEMORY_TYPES,
         limits: { notes: MAX_NOTES, body: MAX_BODY, description: MAX_DESCRIPTION, index: INDEX_CHARS },
       });
@@ -160,6 +191,25 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       return send(res, 200, { note: await memory.restore(userId, name, version) });
     }
     if (section === "shared") return sharedRoute(req, res, s, userId, parts.slice(1));
+    if (req.method === "POST" && section === "import" && !name) {
+      if ((req.headers["content-type"] ?? "").startsWith("application/zip")) {
+        const zip = await body(req, MAX_IMPORT_BYTES);
+        if (!zip) return send(res, 413, { error: "That file is too big to import (2 MB at most)" });
+        return send(res, 200, await importMemory(memory, userId, { zip: new Uint8Array(zip) }));
+      }
+      const input = await json(req, MAX_IMPORT_BYTES);
+      if (!input) return send(res, 400, { error: "Invalid JSON body (2 MB at most)" });
+      const label = typeof input.label === "string" ? input.label.slice(0, 100) : undefined;
+      return send(res, 200, await importMemory(memory, userId, { text: typeof input.text === "string" ? input.text : "", label }));
+    }
+    if (section === "packs") return packRoute(req, res, url, s, userId, parts.slice(1));
+    if (section === "installs" && name) {
+      if (req.method === "DELETE" && !action) {
+        await s.memoryPacks.uninstall(userId, name);
+        return send(res, 200, { id: name, deleted: true });
+      }
+      if (req.method === "POST" && action === "fork") return send(res, 200, { id: name, ...(await s.memoryPacks.fork(userId, name)) });
+    }
     if (req.method === "POST" && section === "events" && name && action === "undo") {
       return send(res, 200, await memory.undo(userId, name));
     }
@@ -201,6 +251,35 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       return send(res, 200, { note: await shared.setMode(userId, id, input.mode ?? null, input.everyone === true) });
     }
     return send(res, req.method === "GET" ? 404 : 405, { error: req.method === "GET" ? "Not found" : "Method not allowed" });
+  }
+
+  async function packRoute(req: IncomingMessage, res: ServerResponse, url: URL, s: Storage, userId: string, parts: string[]) {
+    const hub = s.memoryPacks;
+    const [name, action] = parts;
+    if (req.method === "GET" && !name) return send(res, 200, await hub.list(userId, url.searchParams.get("q") ?? ""));
+    if (req.method === "GET" && name && !action) {
+      const v = url.searchParams.get("version");
+      const version = v ? Number(v) : undefined;
+      if (version !== undefined && !Number.isInteger(version)) return send(res, 400, { error: "version is a number" });
+      return send(res, 200, { pack: await hub.detail(userId, name, version) });
+    }
+    if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    const input = await json(req);
+    if (!input) return send(res, 400, { error: "Invalid JSON body" });
+    if (!name) return send(res, 200, await hub.publish(userId, input, input.name, input.description));
+    const version = input.version === undefined ? undefined : Number(input.version);
+    if (version !== undefined && !Number.isInteger(version)) return send(res, 400, { error: "version is a number" });
+    if (action === "install") return send(res, 200, { install: await hub.install(userId, input, name, version) });
+    if (version === undefined) return send(res, 400, { error: "Say which version" });
+    if (action === "verify") {
+      await hub.verify(userId, name, version, input.verified !== false);
+      return send(res, 200, { pack: await hub.detail(userId, name, version) });
+    }
+    if (action === "yank") {
+      await hub.yank(userId, name, version, input.yanked !== false, input.reason);
+      return send(res, 200, { pack: await hub.detail(userId, name, version) });
+    }
+    return send(res, 404, { error: "Not found" });
   }
 
   return async function handle(req: IncomingMessage, res: ServerResponse, url: URL) {

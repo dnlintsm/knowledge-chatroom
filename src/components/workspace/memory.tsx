@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Archive, Bot, Brain, Check, Download, EyeOff, History, Inbox, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { ImportMemory, InstalledPacks, PACKS, PackBrowser } from "./memory-packs";
 import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
 import { useWorkspace } from "./store";
 import { MEMORY_TAB } from "./types";
@@ -59,7 +60,7 @@ export interface InboxItem {
   description: string | null;
   type: MemoryType | null;
   body: string | null;
-  source: "chat" | "learn";
+  source: "chat" | "learn" | "import";
   reason: string | null;
   createdAt: string;
 }
@@ -113,6 +114,8 @@ export interface SharedSummary {
   mode: SharedMode;
   myMode: SharedMode | null;
   everyoneMode: SharedMode;
+  /** From an installed memory pack: read-only until the place forks it. */
+  pack: { installId: string; name: string; version: number } | null;
   updatedAt: string;
 }
 
@@ -151,6 +154,19 @@ export interface SharedProposal {
 /** A place you can share a copy of a note to. */
 export interface SharedTarget extends SharedPlace {
   canEdit: boolean;
+}
+
+/** A memory pack installed in a place you read (step 4). */
+export interface PackInstall {
+  id: string;
+  name: string;
+  version: number;
+  /** A newer version that isn't yanked. */
+  latest: number | null;
+  place: SharedPlace;
+  canEdit: boolean;
+  notes: number;
+  installedAt: string;
 }
 
 /** In the editor, a shared note is `shared:<id>`. */
@@ -226,6 +242,8 @@ interface Memory {
   /** null clears yours, back to everyone's; `everyone` sets theirs (editors). */
   setSharedMode: (id: string, mode: SharedMode | null, everyone: boolean) => Promise<void>;
   decideShared: (id: string, decision: "accept" | "reject" | "withdraw") => Promise<void>;
+  /** Memory packs installed in places you read (step 4). */
+  installs: PackInstall[];
 }
 
 const MemoryContext = createContext<Memory | null>(null);
@@ -237,14 +255,14 @@ export function useMemory(): Memory {
 }
 
 /** The answer's JSON, or an Error with the server's message. */
-async function call<T>(url: string, init?: RequestInit): Promise<T> {
+export async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { cache: "no-store", ...init });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body as T;
 }
 
-const json = (method: string, body: unknown): RequestInit => ({
+export const json = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
@@ -262,6 +280,7 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const [shared, setShared] = useState<SharedSummary[]>([]);
   const [sharedProposals, setSharedProposals] = useState<SharedProposal[]>([]);
   const [targets, setTargets] = useState<SharedTarget[]>([]);
+  const [installs, setInstalls] = useState<PackInstall[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const threadId = useCopilotChatConfiguration()?.threadId;
   const { editor } = useWorkbench();
@@ -281,6 +300,7 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
         shared?: SharedSummary[];
         sharedProposals?: SharedProposal[];
         targets?: SharedTarget[];
+        installs?: PackInstall[];
       }>(`/api/memory${query.size ? `?${query}` : ""}`);
       setModeState(data.mode);
       setIncognitoState(data.incognito);
@@ -289,6 +309,7 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
       setShared(data.shared ?? []);
       setSharedProposals(data.sharedProposals ?? []);
       setTargets(data.targets ?? []);
+      setInstalls(data.installs ?? []);
       setStatus("ready");
     } catch {
       setStatus("unavailable");
@@ -485,11 +506,13 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
       status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
       shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
+      installs,
     }),
     [
       status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
       shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
+      installs,
     ],
   );
   return <MemoryContext.Provider value={value}>{children}</MemoryContext.Provider>;
@@ -547,7 +570,7 @@ function InboxRow({ item }: { item: InboxItem }) {
       </div>
       {item.description && <p className="mt-0.5 text-xs">{item.description}</p>}
       <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-        {item.reason ?? (item.source === "learn" ? "From a past chat" : "From a chat")}
+        {item.reason ?? (item.source === "learn" ? "From a past chat" : item.source === "import" ? "Imported" : "From a chat")}
       </p>
       {item.body && (
         <details className="mt-1 text-xs">
@@ -742,7 +765,9 @@ export function MemoryPanel() {
           {showArchived && archived.map((note) => <NoteRow key={note.name} note={note} />)}
         </>
       )}
+      <ImportMemory />
       <SharedSection />
+      <InstalledPacks />
       <button
         type="button"
         aria-expanded={showActivity}
@@ -769,6 +794,7 @@ export function MemoryEditor() {
       </div>
     );
   }
+  if (selected === PACKS) return <PackBrowser />;
   if (selected.startsWith("shared:")) return <SharedNoteEditor key={selected} id={selected.slice("shared:".length)} />;
   return <NoteEditor key={selected} name={selected} />;
 }

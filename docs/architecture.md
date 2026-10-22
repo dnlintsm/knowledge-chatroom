@@ -359,8 +359,25 @@ Code's memory files and `SKILL.md`.
   someone who edits the place accepts or rejects it in the Memory view, and accepting
   credits the author. A person shares one of their own notes by copying it (a
   snapshot, checked before it goes): directly where they edit, else as a proposal.
-- Not yet: suggesting notes become skills or knowledge nodes, memory packs on the hub,
-  import, and access for Python agents. These are the later steps of #93.
+- Memory packs (`021_memory_packs.sql`, `agent/src/storage/memory-packs.ts`): a place's
+  own shared notes published to the hub (one per deployment, like skills) as immutable,
+  numbered versions. Whoever publishes a name first owns it; unchanged notes add no
+  version, and each version is scanned like a skill (`skills/scan.ts`). A place's editors
+  install a pack pinned to a version: its notes become the place's shared notes with
+  `pack_install_id` set, Manual for everyone, and read-only (the API and Claude's
+  proposals refuse to change them). Moving the install to another version updates the
+  notes in place and keeps their modes; uninstalling deletes them; forking clears
+  `pack_install_id` so they become the place's own. Hub admins (`HUB_ADMINS`) verify
+  versions; the publisher or an admin yanks one, which keeps existing installs but blocks
+  new ones. The Memory view lists installs, and the hub opens in the middle pane.
+- Import (`agent/src/memory/import.ts`, `POST /memory/import`): notes with front matter
+  (this app's `.zip` export, Claude Code memory files) are read as they are; other text,
+  such as ChatGPT's or Claude's memory pasted in, goes to `MEMORY_MODEL`, which sorts it
+  into notes and merges it with the user's own (at most 30). Every note goes to the
+  inbox (`source = 'import'`), never straight into memory. Without a model the text
+  becomes one note.
+- Not yet: suggesting notes become skills or knowledge nodes, and access for Python
+  agents. These are the later steps of #93.
 
 ### File references in answers
 

@@ -26,6 +26,7 @@ import {
   MemoryService,
   type MemoryRun,
 } from "./memory";
+import { MemoryPackHub } from "./memory-packs";
 import { SharedMemoryService } from "./shared-memory";
 import type { Storage } from "./index";
 import { createMemoryHandler } from "../memory/http";
@@ -433,6 +434,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     const storage = {
       memory,
       sharedMemory,
+      memoryPacks: new MemoryPackHub(sql, workspaceId),
       config: { authSecret: undefined },
       access: { localUserId: async () => me },
     } as unknown as Storage;
