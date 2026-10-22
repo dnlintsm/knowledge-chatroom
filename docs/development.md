@@ -112,7 +112,7 @@ API (`/files`, `/nodes`, `/experiments`, `/search`, `/proposals` on this agent
 server). Requests with it are Claude acting for the signed-in user. They get that
 user's access and nothing more, with the same limits as Claude's own file tools:
 writes in a knowledge node (and to skills at the root) need `?propose`, and
-nothing is renamed, deleted, reviewed or shared. The activity log credits them to
+nothing is renamed, deleted, reviewed or shared (experiments included). The activity log credits them to
 Claude, `via` `mcp:<name>`. The token lasts `STORAGE_TOKEN_SECONDS` (default an
 hour), and only the storage API takes it. Servers must not connect to the database
 or object store directly: the app's connection owns the tables, so row security

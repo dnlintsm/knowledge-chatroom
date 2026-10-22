@@ -619,6 +619,19 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         assert.equal((await write("", "test|bob", "DELETE")).status, 403);
         assert.equal((await fetch(`${url}/access/grants`, { method: "POST", headers: viaLab("test|alice"), body: "{}" })).status, 403);
 
+        // Experiments: Claude records runs, but sharing or archiving one is the user's call.
+        const post = (body: object) =>
+          fetch(`${url}/experiments`, { method: "POST", headers: { ...viaLab("test|bob"), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await post({ nodeId: moduleX, title: "Lab", status: "shared" })).status, 403);
+        const created = await post({ nodeId: moduleX, title: "Lab" });
+        assert.equal(created.status, 201);
+        const { id: lab } = (await created.json()) as { id: string };
+        const patch = (body: object) =>
+          fetch(`${url}/experiments/${lab}`, { method: "PATCH", headers: { ...viaLab("test|bob"), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal((await patch({ state: "done", results: { loss: 0.5 } })).status, 200);
+        for (const status of ["shared", "archived", "draft"]) assert.equal((await patch({ status })).status, 403, status);
+        assert.equal((await as(bob).experiment(lab)).status, "draft");
+
         const log = await as(alice).auditLog(500);
         const entry = log.find((e) => e.action === "proposal.create" && e.target.path === "notes/lab.md")!;
         assert.deepEqual([entry.actorType, entry.actorId, entry.target.via], ["agent", bob, "mcp:lab"]);

@@ -88,7 +88,8 @@ checked. With `"storageAccess": true`, each run sends the server an
 - Only what that user can read or edit.
 - Writes in a knowledge node need `?propose`, so the node's editors review them.
   Writes in an experiment or at the workspace root go straight in.
-- No renaming, deleting, reviewing proposals or managing access.
+- No renaming, deleting, reviewing proposals, sharing or archiving experiments, or
+  managing access.
 - The workspace's activity log records them as Claude's, via `mcp:<name>`.
 
 The token lasts an hour (`STORAGE_TOKEN_SECONDS` on the agent), and only the

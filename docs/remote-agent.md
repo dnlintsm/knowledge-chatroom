@@ -137,7 +137,8 @@ Claude for the signed-in user:
 - Only what that user can read or edit.
 - Writes in a knowledge node (and to skills at the workspace root) need `&propose`, as below.
   Anything else is refused with 403.
-- No renaming, deleting, reviewing proposals or managing access.
+- No renaming, deleting, reviewing proposals, sharing or archiving experiments, or managing
+  access.
 - The activity log credits them to Claude, `via` `remote`.
 
 Only the storage API accepts it: it can't start chat runs. Don't read the database or object
