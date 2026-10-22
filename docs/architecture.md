@@ -382,8 +382,20 @@ Code's memory files and `SKILL.md`.
   same `memory_*` tools as Claude, with the run marked as having read outside
   content, so every change waits in the inbox. Events reach the browser through the
   live run of that chat (`trackLiveRun`).
-- Not yet: suggesting notes become skills or knowledge nodes, semantic search over
-  memory, and search over past chats. These are the rest of #93's step 5.
+- Search by meaning (`agent/src/memory/recall.ts`): when the agent runs an embedding
+  model for file search (`storage.semantic` is ready), `memory_search` also lists notes
+  close in meaning that the words missed, under "Close in meaning". Note vectors are
+  kept in the agent's memory only (an LRU of 5,000, keyed by the model and the note's
+  text), so nothing derived from private notes is stored and a changed note is simply
+  embedded again.
+- Past chats (`ChatService.search` and `lines` in `agent/src/storage/chats.ts`): runs with
+  memory and chat history get `chats_search` (the user's own chats with the query's
+  words in their name or in what the user and Claude said, tool output left out) and
+  `chats_read` (a chat in parts of 12,000 characters). Incognito chats and the chat
+  asking are never results. Using either marks the run as having read outside content,
+  since earlier chats may hold text from files or web pages. Outside MCP servers don't
+  get these tools.
+- Not yet: suggesting notes become skills or knowledge nodes.
 
 ### File references in answers
 

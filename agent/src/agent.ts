@@ -27,7 +27,7 @@ import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
 import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
-import { MEMORY_TOOLS, memoryPrompt, memoryTools, taintHook, type RunMemory } from "./memory/run";
+import { CHAT_TOOLS, chatTools, MEMORY_TOOLS, memoryPrompt, memoryTools, taintHook, type RunMemory } from "./memory/run";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
@@ -224,20 +224,21 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
         model: options.model ?? resolveModel(),
         skills: ctx.skills?.skills.map((s) => s.skill),
       }),
-      ...(memory ? memoryTools(memory) : []),
+      ...(memory ? [...memoryTools(memory), ...chatTools(memory)] : []),
     ];
     return {
       ...withIdentity,
       ...(memory && {
-        systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory)}`,
+        systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory, memory.chats !== null)}`,
         hooks: { ...withIdentity.hooks, PreToolUse: [...(withIdentity.hooks?.PreToolUse ?? []), taintHook(memory)] },
       }),
       mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) },
-      // save_file is only in runs with a working folder, the memory tools in runs with memory.
+      // save_file is only in runs with a working folder, the memory and past-chat tools in runs with memory.
       allowedTools: [
         ...(withIdentity.allowedTools ?? []),
         ...(workdir ? [`mcp__${SERVER_NAME}__save_file`] : []),
         ...(memory ? MEMORY_TOOLS.map((name) => `mcp__${SERVER_NAME}__${name}`) : []),
+        ...(memory?.chats ? CHAT_TOOLS.map((name) => `mcp__${SERVER_NAME}__${name}`) : []),
       ],
     };
   }
