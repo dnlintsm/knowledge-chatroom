@@ -1,9 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
-### Upgrading
+Claude remembers: with `MEMORY=on`, Claude keeps notes about each user that only they
+see, learns from quiet chats, and shares notes with a workspace, node or group under
+review. Chat history moves to the server, one private list per user, and outside
+services verify users with a public key and get their own storage tokens.
 
+### Upgrading from 0.1.2
+
+- **Back up Postgres first.** Migrations `017_chats.sql` to `021_memory_packs.sql` run on
+  agent start.
+- Chats kept before this release are not carried over. Without server storage they were
+  only in the app's memory anyway; from now on each user's chats are saved (#91).
+- Memory is off until you set `MEMORY=on`, and it needs server storage. Learning from
+  chats uses `MEMORY_MODEL` (default: the follow-up chips' Haiku), so with memory on expect
+  a small model call per chat once it has been quiet for `MEMORY_IDLE_MINUTES` (default
+  10). `MEMORY_LEARN=off` keeps memory but stops learning.
+- MCP servers get nothing new unless their `MCP_SERVERS` entry opts in with
+  `"storageAccess": true`. Remote backends (`AGENT_URL`) now receive an
+  `X-Knowledge-Storage` token with every run.
 - Identity tokens (`X-Knowledge-User`) are now signed with a key pair derived from
   `AUTH_SECRET` (`v2`, Ed25519) instead of HMAC with the secret itself (#88). Outside
   services verify them with the public key from the agent's `GET /identity/public-key`
@@ -62,6 +78,18 @@
   through. Tokens last `STORAGE_TOKEN_SECONDS` (default an hour), so long remote runs keep
   access. The Python sample gains `describe_column`, which reads a CSV from the workspace
   this way.
+
+### Changed
+
+- The AG-UI Claude adapter is 0.0.8 (still on Claude Agent SDK 0.3.296, which it pins).
+
+### Known limitations
+
+- Memory is experimental and hasn't been tried with real Claude yet. Turning notes into
+  skills or knowledge nodes is planned for later (#93).
+- Background jobs for long runs (#82), server sessions and CSRF checks (#64), and the
+  `@fastify/busboy` audit finding in CopilotKit's unused Vertex AI provider (#75) are
+  still open.
 
 ## 0.1.2
 
