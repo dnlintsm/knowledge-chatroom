@@ -16,6 +16,8 @@ export async function handleChatRoute(
   path: string,
   user: ChatUser,
   store: ChatStore,
+  /** Called before a chat is deleted, to drop its live run (ChatRunner.discard). */
+  onDelete: (id: string) => void = () => {},
 ): Promise<Response | null> {
   const segments = path.split("/").filter(Boolean);
   if (segments[0] !== "threads") return null;
@@ -58,6 +60,8 @@ export async function handleChatRoute(
           return (await store.update(user, id, changes)) ? Response.json({ threadId: id }) : notFound();
         }
         if (method === "DELETE") {
+          if ((await store.get(user, id)) === null) return notFound();
+          onDelete(id);
           return (await store.remove(user, id)) ? Response.json({ threadId: id, deleted: true }) : notFound();
         }
         return methodNotAllowed();

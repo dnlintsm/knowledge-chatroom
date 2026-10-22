@@ -37,6 +37,8 @@ interface LiveRun {
   agent: AbstractAgent;
   events: ReplaySubject<BaseEvent>;
   stopRequested: boolean;
+  /** The chat was deleted mid-run: the run isn't saved, so the chat stays gone. */
+  discarded: boolean;
 }
 
 const ownerKey = (user: ChatUser) => user?.sub ?? "local";
@@ -111,7 +113,7 @@ export class ChatRunner extends AgentRunner {
       events.complete();
       return events.asObservable();
     }
-    const live: LiveRun = { runId: input.runId, owner: ownerKey(user), agent, events, stopRequested: false };
+    const live: LiveRun = { runId: input.runId, owner: ownerKey(user), agent, events, stopRequested: false, discarded: false };
     this.live.set(threadId, live);
     void this.execute(threadId, user, live, input);
     return events.asObservable();
@@ -163,7 +165,7 @@ export class ChatRunner extends AgentRunner {
     }
     // Saved before the run ends for the browser, so a reload right after
     // finds it. A failed save loses this run's history, not the reply.
-    if (save && seen.length) {
+    if (save && seen.length && !live.discarded) {
       try {
         await this.store.save(user, threadId, {
           agentId: agent.agentId ?? "default",
@@ -219,6 +221,14 @@ export class ChatRunner extends AgentRunner {
         });
       });
     return out.asObservable();
+  }
+
+  /** Before `user` deletes the chat: stops its live run, which then isn't saved. */
+  discard(threadId: string, user: ChatUser) {
+    const live = this.live.get(threadId);
+    if (!live || live.owner !== ownerKey(user)) return;
+    live.discarded = true;
+    void this.stop({ threadId });
   }
 
   async isRunning({ threadId }: AgentRunnerIsRunningRequest): Promise<boolean> {

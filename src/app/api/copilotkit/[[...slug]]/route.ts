@@ -111,7 +111,7 @@ async function withUser(req: NextRequest) {
   }
   if (!intelligence) {
     const path = req.nextUrl.pathname.slice(BASE_PATH.length);
-    const answered = await handleChatRoute(req, path, user, chats);
+    const answered = await handleChatRoute(req, path, user, chats, (id) => chatRunner.discard(id, user));
     if (answered) return answered;
     const stop = path.match(/^\/agent\/[^/]+\/stop\/([^/]+)\/?$/);
     if (stop) {

@@ -78,6 +78,31 @@ test("a chat survives a new runner and replays when connected again", async () =
   expect((await store.get(null, "t1"))!.messages).toHaveLength(4);
 });
 
+test("deleting a chat mid-run doesn't bring it back", async () => {
+  const store = new MemoryChatStore();
+  const runner = new ChatRunner(store);
+  const ask: Message = { id: "u1", role: "user", content: "First" };
+  await all(runner.run({ threadId: "t", agent: fakeAgent("one") as unknown as AbstractAgent, input: input("t", "r1", [ask]) }));
+
+  let release!: () => void;
+  const slow = fakeAgent("two");
+  const answer = slow.runAgent;
+  slow.runAgent = async (i, opts) => {
+    await new Promise<void>((resolve) => (release = resolve));
+    return answer(i, opts);
+  };
+  const running = all(runner.run({ threadId: "t", agent: slow as unknown as AbstractAgent, input: input("t", "r2", [ask]) }));
+  const route = (method: string) =>
+    handleChatRoute(new Request(`http://app/api/copilotkit/threads/t`, { method }), "/threads/t", null, store, (id) =>
+      runner.discard(id, null),
+    );
+  expect((await route("DELETE"))!.status).toBe(200);
+  expect(slow.aborted).toBe(true);
+  release();
+  await running;
+  expect(await store.get(null, "t")).toBeNull();
+});
+
 test("the follow-up chips' runs are not kept", async () => {
   const store = new MemoryChatStore();
   const runner = new ChatRunner(store);
