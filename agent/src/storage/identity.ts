@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+
+import { readIdentityToken, signIdentityToken } from "../../../shared/identity-token";
 
 import type { Principal } from "./access";
 import type { Storage } from "./index";
@@ -10,6 +11,8 @@ import type { Storage } from "./index";
  * (which handles login) signs the user into an X-Knowledge-User header, and
  * requests without a valid one are refused. The agent port must stay private
  * either way; the header is only as trustworthy as the network in front of it.
+ * Tokens are made and checked by shared/identity-token.ts (v2: Ed25519, so
+ * outside services verify them with the public key alone).
  */
 
 export const IDENTITY_HEADER = "x-knowledge-user";
@@ -28,14 +31,9 @@ export interface Identity {
   aud?: string;
 }
 
-const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
-const mac = (secret: string, data: string) =>
-  createHmac("sha256", secret).update(data).digest();
-
-/** `v1.<payload>.<hmac>`; the Next.js app makes the same token. */
+/** A token for `identity`, in the IDENTITY_FORMAT the deployment uses. */
 export function signIdentity(identity: Identity, secret: string): string {
-  const body = `v1.${b64(JSON.stringify(identity))}`;
-  return `${body}.${b64(mac(secret, body))}`;
+  return signIdentityToken(identity, secret);
 }
 
 export function verifyIdentity(
@@ -44,20 +42,11 @@ export function verifyIdentity(
   now = Date.now(),
   audience?: string,
 ): Identity | null {
-  const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== "v1") return null;
-  const expected = mac(secret, `${parts[0]}.${parts[1]}`);
-  const given = Buffer.from(parts[2], "base64url");
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  try {
-    const identity = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Identity;
-    if (typeof identity.sub !== "string" || !identity.sub || identity.sub === "local") return null;
-    if (typeof identity.exp !== "number" || identity.exp * 1000 < now) return null;
-    if (identity.aud !== audience) return null;
-    return identity;
-  } catch {
-    return null;
-  }
+  const identity = readIdentityToken(token, secret, now);
+  if (!identity) return null;
+  if (typeof identity.sub !== "string" || !identity.sub || identity.sub === "local") return null;
+  if (identity.aud !== audience) return null;
+  return identity;
 }
 
 /** The principal for a request, or null when login is on and it carries no valid identity. */

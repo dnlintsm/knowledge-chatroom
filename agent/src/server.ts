@@ -3,7 +3,8 @@
  *
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `POST /suggest` answers the chat's follow-up chips
- * (src/suggest.ts), `GET /health` reports status. Runs on port 8000. With
+ * (src/suggest.ts), `GET /health` reports status, `GET /identity/public-key`
+ * gives outside services the key that verifies identity tokens. Runs on port 8000. With
  * AGENT_URL set, the app's chat goes to a remote backend instead and both chat
  * routes answer 404 (docs/remote-agent.md).
  * When DATABASE_URL is set it also serves the workspace file API under
@@ -36,6 +37,7 @@ import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./sk
 import { SkillService } from "./skills/service";
 import { suggest } from "./suggest";
 import { authSettings } from "../../shared/auth-mode";
+import { identityFormat, identityPublicKey } from "../../shared/identity-token";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 // AGENT_URL set: the app's chat goes to a remote backend (docs/remote-agent.md),
@@ -45,6 +47,10 @@ const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
 // Login settings are checked at startup whether or not storage is on.
 const authSecret = authSettings().secret;
+identityFormat();
+// Outside services (remote backends, MCP servers) verify identity tokens with
+// this public key instead of AUTH_SECRET (docs/remote-agent.md).
+const publicKey = authSecret ? identityPublicKey(authSecret) : null;
 // Storage is optional (DATABASE_URL) and starts in the background.
 const storageConfig = storageConfigFromEnv();
 startStorage(storageConfig);
@@ -140,6 +146,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/identity/public-key") {
+    res.writeHead(publicKey ? 200 : 404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(publicKey ? { alg: "Ed25519", key: publicKey } : { error: "Login is off: there are no identity tokens." }));
     return;
   }
 
@@ -269,4 +281,5 @@ server.listen(PORT, HOST, () => {
   if (REMOTE_CHAT) {
     console.log("[agent] AGENT_URL is set: chat goes to that backend; this server serves storage and skills.");
   }
+  if (publicKey) console.log(`[agent] Identity tokens verify with KNOWLEDGE_PUBLIC_KEY=${publicKey}`);
 });

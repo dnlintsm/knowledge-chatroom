@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- Identity tokens (`X-Knowledge-User`) are now signed with a key pair derived from
+  `AUTH_SECRET` (`v2`, Ed25519) instead of HMAC with the secret itself (#88). Outside
+  services verify them with the public key from the agent's `GET /identity/public-key`
+  (also logged at startup), so they no longer need `AUTH_SECRET`. Remote backends and MCP
+  servers that verify `v1` tokens: switch to the public key (see `docs/remote-agent.md`
+  and `examples/python-agent`), or set `IDENTITY_FORMAT=v1` on the app and the agent until
+  you do. `IDENTITY_FORMAT=v1` will be removed in the next release.
+  Deployments without outside services need no change.
+
 ## 0.1.2
 
 Runs become experiments: the Runs view replaces Traverse, Claude starts runs from your
