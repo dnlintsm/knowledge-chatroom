@@ -193,6 +193,16 @@ export function agentRefusal(method: string, url: URL): string | null {
   }
 }
 
+/**
+ * Stored bytes are served from the app's origin, so a file opened as a page
+ * (an HTML file, an SVG with a script) must not run as the app: no scripts,
+ * no same-origin access, and no sniffing past the declared type.
+ */
+const STORED_CONTENT_HEADERS = {
+  "Content-Security-Policy": "sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
+
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
@@ -510,6 +520,7 @@ async function handleProposals(req: IncomingMessage, res: ServerResponse, url: U
       "Content-Type": proposal.mime,
       "Content-Length": bytes.byteLength,
       "Cache-Control": "no-cache",
+      ...STORED_CONTENT_HEADERS,
     });
     res.end(bytes);
     return;
@@ -790,6 +801,7 @@ export function createStorageHandler(
           "X-File-Author": file.info.author,
           ...(file.info.readOnly ? { "X-File-Read-Only": "true" } : {}),
           "Cache-Control": "no-cache",
+          ...STORED_CONTENT_HEADERS,
         });
         res.end(file.bytes);
         return;

@@ -54,10 +54,11 @@ function useOpenableUrl(content: string) {
 
 export function MediaPreview({ file, kind }: { file: WorkspaceFile; kind: MediaKind }) {
   const url = useOpenableUrl(file.content);
-  const [failed, setFailed] = useState(false);
+  // The URL that failed, so a new version of the file gets its own try.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (!url) return null;
-  if (failed) return <LoadError file={file} url={url} kind={kind} />;
-  const onError = () => setFailed(true);
+  if (failedUrl === url) return <LoadError file={file} url={url} kind={kind} />;
+  const onError = () => setFailedUrl(url);
   switch (kind) {
     case "image":
       return <ImageView file={file} url={url} onError={onError} />;
@@ -102,7 +103,7 @@ function ImageView({ file, url, onError }: { file: WorkspaceFile; url: string; o
             {actualSize ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
             {actualSize ? "Fit" : "Actual size"}
           </ToolbarButton>
-          <OpenLink url={url} />
+          <OpenLink file={file} url={url} />
         </div>
       </div>
       <div className="flex min-h-0 flex-1 overflow-auto p-6">
@@ -140,7 +141,7 @@ function LoadError({ file, url, kind }: { file: WorkspaceFile; url: string; kind
           : "."}
       </p>
       <div className="flex justify-center gap-2">
-        <OpenLink url={url} />
+        <OpenLink file={file} url={url} />
         <DownloadLink file={file} url={url} />
       </div>
     </Centered>
@@ -206,7 +207,10 @@ function ToolbarButton({ onClick, children }: { onClick: () => void; children: R
 const linkClass =
   "flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--secondary)] hover:text-[var(--foreground)]";
 
-function OpenLink({ url }: { url: string }) {
+function OpenLink({ file, url }: { file: WorkspaceFile; url: string }) {
+  // A blob: URL opens as this app's origin, where an SVG's scripts would run;
+  // the server sandboxes the files it serves (agent/src/storage/http.ts).
+  if (url.startsWith("blob:") && file.mime === "image/svg+xml") return null;
   return (
     <a href={url} target="_blank" rel="noreferrer" className={linkClass}>
       <ExternalLink className="size-3" /> Open
