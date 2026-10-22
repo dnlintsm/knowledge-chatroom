@@ -59,6 +59,9 @@ interface FileRow {
   updated_at: Date;
   author_type: AuthorType;
   read_only: boolean;
+  workspace_id: string;
+  node_id: string | null;
+  experiment_id: string | null;
 }
 
 function toInfo(row: FileRow): FileInfo {
@@ -71,7 +74,32 @@ function toInfo(row: FileRow): FileInfo {
     updatedAt: row.updated_at.toISOString(),
     author: row.author_type,
     readOnly: row.read_only,
+    workspaceId: row.workspace_id,
+    nodeId: row.node_id,
+    experimentId: row.experiment_id,
   };
+}
+
+/**
+ * One level of a file list, for listing a folder at a time: the files at
+ * most `depth` folders below `dir` ("" = the top), and the folders at that
+ * depth that hold more files further down.
+ */
+export function listLevel(
+  files: FileInfo[],
+  dir: string,
+  depth = Infinity,
+): { files: FileInfo[]; folders: string[] } {
+  const prefix = dir ? `${dir}/` : "";
+  const shown: FileInfo[] = [];
+  const folders = new Set<string>();
+  for (const file of files) {
+    if (!file.path.startsWith(prefix)) continue;
+    const parts = file.path.slice(prefix.length).split("/");
+    if (parts.length <= depth) shown.push(file);
+    else folders.add(prefix + parts.slice(0, depth).join("/"));
+  }
+  return { files: shown, folders: [...folders].sort() };
 }
 
 /**
@@ -139,7 +167,8 @@ export class FileService {
   async list(): Promise<FileInfo[]> {
     const rows = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only
+             f.updated_at, v.author_type, f.read_only,
+             f.workspace_id, f.node_id, f.experiment_id
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.deleted_at IS NULL
       ORDER BY f.path`;
@@ -150,7 +179,8 @@ export class FileService {
     const path = normalizePath(rawPath);
     const [row] = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only
+             f.updated_at, v.author_type, f.read_only,
+             f.workspace_id, f.node_id, f.experiment_id
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
     return row ? toInfo(row) : null;

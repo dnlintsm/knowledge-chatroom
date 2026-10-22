@@ -7,7 +7,7 @@ import { listServerFiles, loadServerFile, putServerFile } from "../../src/compon
 import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
 import { parsePersistedWorkspace } from "../../src/components/workspace/workspace-state";
 
-const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false };
+const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false, workspaceId: "w", nodeId: null, experimentId: null };
 const state = { files: [{ path: info.path, kind: info.kind, mime: info.mime, content: "kept", updatedAt: 1, author: info.author }], tabs: [info.path], active: info.path };
 
 test("relative paths reject traversal/control bytes and normalize Windows separators", () => {
@@ -29,7 +29,9 @@ test("metadata allows additive fields and legacy missing readOnly but rejects ba
   expect(parseFileList({ files: [{ ...info, futureField: true }] })).toMatchObject([info]);
   const legacy = { ...info, readOnly: undefined };
   expect(parseFileInfo(legacy).readOnly).toBe(false);
-  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }, { readOnly: "false" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
+  expect(parseFileInfo({ ...info, nodeId: "n" }).nodeId).toBe("n");
+  expect(parseFileInfo({ ...info, experimentId: "x" }).experimentId).toBe("x");
+  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }, { readOnly: "false" }, { workspaceId: undefined }, { nodeId: 1 }, { experimentId: undefined }, { nodeId: "n", experimentId: "x" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
 });
 
 test("event contracts cover scoped writes, node/experiment changes and proposals", () => {

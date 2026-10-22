@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { FileInfo } from "./files";
+import { listLevel } from "./files";
 import { agentRefusal } from "./http";
 
 /** What Claude may do through a storage token (issue #88): what its own file tools do. */
@@ -39,4 +41,20 @@ test("nothing is renamed, deleted, reviewed or shared", () => {
   for (const action of ["accept", "reject", "withdraw"]) assert.ok(!may("POST", `/proposals/p1/${action}`), action);
   assert.ok(!may("POST", "/access/grants"));
   assert.ok(!may("DELETE", "/access/groups/g1"));
+});
+
+test("listLevel lists a folder one level at a time", () => {
+  const files = ["notes/a.md", "notes/x/b.md", "notes/x/y/c.md", "skills/s/SKILL.md", "top.md"].map(
+    (path) => ({ path }) as FileInfo,
+  );
+  const paths = (dir: string, depth?: number) => {
+    const level = listLevel(files, dir, depth);
+    return [level.files.map((f) => f.path), level.folders];
+  };
+  assert.deepEqual(paths("", 1), [["top.md"], ["notes", "skills"]]);
+  assert.deepEqual(paths("notes", 1), [["notes/a.md"], ["notes/x"]]);
+  assert.deepEqual(paths("notes", 2), [["notes/a.md", "notes/x/b.md"], ["notes/x/y"]]);
+  assert.deepEqual(paths("notes"), [["notes/a.md", "notes/x/b.md", "notes/x/y/c.md"], []]);
+  // A folder name is a whole segment, not a prefix of a longer one.
+  assert.deepEqual(paths("note", 1), [[], []]);
 });

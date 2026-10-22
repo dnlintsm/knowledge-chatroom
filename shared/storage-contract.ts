@@ -12,6 +12,11 @@ export interface FileInfo {
   updatedAt: string;
   author: AuthorType;
   readOnly: boolean;
+  workspaceId: string;
+  /** The knowledge node the file is in; null at the workspace root and in an experiment. */
+  nodeId: string | null;
+  /** The experiment the file is in, if any. A file has at most one of nodeId and experimentId. */
+  experimentId: string | null;
 }
 
 export interface FileEvent {
@@ -58,6 +63,7 @@ function object(value: unknown): Record<string, unknown> {
 
 const author = (value: unknown) => value === "user" || value === "agent";
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const optionalId = (value: unknown) => value === null || text(value);
 const hash = (value: unknown) => text(value) && /^[a-f0-9]{64}$/.test(value);
 const canonicalPath = (value: unknown) => {
   try { return text(value) && normalizePath(value) === value; }
@@ -72,7 +78,9 @@ export function parseFileInfo(value: unknown): FileInfo {
       !text(item.mime) || !hash(item.sha256) || !author(item.author) ||
       typeof item.size !== "number" || !Number.isSafeInteger(item.size) || item.size < 0 ||
       !text(item.updatedAt) || !Number.isFinite(Date.parse(item.updatedAt)) ||
-      (item.readOnly !== undefined && typeof item.readOnly !== "boolean")) {
+      (item.readOnly !== undefined && typeof item.readOnly !== "boolean") ||
+      !text(item.workspaceId) || !optionalId(item.nodeId) || !optionalId(item.experimentId) ||
+      (item.nodeId !== null && item.experimentId !== null)) {
     throw new StorageContractError("Invalid storage file metadata");
   }
   return { ...item, readOnly: item.readOnly ?? false } as unknown as FileInfo;

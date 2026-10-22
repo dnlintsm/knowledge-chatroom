@@ -15,6 +15,11 @@
 
 ### Added
 
+- File metadata from the storage API names the file's place: `workspaceId`, `nodeId` and
+  `experimentId` (`null` when not in a node or an experiment).
+- `GET /files?depth=<n>&dir=<folder>` lists files one level at a time: `{files, folders}`,
+  the files at most `n` folders below `dir` (the top without it) and the folders at that
+  depth with more files below them. `GET /files` without them lists every file, as before.
 - Chat history is kept per user (#91). Chats survive reloads and restarts: with server
   storage in Postgres (migration `017_chats.sql`, run on start), without it in memory. The
   history button lists your own chats, which you can reopen, rename, archive or delete;

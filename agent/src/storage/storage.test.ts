@@ -2008,6 +2008,51 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await fetch(`${base}/files/skills/my%20skill/SKILL.md`)).status, 404);
     });
 
+    test("file info names its place; ?depth and ?dir list one level", async () => {
+      const post = async (path: string, body: unknown) =>
+        (await (
+          await fetch(`${base}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        ).json()) as { id: string };
+      const put = async (path: string) => {
+        const res = await fetch(`${base}/files/${path}`, { method: "PUT", body: path });
+        assert.equal(res.status, 200);
+        return (await res.json()) as { workspaceId: string; nodeId: string | null; experimentId: string | null };
+      };
+      const atRoot = await put("levels/a.md");
+      await put("levels/x/b.md");
+      await put("levels/x/y/c.md");
+      assert.deepEqual([atRoot.workspaceId, atRoot.nodeId, atRoot.experimentId], [storage.workspaceId, null, null]);
+
+      const node = await post("/nodes", { parentId: null, name: "Depth levels" });
+      const run = await post("/experiments", { nodeId: null, title: "Depth levels run" });
+      const inNode = await put(`notes/n.md?node=${node.id}`);
+      assert.deepEqual([inNode.workspaceId, inNode.nodeId, inNode.experimentId], [storage.workspaceId, node.id, null]);
+      const inRun = await put(`notes/e.md?experiment=${run.id}`);
+      assert.deepEqual([inRun.workspaceId, inRun.nodeId, inRun.experimentId], [storage.workspaceId, null, run.id]);
+      const listed = (await (await fetch(`${base}/files?node=${node.id}`)).json()) as { files: { nodeId: string }[] };
+      assert.deepEqual(listed.files.map((f) => f.nodeId), [node.id]);
+
+      const level = async (query: string) => {
+        const res = await fetch(`${base}/files?${query}`);
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { files: { path: string }[]; folders: string[] };
+        return [body.files.map((f) => f.path), body.folders];
+      };
+      assert.deepEqual(await level("dir=levels&depth=1"), [["levels/a.md"], ["levels/x"]]);
+      assert.deepEqual(await level("dir=/levels/&depth=2"), [["levels/a.md", "levels/x/b.md"], ["levels/x/y"]]);
+      assert.deepEqual(await level("dir=levels"), [["levels/a.md", "levels/x/b.md", "levels/x/y/c.md"], []]);
+      const [top, folders] = await level("depth=1");
+      assert.ok((top as string[]).every((path) => !path.includes("/")));
+      assert.ok((folders as string[]).includes("levels"));
+      for (const query of ["depth=0", "depth=-1", "depth=1.5", "depth=x", "dir=../x&depth=1"]) {
+        assert.equal((await fetch(`${base}/files?${query}`)).status, 400, query);
+      }
+    });
+
     test("?watch streams changes as server-sent events", async () => {
       const controller = new AbortController();
       const res = await fetch(`${base}/files?watch`, { signal: controller.signal });

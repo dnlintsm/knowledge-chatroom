@@ -343,7 +343,10 @@ For local setup, see [Development](development.md).
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
 - **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
-  `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
+  `GET /api/files` lists files (each with its `workspaceId`, `nodeId` and `experimentId`;
+  `?depth=<n>&dir=<folder>` lists one level at a time as `{files, folders}`: the files at most
+  `n` folders below `dir`, and the folders at that depth with more below them),
+  `GET|PUT|DELETE /api/files/<path>` reads, writes
   (request body = bytes) and deletes one, `PATCH /api/files/<path>` with `{"path": ...}`
   renames it within the same place (history kept; 412 when the name is taken),
   `?versions` returns its history, and

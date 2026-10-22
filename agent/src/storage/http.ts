@@ -6,7 +6,7 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
-import { FileExistsError, ReadOnlyFileError } from "./files";
+import { FileExistsError, listLevel, ReadOnlyFileError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
@@ -17,7 +17,13 @@ import type { Session } from "./session";
  * REST API for workspace files, the knowledge tree, experiments, search and
  * access, mounted on the agent server:
  *
- *   GET    /files                   list live files (JSON)
+ *   GET    /files                   list live files (JSON), each with
+ *                                   workspaceId, nodeId and experimentId
+ *   GET    /files?depth=<n>&dir=<folder>
+ *                                   one level at a time: {files, folders}, the
+ *                                   files at most n folders below dir (both
+ *                                   optional; no dir = the top) and the folders
+ *                                   at depth n with more files below them
  *   GET    /files?watch             change stream (Server-Sent Events), one
  *                                   `data: {…}` per committed change:
  *                                   {"op":"write"|"delete","node","path",…} for
@@ -743,8 +749,15 @@ export function createStorageHandler(
       : await session.files(url.searchParams.get("node") || null);
 
     if (path === "") {
-      if (req.method !== "GET") json(res, 405, { error: "Method not allowed" });
-      else json(res, 200, { files: await service.list() });
+      if (req.method !== "GET") return json(res, 405, { error: "Method not allowed" });
+      const depth = url.searchParams.get("depth");
+      const dir = url.searchParams.get("dir");
+      if (depth === null && dir === null) return json(res, 200, { files: await service.list() });
+      if (depth !== null && !/^[1-9]\d*$/.test(depth)) {
+        return json(res, 400, { error: "depth must be a whole number of at least 1" });
+      }
+      const folder = dir?.replace(/\/+$/, "") ? normalizePath(dir.replace(/\/+$/, "")) : "";
+      json(res, 200, listLevel(await service.list(), folder, depth === null ? undefined : Number(depth)));
       return;
     }
 
