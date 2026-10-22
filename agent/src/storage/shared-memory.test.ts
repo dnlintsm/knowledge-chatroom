@@ -133,7 +133,12 @@ describe("shared memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not s
     const again = await shared.propose(member, { op: "update", id: conventions.id, input: note("Units are µm.") }, { authorType: "agent", threadId: "t1" });
     assert.equal(again.id, first.id, "proposing again replaces it");
     assert.equal(again.authorType, "agent");
-    await shared.update(owner, conventions.id, note("Units are nm, always."));
+    // Two editors saving from the same version: one of them gets a conflict.
+    const both = await Promise.allSettled([
+      shared.update(owner, conventions.id, note("Units are nm, always."), conventions.version),
+      shared.update(owner, conventions.id, note("Units are nm, mostly."), conventions.version),
+    ]);
+    assert.deepEqual(both.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
     await assert.rejects(shared.decide(owner, again.id, "accept"), MemoryConflictError);
     assert.equal((await shared.proposals(owner)).some((p) => p.id === again.id), true, "still open after a conflict");
     await assert.rejects(shared.decide(owner, again.id, "withdraw"), MemoryError, "only the author withdraws");
@@ -175,6 +180,16 @@ describe("shared memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not s
 
       const found = await call("memory_search", { query: "recipe" });
       assert.match(found.content[0].text, /etch-recipes/);
+
+      // Turned off mid-run, or not in this run's place: Claude can't read it.
+      await shared.setMode(member, recipes.id, "off", false);
+      const off = await call("memory_view", { name: sharedRef(recipes.id) });
+      assert.equal(off.isError, true);
+      await shared.setMode(member, recipes.id, null, false);
+      const elsewhere = (await prepareMemory(storage, member, { threadId: "chat-t", runId: "r2" }, () => {}, other)) as RunMemory;
+      const outside = Object.fromEntries(memoryTools(elsewhere).map((t) => [t.name, t]));
+      const away = (await outside.memory_view.handler({ name: sharedRef(recipes.id) } as never, {})) as { isError?: boolean };
+      assert.equal(away.isError, true, "another node's note");
       assert.ok(events.some((e) => (e as { name: string }).name === "etch-recipes"));
     } finally {
       delete process.env.MEMORY;

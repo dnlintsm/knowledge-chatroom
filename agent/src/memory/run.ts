@@ -236,9 +236,14 @@ export function memoryTools(memory: RunMemory) {
         "Memory panel. Tell the user in one line.",
     );
   };
-  const sharedId = (name: string) => {
+  // A shared:<id> works only for a note this run may use right now: the user
+  // may have moved to another node or turned the note off since it started.
+  const sharedId = async (name: string) => {
     const id = parseSharedRef(name);
     if (!id && name.startsWith("shared:")) throw new MemoryError(`${name} isn't a shared note's name: use shared:<id> from the index`);
+    if (!id) return null;
+    memory.shared = await sharedService.forRun(userId, memory.nodeId);
+    if (!memory.shared.some((n) => n.id === id)) throw new MemoryNotFoundError(name);
     return id;
   };
   return [
@@ -248,7 +253,7 @@ export function memoryTools(memory: RunMemory) {
       { name: nameParam },
       ({ name }) =>
         attempt(async () => {
-          const id = sharedId(name);
+          const id = await sharedId(name);
           if (id) {
             const note = await sharedService.get(userId, id);
             // Someone else's words: changes after this wait for review.
@@ -307,7 +312,7 @@ export function memoryTools(memory: RunMemory) {
       ({ name, description, type, body, scope }) =>
         attempt(async () => {
           const input = { description, type, body };
-          const id = sharedId(name);
+          const id = await sharedId(name);
           if (id) return proposeShared({ op: "update", id, input });
           if (scope === "workspace" || scope === "node") {
             if (scope === "node" && !memory.nodeId) throw new MemoryError("The user isn't in a knowledge node: use scope workspace");
@@ -332,7 +337,7 @@ export function memoryTools(memory: RunMemory) {
       },
       ({ name, old_text, new_text }) =>
         attempt(async () => {
-          const id = sharedId(name);
+          const id = await sharedId(name);
           if (id || reviewed()) {
             const note = id ? await sharedService.get(userId, id) : await service.get(userId, name);
             if (!note || ("archived" in note && note.archived)) throw new MemoryNotFoundError(name);
@@ -351,7 +356,7 @@ export function memoryTools(memory: RunMemory) {
       { name: nameParam },
       ({ name }) =>
         attempt(async () => {
-          const id = sharedId(name);
+          const id = await sharedId(name);
           if (id) return proposeShared({ op: "delete", id });
           return reviewed() ? propose("delete", name) : changed(await service.archive(userId, name, true, run), `Deleted ${name}.`);
         }),

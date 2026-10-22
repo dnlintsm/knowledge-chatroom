@@ -235,6 +235,11 @@ export class SharedMemoryService {
     return rows;
   }
 
+  /** Holds the note until the transaction ends, so a version check stays true while writing. */
+  private async lock(db: Sql, id: string): Promise<void> {
+    if (UUID.test(id)) await db`SELECT 1 FROM shared_memories WHERE id = ${id} FOR UPDATE`;
+  }
+
   private async one(db: Sql, userId: string, id: string): Promise<Row> {
     if (!UUID.test(id)) throw new MemoryNotFoundError(sharedRef(String(id)));
     const [row] = await this.rows(db, userId, db`m.id = ${id}`);
@@ -368,6 +373,7 @@ export class SharedMemoryService {
   update(userId: string, id: string, input: Partial<MemoryInput>, ifVersion?: number): Promise<SharedNote> {
     const clean = checkInput(input);
     return this.as(userId, async (db) => {
+      await this.lock(db, id);
       const row = await this.one(db, userId, id);
       if (row.rank < 2) throw new MemoryError("Only its place's editors change a shared note; Claude can propose a change");
       if (ifVersion !== undefined && row.version !== ifVersion) throw new MemoryConflictError(`${row.name} changed since`);
