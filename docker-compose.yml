@@ -112,7 +112,7 @@ services:
 
   # --- Sample Python tools (examples/python-agent) for the demo's agent ---
   # Add `--profile python-sample` and, in .env,
-  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
   lab-tools:
     profiles: [python-sample]
     build: ./examples/python-agent

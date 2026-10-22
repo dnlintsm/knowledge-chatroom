@@ -1,6 +1,8 @@
 import type { IncomingMessage } from "node:http";
 
 import {
+  MEMORY_AUDIENCE,
+  MEMORY_HEADER,
   STORAGE_AUDIENCE,
   STORAGE_HEADER,
   readIdentityToken,
@@ -21,7 +23,7 @@ import type { Storage } from "./index";
  */
 
 export const IDENTITY_HEADER = "x-knowledge-user";
-export { STORAGE_HEADER };
+export { MEMORY_AUDIENCE, MEMORY_HEADER, STORAGE_HEADER };
 
 export interface Identity {
   /** Stable id from the login provider, e.g. "<issuer>|<sub>". */
@@ -36,8 +38,11 @@ export interface Identity {
    * storage tokens "storage".
    */
   aud?: string;
-  /** Storage tokens: the outside service acting for the user, e.g. "mcp:lab". */
+  /** Storage and memory tokens: the outside service acting for the user, e.g. "mcp:lab". */
   via?: string;
+  /** Memory tokens: the chat and knowledge node of the run. */
+  thread?: string;
+  node?: string | null;
 }
 
 /** A token for `identity`, in the IDENTITY_FORMAT the deployment uses. */
@@ -89,3 +94,43 @@ export async function identify(
 
 const userFor = (storage: Storage, identity: Identity) =>
   storage.access.userForSubject(identity.sub, { email: identity.email, name: identity.name });
+
+/** What an X-Knowledge-Memory token lets an outside server do: the user's memory in one chat. */
+export interface MemoryGrant {
+  userId: string;
+  via: string;
+  thread: string;
+  node: string | null;
+}
+
+const UUID = /^[0-9a-f-]{36}$/i;
+
+/**
+ * Without login there is nothing to sign with, and every request is the local
+ * user's anyway: the memory "token" is `local.<base64url JSON>` with the same
+ * claims, and only accepted then.
+ */
+export function localMemoryToken(claims: { via: string; thread: string; node: string | null }): string {
+  return `local.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
+}
+
+/** The memory grant an X-Knowledge-Memory header carries, or null when it carries none. */
+export async function identifyMemory(req: Pick<IncomingMessage, "headers">, storage: Storage): Promise<MemoryGrant | null> {
+  const header = req.headers[MEMORY_HEADER];
+  if (typeof header !== "string") return null;
+  const secret = storage.config.authSecret;
+  let claims: Partial<Identity> | null = null;
+  if (secret) {
+    claims = verifyIdentity(header, secret, Date.now(), MEMORY_AUDIENCE);
+  } else if (header.startsWith("local.")) {
+    try {
+      claims = JSON.parse(Buffer.from(header.slice("local.".length), "base64url").toString("utf8")) as Partial<Identity>;
+    } catch {
+      return null;
+    }
+  }
+  if (!claims || typeof claims.via !== "string" || !claims.via || typeof claims.thread !== "string" || !claims.thread) return null;
+  const node = typeof claims.node === "string" && UUID.test(claims.node) ? claims.node : null;
+  const userId = secret ? await userFor(storage, claims as Identity) : await storage.access.localUserId();
+  return { userId, via: claims.via, thread: claims.thread, node };
+}

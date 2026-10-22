@@ -15,6 +15,11 @@
 
 ### Added
 
+- Memory for Python MCP servers (#93, step 5). With `"memoryAccess": true` in
+  `MCP_SERVERS`, runs where memory is on send the server an `X-Knowledge-Memory` token
+  for that chat. Through the agent's `/memory/agent` API the server gets the chat's
+  memory prompt and the same memory tools as Claude; its changes always wait in the
+  user's Memory inbox. The sample Python agent's `recall_user_notes` tool shows how.
 - Memory packs and import (#93, step 4). A place's editors publish its shared notes to
   the hub as a memory pack, with numbered versions scanned like skills. Installing one
   in a workspace, node or group adds its notes there pinned to that version, read-only

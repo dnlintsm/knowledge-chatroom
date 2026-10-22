@@ -35,11 +35,13 @@ test("reads .mcp.json-shaped JSON, http by default, ${VAR} from the environment"
     config: { type: "http", url: "http://lab:9000/mcp", headers: { Authorization: "Bearer s3cret" }, alwaysLoad: true },
     forwardIdentity: true,
     storageAccess: false,
+    memoryAccess: false,
   });
   assert.deepEqual(servers.local, {
     config: { type: "stdio", command: "python", args: ["tools.py"], env: { KEY: "s3cret" } },
     forwardIdentity: false,
     storageAccess: false,
+    memoryAccess: false,
   });
   assert.equal(allowServer("lab"), "mcp__lab");
 });
@@ -83,6 +85,27 @@ test("only forwardIdentity servers get the run's identity", () => {
   assert.equal((configs.other as { headers?: object }).headers, undefined);
   // Outside a run (no identity) nothing is added.
   assert.deepEqual((serverConfigs(servers).lab as { headers?: object }).headers, { A: "1" });
+});
+
+test("memoryAccess servers get the run's memory token, when it has one", () => {
+  const servers = externalServersFromEnv({
+    MCP_SERVERS: JSON.stringify({
+      lab: { url: "http://lab/mcp", memoryAccess: true },
+      other: { url: "http://other/mcp", storageAccess: true },
+    }),
+  });
+  const configs = serverConfigs(servers, (server, kind) => (kind === "memory" ? `memory-for-${server}` : null));
+  assert.deepEqual((configs.lab as { headers?: object }).headers, { "x-knowledge-memory": "memory-for-lab" });
+  // No token of a kind (no login, or memory off in the chat): no header.
+  assert.equal((configs.other as { headers?: object }).headers, undefined);
+  assert.deepEqual(
+    quiet(() => externalServersFromEnv({ MCP_SERVERS: JSON.stringify({ s: { type: "stdio", command: "x", memoryAccess: true } }) })),
+    {},
+  );
+  assert.deepEqual(
+    quiet(() => externalServersFromEnv({ MCP_SERVERS: JSON.stringify({ h: { url: "http://h/mcp", headers: { "X-Knowledge-Memory": "x" } } }) })),
+    {},
+  );
 });
 
 test("tokens signed for an MCP server aren't accepted by the agent", () => {
