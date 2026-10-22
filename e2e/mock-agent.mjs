@@ -161,6 +161,19 @@ const MEMORY_TYPES = ["preference", "profile", "project", "reference", "feedback
 // The list has no bodies.
 const summary = (note) => ({ ...note, body: undefined });
 
+// Shared memory (step 3): one workspace note to start with, which you edit.
+const WORKSPACE = { scope: "workspace", nodeId: null, groupId: null, label: "Workspace" };
+const shared = new Map();
+function putShared(place, name, input) {
+  const id = randomUUID();
+  shared.set(id, {
+    id, name, description: input.description, type: input.type ?? "reference", body: input.body ?? "", version: 1,
+    place, canEdit: true, mode: "auto", myMode: null, everyoneMode: "auto", updatedAt: new Date().toISOString(),
+  });
+  return shared.get(id);
+}
+putShared(WORKSPACE, "lab-conventions", { description: "How the lab names runs and units", body: "Units are nm. Runs are named <tool>-<date>." });
+
 /** Saves a note as the user or Claude; returns the event for Claude's changes. */
 function saveMemory(name, input, by) {
   const now = new Date().toISOString();
@@ -196,7 +209,35 @@ async function handleMemory(req, res, url) {
     const thread = url.searchParams.get("thread");
     const notes = [...memory.notes.values()].map((e) => summary(e.note));
     notes.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updatedAt.localeCompare(a.updatedAt));
-    return json({ mode: memory.mode, incognito: memory.incognito.has(thread), notes, inbox: memory.inbox, types: MEMORY_TYPES });
+    return json({
+      mode: memory.mode, incognito: memory.incognito.has(thread), notes, inbox: memory.inbox, types: MEMORY_TYPES,
+      shared: [...shared.values()].map(summary), sharedProposals: [], targets: [{ ...WORKSPACE, canEdit: true }],
+    });
+  }
+  if (section === "shared") {
+    if (req.method === "POST" && !name) {
+      if ([...shared.values()].some((n) => n.name === input.name)) return json({ error: `There is already a shared note named ${input.name} there` }, 409);
+      return json({ note: putShared(WORKSPACE, input.name, input), proposal: null });
+    }
+    const note = shared.get(name);
+    if (!note) return json({ error: `No memory named shared:${name}` }, 404);
+    if (req.method === "GET" && !action) {
+      return json({ note, versions: [{ version: note.version, description: note.description, type: note.type, body: note.body, changedBy: "You", changedAs: "user", createdAt: note.updatedAt }] });
+    }
+    if (req.method === "PUT" && action === "mode") {
+      if (input.everyone) note.everyoneMode = input.mode;
+      else note.myMode = input.mode;
+      note.mode = note.myMode ?? note.everyoneMode;
+      return json({ note: summary(note) });
+    }
+    if (req.method === "PUT" && !action) {
+      Object.assign(note, { description: input.description, type: input.type, body: input.body, version: note.version + 1 });
+      return json({ note });
+    }
+    if (req.method === "DELETE") {
+      shared.delete(name);
+      return json({ id: name, deleted: true });
+    }
   }
   if (req.method === "PUT" && section === "settings") {
     if (input.mode) memory.mode = input.mode;

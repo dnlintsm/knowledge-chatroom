@@ -344,8 +344,23 @@ Code's memory files and `SKILL.md`.
   under "Recent changes by Claude") or go to the inbox in `ask` mode.
   `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
   it off.
-- Not yet: suggesting notes become skills or knowledge nodes, shared and hub memory, and
-  access for Python agents. These are the later steps of #93.
+- Shared memory (`020_shared_memory.sql`, `agent/src/storage/shared-memory.ts`): notes for
+  the workspace, a knowledge node (and everything below it) or a group (and its
+  sub-groups). `shared_memory_rank` decides who reads and edits each place from the
+  grants: anyone with a grant in the workspace reads its notes and editors of the
+  workspace root edit them; a node's readers and editors likewise; a group's members
+  (and workspace owners) read and edit its notes. A run gets the workspace's notes, its
+  user's groups' and those of the node the user is in and the nodes above it (the
+  browser's place in `forwardedProps`). Each note is Auto (in the prompt's index),
+  Manual (only `memory_search` finds it) or Off, for everyone (set by its editors) and
+  per person. Claude addresses a shared note as `shared:<id>`; reading one counts as
+  outside content for the inbox guard, and `memory_save`, `memory_edit` and
+  `memory_delete` on one, or `memory_save` with `scope: workspace | node`, only propose:
+  someone who edits the place accepts or rejects it in the Memory view, and accepting
+  credits the author. A person shares one of their own notes by copying it (a
+  snapshot, checked before it goes): directly where they edit, else as a proposal.
+- Not yet: suggesting notes become skills or knowledge nodes, memory packs on the hub,
+  import, and access for Python agents. These are the later steps of #93.
 
 ### File references in answers
 

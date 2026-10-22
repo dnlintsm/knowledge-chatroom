@@ -26,6 +26,7 @@ import {
   MemoryService,
   type MemoryRun,
 } from "./memory";
+import { SharedMemoryService } from "./shared-memory";
 import type { Storage } from "./index";
 import { createMemoryHandler } from "../memory/http";
 import { memoryPrompt, memoryTools, prepareMemory, taintHook, type RunMemory } from "../memory/run";
@@ -36,6 +37,7 @@ const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" }, () => {
   let sql: Sql;
   let memory: MemoryService;
+  let sharedMemory: SharedMemoryService;
   let rowSecurity: boolean;
   let workspaceId: string;
   let me: string;
@@ -53,6 +55,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
     rowSecurity = await prepareRowSecurity(sql);
     [{ id: workspaceId }] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
     memory = new MemoryService(sql, workspaceId, rowSecurity);
+    sharedMemory = new SharedMemoryService(sql, workspaceId, rowSecurity);
     const access = new AccessService(sql, workspaceId);
     me = await access.localUserId();
     other = await access.userForSubject("test|other", { name: "Other" });
@@ -196,7 +199,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
   });
 
   test("settings: memory off, incognito chats, and what a run gets", async () => {
-    const storage = { memory } as unknown as Storage;
+    const storage = { memory, sharedMemory } as unknown as Storage;
     const events: string[] = [];
     process.env.MEMORY = "on";
     try {
@@ -273,7 +276,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
   });
 
   test("ask mode and outside content send Claude's changes to the inbox", async () => {
-    const storage = { memory } as unknown as Storage;
+    const storage = { memory, sharedMemory } as unknown as Storage;
     process.env.MEMORY = "on";
     try {
       const events: string[] = [];
@@ -310,7 +313,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
 
   test("the learner learns from quiet chats once, as the user's mode says", async () => {
     const chats = new ChatService(sql, workspaceId, rowSecurity);
-    const storage = { sql, workspaceId, memory, chats } as unknown as Storage;
+    const storage = { sql, workspaceId, memory, sharedMemory, chats } as unknown as Storage;
     const say = (id: string, text: string) =>
       chats.appendRun(me, id, {
         agentId: "a",
@@ -390,7 +393,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
 
   test("the learner leaves notes it didn't see in full, or that changed meanwhile", async () => {
     const chats = new ChatService(sql, workspaceId, rowSecurity);
-    const storage = { sql, workspaceId, memory, chats } as unknown as Storage;
+    const storage = { sql, workspaceId, memory, sharedMemory, chats } as unknown as Storage;
     await memory.save(me, "big-note", note("x".repeat(3000), "A long note"), "user");
     const short = await memory.notesForLearning(me, 2000);
     assert.equal(short.versions.has("big-note"), false);
@@ -429,6 +432,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
   test("the /memory API", async () => {
     const storage = {
       memory,
+      sharedMemory,
       config: { authSecret: undefined },
       access: { localUserId: async () => me },
     } as unknown as Storage;

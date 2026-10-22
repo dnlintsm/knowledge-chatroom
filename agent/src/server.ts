@@ -36,6 +36,17 @@ import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
 import { prepareMemory } from "./memory/run";
+
+/**
+ * The knowledge node the user is in, from the app's run payload
+ * (src/lib/chatroom-props.ts): its shared memory applies to the run. The
+ * browser says it; reading it as the user decides whether it counts.
+ */
+function placeNode(props: unknown): string | null {
+  const place = (props as { knowledge_chatroom?: { node?: { id?: unknown } | null } } | undefined)?.knowledge_chatroom;
+  const id = place?.node?.id;
+  return typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+}
 import { learningEnabled, MemoryLearner } from "./memory/learn";
 import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
@@ -273,6 +284,7 @@ const server = http.createServer(async (req, res) => {
       userId,
       { threadId: input.threadId, runId: input.runId },
       (event) => custom({ name: "memory", value: event }),
+      placeNode(input.forwardedProps),
     ).catch((err) => {
       console.error(`[memory] couldn't load memory; running without it: ${err instanceof Error ? err.message : err}`);
       return null;

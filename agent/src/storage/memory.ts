@@ -69,6 +69,8 @@ export interface MemoryEvent {
   description: string;
   kind: MemoryEventKind;
   version: number;
+  /** Set for a shared note (step 3): which one, and where it lives. */
+  shared?: { id: string; label: string };
 }
 
 export interface MemoryInput {

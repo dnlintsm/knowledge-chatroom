@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Archive, Bot, Brain, Check, Download, EyeOff, History, Inbox, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
+import { useWorkspace } from "./store";
 import { MEMORY_TAB } from "./types";
 import { useWorkbench } from "./workbench";
 
@@ -81,9 +83,78 @@ export interface MemoryEvent {
   description: string;
   kind: "read" | "create" | "update" | "archive" | "propose";
   version: number;
+  /** A shared note's: which one, and where it lives. */
+  shared?: { id: string; label: string };
   /** Set here once the user undid it. */
   undone?: boolean;
 }
+
+export type SharedScope = "workspace" | "node" | "group";
+export type SharedMode = "auto" | "manual" | "off";
+
+/** Where a shared note lives. */
+export interface SharedPlace {
+  scope: SharedScope;
+  nodeId: string | null;
+  groupId: string | null;
+  label: string;
+}
+
+/** A note shared with you: by your workspace, a knowledge node or a group. */
+export interface SharedSummary {
+  id: string;
+  name: string;
+  description: string;
+  type: MemoryType;
+  version: number;
+  place: SharedPlace;
+  canEdit: boolean;
+  /** What applies to you: yours, else everyone's. */
+  mode: SharedMode;
+  myMode: SharedMode | null;
+  everyoneMode: SharedMode;
+  updatedAt: string;
+}
+
+export interface SharedNote extends SharedSummary {
+  body: string;
+}
+
+export interface SharedVersion {
+  version: number;
+  description: string;
+  type: MemoryType;
+  body: string;
+  changedBy: string | null;
+  changedAs: "user" | "agent";
+  createdAt: string;
+}
+
+/** A change to shared memory waiting for its editors. */
+export interface SharedProposal {
+  id: string;
+  op: "add" | "update" | "delete";
+  place: SharedPlace;
+  memoryId: string | null;
+  name: string;
+  description: string | null;
+  type: MemoryType | null;
+  body: string | null;
+  author: string | null;
+  authorType: "user" | "agent";
+  mine: boolean;
+  canDecide: boolean;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** A place you can share a copy of a note to. */
+export interface SharedTarget extends SharedPlace {
+  canEdit: boolean;
+}
+
+/** In the editor, a shared note is `shared:<id>`. */
+export const sharedSelection = (id: string) => `shared:${id}`;
 
 export interface MemoryInput {
   description: string;
@@ -91,7 +162,7 @@ export interface MemoryInput {
   body: string;
 }
 
-const TYPES: { type: MemoryType; label: string; hint: string }[] = [
+export const TYPES: { type: MemoryType; label: string; hint: string }[] = [
   { type: "preference", label: "Preference", hint: "How you like to work" },
   { type: "profile", label: "Profile", hint: "Who you are, your role" },
   { type: "project", label: "Project", hint: "Ongoing work and its decisions" },
@@ -139,6 +210,22 @@ interface Memory {
   /** Undoes one of Claude's changes in this turn. */
   undo: (event: MemoryEvent) => Promise<void>;
   turn: Turn;
+  /** Shared memory (step 3): notes you read, proposals, where you can share. */
+  shared: SharedSummary[];
+  sharedProposals: SharedProposal[];
+  targets: SharedTarget[];
+  sharedDetail: (id: string) => Promise<{ note: SharedNote; versions: SharedVersion[] }>;
+  /** Shares a copy; a proposal when you can't edit the place. */
+  shareCopy: (
+    target: Pick<SharedPlace, "scope" | "nodeId" | "groupId">,
+    name: string,
+    input: MemoryInput,
+  ) => Promise<{ note: SharedNote | null; proposal: SharedProposal | null }>;
+  updateShared: (id: string, input: MemoryInput, version: number) => Promise<SharedNote>;
+  removeShared: (id: string) => Promise<void>;
+  /** null clears yours, back to everyone's; `everyone` sets theirs (editors). */
+  setSharedMode: (id: string, mode: SharedMode | null, everyone: boolean) => Promise<void>;
+  decideShared: (id: string, decision: "accept" | "reject" | "withdraw") => Promise<void>;
 }
 
 const MemoryContext = createContext<Memory | null>(null);
@@ -172,25 +259,41 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const [incognito, setIncognitoState] = useState(false);
   const [notes, setNotes] = useState<MemorySummary[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
+  const [shared, setShared] = useState<SharedSummary[]>([]);
+  const [sharedProposals, setSharedProposals] = useState<SharedProposal[]>([]);
+  const [targets, setTargets] = useState<SharedTarget[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const threadId = useCopilotChatConfiguration()?.threadId;
   const { editor } = useWorkbench();
+  // The knowledge node you're in: you can share a copy there.
+  const nodeId = useWorkspace().node;
 
   const reload = useCallback(async () => {
     try {
-      const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
-      const data = await call<{ mode: Memory["mode"]; incognito: boolean; notes: MemorySummary[]; inbox?: InboxItem[] }>(
-        `/api/memory${query}`,
-      );
+      const query = new URLSearchParams();
+      if (threadId) query.set("thread", threadId);
+      if (nodeId) query.set("node", nodeId);
+      const data = await call<{
+        mode: Memory["mode"];
+        incognito: boolean;
+        notes: MemorySummary[];
+        inbox?: InboxItem[];
+        shared?: SharedSummary[];
+        sharedProposals?: SharedProposal[];
+        targets?: SharedTarget[];
+      }>(`/api/memory${query.size ? `?${query}` : ""}`);
       setModeState(data.mode);
       setIncognitoState(data.incognito);
       setNotes(data.notes);
       setInbox(data.inbox ?? []);
+      setShared(data.shared ?? []);
+      setSharedProposals(data.sharedProposals ?? []);
+      setTargets(data.targets ?? []);
       setStatus("ready");
     } catch {
       setStatus("unavailable");
     }
-  }, [threadId]);
+  }, [threadId, nodeId]);
 
   useEffect(() => void reload(), [reload]);
 
@@ -324,22 +427,77 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
     [reload],
   );
 
+  const sharedUrl = (id: string, action = "") => `/api/memory/shared/${encodeURIComponent(id)}${action ? `/${action}` : ""}`;
+  const sharedDetail = useCallback(
+    (id: string) => call<{ note: SharedNote; versions: SharedVersion[] }>(sharedUrl(id)),
+    [],
+  );
+  const shareCopy = useCallback(
+    async (target: Pick<SharedPlace, "scope" | "nodeId" | "groupId">, name: string, input: MemoryInput) => {
+      const made = await call<{ note: SharedNote | null; proposal: SharedProposal | null }>(
+        "/api/memory/shared",
+        json("POST", { ...target, name, ...input }),
+      );
+      await reload();
+      return made;
+    },
+    [reload],
+  );
+  const updateShared = useCallback(
+    async (id: string, input: MemoryInput, version: number) => {
+      const { note } = await call<{ note: SharedNote }>(sharedUrl(id), json("PUT", { ...input, version }));
+      await reload();
+      return note;
+    },
+    [reload],
+  );
+  const removeShared = useCallback(
+    async (id: string) => {
+      await call(sharedUrl(id), { method: "DELETE" });
+      setSelected((s) => (s === sharedSelection(id) ? null : s));
+      await reload();
+    },
+    [reload],
+  );
+  const setSharedMode = useCallback(
+    async (id: string, next: SharedMode | null, everyone: boolean) => {
+      try {
+        await call(sharedUrl(id, "mode"), json("PUT", { mode: next, everyone }));
+      } finally {
+        await reload();
+      }
+    },
+    [reload],
+  );
+  const decideShared = useCallback(
+    async (id: string, decision: "accept" | "reject" | "withdraw") => {
+      try {
+        await call(`/api/memory/shared/proposals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
+      } finally {
+        await reload();
+      }
+    },
+    [reload],
+  );
+
   const value = useMemo(
     () => ({
       status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
+      shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
     }),
     [
       status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
+      shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
     ],
   );
   return <MemoryContext.Provider value={value}>{children}</MemoryContext.Provider>;
 }
 
-const typeLabel = (type: MemoryType) => TYPES.find((t) => t.type === type)?.label ?? type;
+export const typeLabel = (type: MemoryType) => TYPES.find((t) => t.type === type)?.label ?? type;
 
-const when = (iso: string) =>
+export const when = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 const STALE_DAYS = 60;
@@ -584,6 +742,7 @@ export function MemoryPanel() {
           {showArchived && archived.map((note) => <NoteRow key={note.name} note={note} />)}
         </>
       )}
+      <SharedSection />
       <button
         type="button"
         aria-expanded={showActivity}
@@ -597,7 +756,7 @@ export function MemoryPanel() {
   );
 }
 
-const field =
+export const field =
   "w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]";
 
 /** The middle pane's Memory tab: one note to read and edit, with its versions. */
@@ -610,6 +769,7 @@ export function MemoryEditor() {
       </div>
     );
   }
+  if (selected.startsWith("shared:")) return <SharedNoteEditor key={selected} id={selected.slice("shared:".length)} />;
   return <NoteEditor key={selected} name={selected} />;
 }
 
@@ -768,6 +928,7 @@ function NoteEditor({ name }: { name: string }) {
           </button>
         )}
       </div>
+      {note && !note.archived && <ShareCopy note={note} />}
       {versions.length > 1 && (
         <section aria-label="Versions" className="mt-2 border-t border-[var(--border)] pt-3">
           <h3 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
@@ -824,8 +985,10 @@ export function MemoryStatus() {
   // One chip per note: its latest change, else that Claude read it.
   const byNote = new Map<string, MemoryEvent>();
   for (const event of turn.events) {
-    const seen = byNote.get(event.name);
-    if (!seen || event.kind !== "read") byNote.set(event.name, event);
+    // A shared note can share its name with one of yours.
+    const key = event.shared ? `shared:${event.shared.id || event.name}` : event.name;
+    const seen = byNote.get(key);
+    if (!seen || event.kind !== "read") byNote.set(key, event);
   }
   const chips = [...byNote.values()];
   const off = mode === "off";
@@ -842,7 +1005,7 @@ export function MemoryStatus() {
       ) : chips.length > 0 ? (
         chips.map((event) => (
           <span
-            key={event.name}
+            key={event.shared ? `shared:${event.shared.id || event.name}` : event.name}
             data-testid="memory-chip"
             data-kind={event.kind}
             className={cn(
@@ -853,8 +1016,20 @@ export function MemoryStatus() {
           >
             <button
               type="button"
-              title={event.kind === "propose" ? "Waiting in your Memory inbox" : event.description}
-              onClick={() => (event.kind === "propose" ? sidebar.show("memory") : openNote(event.name))}
+              title={
+                event.kind === "propose"
+                  ? event.shared
+                    ? `Proposed to ${event.shared.label}'s shared memory`
+                    : "Waiting in your Memory inbox"
+                  : event.shared
+                    ? `Shared · ${event.shared.label}: ${event.description}`
+                    : event.description
+              }
+              onClick={() =>
+                event.kind === "propose"
+                  ? sidebar.show("memory")
+                  : openNote(event.shared?.id ? sharedSelection(event.shared.id) : event.name)
+              }
               className="cursor-pointer hover:underline"
             >
               {event.name}
