@@ -37,6 +37,24 @@ import { memoryEnabled } from "./run";
  *   POST /memory/notes/<name>/restore   {version} makes that version current
  *   POST /memory/notes/<name>/archive   {archived} archives or brings it back
  *   POST /memory/events/<id>/undo       undoes one of Claude's changes
+ *
+ * Shared memory (step 3): notes for the workspace, a knowledge node or a
+ * group, which the people there read and its editors change.
+ *
+ *   GET /memory also has {shared, sharedProposals, targets}: the shared notes
+ *                                 you read (with your and everyone's mode),
+ *                                 open proposals you decide or made, and the
+ *                                 places you can share to (?node= adds that
+ *                                 node)
+ *   POST /memory/shared           {scope, nodeId?, groupId?, name, description,
+ *                                 type, body}: shares a copy there; {note} where
+ *                                 you edit, else {proposal} for its editors
+ *   GET /memory/shared/<id>       {note, versions}
+ *   PUT /memory/shared/<id>       {description, type, body, version?} (editors;
+ *                                 409 when it is past `version`)
+ *   DELETE /memory/shared/<id>    deletes it for good (editors)
+ *   PUT /memory/shared/<id>/mode  {mode: auto | manual | off | null, everyone?}
+ *   POST /memory/shared/proposals/<id>/accept | reject | withdraw
  */
 export function createMemoryHandler(storage: () => Storage | null, state: () => StorageState) {
   const send = (res: ServerResponse, status: number, body: unknown) => {
@@ -65,15 +83,22 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     const [section, name, action] = parts;
     if (req.method === "GET" && !section) {
       const thread = url.searchParams.get("thread");
-      const [settings, notes, inbox] = await Promise.all([
+      const node = url.searchParams.get("node");
+      const [settings, notes, inbox, shared, sharedProposals, targets] = await Promise.all([
         memory.settings(userId, thread),
         memory.list(userId),
         memory.inbox(userId),
+        s.sharedMemory.list(userId),
+        s.sharedMemory.proposals(userId),
+        s.sharedMemory.targets(userId, node),
       ]);
       return send(res, 200, {
         ...settings,
         notes,
         inbox,
+        shared,
+        sharedProposals,
+        targets,
         types: MEMORY_TYPES,
         limits: { notes: MAX_NOTES, body: MAX_BODY, description: MAX_DESCRIPTION, index: INDEX_CHARS },
       });
@@ -134,8 +159,46 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       if (!Number.isInteger(version) || version < 1) return send(res, 400, { error: "Say which version" });
       return send(res, 200, { note: await memory.restore(userId, name, version) });
     }
+    if (section === "shared") return sharedRoute(req, res, s, userId, parts.slice(1));
     if (req.method === "POST" && section === "events" && name && action === "undo") {
       return send(res, 200, await memory.undo(userId, name));
+    }
+    return send(res, req.method === "GET" ? 404 : 405, { error: req.method === "GET" ? "Not found" : "Method not allowed" });
+  }
+
+  async function sharedRoute(req: IncomingMessage, res: ServerResponse, s: Storage, userId: string, parts: string[]) {
+    const shared = s.sharedMemory;
+    const [id, action, decision] = parts;
+    if (req.method === "POST" && !id) {
+      const input = await json(req);
+      if (!input) return send(res, 400, { error: "Invalid JSON body" });
+      return send(res, 200, await shared.share(userId, input, input.name, input as never));
+    }
+    if (req.method === "POST" && id === "proposals" && action && !parts[3] &&
+      (decision === "accept" || decision === "reject" || decision === "withdraw")) {
+      return send(res, 200, { id: action, status: decision, ...(await shared.decide(userId, action, decision)) });
+    }
+    if (id && id !== "proposals" && !action) {
+      if (req.method === "GET") {
+        const [note, versions] = await Promise.all([shared.get(userId, id), shared.versions(userId, id)]);
+        return send(res, 200, { note, versions });
+      }
+      if (req.method === "PUT") {
+        const input = await json(req);
+        if (!input) return send(res, 400, { error: "Invalid JSON body" });
+        const version = input.version === undefined ? undefined : Number(input.version);
+        if (version !== undefined && !Number.isInteger(version)) return send(res, 400, { error: "version is a number" });
+        return send(res, 200, { note: await shared.update(userId, id, input as never, version) });
+      }
+      if (req.method === "DELETE") {
+        await shared.remove(userId, id);
+        return send(res, 200, { id, deleted: true });
+      }
+    }
+    if (req.method === "PUT" && id && action === "mode" && !decision) {
+      const input = await json(req);
+      if (!input) return send(res, 400, { error: "Invalid JSON body" });
+      return send(res, 200, { note: await shared.setMode(userId, id, input.mode ?? null, input.everyone === true) });
     }
     return send(res, req.method === "GET" ? 404 : 405, { error: req.method === "GET" ? "Not found" : "Method not allowed" });
   }
@@ -156,7 +219,7 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       } catch {
         return send(res, 400, { error: "Invalid memory name" });
       }
-      if (parts.length > 3) return send(res, 404, { error: "Not found" });
+      if (parts.length > (parts[0] === "shared" ? 4 : 3)) return send(res, 404, { error: "Not found" });
       return await route(req, res, url, s, principal.userId, parts);
     } catch (err) {
       if (err instanceof MemoryError) return send(res, 400, { error: err.message });

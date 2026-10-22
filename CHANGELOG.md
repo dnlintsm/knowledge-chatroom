@@ -15,6 +15,15 @@
 
 ### Added
 
+- Shared memory (#93, step 3). Notes can belong to the whole workspace, a knowledge node
+  (and everything below it) or a group, and who reads and edits them follows the grants.
+  Every chat gets the workspace's notes, its user's groups' notes and the notes of the
+  node the user is in. Each one is Auto (in Claude's memory index), Manual (Claude finds
+  it by searching) or Off, for everyone and per person. Claude never changes shared
+  notes itself: its changes are proposals that the notes' editors accept or reject in the
+  Memory view. "Share a copy" copies one of your own notes there, after you check its
+  text, or sends it to the editors for review. Migration `020_shared_memory.sql` runs on
+  start.
 - Memory learns from chats (#93, step 2). Once a chat has been quiet for 10 minutes, a
   small model reviews it against the user's notes and adds, merges, corrects or retires
   notes (at most 5 changes per chat). A new "Ask first" mode sends every change, from chats

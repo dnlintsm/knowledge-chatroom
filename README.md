@@ -28,7 +28,8 @@ work easier to find, understand, and reuse.
   you see them. Each change shows under the reply with Undo, every note can be edited or
   restored to an earlier version, and incognito chats leave memory alone. Claude also
   learns from chats once they go quiet, and with "Ask first" every change waits for your
-  review.
+  review. Teams share memory too: notes for the whole workspace, a knowledge node or a
+  group, which Claude reads but only proposes changes to.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

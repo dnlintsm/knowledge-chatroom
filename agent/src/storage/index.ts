@@ -7,6 +7,7 @@ import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
 import { MemoryService } from "./memory";
+import { SharedMemoryService } from "./shared-memory";
 import { NodeService } from "./nodes";
 import { ProposalService } from "./proposals";
 import { SearchService } from "./search";
@@ -17,6 +18,7 @@ export { ChatService } from "./chats";
 export type { ChatRun, ChatSummary } from "./chats";
 export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
 export { MemoryService } from "./memory";
+export { SharedMemoryService } from "./shared-memory";
 export type { MemoryEvent, MemoryNote, MemorySummary } from "./memory";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
@@ -48,6 +50,8 @@ export interface Storage {
   chats: ChatService;
   /** Each user's personalized memory (issue #93). */
   memory: MemoryService;
+  /** Memory for a workspace, node or group (issue #93, step 3). */
+  sharedMemory: SharedMemoryService;
   /** Search by meaning; null when no embedding model is set. Not ready until prepared. */
   semantic: SemanticIndex | null;
   events: EventHub;
@@ -98,6 +102,7 @@ export async function initStorage(
     const proposals = new ProposalService(sql, blobs, events, ws.id);
     const chats = new ChatService(sql, ws.id, rowSecurity);
     const memory = new MemoryService(sql, ws.id, rowSecurity);
+    const sharedMemory = new SharedMemoryService(sql, ws.id, rowSecurity);
     return {
       config,
       sql,
@@ -110,6 +115,7 @@ export async function initStorage(
       proposals,
       chats,
       memory,
+      sharedMemory,
       semantic,
       events,
       blobs,

@@ -256,6 +256,22 @@ test("Claude remembers across chats, and you see, undo and edit it", async ({ pa
   await expect(editor.getByLabel("Note")).toHaveValue("I prefer tables for comparisons.");
   await expect(page.getByTestId("memory-activity-item").first()).toContainText("accepted from the inbox");
   await page.getByTestId("memory-mode").selectOption("on");
+
+  // Share a copy with the workspace: you check the text first, then it is
+  // shared memory, Auto in everyone's chats unless they turn it off.
+  await editor.getByRole("button", { name: "Share a copy…" }).click();
+  const share = editor.getByTestId("share-copy");
+  await expect(share.getByLabel("Share to")).toContainText("Workspace");
+  await share.getByLabel("Shared text").fill("Lead with the result; use tables for comparisons.");
+  await share.getByRole("button", { name: "Share", exact: true }).click();
+  const sharedEditor = page.getByTestId("shared-memory-editor");
+  await expect(sharedEditor).toContainText("Shared · Workspace");
+  await expect(sharedEditor.getByLabel("Note")).toHaveValue("Lead with the result; use tables for comparisons.");
+  const sharedRow = page.getByTestId("shared-memory-row").filter({ hasText: "reply-style" });
+  await expect(sharedRow).toBeVisible();
+  await sharedRow.getByLabel("Mode for reply-style").selectOption("manual");
+  await expect(sharedEditor.getByLabel("Mode for you")).toHaveValue("manual");
+  await shot(page, "29e-shared-memory");
 });
 
 test("a workspace with no runs still has the chat", async ({ page }) => {
