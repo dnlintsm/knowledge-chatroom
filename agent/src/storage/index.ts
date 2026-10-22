@@ -6,6 +6,7 @@ import { ChatService } from "./chats";
 import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
+import { MemoryService } from "./memory";
 import { NodeService } from "./nodes";
 import { ProposalService } from "./proposals";
 import { SearchService } from "./search";
@@ -15,6 +16,8 @@ import { Session } from "./session";
 export { ChatService } from "./chats";
 export type { ChatRun, ChatSummary } from "./chats";
 export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
+export { MemoryService } from "./memory";
+export type { MemoryEvent, MemoryNote, MemorySummary } from "./memory";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
 export { ExperimentService } from "./experiments";
@@ -43,6 +46,8 @@ export interface Storage {
   proposals: ProposalService;
   /** Each user's chat history. */
   chats: ChatService;
+  /** Each user's personalized memory (issue #93). */
+  memory: MemoryService;
   /** Search by meaning; null when no embedding model is set. Not ready until prepared. */
   semantic: SemanticIndex | null;
   events: EventHub;
@@ -92,6 +97,7 @@ export async function initStorage(
     const search = new SearchService(sql, blobs, ws.id, semantic);
     const proposals = new ProposalService(sql, blobs, events, ws.id);
     const chats = new ChatService(sql, ws.id, rowSecurity);
+    const memory = new MemoryService(sql, ws.id, rowSecurity);
     return {
       config,
       sql,
@@ -103,6 +109,7 @@ export async function initStorage(
       search,
       proposals,
       chats,
+      memory,
       semantic,
       events,
       blobs,

@@ -199,6 +199,47 @@ test("skills: defaults for everyone, your choice, and one chat's own", async ({ 
   await expect(tldr).toContainText("Default");
 });
 
+test("Claude remembers across chats, and you see, undo and edit it", async ({ page }) => {
+  test.skip(process.env.E2E_MODE === "live", "the mock agent saves the memory");
+  await page.goto("/");
+  const chip = page.getByTestId("memory-chip");
+  await send(page, "Remember that I prefer short answers that lead with the result.");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("keep that in mind", reply);
+  await expect(chip).toContainText("reply-style");
+  await expect(chip).toHaveAttribute("data-kind", "create");
+  await shot(page, "29-memory-saved");
+
+  // Undo takes Claude's change back.
+  await page.getByTestId("memory-undo").click();
+  await expect(chip).toHaveClass(/line-through/);
+  await expect(page.getByTestId("memory-undo")).toHaveCount(0);
+
+  await send(page, "Remember that I prefer short answers, result first.");
+  await expect(chip).toHaveAttribute("data-kind", "create", reply);
+  await page.getByRole("navigation", { name: "Sidebar views" }).getByRole("button", { name: "Memory" }).click();
+  const row = page.getByTestId("memory-row").filter({ hasText: "reply-style" });
+  await expect(row).toHaveCount(1);
+  await row.click();
+  const editor = page.getByTestId("memory-editor");
+  await expect(editor.getByLabel("Note")).toHaveValue("I prefer short answers, result first.");
+  await editor.getByLabel("Note").fill("Short answers, result first. No em-dashes.");
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor.getByTestId("memory-version")).toHaveCount(2);
+  await expect(editor.getByRole("button", { name: "Save" })).toBeDisabled();
+  await shot(page, "29b-memory-panel");
+
+  // An incognito chat leaves memory alone.
+  await page.getByTestId("memory-incognito").click();
+  await expect(page.getByTestId("memory-status")).toContainText("Incognito");
+  await send(page, "Remember that I like tables.");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("mock agent", reply);
+  await expect(chip).toHaveCount(0);
+  await expect(page.getByTestId("skill-status")).toContainText("auto ·");
+  await shot(page, "29c-memory-incognito");
+  await page.getByTestId("memory-incognito").click();
+  await expect(page.getByTestId("memory-incognito")).toHaveAttribute("aria-pressed", "false");
+});
+
 test("a workspace with no runs still has the chat", async ({ page }) => {
   // A first start with one note and no run folders.
   await page.addInitScript((key) => {

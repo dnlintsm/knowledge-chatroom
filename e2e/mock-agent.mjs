@@ -22,6 +22,11 @@
  * skills status bar. Without STORAGE_URL, /skills answers with the built-in
  * skills and keeps their modes in memory.
  *
+ * A message starting with "Remember" saves it as a memory note (reply-style),
+ * as Claude would with its memory tools, and reports it with a "memory" event,
+ * unless memory is off or the chat is incognito. /memory answers like the
+ * agent's memory API (src/memory/http.ts) with notes kept in memory.
+ *
  * `POST /suggest` answers the chat's follow-up chips with two canned ones
  * (FOLLOW_UPS), as the real agent's src/suggest.ts does with a small model.
  *
@@ -31,7 +36,7 @@
  *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
  * storage routes /files, /nodes, /access, /experiments, /search, /proposals, /chats,
- * /skills and /hub are forwarded there, so the preview can show server storage and the knowledge
+ * /skills, /hub and /memory are forwarded there, so the preview can show server storage and the knowledge
  * tree without an API key.
  */
 
@@ -149,6 +154,88 @@ async function handleSkills(req, res, url) {
   res.writeHead(404).end();
 }
 
+// Memory (the agent's src/memory/http.ts, in memory): name → { note, versions }.
+const memory = { mode: "on", incognito: new Set(), notes: new Map(), events: new Map() };
+const MEMORY_TYPES = ["preference", "profile", "project", "reference", "feedback"];
+// The list has no bodies.
+const summary = (note) => ({ ...note, body: undefined });
+
+/** Saves a note as the user or Claude; returns the event for Claude's changes. */
+function saveMemory(name, input, by) {
+  const now = new Date().toISOString();
+  const entry = memory.notes.get(name);
+  const kind = !entry || entry.note.archived ? "create" : "update";
+  const version = entry ? entry.note.version + 1 : 1;
+  const note = {
+    name, description: input.description, type: input.type ?? "preference", body: input.body ?? "",
+    version, createdBy: entry?.note.createdBy ?? by, updatedBy: by, archived: false,
+    createdAt: entry?.note.createdAt ?? now, updatedAt: now, lastUsedAt: entry?.note.lastUsedAt ?? null,
+  };
+  const versions = [{ version, description: note.description, type: note.type, body: note.body, changedBy: by, threadId: null, createdAt: now }, ...(entry?.versions ?? [])];
+  memory.notes.set(name, { note, versions });
+  if (by !== "agent") return { note, event: null };
+  const event = { id: randomUUID(), name, description: note.description, kind, version };
+  memory.events.set(event.id, { ...event, before: entry ?? null });
+  return { note, event };
+}
+
+async function handleMemory(req, res, url) {
+  const [section, name, action] = url.pathname.slice("/memory".length).split("/").filter(Boolean).map(decodeURIComponent);
+  const json = (body, status = 200) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const input = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf-8")) : {};
+  const entry = name ? memory.notes.get(name) : undefined;
+  if (req.method === "GET" && !section) {
+    const thread = url.searchParams.get("thread");
+    const notes = [...memory.notes.values()].map((e) => summary(e.note));
+    notes.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updatedAt.localeCompare(a.updatedAt));
+    return json({ mode: memory.mode, incognito: memory.incognito.has(thread), notes, types: MEMORY_TYPES });
+  }
+  if (req.method === "PUT" && section === "settings") {
+    if (input.mode) memory.mode = input.mode;
+    if (input.incognito === true) memory.incognito.add(input.thread);
+    if (input.incognito === false) memory.incognito.delete(input.thread);
+    return json({ mode: memory.mode, incognito: memory.incognito.has(input.thread) });
+  }
+  if (req.method === "GET" && section === "export") {
+    // An empty .zip.
+    res.writeHead(200, { "Content-Type": "application/zip" });
+    return res.end(Buffer.from([0x50, 0x4b, 5, 6, ...new Array(18).fill(0)]));
+  }
+  if (section === "notes" && name && !action) {
+    if (req.method === "GET") return entry ? json({ note: entry.note, versions: entry.versions }) : json({ error: `No memory named ${name}` }, 404);
+    if (req.method === "PUT") {
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) return json({ error: "A memory's name is lowercase letters, digits and dashes" }, 400);
+      if (!input.description?.trim()) return json({ error: "A memory needs a one-line description" }, 400);
+      return json({ note: saveMemory(name, input, "user").note });
+    }
+    if (req.method === "DELETE") return memory.notes.delete(name) ? json({ name, deleted: true }) : json({ error: "Not found" }, 404);
+  }
+  if (req.method === "POST" && section === "notes" && entry && action === "archive") {
+    entry.note = { ...entry.note, archived: input.archived !== false };
+    return json({ note: entry.note });
+  }
+  if (req.method === "POST" && section === "notes" && entry && action === "restore") {
+    const old = entry.versions.find((v) => v.version === input.version);
+    return json({ note: saveMemory(name, old, "user").note });
+  }
+  if (req.method === "POST" && section === "events" && action === "undo") {
+    const event = memory.events.get(name);
+    if (!event || event.undone) return json({ error: "Nothing to undo" }, 409);
+    event.undone = true;
+    if (event.before) memory.notes.set(event.name, event.before);
+    else memory.notes.delete(event.name);
+    return json({ name: event.name, note: memory.notes.get(event.name)?.note ?? null });
+  }
+  json({ error: "Not found" }, 404);
+}
+
+const REMEMBER_REPLY = "Got it: I'll keep that in mind in your future chats.";
+
 const textOf = (message) =>
   typeof message?.content === "string"
     ? message.content
@@ -164,8 +251,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals|chats|skills|hub)(\/|$)/.test(pathname)) {
+  if (STORAGE_URL && /^\/(files|nodes|access|experiments|search|proposals|chats|skills|hub|memory)(\/|$)/.test(pathname)) {
     forward(req, res);
+    return;
+  }
+
+  if (pathname === "/memory" || pathname.startsWith("/memory/")) {
+    await handleMemory(req, res, url);
     return;
   }
 
@@ -237,6 +329,9 @@ const server = http.createServer(async (req, res) => {
   // "/<name> ..." runs that skill, as the agent's slash commands do, unless it is off in this chat.
   const slashName = last?.role === "user" ? /^\/([a-z0-9-]+)/.exec(asked)?.[1] : undefined;
   const slashSkill = SKILLS.find((s) => s.name === slashName && skillInfo(s, input.threadId).mode !== "off")?.name;
+  // "Remember …" saves a note, where memory is on for this chat.
+  const remember =
+    last?.role === "user" && /^remember\b/i.test(asked) && memory.mode === "on" && !memory.incognito.has(input.threadId);
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")
@@ -244,11 +339,21 @@ const server = http.createServer(async (req, res) => {
         ? SKILL_REPLY
         : asked.includes("read next")
           ? CITING_REPLY
-          : REPLY;
+          : remember
+            ? REMEMBER_REPLY
+            : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
   if (slashSkill) {
     send({ type: "CUSTOM", name: "skill_used", value: { skill: slashSkill, source: "builtin", trigger: "slash" } });
+  }
+  if (remember) {
+    const { event } = saveMemory(
+      "reply-style",
+      { description: "Prefers short answers that lead with the result", type: "preference", body: asked.replace(/^remember( that)?\s*/i, "") },
+      "agent",
+    );
+    send({ type: "CUSTOM", name: "memory", value: { id: event.id, name: event.name, description: event.description, kind: event.kind, version: event.version } });
   }
   if (toolCall) {
     const toolCallId = randomUUID();

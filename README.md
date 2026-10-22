@@ -23,6 +23,10 @@ work easier to find, understand, and reuse.
   yourself, or one chat), invoke it with `/name`, and see which skills a conversation used.
   Share them through the skill hub, which checks each version and shows what an update
   changes, or as `.zip` files that work in Claude Code too.
+- **Personalized memory (experimental)** — with `MEMORY=on`, Claude keeps short notes
+  about you across chats: who you are, how you like to work, your ongoing projects. Only
+  you see them. Each change shows under the reply with Undo, every note can be edited or
+  restored to an earlier version, and incognito chats leave memory alone.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

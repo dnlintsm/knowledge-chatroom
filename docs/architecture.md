@@ -306,6 +306,33 @@ question; each can be opened again, renamed, archived or deleted.
   runs are not kept.
 - With `CPK_INTELLIGENCE_API_KEY` set, CopilotKit Intelligence keeps threads instead.
 
+### Personalized memory
+
+With `MEMORY=on` and server storage, Claude keeps short notes about each user across chats
+(issue #93, experimental). A note is markdown with a name, a one-line description and a
+type (`profile`, `preference`, `project`, `feedback`, `reference`), the same shape as Claude
+Code's memory files and `SKILL.md`.
+
+- `agent/src/storage/memory.ts` keeps them (tables from `018_memory.sql`). Each note belongs
+  to one user; nobody else reads it, workspace owners included, and with row-level security
+  Postgres enforces this too. Every change is a version. Claude's changes and reads are also
+  `memory_events`, which is what Undo works from. When Claude deletes a note, it is only
+  archived; when the user deletes one, it is gone for good, with its versions.
+- `agent/src/memory/run.ts` gives a chat run the user's memory, unless memory is off for them
+  or the chat is incognito. The system prompt gets an index of the notes (one line each,
+  the most recently used first, within 6,000 characters). Claude gets `memory_view`,
+  `memory_search`, `memory_save`, `memory_edit` and `memory_delete`. Each read or change
+  goes to the browser as an AG-UI custom event `memory`.
+- `agent/src/memory/http.ts` serves `/memory`, the user's own notes, settings, undo and
+  `.zip` export. The app forwards `/api/memory` to it. Without `MEMORY=on` or storage it
+  answers 404, and the app hides memory.
+- `src/components/workspace/memory.tsx` has the Memory view (list, on/off, export), the note
+  editor in the middle pane (versions, restore, archive, delete) and the line under the
+  chat input. That line shows what Claude used and changed this turn, with Undo, and the
+  incognito toggle.
+- Not yet: learning from finished chats in the background, a review inbox, shared and hub
+  memory, and access for Python agents. These are the later steps of #93.
+
 ### File references in answers
 
 Claude's answers can point at a file, or at lines in it, and a click opens them in the middle

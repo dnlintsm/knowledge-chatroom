@@ -13,6 +13,8 @@
  * chat history under `/chats` and groups and grants under `/access` (see
  * src/storage/http.ts). `/skills` lists the user's skills and their modes
  * (src/skills/http.ts), with or without storage; `/hub` is the skill hub.
+ * With MEMORY=on and storage, `/memory` is each user's personalized memory
+ * (src/memory/http.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -32,6 +34,8 @@ import { clearWorkdir, syncWorkdir, workdirEnabled } from "./storage/workdir";
 import { IDENTITY_HEADER, identify, signIdentity, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
+import { createMemoryHandler } from "./memory/http";
+import { prepareMemory } from "./memory/run";
 import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
@@ -69,6 +73,7 @@ const handleStorage = createStorageHandler(
 const skills = new SkillService(currentStorage);
 const hub = new SkillHub(currentStorage, skills);
 const handleSkills = createSkillsHandler(skills, hub, currentStorage, storageState);
+const handleMemory = createMemoryHandler(currentStorage, storageState);
 
 /** The run's skills: built-in ones, plus the workspace's when storage is up, in this chat's modes. */
 async function prepareSkills(
@@ -172,6 +177,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (/^\/memory(\/|$)/.test(pathname)) {
+    await handleMemory(req, res, url);
+    return;
+  }
+
   if (/^\/(files|nodes|access|experiments|search|proposals|chats)(\/|$)/.test(pathname)) {
     await handleStorage(req, res, url);
     return;
@@ -236,21 +246,34 @@ const server = http.createServer(async (req, res) => {
 
     const runSkills = await prepareSkills(storage, userId, input.threadId);
     // Each skill the run uses goes to the browser as an AG-UI custom event
-    // ("skill_used"), after RUN_STARTED, and into the usage history.
+    // ("skill_used"), after RUN_STARTED, and into the usage history; so does
+    // each memory note Claude reads or changes ("memory").
     let started = false;
-    const pending: SkillUse[] = [];
-    const emitSkill = (use: SkillUse) =>
-      res.write(encoder.encode({ type: EventType.CUSTOM, name: "skill_used", value: use } as never));
-    const onSkillUse = (use: SkillUse) => {
+    const pending: { name: string; value: unknown }[] = [];
+    const emitCustom = ({ name, value }: { name: string; value: unknown }) =>
+      res.write(encoder.encode({ type: EventType.CUSTOM, name, value } as never));
+    const custom = (event: { name: string; value: unknown }) => {
       if (res.writableEnded) return;
-      if (started) emitSkill(use);
-      else pending.push(use);
+      if (started) emitCustom(event);
+      else pending.push(event);
+    };
+    const onSkillUse = (use: SkillUse) => {
+      custom({ name: "skill_used", value: use });
       void skills.record(storage ? (userId ?? null) : null, {
         threadId: input.threadId ?? "",
         runId: input.runId ?? "",
         ...use,
       });
     };
+    const runMemory = await prepareMemory(
+      storage,
+      userId,
+      { threadId: input.threadId, runId: input.runId },
+      (event) => custom({ name: "memory", value: event }),
+    ).catch((err) => {
+      console.error(`[memory] couldn't load memory; running without it: ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
 
     // The adapter emits RUN_STARTED/RUN_FINISHED/RUN_ERROR itself; the error
     // callback surfaces the message as a clean RUN_ERROR (never a broken stream).
@@ -262,7 +285,7 @@ const server = http.createServer(async (req, res) => {
             res.write(encoder.encode(event));
             if (!started && event.type === EventType.RUN_STARTED) {
               started = true;
-              pending.splice(0).forEach(emitSkill);
+              pending.splice(0).forEach(emitCustom);
             }
           },
           error: (err) => {
@@ -278,6 +301,7 @@ const server = http.createServer(async (req, res) => {
       runSkills,
       onSkillUse,
       identityForTools(req),
+      runMemory,
     );
     return;
   }

@@ -27,6 +27,7 @@ import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
 import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
+import { MEMORY_TOOLS, memoryPrompt, memoryTools, type RunMemory } from "./memory/run";
 
 // Load .env from the starter root before building the adapter (which reads the
 // model from the environment); fall back to the current working directory.
@@ -124,6 +125,8 @@ interface RunContext {
   onSkillUse: (use: SkillUse) => void;
   /** Signs the run's user for an outside MCP server that asks for it. */
   identity?: RunTokens;
+  /** The user's memory for this run (./memory/run.ts); null = none. */
+  memory?: RunMemory | null;
 }
 
 const runContext = new AsyncLocalStorage<RunContext>();
@@ -137,7 +140,7 @@ const CHATROOM_PROPS = "knowledge_chatroom";
  * undefined = the shared tools, which act for the local user without login.
  * `skills` are the skills prepared for the run, and `onSkillUse` hears each
  * one it uses. `identity` signs the run's user for each outside MCP server
- * that asks for it (./mcp.ts).
+ * that asks for it (./mcp.ts). `memory` is the user's memory for the run.
  */
 export const runAs = <T>(
   userId: string | null | undefined,
@@ -145,7 +148,8 @@ export const runAs = <T>(
   skills: RunSkills | null = null,
   onSkillUse: (use: SkillUse) => void = () => {},
   identity?: RunTokens,
-): T => runContext.run({ userId, skills, onSkillUse, identity }, fn);
+  memory: RunMemory | null = null,
+): T => runContext.run({ userId, skills, onSkillUse, identity, memory }, fn);
 
 // The adapter's own extra arguments (profile options, frontend tool results).
 type OptionsRest = Parameters<ClaudeAgentAdapter["buildOptions"]> extends [unknown, ...infer R] ? R : never;
@@ -212,6 +216,7 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
       : withSkills;
     const userId = ctx.userId;
     if (!serverStorage || userId === undefined) return withIdentity;
+    const memory = ctx.memory;
     const tools = [
       ...baseTools,
       ...createFileTools(currentStorage, async () => userId, workdir?.cwd, {
@@ -219,14 +224,17 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
         model: options.model ?? resolveModel(),
         skills: ctx.skills?.skills.map((s) => s.skill),
       }),
+      ...(memory ? memoryTools(memory) : []),
     ];
     return {
       ...withIdentity,
+      ...(memory && { systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory)}` }),
       mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) },
-      // save_file is only in runs with a working folder.
+      // save_file is only in runs with a working folder, the memory tools in runs with memory.
       allowedTools: [
         ...(withIdentity.allowedTools ?? []),
         ...(workdir ? [`mcp__${SERVER_NAME}__save_file`] : []),
+        ...(memory ? MEMORY_TOOLS.map((name) => `mcp__${SERVER_NAME}__${name}`) : []),
       ],
     };
   }

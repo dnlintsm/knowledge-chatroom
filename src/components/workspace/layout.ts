@@ -12,6 +12,7 @@ export type SidebarView =
   | "runs"
   | "knowledge"
   | "skills"
+  | "memory"
   | "uploads"
   | "artifacts";
 

@@ -53,8 +53,9 @@ const agentServers = useRealAgent
       ...(withStorage
         ? [
             {
-              // Scripts on only shows them as runnable: chat goes to the mock agent.
-              command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on npm --prefix agent start`,
+              // Scripts on only shows them as runnable, and memory only shows its API:
+              // chat goes to the mock agent.
+              command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on npm --prefix agent start`,
               url: `http://localhost:${STORAGE_PORT}/health`,
             },
           ]

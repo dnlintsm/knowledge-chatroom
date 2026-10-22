@@ -36,9 +36,11 @@ export const EXPERIMENT_TAB: TabId = "::experiment";
 export const REVIEW_TAB: TabId = "::review";
 /** The runs here and below, side by side. */
 export const RUNS_TAB: TabId = "::runs";
+/** One of your memory notes, to read and edit (memory.tsx). */
+export const MEMORY_TAB: TabId = "::memory";
 /** Tabs that aren't files. */
 export const isBuiltInTab = (tab: TabId) =>
-  tab === TASKS_TAB || tab === EXPERIMENT_TAB || tab === REVIEW_TAB || tab === RUNS_TAB;
+  tab === TASKS_TAB || tab === EXPERIMENT_TAB || tab === REVIEW_TAB || tab === RUNS_TAB || tab === MEMORY_TAB;
 
 export function fileName(path: string) {
   return path.split("/").pop() ?? path;
