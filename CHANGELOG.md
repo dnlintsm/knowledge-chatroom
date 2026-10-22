@@ -3,9 +3,10 @@
 ## 0.2.0
 
 Claude remembers: with `MEMORY=on`, Claude keeps notes about each user that only they
-see, learns from quiet chats, and shares notes with a workspace, node or group under
-review. Chat history moves to the server, one private list per user, and outside
-services verify users with a public key and get their own storage tokens.
+see, learns from quiet chats, finds notes by meaning and searches your past chats, and
+shares notes with a workspace, node or group under review. Chat history moves to the
+server, one private list per user, and outside services verify users with a public key
+and get their own storage tokens.
 
 ### Upgrading from 0.1.2
 
@@ -13,10 +14,11 @@ services verify users with a public key and get their own storage tokens.
   agent start.
 - Chats kept before this release are not carried over. Without server storage they were
   only in the app's memory anyway; from now on each user's chats are saved (#91).
-- Memory is off until you set `MEMORY=on`, and it needs server storage. Learning from
-  chats uses `MEMORY_MODEL` (default: the follow-up chips' Haiku), so with memory on expect
-  a small model call per chat once it has been quiet for `MEMORY_IDLE_MINUTES` (default
-  10). `MEMORY_LEARN=off` keeps memory but stops learning.
+- Memory is off until you set `MEMORY=on` (the Docker compose file passes it through),
+  and it needs server storage. Learning from chats uses `MEMORY_MODEL` (default: the
+  follow-up chips' Haiku), so with memory on expect a small model call per chat once it
+  has been quiet for `MEMORY_IDLE_MINUTES` (default 10). `MEMORY_LEARN=off` keeps memory
+  but stops learning.
 - MCP servers get nothing new unless their `MCP_SERVERS` entry opts in with
   `"storageAccess": true` or `"memoryAccess": true`. Remote backends (`AGENT_URL`) now
   receive an `X-Knowledge-Storage` token with every run.
