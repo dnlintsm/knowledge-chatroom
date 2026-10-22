@@ -29,7 +29,9 @@ work easier to find, understand, and reuse.
   restored to an earlier version, and incognito chats leave memory alone. Claude also
   learns from chats once they go quiet, and with "Ask first" every change waits for your
   review. Teams share memory too: notes for the whole workspace, a knowledge node or a
-  group, which Claude reads but only proposes changes to.
+  group, which Claude reads but only proposes changes to. Bring your memory from ChatGPT
+  or Claude by pasting it in, and publish or install memory packs (a team's shared notes)
+  on the hub.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,

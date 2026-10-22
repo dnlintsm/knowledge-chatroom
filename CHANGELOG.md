@@ -15,6 +15,14 @@
 
 ### Added
 
+- Memory packs and import (#93, step 4). A place's editors publish its shared notes to
+  the hub as a memory pack, with numbered versions scanned like skills. Installing one
+  in a workspace, node or group adds its notes there pinned to that version, read-only
+  and Manual for everyone; installs can move to a newer version, be forked into the
+  place's own notes, or be uninstalled. Hub admins verify versions, and publishers or
+  admins yank them. "Import memory…" in the Memory view takes another assistant's
+  memory (pasted, or a file) or a `.zip` export and puts every note in the inbox for
+  review. Migration `021_memory_packs.sql` runs on start.
 - Shared memory (#93, step 3). Notes can belong to the whole workspace, a knowledge node
   (and everything below it) or a group, and who reads and edits them follows the grants.
   Every chat gets the workspace's notes, its user's groups' notes and the notes of the

@@ -272,6 +272,40 @@ test("Claude remembers across chats, and you see, undo and edit it", async ({ pa
   await sharedRow.getByLabel("Mode for reply-style").selectOption("manual");
   await expect(sharedEditor.getByLabel("Mode for you")).toHaveValue("manual");
   await shot(page, "29e-shared-memory");
+
+  // Import another assistant's memory: each note waits in the inbox.
+  await page.getByRole("button", { name: "Import memory…" }).click();
+  const importer = page.getByTestId("memory-import");
+  await importer.getByLabel("Memory to import").fill("- Materials scientist on the thin-film team\n- Prefers metric units");
+  await importer.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "2 notes are waiting" })).toBeVisible();
+  const imported = page.getByTestId("memory-inbox-item").filter({ hasText: "work-role" });
+  await expect(imported).toContainText("Imported from pasted memory");
+  await imported.getByRole("button", { name: "Accept work-role" }).click();
+  await expect(imported).toHaveCount(0);
+  await expect(page.getByTestId("memory-row").filter({ hasText: "work-role" })).toHaveCount(1);
+
+  // Memory packs: install one from the hub; its notes are read-only and Manual.
+  await page.getByTestId("installed-packs").getByRole("button", { name: "Browse" }).click();
+  const browser = page.getByTestId("pack-browser");
+  await browser.getByTestId("pack-row").filter({ hasText: "thin-film-glossary" }).click();
+  const pack = browser.getByTestId("pack-detail");
+  await expect(pack.getByTestId("pack-note")).toHaveCount(2);
+  await pack.getByRole("button", { name: "Install v1" }).click();
+  await expect(pack.getByRole("button", { name: "Installed" })).toBeVisible();
+  await expect(page.getByTestId("pack-install").filter({ hasText: "thin-film-glossary" })).toBeVisible();
+  const packRow = page.getByTestId("shared-memory-row").filter({ hasText: "film-terms" });
+  await expect(packRow.getByLabel("Mode for film-terms")).toHaveValue("manual");
+  await shot(page, "29f-memory-packs");
+  await packRow.getByRole("button").first().click();
+  await expect(sharedEditor.getByTestId("pack-badge")).toContainText("thin-film-glossary v1");
+  await expect(sharedEditor.getByLabel("Note")).toHaveAttribute("readonly", "");
+  await expect(sharedEditor.getByRole("button", { name: "Save" })).toHaveCount(0);
+
+  // Forking makes them the place's own.
+  await page.getByRole("button", { name: "Fork thin-film-glossary" }).click();
+  await expect(page.getByTestId("pack-install")).toHaveCount(0);
+  await expect(packRow).toBeVisible();
 });
 
 test("a workspace with no runs still has the chat", async ({ page }) => {

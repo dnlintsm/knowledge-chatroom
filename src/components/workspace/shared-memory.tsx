@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, Check, FolderTree, History, Share2, Trash2, Undo2, Users, X } from "lucide-react";
+import { Building2, Check, FolderTree, History, Package, Share2, Trash2, Undo2, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TYPES,
@@ -40,7 +40,7 @@ export function PlaceIcon({ place, className }: { place: SharedPlace; className?
   return <Icon className={cn("size-3.5 shrink-0 text-sky-600", className)} aria-hidden />;
 }
 
-const placeKey = (p: Pick<SharedPlace, "scope" | "nodeId" | "groupId">) => `${p.scope}:${p.nodeId ?? ""}:${p.groupId ?? ""}`;
+export const placeKey = (p: Pick<SharedPlace, "scope" | "nodeId" | "groupId">) => `${p.scope}:${p.nodeId ?? ""}:${p.groupId ?? ""}`;
 
 function SharedRow({ note }: { note: SharedSummary }) {
   const { selected, openNote, setSharedMode } = useMemory();
@@ -59,6 +59,11 @@ function SharedRow({ note }: { note: SharedSummary }) {
         <span className="flex items-center gap-1.5">
           <PlaceIcon place={note.place} />
           <span className="min-w-0 flex-1 truncate font-medium">{note.name}</span>
+          {note.pack && (
+            <span title={`From the memory pack ${note.pack.name} v${note.pack.version}`}>
+              <Package className="size-3.5 text-[var(--muted-foreground)]" aria-label="From a memory pack" />
+            </span>
+          )}
         </span>
         <span className="line-clamp-2 text-xs text-[var(--muted-foreground)]">{note.description}</span>
       </button>
@@ -236,7 +241,7 @@ export function SharedNoteEditor({ id }: { id: string }) {
       setSaving(false);
     }
   };
-  const readOnly = !note.canEdit;
+  const readOnly = !note.canEdit || note.pack !== null;
 
   return (
     <div data-testid="shared-memory-editor" className="mx-auto flex max-w-3xl flex-col gap-3 p-6">
@@ -244,10 +249,17 @@ export function SharedNoteEditor({ id }: { id: string }) {
         <PlaceIcon place={note.place} className="size-5" />
         <h2 className="text-lg font-semibold">{note.name}</h2>
         <span className="rounded bg-sky-100 px-1.5 text-xs text-sky-900 dark:bg-sky-950 dark:text-sky-200">Shared · {note.place.label}</span>
+        {note.pack && (
+          <span data-testid="pack-badge" className="flex items-center gap-1 rounded bg-amber-100 px-1.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <Package className="size-3" /> {note.pack.name} v{note.pack.version}
+          </span>
+        )}
       </div>
       <p className="text-xs text-[var(--muted-foreground)]">
         Version {note.version} · {when(note.updatedAt)}
-        {readOnly && " · Only its editors change it; Claude can propose changes."}
+        {note.pack
+          ? " · From a memory pack: update the pack, or fork it under Memory packs to edit its notes here."
+          : readOnly && " · Only its editors change it; Claude can propose changes."}
       </p>
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <label className="flex items-center gap-1.5">
@@ -326,7 +338,7 @@ export function SharedNoteEditor({ id }: { id: string }) {
           {error}
         </p>
       )}
-      {note.canEdit && (
+      {!readOnly && (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"

@@ -89,12 +89,14 @@ export interface InboxItem {
   body: string | null;
   /** The note's version the change was made against. */
   baseVersion: number | null;
-  /** chat: in a chat; learn: from a past chat, in the background. */
-  source: "chat" | "learn";
+  /** chat: in a chat; learn: from a past chat, in the background; import: imported by the user. */
+  source: InboxSource;
   threadId: string | null;
   reason: string | null;
   createdAt: string;
 }
+
+export type InboxSource = "chat" | "learn" | "import";
 
 /** One of Claude's changes, for the activity list (Undo while it is the latest). */
 export interface MemoryActivity extends MemoryEvent {
@@ -214,7 +216,7 @@ interface InboxRow {
   type: MemoryType | null;
   body: string | null;
   base_version: number | null;
-  source: "chat" | "learn";
+  source: InboxSource;
   thread_id: string | null;
   reason: string | null;
   created_at: Date;
@@ -608,7 +610,7 @@ export class MemoryService {
       /** The version the change was made against; a newer note is a conflict. */
       baseVersion?: number;
     },
-    origin: { source: "chat" | "learn"; threadId?: string | null },
+    origin: { source: InboxSource; threadId?: string | null },
   ): Promise<InboxItem> {
     const { op, name } = change;
     if (op !== "add" && op !== "update" && op !== "delete") return Promise.reject(new MemoryError("op is add, update or delete"));

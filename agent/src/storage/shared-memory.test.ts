@@ -15,6 +15,7 @@ import { after, before, describe, test } from "node:test";
 import { AccessService } from "./access";
 import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
 import { MemoryConflictError, MemoryError, MemoryNotFoundError, MemoryService } from "./memory";
+import { MemoryPackHub } from "./memory-packs";
 import { SharedMemoryService, sharedRef } from "./shared-memory";
 import type { Storage } from "./index";
 import { createMemoryHandler } from "../memory/http";
@@ -201,6 +202,7 @@ describe("shared memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not s
     const storage = {
       memory,
       sharedMemory: shared,
+      memoryPacks: new MemoryPackHub(sql, workspaceId),
       config: { authSecret: undefined },
       access: { localUserId: async () => owner },
     } as unknown as Storage;

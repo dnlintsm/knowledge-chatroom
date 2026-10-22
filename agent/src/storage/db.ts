@@ -89,6 +89,10 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     await tx.unsafe(
       `GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, memory_learned_chats, shared_memories, shared_memory_versions, shared_memory_proposals, shared_memory_settings TO ${role}`,
     );
+    // Installed memory packs (021_memory_packs.sql): the pack service writes them as the server.
+    await tx.unsafe(
+      `GRANT SELECT ON memory_pack_installs, hub_memory_packs, hub_memory_pack_versions TO ${role}`,
+    );
     return true;
   }) as Promise<boolean>;
 }
