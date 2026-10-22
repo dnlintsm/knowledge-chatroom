@@ -61,6 +61,11 @@ services:
       SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
       # Outside MCP servers (JSON); use service names, not localhost, for URLs.
       MCP_SERVERS: ${MCP_SERVERS:-}
+      # Personalized memory (experimental): MEMORY=on turns it on (.env.example).
+      MEMORY: ${MEMORY:-}
+      MEMORY_MODEL: ${MEMORY_MODEL:-}
+      MEMORY_LEARN: ${MEMORY_LEARN:-}
+      MEMORY_IDLE_MINUTES: ${MEMORY_IDLE_MINUTES:-10}
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
@@ -112,7 +117,7 @@ services:
 
   # --- Sample Python tools (examples/python-agent) for the demo's agent ---
   # Add `--profile python-sample` and, in .env,
-  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
   lab-tools:
     profiles: [python-sample]
     build: ./examples/python-agent

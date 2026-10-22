@@ -17,6 +17,10 @@
  * "remote"). Only the storage API accepts them, and it treats their requests
  * as Claude acting for the user: node writes must be proposals, and nothing
  * is deleted or shared (agent/src/storage/http.ts).
+ *
+ * Memory tokens (X-Knowledge-Memory) have aud "memory", `via`, and the run's
+ * `thread` and `node`: an outside MCP server uses the user's memory for that
+ * chat through the agent's /memory/agent API, as Claude does in it (issue #93).
  */
 
 import {
@@ -36,12 +40,17 @@ export interface IdentityClaims {
   name?: string;
   exp: number;
   aud?: string;
-  /** Storage tokens: the outside service acting for the user. */
+  /** Storage and memory tokens: the outside service acting for the user. */
   via?: string;
+  /** Memory tokens: the chat and the knowledge node the run is in. */
+  thread?: string;
+  node?: string | null;
 }
 
 export const STORAGE_HEADER = "x-knowledge-storage";
 export const STORAGE_AUDIENCE = "storage";
+export const MEMORY_HEADER = "x-knowledge-memory";
+export const MEMORY_AUDIENCE = "memory";
 
 /** How long a storage token lasts: STORAGE_TOKEN_SECONDS, default an hour (a long run). */
 export function storageTokenSeconds(env: Env = process.env): number {

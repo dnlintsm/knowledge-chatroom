@@ -31,11 +31,11 @@ import { currentStorage, startStorage, storageState, type Storage } from "./stor
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
 import { clearWorkdir, syncWorkdir, workdirEnabled } from "./storage/workdir";
-import { IDENTITY_HEADER, identify, signIdentity, verifyIdentity } from "./storage/identity";
+import { IDENTITY_HEADER, identify, localMemoryToken, signIdentity, verifyIdentity } from "./storage/identity";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
-import { prepareMemory } from "./memory/run";
+import { prepareMemory, trackLiveRun } from "./memory/run";
 
 /**
  * The knowledge node the user is in, from the app's run payload
@@ -54,6 +54,7 @@ import { SkillService } from "./skills/service";
 import { suggest } from "./suggest";
 import { authSettings } from "../../shared/auth-mode";
 import {
+  MEMORY_AUDIENCE,
   STORAGE_AUDIENCE,
   identityFormat,
   identityPublicKey,
@@ -139,20 +140,36 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
  * Signs the run's user for one outside MCP server (./mcp.ts). forwardIdentity:
  * a token for audience "mcp:<server>", which the agent itself refuses, so a
  * server can't use it against the agent. storageAccess: a storage token via
- * "mcp:<server>", which only the storage API takes. The app's header expires
- * in minutes, so these last as long as a run may. None without login.
+ * "mcp:<server>", which only the storage API takes. memoryAccess: a memory
+ * token for this chat, when the run has memory (`memory`), which only
+ * /memory/agent takes. The app's header expires in minutes, so these last as
+ * long as a run may. Without login only the memory token, unsigned.
  */
-function identityForTools(req: http.IncomingMessage): RunTokens | undefined {
+function identityForTools(
+  req: http.IncomingMessage,
+  memory: { thread: string; node: string | null } | null,
+): RunTokens | undefined {
   const secret = authSecret;
+  if (!secret) {
+    return (server, kind = "identity") =>
+      kind === "memory" && memory ? localMemoryToken({ via: `mcp:${server}`, ...memory }) : null;
+  }
   const header = req.headers[IDENTITY_HEADER];
-  const identity = secret && typeof header === "string" ? verifyIdentity(header, secret) : null;
-  if (!secret || !identity) return undefined;
+  const identity = typeof header === "string" ? verifyIdentity(header, secret) : null;
+  if (!identity) return undefined;
   const now = Math.floor(Date.now() / 1000);
   const user = { sub: identity.sub, email: identity.email, name: identity.name };
-  return (server, kind = "identity") =>
-    kind === "storage"
-      ? signIdentity({ ...user, aud: STORAGE_AUDIENCE, via: `mcp:${server}`, exp: now + STORAGE_TOKEN_SECONDS }, secret)
-      : signIdentity({ ...user, aud: `mcp:${server}`, exp: now + TOOL_IDENTITY_SECONDS }, secret);
+  return (server, kind = "identity") => {
+    const via = `mcp:${server}`;
+    if (kind === "memory") {
+      return memory
+        ? signIdentity({ ...user, aud: MEMORY_AUDIENCE, via, ...memory, exp: now + STORAGE_TOKEN_SECONDS }, secret)
+        : null;
+    }
+    return kind === "storage"
+      ? signIdentity({ ...user, aud: STORAGE_AUDIENCE, via, exp: now + STORAGE_TOKEN_SECONDS }, secret)
+      : signIdentity({ ...user, aud: via, exp: now + TOOL_IDENTITY_SECONDS }, secret);
+  };
 }
 
 const TOOL_IDENTITY_SECONDS = 60 * 60;
@@ -289,6 +306,11 @@ const server = http.createServer(async (req, res) => {
       console.error(`[memory] couldn't load memory; running without it: ${err instanceof Error ? err.message : err}`);
       return null;
     });
+    if (runMemory) {
+      // Outside MCP servers with memoryAccess report here too, while the run goes.
+      const untrack = trackLiveRun(runMemory.run.threadId, runMemory.onEvent);
+      res.on("close", untrack);
+    }
 
     // The adapter emits RUN_STARTED/RUN_FINISHED/RUN_ERROR itself; the error
     // callback surfaces the message as a clean RUN_ERROR (never a broken stream).
@@ -315,7 +337,7 @@ const server = http.createServer(async (req, res) => {
         }),
       runSkills,
       onSkillUse,
-      identityForTools(req),
+      identityForTools(req, runMemory ? { thread: runMemory.run.threadId, node: runMemory.nodeId } : null),
       runMemory,
     );
     return;

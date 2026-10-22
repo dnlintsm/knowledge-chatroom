@@ -376,8 +376,14 @@ Code's memory files and `SKILL.md`.
   into notes and merges it with the user's own (at most 30). Every note goes to the
   inbox (`source = 'import'`), never straight into memory. Without a model the text
   becomes one note.
-- Not yet: suggesting notes become skills or knowledge nodes, and access for Python
-  agents. These are the later steps of #93.
+- Outside MCP servers (`memoryAccess`, `/memory/agent` in `agent/src/memory/http.ts`):
+  a run with memory sends such servers an `X-Knowledge-Memory` token naming the user,
+  the chat and its node. With it, a server gets the chat's memory prompt and runs the
+  same `memory_*` tools as Claude, with the run marked as having read outside
+  content, so every change waits in the inbox. Events reach the browser through the
+  live run of that chat (`trackLiveRun`).
+- Not yet: suggesting notes become skills or knowledge nodes, semantic search over
+  memory, and search over past chats. These are the rest of #93's step 5.
 
 ### File references in answers
 
