@@ -509,6 +509,15 @@ export class MemoryService {
     });
   }
 
+  /** Every note in use, with its text: for search by meaning (../memory/recall.ts). */
+  texts(userId: string): Promise<(Pick<MemoryNote, "name" | "description" | "type" | "body" | "version">)[]> {
+    return this.as(userId, async (db) =>
+      db<(Pick<MemoryNote, "name" | "description" | "type" | "body" | "version">)[]>`
+        SELECT name, description, type, body, version FROM memories
+        WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND archived_at IS NULL
+        ORDER BY name`);
+  }
+
   /** Notes in use whose name, description or body has the query's words, best first. */
   search(userId: string, query: string, limit = 10): Promise<(MemorySummary & { snippet: string })[]> {
     const words = [...new Set(query.toLowerCase().split(/\s+/).filter((w) => w.length > 1))].slice(0, 12);

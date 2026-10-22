@@ -15,6 +15,11 @@
 
 ### Added
 
+- Search by meaning over memory, and Claude searching past chats (#93, step 5). When the
+  agent runs an embedding model (the one file search uses), `memory_search` also lists
+  notes close in meaning to the query. In chats with memory, Claude can find and read
+  the user's earlier chats with `chats_search` and `chats_read`; incognito chats are
+  never found, and changes to memory after reading a past chat wait in the inbox.
 - Memory for Python MCP servers (#93, step 5). With `"memoryAccess": true` in
   `MCP_SERVERS`, runs where memory is on send the server an `X-Knowledge-Memory` token
   for that chat. Through the agent's `/memory/agent` API the server gets the chat's
