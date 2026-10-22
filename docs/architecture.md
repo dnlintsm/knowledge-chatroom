@@ -285,6 +285,27 @@ and streams back only that tool call. Nothing is stored and no tools run. The br
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
 
+### Chat history
+
+Each user's chats are kept on the server, so they come back after a reload or a restart
+(issue #91). The chat pane's history button lists them, newest first, named after the first
+question; each can be opened again, renamed, archived or deleted.
+
+- `src/lib/chat-runner.ts` is the CopilotKit runtime's runner. A live run streams from memory
+  (so reconnecting mid-run works); when it finishes, its compacted AG-UI events and the
+  messages after it are saved. Opening a chat replays its saved runs.
+- `src/lib/chat-store.ts` saves them through the agent server's `/chats` API
+  (`agent/src/storage/chats.ts`, tables `chats` and `chat_runs` from `017_chats.sql`) when
+  it has storage, else in this process's memory (lost on restart, still one history per
+  user).
+- `src/lib/chat-routes.ts` answers the runtime's thread routes (`/api/copilotkit/threads…`)
+  for the signed-in user; `src/components/workspace/chat-history.tsx` is the list.
+- A chat belongs to the user who started it. Nobody else lists, opens, continues or stops it,
+  workspace owners included; with row-level security Postgres enforces this too. Storage
+  tokens (MCP servers, remote backends) can't reach chats. The follow-up chips' `suggester`
+  runs are not kept.
+- With `CPK_INTELLIGENCE_API_KEY` set, CopilotKit Intelligence keeps threads instead.
+
 ### File references in answers
 
 Claude's answers can point at a file, or at lines in it, and a click opens them in the middle

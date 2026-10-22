@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2, UserCog, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ago, cn } from "@/lib/utils";
 import type { Role } from "./server-files";
 import { access, personLabel, ROLES, type Group, type Person } from "./sharing";
 import { useWorkspace } from "./store";
@@ -37,23 +37,6 @@ type Tab = "people" | "groups" | "activity";
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const roleLabel = (r: Role) => ROLES.find((x) => x.role === r)!.label;
 const ACCESS: Record<Role, string> = { viewer: "view", editor: "edit", owner: "owner" };
-
-const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-function ago(iso: string | null) {
-  if (!iso) return "—";
-  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
-  const steps: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["year", 31_536_000],
-    ["month", 2_592_000],
-    ["day", 86_400],
-    ["hour", 3600],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of steps) {
-    if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit);
-  }
-  return "just now";
-}
 
 /** Opens the admin panel; only workspace owners (with login on) see it. */
 export function AdminButton() {

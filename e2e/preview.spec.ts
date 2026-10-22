@@ -218,6 +218,29 @@ test("a workspace with no runs still has the chat", async ({ page }) => {
   await shot(page, "20-chat-without-runs");
 });
 
+test("chats come back after the page reloads", async ({ page }) => {
+  const question = "Which etch runs did we do last week?";
+  await page.goto("/");
+  await send(page, question);
+  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
+  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
+
+  // A reload starts a new chat; the last one waits in the history, named after the question.
+  await page.reload();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await expect(page.getByText(question)).toHaveCount(0);
+  await page.getByRole("button", { name: "Chat history" }).click();
+  const chat = page.getByTestId("chat-history").getByRole("option", { name: question });
+  await expect(chat).toBeVisible();
+  await shot(page, "28-chat-history-after-reload");
+
+  await chat.click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await expect(page.getByText(question)).toBeVisible();
+  await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible();
+  await shot(page, "28b-chat-reopened");
+});
+
 test("selection is dropped when its file closes", async ({ page }) => {
   await gotoReport(page);
   const preview = page.getByTestId("file-preview");

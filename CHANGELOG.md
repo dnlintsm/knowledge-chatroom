@@ -15,6 +15,12 @@
 
 ### Added
 
+- Chat history is kept per user (#91). Chats survive reloads and restarts: with server
+  storage in Postgres (migration `017_chats.sql`, run on start), without it in memory. The
+  history button lists your own chats, which you can reopen, rename, archive or delete;
+  nobody else sees them, workspace owners included. Before this, without CopilotKit
+  Intelligence, chats were kept in the app's memory only, in one list shared by every
+  signed-in user.
 - Storage tokens for outside services (#88). MCP servers with `"storageAccess": true` and
   remote backends (`AGENT_URL`) get an `X-Knowledge-Storage` token with each run. With it they
   read and write workspace files through the storage API as Claude acting for the signed-in
