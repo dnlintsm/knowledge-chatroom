@@ -2,7 +2,6 @@ import {
   CopilotRuntime,
   CopilotKitIntelligence,
   createCopilotEndpoint,
-  InMemoryAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { createDefaultAgent, createSuggesterAgent, dynamicSuggestions } from "@/agent";
 import { handle } from "hono/vercel";
@@ -16,6 +15,9 @@ import {
   storageHeader,
 } from "@/lib/auth";
 import { remoteAgentUrl } from "@/lib/agent-target";
+import { handleChatRoute } from "@/lib/chat-routes";
+import { ChatRunner } from "@/lib/chat-runner";
+import { AutoChatStore } from "@/lib/chat-store";
 import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server and speaks AG-UI directly
@@ -26,6 +28,14 @@ import type { NextRequest } from "next/server";
 // else — runtime config, v2 endpoint wiring, MCP apps, openGenerativeUI,
 // a2ui — mirrors the canonical demo.
 const defaultAgent = createDefaultAgent();
+
+// Each user's chats, kept by the agent server in Postgres when it has
+// storage, else in memory (issue #91, src/lib/chat-runner.ts). Not used with
+// CopilotKit Intelligence, which keeps threads itself.
+const intelligence = Boolean(process.env.CPK_INTELLIGENCE_API_KEY);
+const chats = new AutoChatStore();
+const chatRunner = new ChatRunner(chats);
+const BASE_PATH = "/api/copilotkit";
 
 // "suggester" writes the chat's follow-up chips; without it (a remote backend,
 // or CHAT_SUGGESTIONS=static) the browser keeps the first-round chips
@@ -57,7 +67,7 @@ const runtime = new CopilotRuntime({
           return { id: user.sub, name: user.name ?? user.email ?? user.sub };
         },
       }
-    : { runner: new InMemoryAgentRunner() }),
+    : { runner: chatRunner }),
   // --- /copilotkit:intelligence ---
   openGenerativeUI: true,
   a2ui: {
@@ -76,7 +86,7 @@ const runtime = new CopilotRuntime({
 
 const app = createCopilotEndpoint({
   runtime,
-  basePath: "/api/copilotkit",
+  basePath: BASE_PATH,
 });
 
 const handler = handle(app);
@@ -86,16 +96,36 @@ const handler = handle(app);
 // (never one the browser sent), and src/agent.ts copies that user into the
 // run's forwardedProps. With login on, chat needs a signed-in user. A remote
 // backend also gets an X-Knowledge-Storage token, to reach the user's files
-// through the storage API for the whole run (issue #88).
+// through the storage API for the whole run (issue #88). Without
+// Intelligence, the history routes come from the user's own chats
+// (src/lib/chat-routes.ts), and only a run's own user may stop it.
 async function withUser(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete(IDENTITY_HEADER);
   headers.delete(STORAGE_HEADER);
+  const user = authSecret() ? sessionFrom(req) : null;
   if (authSecret()) {
-    const user = sessionFrom(req);
     if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });
     headers.set(IDENTITY_HEADER, identityHeader(user));
     if (remoteAgentUrl()) headers.set(STORAGE_HEADER, storageHeader(user, "remote"));
+  }
+  if (!intelligence) {
+    const path = req.nextUrl.pathname.slice(BASE_PATH.length);
+    const answered = await handleChatRoute(req, path, user, chats, (id) => chatRunner.discard(id, user));
+    if (answered) return answered;
+    const stop = path.match(/^\/agent\/[^/]+\/stop\/([^/]+)\/?$/);
+    if (stop) {
+      let threadId = stop[1];
+      try {
+        threadId = decodeURIComponent(threadId);
+      } catch {
+        // the runtime answers malformed ids itself
+      }
+      const owner = chatRunner.liveOwner(threadId);
+      if (owner && owner !== (user?.sub ?? "local")) {
+        return Response.json({ error: "Thread not found" }, { status: 404 });
+      }
+    }
   }
   return handler(new Request(req, { headers }));
 }

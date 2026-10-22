@@ -116,3 +116,13 @@ reload or navigation after a failed save.
 context share a real workspace and receive its real stream. It checks both
 persisted bytes and the other tab's editor, then confirms remote deletion closes
 both tabs. Its fixture uses a dedicated note and removes it after testing.
+
+## Chat history
+
+`tests/unit/chat-history.spec.ts` checks the chat runner and history routes with
+chats in memory: a chat replays after a new runner (as after a restart), and with
+login on each user sees, continues and changes only their own chats. The storage
+integration suite covers the `/chats` API and its row-level security, and
+`e2e/chat-history.spec.ts` (storage mode) chats, finds the chat in Postgres,
+reloads and reopens it from the history. `e2e/preview.spec.ts` does the same with
+chats in memory.

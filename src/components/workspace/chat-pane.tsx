@@ -2,14 +2,10 @@
 
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { FileText, FlaskConical, History, MessageSquarePlus, TextSelect } from "lucide-react";
-import {
-  CopilotChat,
-  CopilotThreadsDrawer,
-  useCopilotChatConfiguration,
-  type CopilotChatInput,
-} from "@copilotkit/react-core/v2";
+import { CopilotChat, useCopilotChatConfiguration, type CopilotChatInput } from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
+import { ChatHistory } from "./chat-history";
 import { FileIcon } from "./file-icon";
 import { parseFileRef, rootRelativeLinks, type FileRef } from "./file-refs";
 import { SkillChatInput } from "./skills";
@@ -113,8 +109,8 @@ export function ChatPane() {
       </div>
 
       {history && (
-        <div data-testid="chat-history" className="min-h-0 flex-1 overflow-y-auto [&_copilotkit-threads-drawer]:h-full [&_copilotkit-threads-drawer]:[--cpk-drawer-width:100%]">
-          <CopilotThreadsDrawer agentId="default" collapsible={false} label="Chats" />
+        <div data-testid="chat-history" className="min-h-0 flex-1">
+          <ChatHistory onOpen={() => setHistory(false)} />
         </div>
       )}
       {/* Kept mounted under the history so the conversation and its tools survive. */}

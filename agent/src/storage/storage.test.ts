@@ -28,6 +28,7 @@ import { NodeNotFoundError } from "./nodes";
 import { FileExistsError, ReadOnlyFileError } from "./files";
 import { ProposalError } from "./proposals";
 import { initStorage, type Storage } from "./index";
+import { ChatError, ChatTakenError, type ChatSummary, type NewRun } from "./chats";
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
@@ -1814,6 +1815,146 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await call({ from: "out/missing.png", path: "x.png", node: optics })).isError, true);
       // Without a working folder there is no save_file.
       assert.equal(createFileTools(() => storage).some((t) => t.name === "save_file"), false);
+    });
+  });
+
+  describe("chat history", () => {
+    let dana: string;
+    let eve: string;
+    const run = (runId: string, text: string, extra: Partial<NewRun> = {}): NewRun => ({
+      agentId: "default",
+      runId,
+      events: [{ type: "RUN_STARTED", runId }, { type: "TEXT_MESSAGE_CONTENT", delta: text }],
+      messages: [{ id: `m-${runId}`, role: "user", content: text }],
+      ...extra,
+    });
+
+    before(async () => {
+      dana = await storage.access.userForSubject("test|dana", { name: "Dana" });
+      eve = await storage.access.userForSubject("test|eve", { name: "Eve" });
+    });
+
+    test("saves runs in order and names a chat after its first question", async () => {
+      const first = await storage.chats.appendRun(dana, "chat-1", run("r1", "hi", { name: "  What is   in notes?  " }));
+      assert.equal(first.name, "What is in notes?");
+      assert.equal(first.agentId, "default");
+      const second = await storage.chats.appendRun(dana, "chat-1", run("r2", "more", { parentRunId: "r1", name: "ignored" }));
+      assert.equal(second.name, "What is in notes?");
+      assert.ok(second.lastRunAt);
+
+      const runs = await storage.chats.runs(dana, "chat-1");
+      assert.deepEqual(runs!.map((r) => [r.runId, r.parentRunId]), [["r1", null], ["r2", "r1"]]);
+      assert.deepEqual(runs![1].events[1], { type: "TEXT_MESSAGE_CONTENT", delta: "more" });
+      const got = await storage.chats.get(dana, "chat-1");
+      assert.deepEqual(got!.messages, [{ id: "m-r2", role: "user", content: "more" }]);
+    });
+
+    test("a chat is its user's alone", async () => {
+      await assert.rejects(storage.chats.appendRun(eve, "chat-1", run("r3", "mine now?")), ChatTakenError);
+      assert.equal(await storage.chats.get(eve, "chat-1"), null);
+      assert.equal(await storage.chats.runs(eve, "chat-1"), null);
+      assert.equal(await storage.chats.update(eve, "chat-1", { name: "x" }), null);
+      assert.equal(await storage.chats.remove(eve, "chat-1"), false);
+      assert.deepEqual((await storage.chats.list(eve)).threads, []);
+      assert.equal(await storage.chats.owner(eve, "chat-1"), "theirs");
+      assert.equal(await storage.chats.owner(dana, "chat-1"), "mine");
+      assert.equal(await storage.chats.owner(dana, "chat-none"), "none");
+      // The workspace owner doesn't see them either.
+      const owner = await storage.access.localUserId();
+      assert.deepEqual((await storage.chats.list(owner)).threads, []);
+    });
+
+    test("row security keeps chats private in the database too", async (t) => {
+      if (!storage.rowSecurity) return t.skip("no row security");
+      const seen = await asDbUser(storage.sql, eve, (db) => db`SELECT id FROM chats UNION ALL SELECT chat_id FROM chat_runs`);
+      assert.equal(seen.length, 0);
+      await assert.rejects(
+        asDbUser(storage.sql, eve, (db) => db`INSERT INTO chats (id, workspace_id, user_id, agent_id) VALUES ('forged', ${storage.workspaceId}, ${dana}, 'default')`),
+      );
+    });
+
+    test("lists, renames, archives and deletes", async () => {
+      await storage.chats.appendRun(dana, "chat-2", run("r1", "second"));
+      await storage.chats.appendRun(dana, "chat-3", run("r1", "third", { agentId: "other" }));
+      const all = await storage.chats.list(dana);
+      assert.deepEqual(all.threads.map((t) => t.id), ["chat-3", "chat-2", "chat-1"]);
+      assert.deepEqual((await storage.chats.list(dana, { agentId: "default" })).threads.map((t) => t.id), ["chat-2", "chat-1"]);
+
+      const page1 = await storage.chats.list(dana, { limit: 2 });
+      assert.equal(page1.threads.length, 2);
+      const page2 = await storage.chats.list(dana, { limit: 2, cursor: page1.nextCursor });
+      assert.deepEqual(page2.threads.map((t) => t.id), ["chat-1"]);
+      assert.equal(page2.nextCursor, null);
+      await assert.rejects(storage.chats.list(dana, { cursor: "nope" }), ChatError);
+
+      assert.equal((await storage.chats.update(dana, "chat-2", { name: "Renamed" }))!.name, "Renamed");
+      assert.equal((await storage.chats.update(dana, "chat-2", { archived: true }))!.archived, true);
+      assert.deepEqual((await storage.chats.list(dana, { agentId: "default" })).threads.map((t) => t.id), ["chat-1"]);
+      assert.deepEqual(
+        (await storage.chats.list(dana, { agentId: "default", includeArchived: true })).threads.map((t) => t.id),
+        ["chat-2", "chat-1"],
+      );
+
+      assert.equal(await storage.chats.remove(dana, "chat-2"), true);
+      assert.equal(await storage.chats.runs(dana, "chat-2"), null);
+      const [{ n }] = await storage.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM chat_runs WHERE chat_id = 'chat-2'`;
+      assert.equal(n, 0);
+    });
+
+    test("the /chats API answers for the signed-in user only", async () => {
+      const secret = "k".repeat(32);
+      const signed = { ...storage, config: { ...storage.config, authSecret: secret } };
+      const handle = createStorageHandler(() => signed, 1024);
+      const srv = http.createServer((req, res) => handle(req, res, new URL(req.url!, "http://localhost")));
+      await new Promise<void>((resolve) => srv.listen(0, resolve));
+      const url = `http://localhost:${(srv.address() as AddressInfo).port}`;
+      const exp = Math.floor(Date.now() / 1000) + 60;
+      const as = (sub: string) => ({ [IDENTITY_HEADER]: signIdentity({ sub, exp }, secret), "Content-Type": "application/json" });
+      try {
+        assert.equal((await fetch(`${url}/chats`)).status, 401);
+        const saved = await fetch(`${url}/chats/api-chat/runs`, {
+          method: "POST",
+          headers: as("test|eve"),
+          body: JSON.stringify(run("r1", "from the API", { name: "From the API" })),
+        });
+        assert.equal(saved.status, 201);
+        assert.equal(((await saved.json()) as ChatSummary).name, "From the API");
+        // Bigger than the 1 KB upload limit: runs have their own.
+        const big = await fetch(`${url}/chats/api-chat/runs`, {
+          method: "POST",
+          headers: as("test|eve"),
+          body: JSON.stringify(run("r2", "x".repeat(4096))),
+        });
+        assert.equal(big.status, 201);
+
+        const list = (await (await fetch(`${url}/chats?agent=default`, { headers: as("test|eve") })).json()) as {
+          threads: ChatSummary[];
+        };
+        assert.deepEqual(list.threads.map((t) => t.id), ["api-chat"]);
+        const runs = (await (await fetch(`${url}/chats/api-chat/runs`, { headers: as("test|eve") })).json()) as {
+          runs: { runId: string }[];
+        };
+        assert.deepEqual(runs.runs.map((r) => r.runId), ["r1", "r2"]);
+        assert.equal((await fetch(`${url}/chats/api-chat`, { headers: as("test|dana") })).status, 404);
+        assert.equal(
+          (await fetch(`${url}/chats/api-chat/runs`, { method: "POST", headers: as("test|dana"), body: JSON.stringify(run("r9", "hijack")) })).status,
+          403,
+        );
+        assert.equal((await fetch(`${url}/chats/api-chat/runs`, { method: "POST", headers: as("test|eve"), body: "{}" })).status, 400);
+        const renamed = await fetch(`${url}/chats/api-chat`, { method: "PATCH", headers: as("test|eve"), body: JSON.stringify({ name: "New name", archived: true }) });
+        assert.deepEqual(
+          [renamed.status, ((await renamed.json()) as ChatSummary).archived],
+          [200, true],
+        );
+        assert.equal((await fetch(`${url}/chats/api-chat`, { method: "DELETE", headers: as("test|dana") })).status, 404);
+        assert.equal((await fetch(`${url}/chats/api-chat`, { method: "DELETE", headers: as("test|eve") })).status, 200);
+
+        // Storage tokens (Claude through an outside service) never reach chats.
+        const token = signIdentity({ sub: "test|eve", exp, aud: "storage", via: "mcp:lab" }, secret);
+        assert.equal((await fetch(`${url}/chats`, { headers: { [STORAGE_HEADER]: token } })).status, 403);
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()));
+      }
     });
   });
 

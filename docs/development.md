@@ -162,8 +162,11 @@ The issuer and `APP_URL` must use https unless they are on localhost; set
 sign in owns the workspace. Without login (`AUTH_MODE=local`, or no `AUTH_SECRET`
 in development), one built-in user owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
 
-`CPK_INTELLIGENCE_API_KEY` is optional for live thread history. Its browser gate
-is resolved at build time, so rebuild after changing it for a production run.
+Chat history needs nothing extra: each user's chats are kept by the agent server, in
+Postgres with `DATABASE_URL` and in memory without it ([Architecture](architecture.md#chat-history)).
+`CPK_INTELLIGENCE_API_KEY` is optional and keeps threads in CopilotKit Intelligence
+instead. Its browser gate is resolved at build time, so rebuild after changing it for a
+production run.
 
 ## Troubleshooting
 

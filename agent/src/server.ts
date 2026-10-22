@@ -9,8 +9,8 @@
  * routes answer 404 (docs/remote-agent.md).
  * When DATABASE_URL is set it also serves the workspace file API under
  * `/files`, the knowledge tree under `/nodes`, experiments under `/experiments`,
- * search under `/search`, proposed versions under `/proposals` and groups
- * and grants under `/access` (see
+ * search under `/search`, proposed versions under `/proposals`, each user's
+ * chat history under `/chats` and groups and grants under `/access` (see
  * src/storage/http.ts). `/skills` lists the user's skills and their modes
  * (src/skills/http.ts), with or without storage; `/hub` is the skill hub.
  *
@@ -172,7 +172,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (/^\/(files|nodes|access|experiments|search|proposals)(\/|$)/.test(pathname)) {
+  if (/^\/(files|nodes|access|experiments|search|proposals|chats)(\/|$)/.test(pathname)) {
     await handleStorage(req, res, url);
     return;
   }

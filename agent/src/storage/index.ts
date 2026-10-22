@@ -2,6 +2,7 @@ import { S3BlobStore, type BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { AccessService, type Principal } from "./access";
 import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
+import { ChatService } from "./chats";
 import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
 import { FileService } from "./files";
@@ -11,6 +12,8 @@ import { SearchService } from "./search";
 import { ApiEmbedder, LocalEmbedder, SemanticIndex, type Embedder } from "./semantic";
 import { Session } from "./session";
 
+export { ChatService } from "./chats";
+export type { ChatRun, ChatSummary } from "./chats";
 export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
 export type { FileInfo, FileVersion } from "./files";
 export { NodeService } from "./nodes";
@@ -38,6 +41,8 @@ export interface Storage {
   search: SearchService;
   /** Proposed versions of files, waiting for review. */
   proposals: ProposalService;
+  /** Each user's chat history. */
+  chats: ChatService;
   /** Search by meaning; null when no embedding model is set. Not ready until prepared. */
   semantic: SemanticIndex | null;
   events: EventHub;
@@ -86,6 +91,7 @@ export async function initStorage(
     const semantic = embedder && new SemanticIndex(sql, embedder);
     const search = new SearchService(sql, blobs, ws.id, semantic);
     const proposals = new ProposalService(sql, blobs, events, ws.id);
+    const chats = new ChatService(sql, ws.id, rowSecurity);
     return {
       config,
       sql,
@@ -96,6 +102,7 @@ export async function initStorage(
       access,
       search,
       proposals,
+      chats,
       semantic,
       events,
       blobs,

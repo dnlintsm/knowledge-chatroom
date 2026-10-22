@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { AccessError, ForbiddenError, ROLES, type Role } from "./access";
+import { AccessError, ForbiddenError, ROLES, type Principal, type Role } from "./access";
+import { ChatError, ChatTakenError } from "./chats";
 import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
@@ -105,6 +106,22 @@ import type { Session } from "./session";
  *   Changes arrive on the /files change stream as
  *   {"op":"proposal","change","id","node","path","author","authorId"}.
  *
+ *   GET    /chats                   {threads, nextCursor}: your chats, most
+ *                                   recently active first; ?agent=<id>,
+ *                                   &archived (include archived ones),
+ *                                   &limit= (≤ 200), &cursor=<nextCursor>
+ *   GET    /chats/<id>              {chat, messages}: one of your chats and its
+ *                                   messages as of its latest run
+ *   GET    /chats/<id>/runs         {runs}: its runs' AG-UI events, in order
+ *   POST   /chats/<id>/runs         {agentId, runId, parentRunId?, events,
+ *                                   messages, name?} → the chat: saves a
+ *                                   finished run, starting the chat on its
+ *                                   first; 403 when the id is someone else's
+ *   PATCH  /chats/<id>              {name?, archived?}
+ *   DELETE /chats/<id>              for good, with its runs
+ *   Chats are their user's alone (017_chats.sql): workspace owners don't see
+ *   them, and storage tokens can't reach them.
+ *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
  *   GET    /access/people           the same, with sign-up and last-active
@@ -143,6 +160,7 @@ import type { Session } from "./session";
 export function agentRefusal(method: string, url: URL): string | null {
   const [section, ...rest] = url.pathname.split("/").slice(1);
   const sub = rest.join("/");
+  if (section === "chats") return "Chat history stays with its user: storage tokens can't reach it";
   if (method === "GET" || method === "HEAD") {
     return section === "access" && sub !== "" ? "Claude doesn't manage access" : null;
   }
@@ -503,6 +521,105 @@ async function handleProposals(req: IncomingMessage, res: ServerResponse, url: U
   json(res, 404, { error: "Not found" });
 }
 
+/** Chat runs carry tool results and attachments, so they may be large. */
+const MAX_RUN_BYTES = 32 * 1024 * 1024;
+
+async function handleChats(req: IncomingMessage, res: ServerResponse, url: URL, storage: Storage, principal: Principal) {
+  const parts = url.pathname.split("/").slice(2); // after /chats
+  let id: string | undefined;
+  try {
+    id = parts[0] ? decodeURIComponent(parts[0]) : undefined;
+  } catch {
+    return json(res, 400, { error: "Malformed chat id" });
+  }
+  const sub = parts.slice(1).join("/");
+  const method = req.method ?? "GET";
+  const { chats } = storage;
+  const me = principal.userId;
+  const notFound = () => json(res, 404, { error: "Chat not found" });
+
+  if (!id) {
+    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+    return json(
+      res,
+      200,
+      await chats.list(me, {
+        agentId: url.searchParams.get("agent") || undefined,
+        includeArchived: url.searchParams.has("archived"),
+        limit: Number.isNaN(limit) ? undefined : limit,
+        cursor: url.searchParams.get("cursor"),
+      }),
+    );
+  }
+
+  if (sub === "runs") {
+    if (method === "GET") {
+      const runs = await chats.runs(me, id);
+      return runs ? json(res, 200, { runs }) : notFound();
+    }
+    if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    const bytes = await readBody(req, MAX_RUN_BYTES);
+    if (!bytes) return json(res, 413, { error: `A run may be at most ${MAX_RUN_BYTES} bytes` });
+    let body: Record<string, unknown> | null = null;
+    try {
+      body = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    } catch {
+      // answered below
+    }
+    const parent = body?.parentRunId;
+    if (
+      !body ||
+      typeof body.agentId !== "string" ||
+      typeof body.runId !== "string" ||
+      !Array.isArray(body.events) ||
+      !Array.isArray(body.messages) ||
+      (parent !== undefined && parent !== null && typeof parent !== "string") ||
+      (body.name !== undefined && body.name !== null && typeof body.name !== "string")
+    ) {
+      return json(res, 400, {
+        error: "Expected {agentId, runId: string, parentRunId?: string, events, messages: array, name?: string}",
+      });
+    }
+    const chat = await chats.appendRun(me, id, {
+      agentId: body.agentId,
+      runId: body.runId,
+      parentRunId: parent as string | null | undefined,
+      events: body.events,
+      messages: body.messages,
+      name: body.name as string | null | undefined,
+    });
+    return json(res, 201, chat);
+  }
+  if (sub) return json(res, 404, { error: "Not found" });
+
+  switch (method) {
+    case "GET": {
+      const chat = await chats.get(me, id);
+      return chat ? json(res, 200, chat) : notFound();
+    }
+    case "PATCH": {
+      const body = await readJson(req);
+      if (
+        !body ||
+        (body.name !== undefined && body.name !== null && typeof body.name !== "string") ||
+        (body.archived !== undefined && typeof body.archived !== "boolean")
+      ) {
+        return json(res, 400, { error: "Expected {name?: string, archived?: boolean}" });
+      }
+      const chat = await chats.update(me, id, {
+        name: body.name as string | null | undefined,
+        archived: body.archived as boolean | undefined,
+      });
+      return chat ? json(res, 200, chat) : notFound();
+    }
+    case "DELETE":
+      return (await chats.remove(me, id)) ? json(res, 200, { deleted: id }) : notFound();
+    default:
+      return json(res, 405, { error: "Method not allowed" });
+  }
+}
+
 async function handleSearch(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   if (!/^\/search\/?$/.test(url.pathname)) {
     json(res, 404, { error: "Not found" });
@@ -557,6 +674,7 @@ export function createStorageHandler(
           return;
         }
       }
+      if (/^\/chats(\/|$)/.test(url.pathname)) return await handleChats(req, res, url, current, principal);
       const session = current.session(principal);
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
@@ -569,7 +687,7 @@ export function createStorageHandler(
         json(res, 404, { error: err.message });
         return;
       }
-      if (err instanceof ForbiddenError) {
+      if (err instanceof ForbiddenError || err instanceof ChatTakenError) {
         json(res, 403, { error: err.message });
         return;
       }
@@ -587,7 +705,8 @@ export function createStorageHandler(
         err instanceof AccessError ||
         err instanceof ExperimentError ||
         err instanceof SearchError ||
-        err instanceof ProposalError
+        err instanceof ProposalError ||
+        err instanceof ChatError
       ) {
         json(res, 400, { error: err.message });
         return;
