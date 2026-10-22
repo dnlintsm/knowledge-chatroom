@@ -8,11 +8,14 @@ import { createDefaultAgent, createSuggesterAgent, dynamicSuggestions } from "@/
 import { handle } from "hono/vercel";
 import {
   IDENTITY_HEADER,
+  STORAGE_HEADER,
   authSecret,
   identityHeader,
   sessionFrom,
   sessionFromRequest,
+  storageHeader,
 } from "@/lib/auth";
+import { remoteAgentUrl } from "@/lib/agent-target";
 import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server and speaks AG-UI directly
@@ -81,14 +84,18 @@ const handler = handle(app);
 // The runtime forwards x-* request headers to the agent, so the agent server
 // learns who a run is for from the signed X-Knowledge-User header set here
 // (never one the browser sent), and src/agent.ts copies that user into the
-// run's forwardedProps. With login on, chat needs a signed-in user.
+// run's forwardedProps. With login on, chat needs a signed-in user. A remote
+// backend also gets an X-Knowledge-Storage token, to reach the user's files
+// through the storage API for the whole run (issue #88).
 async function withUser(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete(IDENTITY_HEADER);
+  headers.delete(STORAGE_HEADER);
   if (authSecret()) {
     const user = sessionFrom(req);
     if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });
     headers.set(IDENTITY_HEADER, identityHeader(user));
+    if (remoteAgentUrl()) headers.set(STORAGE_HEADER, storageHeader(user, "remote"));
   }
   return handler(new Request(req, { headers }));
 }

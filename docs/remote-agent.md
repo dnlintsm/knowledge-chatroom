@@ -122,9 +122,27 @@ v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.
 - **Older backends** that verify `v1` tokens (HMAC with `AUTH_SECRET`) keep working while
   the app and agent run with `IDENTITY_FORMAT=v1`. That setting goes away in the next
   release, so move to the public key.
-- **Calling this repo's storage API**: the same header works there, at `LOCAL_AGENT_URL`, on
-  the private network, for its 5 minutes. A change made this way is recorded as made by the
-  user, not as Claude's.
+- **Calling this repo's storage API**: use the `X-Knowledge-Storage` token below. The
+  `X-Knowledge-User` header still works there for its 5 minutes, but a change made with it is
+  recorded as the user's own, not Claude's, and skips the review Claude's node edits get.
+
+### `X-Knowledge-Storage`
+
+Sent with `X-Knowledge-User` when login is on, for the storage API at `LOCAL_AGENT_URL`
+(`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`). Pass it on unchanged. It is
+the same token format with `aud` `storage` and `via` `remote`, valid for
+`STORAGE_TOKEN_SECONDS` (default an hour) so a long run keeps access. Requests with it act as
+Claude for the signed-in user:
+
+- Only what that user can read or edit.
+- Writes in a knowledge node (and to skills at the workspace root) need `&propose`, as below.
+  Anything else is refused with 403.
+- No renaming, deleting, reviewing proposals or managing access.
+- The activity log credits them to Claude, `via` `remote`.
+
+Only the storage API accepts it: it can't start chat runs. Don't read the database or object
+store directly instead. The app's connection owns the tables, so row security doesn't apply
+to it.
 
 ## What the backend must do
 
@@ -148,8 +166,9 @@ v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.
    as the user opens files and moves around, so the model must see the current one on every
    run (see the notes on `ag_ui_claude_sdk` below).
 5. **Bring file tools when `storage` is `"server"`.** The browser's file tools are off then,
-   so the model needs the backend's own. Use this repo's storage API with the user's header,
-   or your own access to the same Postgres and S3 store. Keep these rules:
+   so the model needs the backend's own. Use this repo's storage API with the run's
+   `X-Knowledge-Storage` token. The API enforces the first three rules; the last one is
+   for your tools and prompt:
    - **Writes in a knowledge node are proposals**: `PUT /files/<path>?node=<id>&propose`, so
      the node's editors review them.
    - **Writes in an experiment or at the root** change the file directly.

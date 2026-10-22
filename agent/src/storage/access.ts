@@ -17,6 +17,8 @@ export function atLeast(role: Role | null, min: Role): boolean {
 export interface Principal {
   userId: string;
   actor: "user" | "agent";
+  /** Claude through an outside service (a storage token's `via`), e.g. "mcp:lab". */
+  via?: string;
 }
 
 /** Signed in, but not allowed to do this. */
@@ -427,7 +429,7 @@ export class AccessService {
     return tx`
       INSERT INTO audit_log (workspace_id, actor_type, actor_id, action, target)
       VALUES (${this.workspaceId}, ${principal.actor}, ${principal.userId}, ${action},
-              ${tx.json(target as never)})`;
+              ${tx.json((principal.via ? { ...target, via: principal.via } : target) as never)})`;
   }
 
   /** Newest first; `kinds` keeps only actions starting with those (e.g. "group" for group.*). */

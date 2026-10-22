@@ -17,7 +17,7 @@ import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { RunAgentInput } from "@ag-ui/core";
 
-import { allowServer, externalServersFromEnv, serverConfigs } from "./mcp";
+import { allowServer, externalServersFromEnv, serverConfigs, type RunTokens } from "./mcp";
 import { resolveModel } from "./model";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
@@ -123,7 +123,7 @@ interface RunContext {
   skills: RunSkills | null;
   onSkillUse: (use: SkillUse) => void;
   /** Signs the run's user for an outside MCP server that asks for it. */
-  identity?: (server: string) => string;
+  identity?: RunTokens;
 }
 
 const runContext = new AsyncLocalStorage<RunContext>();
@@ -144,7 +144,7 @@ export const runAs = <T>(
   fn: () => T,
   skills: RunSkills | null = null,
   onSkillUse: (use: SkillUse) => void = () => {},
-  identity?: (server: string) => string,
+  identity?: RunTokens,
 ): T => runContext.run({ userId, skills, onSkillUse, identity }, fn);
 
 // The adapter's own extra arguments (profile options, frontend tool results).

@@ -37,7 +37,13 @@ import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./sk
 import { SkillService } from "./skills/service";
 import { suggest } from "./suggest";
 import { authSettings } from "../../shared/auth-mode";
-import { identityFormat, identityPublicKey } from "../../shared/identity-token";
+import {
+  STORAGE_AUDIENCE,
+  identityFormat,
+  identityPublicKey,
+  storageTokenSeconds,
+} from "../../shared/identity-token";
+import type { RunTokens } from "./mcp";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 // AGENT_URL set: the app's chat goes to a remote backend (docs/remote-agent.md),
@@ -48,6 +54,7 @@ const HOST = process.env.AGENT_HOST || "0.0.0.0";
 // Login settings are checked at startup whether or not storage is on.
 const authSecret = authSettings().secret;
 identityFormat();
+const STORAGE_TOKEN_SECONDS = storageTokenSeconds();
 // Outside services (remote backends, MCP servers) verify identity tokens with
 // this public key instead of AUTH_SECRET (docs/remote-agent.md).
 const publicKey = authSecret ? identityPublicKey(authSecret) : null;
@@ -110,18 +117,23 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
 }
 
 /**
- * Signs the run's user for one outside MCP server (forwardIdentity in ./mcp.ts):
+ * Signs the run's user for one outside MCP server (./mcp.ts). forwardIdentity:
  * a token for audience "mcp:<server>", which the agent itself refuses, so a
- * server can't use it against the agent. The app's header expires in minutes,
- * so this one lasts as long as a run may. None without login.
+ * server can't use it against the agent. storageAccess: a storage token via
+ * "mcp:<server>", which only the storage API takes. The app's header expires
+ * in minutes, so these last as long as a run may. None without login.
  */
-function identityForTools(req: http.IncomingMessage): ((server: string) => string) | undefined {
+function identityForTools(req: http.IncomingMessage): RunTokens | undefined {
   const secret = authSecret;
   const header = req.headers[IDENTITY_HEADER];
   const identity = secret && typeof header === "string" ? verifyIdentity(header, secret) : null;
   if (!secret || !identity) return undefined;
-  const exp = Math.floor(Date.now() / 1000) + TOOL_IDENTITY_SECONDS;
-  return (server) => signIdentity({ ...identity, aud: `mcp:${server}`, exp }, secret);
+  const now = Math.floor(Date.now() / 1000);
+  const user = { sub: identity.sub, email: identity.email, name: identity.name };
+  return (server, kind = "identity") =>
+    kind === "storage"
+      ? signIdentity({ ...user, aud: STORAGE_AUDIENCE, via: `mcp:${server}`, exp: now + STORAGE_TOKEN_SECONDS }, secret)
+      : signIdentity({ ...user, aud: `mcp:${server}`, exp: now + TOOL_IDENTITY_SECONDS }, secret);
 }
 
 const TOOL_IDENTITY_SECONDS = 60 * 60;

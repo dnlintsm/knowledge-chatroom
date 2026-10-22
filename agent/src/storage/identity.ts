@@ -1,6 +1,11 @@
 import type { IncomingMessage } from "node:http";
 
-import { readIdentityToken, signIdentityToken } from "../../../shared/identity-token";
+import {
+  STORAGE_AUDIENCE,
+  STORAGE_HEADER,
+  readIdentityToken,
+  signIdentityToken,
+} from "../../../shared/identity-token";
 
 import type { Principal } from "./access";
 import type { Storage } from "./index";
@@ -16,6 +21,7 @@ import type { Storage } from "./index";
  */
 
 export const IDENTITY_HEADER = "x-knowledge-user";
+export { STORAGE_HEADER };
 
 export interface Identity {
   /** Stable id from the login provider, e.g. "<issuer>|<sub>". */
@@ -26,9 +32,12 @@ export interface Identity {
   exp: number;
   /**
    * Who the token is for; unset = this agent. Tokens forwarded to outside MCP
-   * servers carry "mcp:<server>" so the agent never accepts them back.
+   * servers carry "mcp:<server>" so the agent never accepts them back, and
+   * storage tokens "storage".
    */
   aud?: string;
+  /** Storage tokens: the outside service acting for the user, e.g. "mcp:lab". */
+  via?: string;
 }
 
 /** A token for `identity`, in the IDENTITY_FORMAT the deployment uses. */
@@ -49,20 +58,34 @@ export function verifyIdentity(
   return identity;
 }
 
-/** The principal for a request, or null when login is on and it carries no valid identity. */
+/**
+ * The principal for a request, or null when login is on and it carries no
+ * valid identity. With `storageTokens` (the storage API only), a valid
+ * X-Knowledge-Storage token wins over X-Knowledge-User: Claude acting for its
+ * user through the outside service it names (`via`).
+ */
 export async function identify(
   req: Pick<IncomingMessage, "headers">,
   storage: Storage,
   actor: Principal["actor"] = "user",
+  { storageTokens = false } = {},
 ): Promise<Principal | null> {
   const secret = storage.config.authSecret;
   if (!secret) return { userId: await storage.access.localUserId(), actor };
+  const storageHeader = storageTokens ? req.headers[STORAGE_HEADER] : undefined;
+  if (storageHeader !== undefined) {
+    const identity =
+      typeof storageHeader === "string"
+        ? verifyIdentity(storageHeader, secret, Date.now(), STORAGE_AUDIENCE)
+        : null;
+    if (!identity || typeof identity.via !== "string" || !identity.via) return null;
+    return { userId: await userFor(storage, identity), actor: "agent", via: identity.via };
+  }
   const header = req.headers[IDENTITY_HEADER];
   const identity = typeof header === "string" ? verifyIdentity(header, secret) : null;
   if (!identity) return null;
-  const userId = await storage.access.userForSubject(identity.sub, {
-    email: identity.email,
-    name: identity.name,
-  });
-  return { userId, actor };
+  return { userId: await userFor(storage, identity), actor };
 }
+
+const userFor = (storage: Storage, identity: Identity) =>
+  storage.access.userForSubject(identity.sub, { email: identity.email, name: identity.name });

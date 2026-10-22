@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from lab_tools import identity, server, stats
+from lab_tools import identity, server, stats, workspace
 
 # The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",
 # and tokens its agent signed with it (shared/identity-token.ts, the same values
@@ -94,3 +94,59 @@ def test_tools_need_a_known_caller_when_login_is_on(monkeypatch):
     with pytest.raises(server.ToolError):
         server.describe_metric([], SimpleNamespace(headers={identity.HEADER: FOR_LAB}))
     assert server.compare_runs([1, 1.1, 0.9], [2, 2.1, 1.9], SimpleNamespace(headers={identity.HEADER: FOR_LAB}))["verdict"] == "better"
+
+
+@pytest.fixture
+def storage_api(monkeypatch):
+    """A stand-in for the chatroom's storage API: alice's token may read data/run.csv, nothing else."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            seen.append((self.path, self.headers.get(workspace.STORAGE_HEADER)))
+            if self.headers.get(workspace.STORAGE_HEADER) != "alice-storage-token":
+                self._send(401, b'{"error": "Sign in to use the workspace"}')
+            elif self.path.startswith("/files/data/run.csv"):
+                self._send(200, b"step,loss\n1,0.9\n2,0.7\n3,0.5\n")
+            else:
+                self._send(404, b'{"error": "Not found"}')
+
+        def _send(self, status, body):
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setattr(server, "STORAGE_URL", f"http://127.0.0.1:{httpd.server_port}")
+    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
+    monkeypatch.setattr(server, "SERVER_NAME", "lab")
+    yield seen
+    httpd.shutdown()
+
+
+def test_workspace_files_are_read_with_the_runs_storage_token(storage_api):
+    ctx = SimpleNamespace(headers={identity.HEADER: FOR_LAB, workspace.STORAGE_HEADER: "alice-storage-token"})
+    result = server.describe_column("data/run.csv", "loss", ctx, node="n1")
+    assert (result["n"], result["mean"], result["min"]) == (3, pytest.approx(0.7), 0.5)
+    # Passed on unchanged, with the place.
+    assert storage_api[-1] == ("/files/data/run.csv?node=n1", "alice-storage-token")
+    with pytest.raises(server.ToolError, match="no column 'acc'"):
+        server.describe_column("data/run.csv", "acc", ctx)
+    with pytest.raises(server.ToolError, match=r"\(404\): Not found"):
+        server.describe_column("data/other.csv", "loss", ctx)
+
+
+def test_workspace_files_need_the_storage_token(storage_api):
+    ctx = SimpleNamespace(headers={identity.HEADER: FOR_LAB})
+    with pytest.raises(server.ToolError, match="storageAccess"):
+        server.describe_column("data/run.csv", "loss", ctx)
+    ctx.headers[workspace.STORAGE_HEADER] = "someone-elses-token"
+    with pytest.raises(server.ToolError, match=r"\(401\)"):
+        server.describe_column("data/run.csv", "loss", ctx)
