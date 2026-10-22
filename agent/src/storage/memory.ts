@@ -20,8 +20,11 @@ import { asUser, inTransaction, type Sql, type Tx } from "./db";
 export const MEMORY_TYPES = ["preference", "profile", "project", "reference", "feedback"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 export type MemoryAuthor = "user" | "agent";
-export type MemoryMode = "on" | "off";
-export type MemoryEventKind = "read" | "create" | "update" | "archive";
+/** on: Claude changes notes itself (with Undo); ask: its changes wait in the inbox; off: no memory. */
+export type MemoryMode = "on" | "ask" | "off";
+/** propose: a change waiting in the inbox (not a memory_events row). */
+export type MemoryEventKind = "read" | "create" | "update" | "archive" | "propose";
+export type InboxOp = "add" | "update" | "delete";
 
 /** Notes per user (archived ones not counted). */
 export const MAX_NOTES = 200;
@@ -29,6 +32,8 @@ export const MAX_BODY = 16_000;
 export const MAX_DESCRIPTION = 300;
 /** How much of the prompt the index of notes may take, in characters. */
 export const INDEX_CHARS = 6_000;
+/** Changes waiting for review per user; more are refused until some are decided. */
+export const MAX_INBOX = 50;
 
 export interface MemorySummary {
   name: string;
@@ -70,6 +75,32 @@ export interface MemoryInput {
   description: string;
   type: string;
   body: string;
+}
+
+/** A change Claude proposed, waiting for the user. */
+export interface InboxItem {
+  id: string;
+  op: InboxOp;
+  name: string;
+  description: string | null;
+  type: MemoryType | null;
+  body: string | null;
+  /** The note's version the change was made against. */
+  baseVersion: number | null;
+  /** chat: in a chat; learn: from a past chat, in the background. */
+  source: "chat" | "learn";
+  threadId: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** One of Claude's changes, for the activity list (Undo while it is the latest). */
+export interface MemoryActivity extends MemoryEvent {
+  threadId: string;
+  /** chat: in a chat; learn: from a past chat; inbox: accepted from the inbox. */
+  source: "chat" | "learn" | "inbox";
+  at: string;
+  undone: boolean;
 }
 
 /** The chat run a change or read happened in; none for the user's own edits. */
@@ -167,6 +198,37 @@ const toSummary = (row: MemoryRow): MemorySummary => {
   delete note.body;
   return note as MemorySummary;
 };
+
+/** The run id the background learner records its changes under. */
+export const LEARN_RUN = "learn";
+
+interface InboxRow {
+  id: string;
+  op: InboxOp;
+  name: string;
+  description: string | null;
+  type: MemoryType | null;
+  body: string | null;
+  base_version: number | null;
+  source: "chat" | "learn";
+  thread_id: string | null;
+  reason: string | null;
+  created_at: Date;
+}
+
+const toInboxItem = (row: InboxRow): InboxItem => ({
+  id: row.id,
+  op: row.op,
+  name: row.name,
+  description: row.description,
+  type: row.type,
+  body: row.body,
+  baseVersion: row.base_version,
+  source: row.source,
+  threadId: row.thread_id,
+  reason: row.reason,
+  createdAt: row.created_at.toISOString(),
+});
 
 export class MemoryService {
   constructor(
@@ -501,7 +563,9 @@ export class MemoryService {
   }
 
   setMode(userId: string, mode: unknown): Promise<MemoryMode> {
-    if (mode !== "on" && mode !== "off") return Promise.reject(new MemoryError("mode is on or off"));
+    if (mode !== "on" && mode !== "ask" && mode !== "off") {
+      return Promise.reject(new MemoryError("mode is on, ask or off"));
+    }
     return this.as(userId, async (db) => {
       await db`
         INSERT INTO memory_settings (workspace_id, user_id, mode) VALUES (${this.workspaceId}, ${userId}, ${mode})
@@ -526,6 +590,167 @@ export class MemoryService {
       }
       return incognito;
     });
+  }
+
+  /**
+   * Puts a change in the user's inbox instead of making it. A pending change
+   * to the same note with the same op is replaced, so the inbox holds the
+   * latest one.
+   */
+  propose(
+    userId: string,
+    change: { op: InboxOp; name: string; input?: Partial<MemoryInput>; reason?: string | null },
+    origin: { source: "chat" | "learn"; threadId?: string | null },
+  ): Promise<InboxItem> {
+    const { op, name } = change;
+    if (op !== "add" && op !== "update" && op !== "delete") return Promise.reject(new MemoryError("op is add, update or delete"));
+    if (!validName(name)) return Promise.reject(new MemoryError(`Invalid memory name: ${String(name)}`));
+    let clean: (MemoryInput & { type: MemoryType }) | null = null;
+    try {
+      clean = op === "delete" ? null : checkInput(change.input ?? {});
+    } catch (err) {
+      return Promise.reject(err);
+    }
+    const reason = change.reason?.replace(/\s+/g, " ").trim().slice(0, 500) || null;
+    return this.as(userId, async (db) => {
+      const row = await this.row(db, userId, name);
+      if (op === "add" && row && !row.archived_at) throw new MemoryConflictError(`A memory named ${name} already exists`);
+      if (op !== "add" && (!row || row.archived_at)) throw new MemoryNotFoundError(name);
+      const base = op === "add" ? null : row!.version;
+      const [pending] = await db<{ id: string }[]>`
+        SELECT id FROM memory_inbox
+        WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND status = 'pending'
+          AND name = ${name} AND op = ${op}
+        FOR UPDATE`;
+      if (pending) {
+        const [item] = await db<InboxRow[]>`
+          UPDATE memory_inbox SET
+            description = ${clean?.description ?? null}, type = ${clean?.type ?? null}, body = ${clean?.body ?? null},
+            base_version = ${base}, source = ${origin.source}, thread_id = ${origin.threadId ?? null},
+            reason = ${reason}, created_at = now()
+          WHERE id = ${pending.id} RETURNING *`;
+        return toInboxItem(item);
+      }
+      const [{ count }] = await db<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM memory_inbox
+        WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND status = 'pending'`;
+      if (count >= MAX_INBOX) throw new MemoryError(`The memory inbox has ${MAX_INBOX} changes waiting; review some first`);
+      const [item] = await db<InboxRow[]>`
+        INSERT INTO memory_inbox
+          (workspace_id, user_id, op, name, description, type, body, base_version, source, thread_id, reason)
+        VALUES (${this.workspaceId}, ${userId}, ${op}, ${name}, ${clean?.description ?? null}, ${clean?.type ?? null},
+                ${clean?.body ?? null}, ${base}, ${origin.source}, ${origin.threadId ?? null}, ${reason})
+        RETURNING *`;
+      return toInboxItem(item);
+    });
+  }
+
+  /** Changes waiting for the user, oldest first. */
+  inbox(userId: string): Promise<InboxItem[]> {
+    return this.as(userId, async (db) => {
+      const rows = await db<InboxRow[]>`
+        SELECT * FROM memory_inbox
+        WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND status = 'pending'
+        ORDER BY created_at, id`;
+      return rows.map(toInboxItem);
+    });
+  }
+
+  /**
+   * Makes a proposed change, as Claude's (so it shows in the activity with
+   * Undo). Refused when the note changed since it was proposed.
+   */
+  async accept(userId: string, id: string): Promise<{ note: MemoryNote | null; event: MemoryEvent | null }> {
+    const item = await this.decide(userId, id, "accepted");
+    const run = { threadId: item.threadId ?? "", runId: "inbox" };
+    try {
+      if (item.op === "delete") {
+        const note = await this.get(userId, item.name);
+        if (!note || note.archived || note.version !== item.baseVersion) {
+          throw new MemoryConflictError(`${item.name} changed since Claude proposed this`);
+        }
+        return await this.archive(userId, item.name, true, run);
+      }
+      const input = { description: item.description!, type: item.type!, body: item.body! };
+      return await this.save(userId, item.name, input, "agent", {
+        run,
+        create: item.op === "add",
+        ifVersion: item.op === "update" ? item.baseVersion! : undefined,
+      });
+    } catch (err) {
+      // Back to waiting, so the user can reject it or look again.
+      await this.as(userId, (db) => db`UPDATE memory_inbox SET status = 'pending', decided_at = NULL WHERE id = ${id}`);
+      if (err instanceof MemoryConflictError) {
+        throw new MemoryConflictError(`${item.name} changed since Claude proposed this; reject it, or edit the note yourself`);
+      }
+      throw err;
+    }
+  }
+
+  /** Drops a proposed change. */
+  async reject(userId: string, id: string): Promise<void> {
+    await this.decide(userId, id, "rejected");
+  }
+
+  private decide(userId: string, id: string, status: "accepted" | "rejected"): Promise<InboxItem> {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return Promise.reject(new MemoryNotFoundError("change in the inbox"));
+    return this.as(userId, async (db) => {
+      const [row] = await db<InboxRow[]>`
+        UPDATE memory_inbox SET status = ${status}, decided_at = now()
+        WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId} AND status = 'pending'
+        RETURNING *`;
+      if (!row) throw new MemoryNotFoundError("change in the inbox");
+      return toInboxItem(row);
+    });
+  }
+
+  /** Claude's recent changes to the user's notes, newest first. */
+  activity(userId: string, limit = 30): Promise<MemoryActivity[]> {
+    return this.as(userId, async (db) => {
+      const rows = await db<{
+        id: string; name: string; description: string; kind: MemoryEventKind; version: number;
+        thread_id: string; run_id: string; created_at: Date; undone_at: Date | null;
+      }[]>`
+        SELECT e.id, m.name, m.description, e.kind, e.version, e.thread_id, e.run_id, e.created_at, e.undone_at
+        FROM memory_events e JOIN memories m ON m.id = e.memory_id
+        WHERE e.workspace_id = ${this.workspaceId} AND e.user_id = ${userId} AND e.kind <> 'read'
+        ORDER BY e.created_at DESC, e.id
+        LIMIT ${Math.min(Math.max(limit, 1), 100)}`;
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        kind: r.kind,
+        version: r.version,
+        threadId: r.thread_id,
+        source: r.run_id === LEARN_RUN ? "learn" : r.run_id === "inbox" ? "inbox" : "chat",
+        at: r.created_at.toISOString(),
+        undone: r.undone_at !== null,
+      }));
+    });
+  }
+
+  /**
+   * The notes in use, in full where they fit in `maxChars`, for the
+   * background learner to compare a chat against.
+   */
+  async notesForLearning(userId: string, maxChars = 24_000): Promise<string> {
+    const rows = await this.as(userId, (db) => db<MemoryRow[]>`
+      SELECT * FROM memories
+      WHERE workspace_id = ${this.workspaceId} AND user_id = ${userId} AND archived_at IS NULL
+      ORDER BY coalesce(last_used_at, updated_at) DESC, name`);
+    const parts: string[] = [];
+    let size = 0;
+    for (const row of rows) {
+      const used = row.last_used_at ? row.last_used_at.toISOString().slice(0, 10) : "never";
+      const head = `<note name="${row.name}" type="${row.type}" updated="${row.updated_at.toISOString().slice(0, 10)}" last_used="${used}">`;
+      const full = `${head}\n${row.description}\n\n${row.body}\n</note>`;
+      const text = size + full.length <= maxChars ? full : `${head}\n${row.description}\n(body left out for length)\n</note>`;
+      if (size + text.length > maxChars) break;
+      parts.push(text);
+      size += text.length;
+    }
+    return parts.join("\n");
   }
 
   /** Every note as memory/<name>.md (archived ones under memory/archived/), zipped. */

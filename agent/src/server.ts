@@ -36,6 +36,7 @@ import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
 import { prepareMemory } from "./memory/run";
+import { learningEnabled, MemoryLearner } from "./memory/learn";
 import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
@@ -74,6 +75,8 @@ const skills = new SkillService(currentStorage);
 const hub = new SkillHub(currentStorage, skills);
 const handleSkills = createSkillsHandler(skills, hub, currentStorage, storageState);
 const handleMemory = createMemoryHandler(currentStorage, storageState);
+// Learns from chats once they go quiet (MEMORY=on, storage; ./memory/learn.ts).
+if (storageConfig && learningEnabled()) new MemoryLearner(currentStorage).start();
 
 /** The run's skills: built-in ones, plus the workspace's when storage is up, in this chat's modes. */
 async function prepareSkills(

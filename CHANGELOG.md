@@ -15,6 +15,14 @@
 
 ### Added
 
+- Memory learns from chats (#93, step 2). Once a chat has been quiet for 10 minutes, a
+  small model reviews it against the user's notes and adds, merges, corrects or retires
+  notes (at most 5 changes per chat). A new "Ask first" mode sends every change, from chats
+  and from learning, to a review inbox in the Memory view. Turns that read files, web pages
+  or other tool output always go through the inbox, so text in them can't quietly rewrite
+  memory. The Memory view also lists Claude's recent changes with Undo and marks notes
+  unused for 60 days. `MEMORY_LEARN=off` turns learning off; `MEMORY_MODEL` and
+  `MEMORY_IDLE_MINUTES` tune it. Migration `019_memory_learning.sql` runs on start.
 - Personalized memory, experimental (#93). With `MEMORY=on` and server storage, Claude keeps
   short notes about each user across chats. Every chat's prompt gets an index of them, and
   Claude has memory tools to read, search, save, edit and delete notes. Only that user sees

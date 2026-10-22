@@ -19,11 +19,16 @@ import { memoryEnabled } from "./run";
  * server storage; otherwise every route answers 404 and the app hides memory.
  * Everything is the signed-in user's own: nobody reads another's notes.
  *
- *   GET /memory?thread=           {mode, incognito, notes, types, limits}: your
- *                                 notes (archived ones last, archived: true),
- *                                 memory on/off for you, and whether `thread`
- *                                 is an incognito chat
- *   PUT /memory/settings          {mode?: on | off, thread?, incognito?}
+ *   GET /memory?thread=           {mode, incognito, notes, inbox, types, limits}:
+ *                                 your notes (archived ones last, archived:
+ *                                 true), the changes waiting for your review,
+ *                                 memory on/ask/off for you, and whether
+ *                                 `thread` is an incognito chat
+ *   PUT /memory/settings          {mode?: on | ask | off, thread?, incognito?}
+ *   GET /memory/activity          Claude's recent changes, newest first
+ *   POST /memory/inbox/<id>/accept    makes a proposed change (409 when the
+ *                                 note changed since)
+ *   POST /memory/inbox/<id>/reject    drops it
  *   GET /memory/export            every note as memory/<name>.md, zipped
  *   GET /memory/notes/<name>      {note, versions}
  *   PUT /memory/notes/<name>      {description, type, body} creates or replaces
@@ -60,10 +65,15 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     const [section, name, action] = parts;
     if (req.method === "GET" && !section) {
       const thread = url.searchParams.get("thread");
-      const [settings, notes] = await Promise.all([memory.settings(userId, thread), memory.list(userId)]);
+      const [settings, notes, inbox] = await Promise.all([
+        memory.settings(userId, thread),
+        memory.list(userId),
+        memory.inbox(userId),
+      ]);
       return send(res, 200, {
         ...settings,
         notes,
+        inbox,
         types: MEMORY_TYPES,
         limits: { notes: MAX_NOTES, body: MAX_BODY, description: MAX_DESCRIPTION, index: INDEX_CHARS },
       });
@@ -75,6 +85,17 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       if (input.incognito !== undefined) await memory.setIncognito(userId, input.thread, input.incognito === true);
       const thread = typeof input.thread === "string" ? input.thread : null;
       return send(res, 200, await memory.settings(userId, thread));
+    }
+    if (req.method === "GET" && section === "activity" && !name) {
+      return send(res, 200, { activity: await memory.activity(userId) });
+    }
+    if (req.method === "POST" && section === "inbox" && name && (action === "accept" || action === "reject")) {
+      if (action === "reject") {
+        await memory.reject(userId, name);
+        return send(res, 200, { id: name, status: "rejected" });
+      }
+      const { note } = await memory.accept(userId, name);
+      return send(res, 200, { id: name, status: "accepted", note });
     }
     if (req.method === "GET" && section === "export" && !name) {
       const zip = await memory.exportZip(userId);

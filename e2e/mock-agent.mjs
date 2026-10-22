@@ -24,7 +24,8 @@
  *
  * A message starting with "Remember" saves it as a memory note (reply-style),
  * as Claude would with its memory tools, and reports it with a "memory" event,
- * unless memory is off or the chat is incognito. /memory answers like the
+ * unless memory is off or the chat is incognito; with memory set to "ask" it
+ * proposes the note to the inbox instead. /memory answers like the
  * agent's memory API (src/memory/http.ts) with notes kept in memory.
  *
  * `POST /suggest` answers the chat's follow-up chips with two canned ones
@@ -155,7 +156,7 @@ async function handleSkills(req, res, url) {
 }
 
 // Memory (the agent's src/memory/http.ts, in memory): name → { note, versions }.
-const memory = { mode: "on", incognito: new Set(), notes: new Map(), events: new Map() };
+const memory = { mode: "on", incognito: new Set(), notes: new Map(), events: new Map(), inbox: [], activity: [] };
 const MEMORY_TYPES = ["preference", "profile", "project", "reference", "feedback"];
 // The list has no bodies.
 const summary = (note) => ({ ...note, body: undefined });
@@ -176,6 +177,7 @@ function saveMemory(name, input, by) {
   if (by !== "agent") return { note, event: null };
   const event = { id: randomUUID(), name, description: note.description, kind, version };
   memory.events.set(event.id, { ...event, before: entry ?? null });
+  memory.activity.unshift({ id: event.id, name, kind, source: "chat", at: now, undone: false });
   return { note, event };
 }
 
@@ -193,13 +195,24 @@ async function handleMemory(req, res, url) {
     const thread = url.searchParams.get("thread");
     const notes = [...memory.notes.values()].map((e) => summary(e.note));
     notes.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updatedAt.localeCompare(a.updatedAt));
-    return json({ mode: memory.mode, incognito: memory.incognito.has(thread), notes, types: MEMORY_TYPES });
+    return json({ mode: memory.mode, incognito: memory.incognito.has(thread), notes, inbox: memory.inbox, types: MEMORY_TYPES });
   }
   if (req.method === "PUT" && section === "settings") {
     if (input.mode) memory.mode = input.mode;
     if (input.incognito === true) memory.incognito.add(input.thread);
     if (input.incognito === false) memory.incognito.delete(input.thread);
     return json({ mode: memory.mode, incognito: memory.incognito.has(input.thread) });
+  }
+  if (req.method === "GET" && section === "activity") return json({ activity: memory.activity });
+  if (req.method === "POST" && section === "inbox" && (action === "accept" || action === "reject")) {
+    const item = memory.inbox.find((i) => i.id === name);
+    if (!item) return json({ error: "No such change in the inbox" }, 404);
+    memory.inbox = memory.inbox.filter((i) => i !== item);
+    if (action === "reject") return json({ id: name, status: "rejected" });
+    const { note, event } = saveMemory(item.name, item, "agent");
+    memory.activity[0] = { ...memory.activity[0], source: "inbox" };
+    memory.events.get(event.id).source = "inbox";
+    return json({ id: name, status: "accepted", note });
   }
   if (req.method === "GET" && section === "export") {
     // An empty .zip.
@@ -227,6 +240,8 @@ async function handleMemory(req, res, url) {
     const event = memory.events.get(name);
     if (!event || event.undone) return json({ error: "Nothing to undo" }, 409);
     event.undone = true;
+    const listed = memory.activity.find((a) => a.id === event.id);
+    if (listed) listed.undone = true;
     if (event.before) memory.notes.set(event.name, event.before);
     else memory.notes.delete(event.name);
     return json({ name: event.name, note: memory.notes.get(event.name)?.note ?? null });
@@ -331,7 +346,7 @@ const server = http.createServer(async (req, res) => {
   const slashSkill = SKILLS.find((s) => s.name === slashName && skillInfo(s, input.threadId).mode !== "off")?.name;
   // "Remember …" saves a note, where memory is on for this chat.
   const remember =
-    last?.role === "user" && /^remember\b/i.test(asked) && memory.mode === "on" && !memory.incognito.has(input.threadId);
+    last?.role === "user" && /^remember\b/i.test(asked) && memory.mode !== "off" && !memory.incognito.has(input.threadId);
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")
@@ -347,7 +362,15 @@ const server = http.createServer(async (req, res) => {
   if (slashSkill) {
     send({ type: "CUSTOM", name: "skill_used", value: { skill: slashSkill, source: "builtin", trigger: "slash" } });
   }
-  if (remember) {
+  if (remember && memory.mode === "ask") {
+    const item = {
+      id: randomUUID(), op: memory.notes.has("reply-style") ? "update" : "add", name: "reply-style",
+      description: "Prefers short answers that lead with the result", type: "preference",
+      body: asked.replace(/^remember( that)?\s*/i, ""), source: "chat", reason: null, createdAt: new Date().toISOString(),
+    };
+    memory.inbox.push(item);
+    send({ type: "CUSTOM", name: "memory", value: { id: item.id, name: item.name, description: item.description, kind: "propose", version: 0 } });
+  } else if (remember) {
     const { event } = saveMemory(
       "reply-style",
       { description: "Prefers short answers that lead with the result", type: "preference", body: asked.replace(/^remember( that)?\s*/i, "") },

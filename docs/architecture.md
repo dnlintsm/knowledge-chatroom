@@ -330,8 +330,22 @@ Code's memory files and `SKILL.md`.
   editor in the middle pane (versions, restore, archive, delete) and the line under the
   chat input. That line shows what Claude used and changed this turn, with Undo, and the
   incognito toggle.
-- Not yet: learning from finished chats in the background, a review inbox, shared and hub
-  memory, and access for Python agents. These are the later steps of #93.
+- Learning (`019_memory_learning.sql`). Memory mode is `on`, `ask` or `off`. In `ask`
+  mode, and in any run that has used a tool other than the memory tools (a `PreToolUse`
+  hook marks the run, since files, web pages and MCP results may carry injected text),
+  Claude's saves, edits and deletes become proposals in `memory_inbox` instead. The user
+  accepts or rejects them in the Memory view; accepting applies the change against the
+  version it was made on, or reports a conflict.
+- `agent/src/memory/learn.ts` is the background learner. Every minute it picks chats idle
+  for `MEMORY_IDLE_MINUTES` (default 10) and at most 3 days old, not incognito, whose
+  owner has memory on or ask, and asks a small model (`MEMORY_MODEL`, else the follow-up
+  chips' model) for at most 5 changes to the notes, covering new facts, duplicates,
+  contradictions and stale notes. Changes apply directly in `on` mode (with Undo, listed
+  under "Recent changes by Claude") or go to the inbox in `ask` mode.
+  `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
+  it off.
+- Not yet: suggesting notes become skills or knowledge nodes, shared and hub memory, and
+  access for Python agents. These are the later steps of #93.
 
 ### File references in answers
 
