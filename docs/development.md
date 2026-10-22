@@ -118,6 +118,15 @@ hour), and only the storage API takes it. Servers must not connect to the databa
 or object store directly: the app's connection owns the tables, so row security
 doesn't apply to it, and presigned links skip every check.
 
+`memoryAccess` gives a server the user's memory in the chat that calls it (#93):
+in runs where memory is on, each run also sends an `X-Knowledge-Memory` token
+(aud `memory`, with the chat's `thread` and `node`; without login an unsigned
+`local.` token). The server passes it to `GET /memory/agent` (the memory prompt
+and the `memory_*` tools with JSON schemas) and `POST /memory/agent/tools/<tool>`.
+It reads like Claude in that chat; every change waits in the user's Memory inbox
+or goes to a shared note's editors, and shows under the reply while the run goes.
+Incognito chats and memory turned off get no token, and each call checks again.
+
 [examples/python-agent](../examples/python-agent/README.md) is a complete sample:
 a Python agent's prompt moved into a skill and its tools into an MCP server, with
 the forwarded user checked and tests. Start there when bringing a Python agent in.
