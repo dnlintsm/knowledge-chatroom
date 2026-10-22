@@ -85,6 +85,10 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     await tx.unsafe(`GRANT USAGE ON SEQUENCE audit_log_id_seq TO ${role}`);
     // Chat history (017_chats.sql): only its owner's, row security sees to that.
     await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON chats, chat_runs TO ${role}`);
+    // Personalized memory (018_memory.sql): likewise only its owner's.
+    await tx.unsafe(
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats TO ${role}`,
+    );
     return true;
   }) as Promise<boolean>;
 }

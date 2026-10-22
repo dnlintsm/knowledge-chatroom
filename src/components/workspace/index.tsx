@@ -25,6 +25,7 @@ import { ChatPane } from "./chat-pane";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
+import { MemoryProvider } from "./memory";
 import { SkillsProvider } from "./skills";
 import { Splitter } from "./splitter";
 import { useWorkspace, WorkspaceProvider } from "./store";
@@ -46,7 +47,9 @@ export function Workspace() {
     <WorkbenchProvider>
       <ActionsProvider>
         <SkillsProvider>
-          <WorkspaceLayout />
+          <MemoryProvider>
+            <WorkspaceLayout />
+          </MemoryProvider>
         </SkillsProvider>
       </ActionsProvider>
     </WorkbenchProvider>

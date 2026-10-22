@@ -10,10 +10,11 @@ if (missing.length) {
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cli = fileURLToPath(new URL("../node_modules/tsx/dist/cli.mjs", import.meta.url));
-// The real embedding model downloads about 120 MB, so it's checked only on request.
-const files = ["src/storage/storage.test.ts"];
+// One file at a time: each resets the test database. The real embedding model
+// downloads about 120 MB, so it's checked only on request.
+const files = ["src/storage/storage.test.ts", "src/storage/memory.test.ts"];
 if (process.env.EMBEDDING_TEST) files.push("src/storage/embeddings.test.ts");
-const result = spawnSync(process.execPath, [cli, "--test", ...files], {
+const result = spawnSync(process.execPath, [cli, "--test", "--test-concurrency=1", ...files], {
   cwd: root,
   stdio: "inherit",
 });

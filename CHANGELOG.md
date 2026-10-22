@@ -15,6 +15,14 @@
 
 ### Added
 
+- Personalized memory, experimental (#93). With `MEMORY=on` and server storage, Claude keeps
+  short notes about each user across chats. Every chat's prompt gets an index of them, and
+  Claude has memory tools to read, search, save, edit and delete notes. Only that user sees
+  their notes, workspace owners included. The Memory view lists them, and each one opens in
+  the middle pane to edit, restore an earlier version, archive or delete. Under the chat
+  input, a line shows which notes Claude used or changed in the turn, with Undo. A chat can
+  be made incognito so that Claude neither reads nor saves memory in it. Memory can be
+  turned off per user and exported as a `.zip`. Migration `018_memory.sql` runs on start.
 - Chat history is kept per user (#91). Chats survive reloads and restarts: with server
   storage in Postgres (migration `017_chats.sql`, run on start), without it in memory. The
   history button lists your own chats, which you can reopen, rename, archive or delete;

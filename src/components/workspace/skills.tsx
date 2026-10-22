@@ -14,6 +14,7 @@ import {
 import { AlertTriangle, Sparkles, SquareTerminal } from "lucide-react";
 import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
+import { MemoryStatus } from "./memory";
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 
@@ -473,7 +474,7 @@ const SkillTextArea = forwardRef<HTMLTextAreaElement, CopilotChatInput.TextAreaP
 
 type ChatInputProps = Parameters<typeof CopilotChatInput>[0];
 
-/** The chat's input slot: CopilotKit's input plus the skills "/" menu and status bar. */
+/** The chat's input slot: CopilotKit's input plus the skills "/" menu, the memory line and the skills status bar. */
 export function SkillChatInput(props: ChatInputProps) {
   const { skills, status, turn } = useSkills();
   const value = props.value ?? "";
@@ -560,6 +561,7 @@ export function SkillChatInput(props: ChatInputProps) {
           textArea={SkillTextArea}
           disclaimer={() => null}
         />
+        <MemoryStatus />
         {status === "ready" ? (
           <SkillStatusBar skills={skills} turn={turn} />
         ) : (

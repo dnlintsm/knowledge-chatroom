@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   Bot,
+  Brain,
   ChevronDown,
   ChevronRight,
   Files,
@@ -29,6 +30,7 @@ import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
 import { findRunFolders, runsUnder, type RunFolder } from "./runs";
 import { SearchPanel } from "./search-panel";
+import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
 import { useWorkbench } from "./workbench";
@@ -42,6 +44,7 @@ const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "runs", label: "Runs", icon: FlaskConical },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
+  { id: "memory", label: "Memory", icon: Brain },
   { id: "uploads", label: "Uploads", icon: Upload },
   { id: "artifacts", label: "Artifacts", icon: Package },
 ];
@@ -56,12 +59,14 @@ export function ActivityBar({
   panelOpen: boolean;
   onSelect: (view: SidebarView) => void;
 }) {
+  // Memory shows only where the server has it (MEMORY=on with storage).
+  const memory = useMemory().status !== "unavailable";
   return (
     <nav
       aria-label="Sidebar views"
       className="flex flex-col items-center gap-1 py-2 border-r border-[var(--border)] bg-[var(--secondary)]"
     >
-      {VIEWS.map(({ id, label, icon: Icon }) => {
+      {VIEWS.filter(({ id }) => id !== "memory" || memory).map(({ id, label, icon: Icon }) => {
         const active = panelOpen && view === id;
         return (
           <button
@@ -173,7 +178,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
         dragging && "ring-2 ring-inset ring-[var(--ring)]",
       )}
       onDragOver={(e) => {
-        if (view === "search" || view === "runs" || !canEdit) return;
+        if (view === "search" || view === "runs" || view === "memory" || !canEdit) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -211,6 +216,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
             }
           />
         )}
+        {view === "memory" && <MemoryPanel />}
         {view === "uploads" && (
           <FlatList
             files={files.filter((f) => f.kind === "upload")}

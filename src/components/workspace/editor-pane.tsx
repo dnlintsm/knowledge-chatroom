@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bot, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
+import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
 import { ExperimentPanel, RunsPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
+import { MemoryEditor } from "./memory";
 import { ReviewPanel } from "./review-panel";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
@@ -18,6 +19,7 @@ import {
   isBuiltInTab,
   isMarkdown,
   isTextFile,
+  MEMORY_TAB,
   REVIEW_TAB,
   RUNS_TAB,
   TASKS_TAB,
@@ -29,6 +31,7 @@ const BUILT_IN_TABS = {
   [EXPERIMENT_TAB]: { label: "Experiment", icon: FlaskConical },
   [REVIEW_TAB]: { label: "Proposed changes", icon: FileDiff },
   [RUNS_TAB]: { label: "Runs", icon: Table2 },
+  [MEMORY_TAB]: { label: "Memory", icon: Brain },
 };
 
 type Mode = "preview" | "edit";
@@ -187,6 +190,8 @@ export function EditorPane() {
           <ReviewPanel />
         ) : active === RUNS_TAB ? (
           <RunsPanel />
+        ) : active === MEMORY_TAB ? (
+          <MemoryEditor />
         ) : activeFile ? (
           <FileView key={activeFile.path} file={activeFile} mode={mode} />
         ) : (
