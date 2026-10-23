@@ -273,6 +273,7 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
 
 /** Markdown with YAML front matter (as in SKILL.md) shown as a metadata card. */
 function Markdown({ text }: { text: string }) {
+  const { getFile } = useWorkspace();
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   const frontMatter = match?.[0] ?? "";
   const meta = match?.[1]
@@ -297,7 +298,22 @@ function Markdown({ text }: { text: string }) {
       )}
       {/* Static mode parses the whole text at once, so source positions are file
           lines; blanking the front matter (not cutting it) keeps them that way. */}
-      <Streamdown mode="static" rehypePlugins={PREVIEW_REHYPE_PLUGINS}>
+      <Streamdown
+        mode="static"
+        rehypePlugins={PREVIEW_REHYPE_PLUGINS}
+        components={{
+          img(props) {
+            const src = props.src;
+            if (src && !src.match(/^[a-z]+:/i) && !src.startsWith("/")) {
+              const file = getFile(src);
+              if (file?.content) {
+                return <img {...props} src={file.content} />;
+              }
+            }
+            return <img {...props} />;
+          },
+        }}
+      >
         {frontMatter.replace(/[^\r\n]/g, "") + text.slice(frontMatter.length)}
       </Streamdown>
     </>
