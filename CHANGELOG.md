@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- `IDENTITY_FORMAT=v1` is gone (#100). Identity, storage and memory tokens are only `v2`
+  (Ed25519), and `v1` HMAC tokens are refused. If the app or agent still has
+  `IDENTITY_FORMAT=v1` set, the agent refuses to start and says why: unset it, and make
+  sure outside services verify with the public key from `GET /identity/public-key`.
+
+### Removed
+
+- The `v1` (HMAC with `AUTH_SECRET`) identity token format and the `IDENTITY_FORMAT`
+  setting, kept in 0.2.0 for one release while services moved to the public key.
+
 ## 0.2.0
 
 Claude remembers: with `MEMORY=on`, Claude keeps notes about each user that only they

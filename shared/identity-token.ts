@@ -2,12 +2,10 @@
  * The signed identity tokens that say who a request is for (X-Knowledge-User),
  * made and checked the same way by the Next.js app and the agent (issue #88).
  *
- * - `v2.<payload>.<Ed25519 signature>` (default): signed with a key pair
- *   derived from AUTH_SECRET. Outside services (remote backends, MCP servers)
- *   verify with the public key alone, so they can't sign for anyone.
- * - `v1.<payload>.<HMAC-SHA256>`: the old format, checked with AUTH_SECRET
- *   itself. Still accepted, and made when IDENTITY_FORMAT=v1, for one release
- *   so services that verify v1 keep working while they move to the public key.
+ * Tokens are `v2.<payload>.<Ed25519 signature>`, signed with a key pair
+ * derived from AUTH_SECRET. Outside services (remote backends, MCP servers)
+ * verify with the public key alone, so they can't sign for anyone. The old
+ * `v1` HMAC format was accepted for one release (0.2.0) and is gone.
  *
  * The payload is base64url JSON {sub, email?, name?, exp, aud?, via?}; `exp`
  * is in seconds since the epoch.
@@ -24,12 +22,10 @@
  */
 
 import {
-  createHmac,
   createPrivateKey,
   createPublicKey,
   hkdfSync,
   sign,
-  timingSafeEqual,
   verify,
   type KeyObject,
 } from "node:crypto";
@@ -63,17 +59,21 @@ export function storageTokenSeconds(env: Env = process.env): number {
   return seconds;
 }
 
-export type IdentityFormat = "v1" | "v2";
-
 type Env = Record<string, string | undefined>;
 
-/** The format new tokens are made in: v2 unless IDENTITY_FORMAT=v1. */
-export function identityFormat(env: Env = process.env): IdentityFormat {
-  const value = env.IDENTITY_FORMAT?.trim().toLowerCase() || "v2";
-  if (value !== "v1" && value !== "v2") {
-    throw new Error(`IDENTITY_FORMAT must be "v1" or "v2", not "${env.IDENTITY_FORMAT}"`);
-  }
-  return value;
+/**
+ * Refuses a leftover IDENTITY_FORMAT=v1 at startup: v1 tokens are no longer
+ * made or accepted, so a service still verifying them would fail on every
+ * request. Better to stop here with the reason.
+ */
+export function checkIdentityFormat(env: Env = process.env): void {
+  const value = env.IDENTITY_FORMAT?.trim().toLowerCase();
+  if (!value || value === "v2") return;
+  throw new Error(
+    `IDENTITY_FORMAT=${env.IDENTITY_FORMAT} is no longer supported: identity tokens are always v2 ` +
+      "(Ed25519). Unset it, and have outside services verify with the public key from " +
+      "GET /identity/public-key (docs/remote-agent.md).",
+  );
 }
 
 // PKCS#8 DER header of an Ed25519 private key; the 32-byte seed follows it.
@@ -103,22 +103,16 @@ export function identityPublicKey(secret: string): string {
 }
 
 const b64 = (data: Buffer | string) => Buffer.from(data).toString("base64url");
-const mac = (secret: string, data: string) => createHmac("sha256", secret).update(data).digest();
 
-export function signIdentityToken(
-  claims: IdentityClaims,
-  secret: string,
-  format: IdentityFormat = identityFormat(),
-): string {
-  const body = `${format}.${b64(JSON.stringify(claims))}`;
-  const signature =
-    format === "v1" ? mac(secret, body) : sign(null, Buffer.from(body), keyPair(secret).privateKey);
-  return `${body}.${b64(signature)}`;
+export function signIdentityToken(claims: IdentityClaims, secret: string): string {
+  const body = `v2.${b64(JSON.stringify(claims))}`;
+  return `${body}.${b64(sign(null, Buffer.from(body), keyPair(secret).privateKey))}`;
 }
 
 /**
- * The claims of a token signed for AUTH_SECRET in either format, or null when
- * it is malformed, forged or expired. Callers check `sub` and `aud`.
+ * The claims of a token signed for AUTH_SECRET, or null when it is malformed,
+ * forged, expired or in another format (including the retired v1). Callers
+ * check `sub` and `aud`.
  */
 export function readIdentityToken(
   token: string | undefined,
@@ -126,17 +120,10 @@ export function readIdentityToken(
   now = Date.now(),
 ): IdentityClaims | null {
   const parts = token?.split(".") ?? [];
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3 || parts[0] !== "v2") return null;
   const body = `${parts[0]}.${parts[1]}`;
   const given = Buffer.from(parts[2], "base64url");
-  if (parts[0] === "v1") {
-    const expected = mac(secret, body);
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  } else if (parts[0] === "v2") {
-    if (given.length !== 64 || !verify(null, Buffer.from(body), keyPair(secret).publicKey, given)) return null;
-  } else {
-    return null;
-  }
+  if (given.length !== 64 || !verify(null, Buffer.from(body), keyPair(secret).publicKey, given)) return null;
   try {
     const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as IdentityClaims;
     if (!claims || typeof claims !== "object") return null;

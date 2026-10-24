@@ -45,7 +45,7 @@ export interface Identity {
   node?: string | null;
 }
 
-/** A token for `identity`, in the IDENTITY_FORMAT the deployment uses. */
+/** A signed token for `identity`. */
 export function signIdentity(identity: Identity, secret: string): string {
   return signIdentityToken(identity, secret);
 }
