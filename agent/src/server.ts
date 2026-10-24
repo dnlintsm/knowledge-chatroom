@@ -56,7 +56,7 @@ import { authSettings } from "../../shared/auth-mode";
 import {
   MEMORY_AUDIENCE,
   STORAGE_AUDIENCE,
-  identityFormat,
+  checkIdentityFormat,
   identityPublicKey,
   storageTokenSeconds,
 } from "../../shared/identity-token";
@@ -70,7 +70,7 @@ const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
 // Login settings are checked at startup whether or not storage is on.
 const authSecret = authSettings().secret;
-identityFormat();
+checkIdentityFormat();
 const STORAGE_TOKEN_SECONDS = storageTokenSeconds();
 // Outside services (remote backends, MCP servers) verify identity tokens with
 // this public key instead of AUTH_SECRET (docs/remote-agent.md).

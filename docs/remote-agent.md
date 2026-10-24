@@ -33,7 +33,7 @@ by the Next.js server, never by the browser. Keep it on a private network like t
 POST ${AGENT_URL}/agent/report
 Content-Type: application/json
 Accept: text/event-stream
-X-Knowledge-User: v1.<payload>.<signature>     (only with login)
+X-Knowledge-User: v2.<payload>.<signature>     (only with login)
 ```
 
 The body is an AG-UI `RunAgentInput`, and the answer is an AG-UI event stream (server-sent
@@ -119,9 +119,8 @@ v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.
   `examples/python-agent/lab_tools/identity.py` is a Python verifier. Call
   `verify(token, public_key(KNOWLEDGE_PUBLIC_KEY), audience=None)`: the app's header has no
   `aud`. `sub` is the same value as `user.id`.
-- **Older backends** that verify `v1` tokens (HMAC with `AUTH_SECRET`) keep working while
-  the app and agent run with `IDENTITY_FORMAT=v1`. That setting goes away in the next
-  release, so move to the public key.
+- **Older backends** that verify `v1` tokens (HMAC with `AUTH_SECRET`) no longer work:
+  the app and agent only make `v2` tokens, and `IDENTITY_FORMAT=v1` was removed after 0.2.0.
 - **Calling this repo's storage API**: use the `X-Knowledge-Storage` token below. The
   `X-Knowledge-User` header still works there for its 5 minutes, but a change made with it is
   recorded as the user's own, not Claude's, and skips the review Claude's node edits get.
