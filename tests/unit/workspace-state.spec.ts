@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { reduceWorkspace, type PersistedWorkspace } from "../../src/components/workspace/workspace-state";
-import { NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
+import { COLLAPSED_FOLDERS_KEY, NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistCollapsedFolders, persistWorkspace, readCollapsedFolders, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
 import type { WorkspaceFile } from "../../src/components/workspace/types";
 
 const file: WorkspaceFile = { path: "notes/a.md", kind: "note", content: "first", mime: "text/markdown", updatedAt: 1, author: "user" };
@@ -75,4 +75,16 @@ test("renaming a file moves its tab in place and keeps it active", () => {
   expect(next.files).toEqual([renamed]);
   expect(next.tabs).toEqual(["notes/plan.md", "notes/b.md", "::tasks"]);
   expect(next.active).toBe("notes/plan.md");
+});
+
+test("collapsed folders are remembered per place and tolerate bad data", () => {
+  const storage = browserStorage({ [COLLAPSED_FOLDERS_KEY]: JSON.stringify({ "": ["runs", 3], n1: "x" }) });
+  expect(readCollapsedFolders(storage, null)).toEqual(["runs"]);
+  expect(readCollapsedFolders(storage, "n1")).toEqual([]);
+  persistCollapsedFolders(storage, "n1", ["skills/summarize", "notes"]);
+  expect(readCollapsedFolders(storage, "n1")).toEqual(["notes", "skills/summarize"]);
+  expect(readCollapsedFolders(storage, null)).toEqual(["runs"]);
+  persistCollapsedFolders(storage, null, []);
+  expect(JSON.parse(storage.getItem(COLLAPSED_FOLDERS_KEY)!)).toEqual({ n1: ["notes", "skills/summarize"] });
+  expect(readCollapsedFolders(browserStorage({ [COLLAPSED_FOLDERS_KEY]: "{" }), null)).toEqual([]);
 });

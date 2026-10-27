@@ -375,6 +375,31 @@ test("files and layout survive a reload", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
 });
 
+test("collapsed folders stay collapsed across views and reloads", async ({ page }) => {
+  await page.goto("/");
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  const folder = (name: string) => page.getByRole("button", { name, exact: true });
+  const skill = page.locator('[role="treeitem"][title="skills/summarize/SKILL.md"]');
+  await expect(skill).toBeVisible();
+  await folder("summarize").click();
+  await folder("runs").click();
+  await expect(folder("summarize")).toHaveAttribute("aria-expanded", "false");
+  await expect(skill).toHaveCount(0);
+  await shot(page, "19-collapsed-folders");
+
+  // Away to another view and back, then a reload: still as left.
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  await files.click();
+  await expect(folder("summarize")).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await expect(folder("runs")).toHaveAttribute("aria-expanded", "false");
+  await expect(folder("skills")).toHaveAttribute("aria-expanded", "true");
+  await expect(skill).toHaveCount(0);
+
+  await folder("summarize").click();
+  await expect(skill).toBeVisible();
+});
+
 test("rename a file", async ({ page }) => {
   const NOTES = "notes";
   await gotoReport(page);
