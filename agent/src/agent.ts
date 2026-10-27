@@ -51,7 +51,7 @@ const SYSTEM_PROMPT = [
   "  selection arrive as context. Use the workspace file tools to look around (list,",
   "  read) and to create or edit files (write, full content); new generated",
   "  documents go under artifacts/. Say what you changed in one line.",
-  "- Runs: a run is an experiment with a report (its report.md, or xdoe-report/report.md).",
+  "- Runs: a run is an experiment with a report (its report.md).",
   "  The one the user is in arrives as currentExperiment in context, with its state",
   "  (ready, running, done, failed) and report. Answer about that run unless told",
   "  otherwise. Without one, answer about the files where the user is.",

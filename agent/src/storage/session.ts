@@ -338,27 +338,6 @@ export class Session {
     if (after !== before) await files.write(REPORT_PATH, new TextEncoder().encode(after));
   }
 
-  /**
-   * Moves the files of `folder` in a node (null: the root) into a new
-   * experiment of yours, e.g. a run folder from before runs were
-   * experiments. Moving files out of a place needs editor there.
-   */
-  async experimentFromFolder(
-    nodeId: string | null,
-    rawFolder: string,
-    input: ExperimentInput,
-  ): Promise<{ experiment: Experiment; moved: string[] }> {
-    await this.need(nodeId, "editor");
-    const folder = normalizePath(rawFolder.replace(/\/+$/, ""));
-    const userId = this.principal.userId;
-    const title = input.title ?? folder.split("/").pop()!;
-    return this.scoped((db) =>
-      on(this.parts.experiments, db).fromFolder(userId, nodeId, folder, { ...input, title }, (tx, id) =>
-        this.audit("experiment.from_folder", { experiment: id, node: nodeId, folder })(tx),
-      ),
-    );
-  }
-
   /** Archived experiments are read only, apart from changing the status back. */
   async updateExperiment(id: string, input: ExperimentInput): Promise<Experiment> {
     const current = await this.experiment(id);

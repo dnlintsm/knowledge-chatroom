@@ -16,7 +16,7 @@ async function shot(page: Page, name: string) {
 // Without server storage it is only a folder: runs are experiments, which
 // live on the server (runs.spec.ts shows them).
 const RUN = "runs/etch-2026-10-01";
-const REPORT = `${RUN}/xdoe-report/report.md`;
+const REPORT = `${RUN}/report.md`;
 
 /** The file list, with the sample run folder's report open. */
 async function gotoReport(page: Page) {
@@ -520,7 +520,7 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
     storage: "local",
     node: null,
     experiment: null,
-    selected_path: `${RUN}/xdoe-report/effects.csv`,
+    selected_path: `${RUN}/effects.csv`,
   });
 });
 
