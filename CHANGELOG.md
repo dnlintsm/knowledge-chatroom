@@ -1,17 +1,52 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-### Upgrading
+Files preview in the editor pane (images, PDFs, audio, video, code, HTML, TSV), the file
+tree remembers which folders you collapsed, and two leftovers kept for one release are
+removed: `v1` identity tokens and old `xdoe-report/` run folders. It's a minor release
+rather than a patch because those removals can break an upgrade; follow the steps below.
 
-- `IDENTITY_FORMAT=v1` is gone (#100). Identity, storage and memory tokens are only `v2`
-  (Ed25519), and `v1` HMAC tokens are refused. If the app or agent still has
-  `IDENTITY_FORMAT=v1` set, the agent refuses to start and says why: unset it, and make
-  sure outside services verify with the public key from `GET /identity/public-key`.
-- Old xDOE run folders (a folder holding `xdoe-report/`) can no longer be turned into runs,
-  and a run's report is only its top-level `report.md`. Convert any such folders on 0.2.0
-  before upgrading. A run made from one keeps its files, but its report no longer opens
-  by itself: rename its `xdoe-report/report.md` to `report.md`.
+### Upgrading from 0.2.0
+
+- **Check `IDENTITY_FORMAT` first.** `IDENTITY_FORMAT=v1` is gone (#100, #106). Identity,
+  storage and memory tokens are only `v2` (Ed25519), and `v1` HMAC tokens are refused. If
+  the app or agent still has `IDENTITY_FORMAT=v1` (or any value other than `v2`) set, the
+  agent refuses to start and says why: remove the variable from `.env` and the compose
+  file, and make sure remote backends and MCP servers verify with the public key from
+  `GET /identity/public-key` (see `docs/remote-agent.md`). Deployments without outside
+  services only need the variable unset, if it was set.
+- **Convert old run folders before upgrading** (#107). Folders holding `xdoe-report/` can
+  no longer be turned into runs, and a run's report is only its top-level `report.md`.
+  Use **Make run** on 0.2.0 for any such folder you still want as a run, then upgrade. A
+  run made from one earlier keeps its files, but its report no longer opens by itself:
+  rename its `xdoe-report/report.md` to `report.md`. Folders never converted stay
+  ordinary folders.
+- No database migrations in this release, and no new settings.
+- File previews load stored files through their signed S3 links, so `S3_PUBLIC_URL` must
+  be reachable from the browser (and https when the app is https). If it isn't, the image
+  viewer now says so instead of showing a broken image.
+
+### Added
+
+- Previews in the editor pane (#103, #104). Images get a viewer with Fit / Actual size,
+  pixel size and an Open link; PDFs open in the browser's viewer; audio and video play in
+  native players; code is highlighted with Preview / Edit like markdown (chat line
+  references highlight here too); HTML renders in a fully sandboxed frame with the source
+  under Edit; TSV shows as a table like CSV. Anything else shows "No preview" with a
+  Download link. More file types get the right MIME type (bmp, ico, avif, apng, tsv, htm,
+  common audio and video), and more text extensions (go, rs, java, c/cpp, rb, php, swift,
+  log, ini, jsonl, ipynb, vue, svelte and others) can be read by Claude too.
+- Folders you collapse in the file tree stay collapsed when you switch views or reload,
+  separately for the workspace root, each knowledge node and each run (#109). This is
+  kept per browser, like open tabs and the pane layout.
+
+### Fixed
+
+- An image that can't be loaded, or a format browsers don't show (HEIC, TIFF), no longer
+  shows a silent broken-image icon; the viewer explains the likely cause and offers Open /
+  Download (#103). Files with extensions missing from the MIME table, previously stored as
+  `application/octet-stream`, now preview by extension.
 
 ### Removed
 
@@ -20,6 +55,15 @@
 - The `xdoe-report/` run folder marker (#82): the Runs view's **Make run** list of old run
   folders, `POST /experiments/from-folder`, and `xdoe-report/report.md` as a run's report.
   The sample run folders in the browser-only workspace keep their report at `report.md`.
+
+### Known limitations
+
+- No previews for Office files (docx, xlsx, pptx) or HEIC/TIFF images, which need a
+  converter; notebooks show as JSON. Signed links last five minutes, so a long video
+  paused past that may need a reload to seek.
+- Memory still hasn't been tried with real Claude (#108). Server sessions and CSRF checks
+  (#64) and the audit finding in CopilotKit's unused Vertex AI provider (#75) are still
+  open.
 
 ## 0.2.0
 
