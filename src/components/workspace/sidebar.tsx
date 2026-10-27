@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   Bot,
   Brain,
@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
+import { persistCollapsedFolders, readCollapsedFolders } from "./local-persistence";
+import { experimentPlace, type PlaceId } from "./server-files";
 import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
 import { runsUnder } from "./runs";
@@ -475,16 +477,33 @@ function buildTree(files: WorkspaceFile[]): Folder {
   return root;
 }
 
+const NO_FOLDERS = new Set<string>();
+
+/**
+ * Which folders are collapsed in this place's file tree, remembered in this
+ * browser so switching views or reloading keeps them as the user left them.
+ */
+function useCollapsedFolders() {
+  const { node, experiment } = useWorkspace();
+  const place: PlaceId = experiment ? experimentPlace(experiment.id) : node;
+  const [saved, setSaved] = useState<{ place: PlaceId; paths: Set<string> } | null>(null);
+  useEffect(() => {
+    setSaved({ place, paths: new Set(readCollapsedFolders(window.localStorage, place)) });
+  }, [place]);
+  const collapsed = saved?.place === place ? saved.paths : NO_FOLDERS;
+  const toggle = (path: string) => {
+    const next = new Set(collapsed);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    setSaved({ place, paths: next });
+    persistCollapsedFolders(window.localStorage, place, [...next]);
+  };
+  return { collapsed, toggle };
+}
+
 export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
   const tree = useMemo(() => buildTree(files), [files]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggle = (path: string) =>
-    setCollapsed((s) => {
-      const next = new Set(s);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+  const { collapsed, toggle } = useCollapsedFolders();
 
   const render = (folder: Folder, depth: number): ReactNode => (
     <>
