@@ -479,6 +479,15 @@ function buildTree(files: WorkspaceFile[]): Folder {
 
 const NO_FOLDERS = new Set<string>();
 
+/** Reading localStorage itself throws when the browser blocks site storage. */
+function localStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Which folders are collapsed in this place's file tree, remembered in this
  * browser so switching views or reloading keeps them as the user left them.
@@ -488,7 +497,8 @@ function useCollapsedFolders() {
   const place: PlaceId = experiment ? experimentPlace(experiment.id) : node;
   const [saved, setSaved] = useState<{ place: PlaceId; paths: Set<string> } | null>(null);
   useEffect(() => {
-    setSaved({ place, paths: new Set(readCollapsedFolders(window.localStorage, place)) });
+    const storage = localStorageOrNull();
+    setSaved({ place, paths: new Set(storage ? readCollapsedFolders(storage, place) : []) });
   }, [place]);
   const collapsed = saved?.place === place ? saved.paths : NO_FOLDERS;
   const toggle = (path: string) => {
@@ -496,7 +506,8 @@ function useCollapsedFolders() {
     if (next.has(path)) next.delete(path);
     else next.add(path);
     setSaved({ place, paths: next });
-    persistCollapsedFolders(window.localStorage, place, [...next]);
+    const storage = localStorageOrNull();
+    if (storage) persistCollapsedFolders(storage, place, [...next]);
   };
   return { collapsed, toggle };
 }
