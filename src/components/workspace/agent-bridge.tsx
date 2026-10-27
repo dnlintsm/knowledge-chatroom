@@ -54,7 +54,7 @@ export function useWorkspaceAgent() {
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment the user is working in, on that node (or at the workspace root): a run, with its state (ready, running, done, failed) and its report (report.md, or xdoe-report/report.md) when it has one. Questions are about this run unless the user says otherwise, and `files` are its files. Without one, `files` are the files where the user is.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment the user is working in, on that node (or at the workspace root): a run, with its state (ready, running, done, failed) and its report (report.md) when it has one. Questions are about this run unless the user says otherwise, and `files` are its files. Without one, `files` are the files where the user is.",
     value: {
       currentNode: ws.node
         ? {

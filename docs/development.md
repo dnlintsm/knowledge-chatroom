@@ -33,9 +33,8 @@ shown in [Testing](testing.md).
 
 ## Runs, rules and semantic search
 
-A run is an experiment with a report (`report.md`, or `xdoe-report/report.md`), so runs
-need server storage. Old run folders (holding `xdoe-report/`) show in the Runs view with
-a **Make run** button. `RULES_API_URL` configures the server-side rules provider; when
+A run is an experiment with a report (`report.md`), so runs need server storage.
+`RULES_API_URL` configures the server-side rules provider; when
 unset, the built-in mock answers. Actions use the user's role in the run, and generated
 rules files are read-only. See [Architecture](architecture.md).
 

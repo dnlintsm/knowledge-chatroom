@@ -43,7 +43,6 @@ import {
   putServerFile,
   renameServerFile,
   renameServerNode,
-  serverExperimentFromFolder,
   updateServerExperiment,
   WATCH_URL,
   type Account,
@@ -176,8 +175,6 @@ interface WorkspaceValue {
    * the root (null, empty) and moves into it. These throw with a message too.
    */
   createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
-  /** Moves a folder here into a new experiment of yours and moves into it. */
-  experimentFromFolder: (folder: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
   /** Open proposals you can see, anywhere, newest first. */
@@ -672,19 +669,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment, settleSaves],
   );
-  const experimentFromFolder = useCallback(
-    async (folder: string) => {
-      const at = placeRef.current;
-      if (experimentOf(at)) throw new Error("This is already an experiment; go to its node to turn a folder into a run");
-      // The move takes what the server has, so recent edits go first.
-      await settleSaves(at);
-      const created = await serverExperimentFromFolder(at, folder);
-      await refreshExperiments();
-      await enterExperiment(created.id);
-      return created;
-    },
-    [refreshExperiments, enterExperiment, settleSaves],
-  );
   const updateExperiment = useCallback(
     async (id: string, change: ExperimentChange) => {
       // Archived is read only, so edits still on their way would be refused.
@@ -769,7 +753,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       renameNode,
       deleteNode,
       createExperiment,
-      experimentFromFolder,
       updateExperiment,
       deleteExperiment,
       proposals,
@@ -779,7 +762,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [
     state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
-    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, experimentFromFolder,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment, proposals, decideProposal, promote,
   ]);
 

@@ -150,9 +150,8 @@ and `POST /api/skills/import?replace=1` move `.zip` files. For trust:
 
 ### Runs are experiments
 
-A **run** is an experiment (see Experiments below) with a report: its `report.md`, or
-`xdoe-report/report.md` for one made from an xDOE run folder. There is no separate run
-folder or mode (issue #82):
+A **run** is an experiment (see Experiments below) with a report: its `report.md`. There
+is no separate run folder or mode (issue #82):
 
 - The **Runs** view on the icon rail lists the runs where you are and below it. At the
   workspace root that is every run you can see, so the app name in the title bar goes there.
@@ -166,10 +165,6 @@ folder or mode (issue #82):
 - The run you're in is in the URL (`/?experiment=<id>`), so links open a run directly and
   back/forward move between runs. A link to one that isn't there, or isn't shared with you,
   drops out of the URL with a notice. Old `?run=` links are dropped the same way.
-- **Run folders** from before (a folder holding `xdoe-report/`) are listed at the bottom of
-  the Runs view for anyone who can edit there. **Make run** moves the folder's files, with
-  their history, into a new draft run named after the folder (`POST
-  /experiments/from-folder`).
 
 - **Runs Claude starts** (`create_experiment`, `agent/src/storage/session.ts` `startRun`)
   begin in state running. The files the run works from are its **inputs**: each is linked
@@ -457,8 +452,7 @@ For local setup, see [Development](development.md).
   by everyone who can view the node; only the author changes it, and an archived one is read
   only until restored. Its `state` (ready, running, done, failed) says how far the run got.
   `GET|POST /api/experiments` lists (optionally `?node=<id>`, or `?node=root`) and forks
-  (`nodeId: null` for the root), `POST /api/experiments/from-folder {nodeId, folder}` moves a
-  folder into a new one, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
+  (`nodeId: null` for the root), `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
   one, and every `/api/files` route takes `?experiment=<id>`. In the Knowledge view,
   experiments sit under their node (root ones under Workspace) with their status and state,
   and the Experiment tab holds the details and a comparison table. Its author brings its results to the node by proposing them (below).

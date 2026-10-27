@@ -9,7 +9,6 @@ import {
   Files,
   FilePlus,
   FlaskConical,
-  FolderInput,
   ListTodo,
   Lock,
   Network,
@@ -28,7 +27,7 @@ import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
 import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
-import { findRunFolders, runsUnder, type RunFolder } from "./runs";
+import { runsUnder } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
@@ -520,8 +519,7 @@ export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; 
 
 /**
  * Runs view: every run here and below (all of them at the workspace root),
- * newest first; picking one moves into it and opens its report. Below, old
- * run folders here that can become runs.
+ * newest first; picking one moves into it and opens its report.
  */
 function RunList() {
   const ws = useWorkspace();
@@ -593,56 +591,7 @@ function RunList() {
           </p>
         )
       )}
-      {!ws.experiment && ws.canEdit && <RunFolders />}
     </div>
-  );
-}
-
-/** Folders here from before runs were experiments (holding xdoe-report/), each one click from being a run. */
-function RunFolders() {
-  const ws = useWorkspace();
-  const { notify } = useWorkbench();
-  const [busy, setBusy] = useState<string | null>(null);
-  const folders = useMemo(() => findRunFolders(ws.files.map((f) => f.path)), [ws.files]);
-  if (!folders.length) return null;
-  const convert = async (folder: RunFolder) => {
-    setBusy(folder.path);
-    try {
-      await ws.experimentFromFolder(folder.path);
-      notify(`${folder.name} is a run now; its files moved into it.`, "success");
-    } catch (err) {
-      notify(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setBusy(null);
-    }
-  };
-  return (
-    <section aria-label="Run folders" data-testid="run-folders" className="mt-3 border-t border-[var(--border)] pt-2">
-      <p className="px-3 pb-1 text-xs text-[var(--muted-foreground)]">
-        Run folders here. Turn one into a run to give it a state, parameters and results; its files move into it.
-      </p>
-      <ul>
-        {folders.map((f) => (
-          <li key={f.path} className="flex items-center gap-2 px-3 py-1">
-            <FolderInput className="size-4 shrink-0 text-[var(--muted-foreground)]" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{f.name}</span>
-              <span className="block truncate text-xs text-[var(--muted-foreground)]">
-                {f.path} · {f.fileCount} file{f.fileCount === 1 ? "" : "s"}
-              </span>
-            </span>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void convert(f)}
-              className="h-6 shrink-0 rounded-md border border-[var(--border)] px-2 text-xs hover:bg-[var(--secondary)] cursor-pointer disabled:cursor-default disabled:opacity-50"
-            >
-              {busy === f.path ? "Moving…" : "Make run"}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

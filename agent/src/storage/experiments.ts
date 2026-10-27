@@ -253,45 +253,6 @@ export class ExperimentService {
     }
   }
 
-  /**
-   * Turns a folder of `nodeId` (null: the workspace root) into a new draft
-   * experiment of `userId`'s: the folder's files move into it, keeping their
-   * history, at paths relative to the folder. Nothing else is copied in. For
-   * the run folders from before runs were experiments. Throws ExperimentError
-   * when the folder holds no files.
-   */
-  async fromFolder(
-    userId: string,
-    nodeId: string | null,
-    folder: string,
-    input: ExperimentInput,
-    inTx?: (tx: Tx, id: string) => Promise<unknown>,
-  ): Promise<{ experiment: Experiment; moved: string[] }> {
-    const prefix = `${folder}/`;
-    let moved: string[] = [];
-    const experiment = await this.add(userId, nodeId, input, async (tx, id) => {
-      const rows = await tx<{ path: string; sha256: string }[]>`
-        UPDATE files f SET node_id = NULL, experiment_id = ${id},
-               path = substr(f.path, ${prefix.length + 1}), updated_at = now()
-        FROM file_versions v
-        WHERE v.id = f.current_version_id
-          AND f.workspace_id = ${this.workspaceId} AND f.experiment_id IS NULL
-          AND f.node_id IS NOT DISTINCT FROM ${nodeId}::uuid
-          AND starts_with(f.path, ${prefix}) AND f.deleted_at IS NULL
-        RETURNING f.path, v.blob_sha256 AS sha256`;
-      if (!rows.length) throw new ExperimentError(`There are no files in ${folder}`);
-      moved = rows.map((r) => `${prefix}${r.path}`).sort();
-      for (const row of rows) {
-        await this.events.notify(tx, { op: "delete", node: nodeId, path: `${prefix}${row.path}` });
-        await this.events.notify(tx, {
-          op: "write", node: null, experiment: id, path: row.path, sha256: row.sha256, author: "user",
-        });
-      }
-      await inTx?.(tx, id);
-    });
-    return { experiment, moved };
-  }
-
   private async add(
     userId: string,
     nodeId: string | null,

@@ -64,9 +64,6 @@ import type { Session } from "./session";
  *                                   with a copy of the node's files, at the
  *                                   root (null) empty. A run is an experiment
  *                                   with a report.md.
- *   POST   /experiments/from-folder {nodeId|null, folder, title?} →
- *                                   {experiment, moved}: moves a folder's files
- *                                   into a new draft (editor of the place)
  *   GET    /experiments/<id>        one experiment
  *   PATCH  /experiments/<id>        {title?, hypothesis?, params?, results?,
  *                                   status?: draft|shared|archived,
@@ -333,16 +330,6 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
   const expected =
     "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived, state?: ready|running|done|failed}";
   const place = (v: unknown): v is string | null => v === null || typeof v === "string";
-  if (id === "from-folder") {
-    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
-    const body = await readJson(req);
-    const input = body && experimentInput(body);
-    if (!body || !place(body.nodeId) || typeof body.folder !== "string" || !input) {
-      return json(res, 400, { error: "Expected {nodeId: string|null, folder: string, title?: string}" });
-    }
-    json(res, 201, await session.experimentFromFolder(body.nodeId, body.folder, input));
-    return;
-  }
   if (!id) {
     if (req.method === "GET") {
       const node = url.searchParams.get("node");

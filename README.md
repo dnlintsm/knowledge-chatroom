@@ -88,8 +88,8 @@ npm ci                         # installs the UI and agent from their lockfiles
 npm run dev                    # UI :3000, agent :8000
 ```
 
-Open <http://localhost:3000>, then start a run or turn a sample run folder into one
-from the Runs view (runs need server storage).
+Open <http://localhost:3000>, then start a run from the Runs view (runs need server
+storage).
 Server storage and login are optional; see [Development](docs/development.md).
 
 ## Documentation

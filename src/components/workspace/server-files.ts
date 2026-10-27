@@ -301,17 +301,6 @@ async function experimentRequest(method: string, path: string, body?: unknown): 
 
 export const createServerExperiment = (nodeId: string | null, title: string) =>
   experimentRequest("POST", "", { nodeId, title });
-/** Moves a folder's files into a new experiment of yours (needs editor where the folder is). */
-export const serverExperimentFromFolder = (nodeId: string | null, folder: string) =>
-  apiFetch("/api/experiments/from-folder", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, folder }),
-  }).then(async (res) => {
-    const data = (await res.json().catch(() => ({}))) as { experiment?: Experiment; error?: string };
-    if (!res.ok || !data.experiment) throw new Error(data.error ?? `Convert folder: ${res.status}`);
-    return data.experiment;
-  });
 export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
 export const deleteServerExperiment = (id: string) =>
