@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.3.0
+## 0.2.1
 
 Files preview in the editor pane (images, PDFs, audio, video, code, HTML, TSV), the file
 tree remembers which folders you collapsed, and two leftovers kept for one release are
-removed: `v1` identity tokens and old `xdoe-report/` run folders. It's a minor release
-rather than a patch because those removals can break an upgrade; follow the steps below.
+removed: `v1` identity tokens and old `xdoe-report/` run folders. Those removals can break
+an upgrade, so follow the steps below.
 
 ### Upgrading from 0.2.0
 
