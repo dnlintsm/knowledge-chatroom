@@ -1051,6 +1051,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await as(alice).updateExperiment(run.id, { state: "done" });
       const late = [{ path: "uploads/more.csv", experiment: run.id, as: "late.csv" }];
       await assert.rejects(as(alice).addRunInputs(run.id, late), ExperimentError);
+      // Also under the run's lock, should it finish between the check and the link.
+      await assert.rejects(storage.experiments.addInputs(run.id, [], []), ExperimentError);
       await as(alice).updateExperiment(run.id, { state: "running" });
       await as(alice).updateExperiment(run.id, { status: "archived" });
       await assert.rejects(as(alice).addRunInputs(run.id, late), ForbiddenError);

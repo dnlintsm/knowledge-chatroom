@@ -269,11 +269,16 @@ export class ExperimentService {
   ): Promise<boolean> {
     if (!isNodeId(id)) return false;
     return this.sql.begin(async (tx) => {
-      const [before] = await tx<{ node_id: string | null }[]>`
-        SELECT node_id FROM experiments
+      const [before] = await tx<{ node_id: string | null; state: ExperimentState; status: ExperimentStatus }[]>`
+        SELECT node_id, state, status FROM experiments
         WHERE id = ${id} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL
         FOR UPDATE`;
       if (!before) return false;
+      // Checked again under the lock: the run may have finished or been archived meanwhile.
+      if (before.state === "done" || before.state === "failed") {
+        throw new ExperimentError(`This run already finished (${before.state}); start a new run to add inputs`);
+      }
+      if (before.status === "archived") throw new ExperimentError("This experiment is archived; restore it to change it");
       const linked = await this.linkInputs(tx, id, inputs);
       await tx`
         UPDATE experiments

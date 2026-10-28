@@ -366,12 +366,21 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const linking = asInputs && !finished;
+  // Where uploads would land now; null once this panel is gone.
+  const here = useRef<string | null>(null);
+  here.current = ws.experiment?.id ?? null;
+  useEffect(() => () => void (here.current = null), []);
 
   const add = async (list: FileList | null) => {
     setBusy(true);
     const skipped: string[] = [];
     try {
-      const written = await uploadFiles(list, ws.write, (path) => skipped.push(path));
+      const written = await uploadFiles(
+        list,
+        ws.write,
+        (path) => skipped.push(path),
+        () => here.current === experiment.id,
+      );
       if (!written.length) {
         if (skipped.length) setMessage({ text: `${skipped.join(", ")} is read-only, so nothing was uploaded.`, error: true });
         return;
