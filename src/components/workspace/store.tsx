@@ -30,6 +30,7 @@ import {
   createServerExperiment,
   createServerNode,
   decideProposal as decideServerProposal,
+  addServerRunInputs,
   deleteServerExperiment,
   deleteServerFile,
   deleteServerNode,
@@ -177,6 +178,11 @@ interface WorkspaceValue {
   createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
+  /**
+   * Adds files of experiment `id` (by path) as its run inputs: read-only
+   * copies under inputs/, recorded in its provenance. Throws with a message.
+   */
+  addRunInputs: (id: string, paths: string[]) => Promise<Experiment>;
   /** Open proposals you can see, anywhere, newest first. */
   proposals: Proposal[];
   /** Accept, reject or withdraw a proposal; throws with a message. */
@@ -680,6 +686,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [settleSaves, setExperiments],
   );
+  const addRunInputs = useCallback(
+    async (id: string, paths: string[]) => {
+      // Inputs link what the server has, so new uploads go first.
+      const here = experimentPlace(id);
+      if (placeRef.current === here) await settleSaves(here);
+      const updated = await addServerRunInputs(id, paths);
+      setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
+      return updated;
+    },
+    [settleSaves, setExperiments],
+  );
   const deleteExperiment = useCallback(
     async (id: string) => {
       const doomed = experiments.find((e) => e.id === id);
@@ -755,6 +772,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createExperiment,
       updateExperiment,
       deleteExperiment,
+      addRunInputs,
       proposals,
       decideProposal,
       promote,
@@ -763,7 +781,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
-    updateExperiment, deleteExperiment, proposals, decideProposal, promote,
+    updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
