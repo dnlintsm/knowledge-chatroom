@@ -208,28 +208,7 @@ export class Session {
   ): Promise<Experiment> {
     await this.need(nodeId, "viewer");
     const userId = this.principal.userId;
-    const links: LinkedInput[] = [];
-    const recorded: Record<string, unknown>[] = [];
-    for (const source of inputs) {
-      const from = normalizePath(source.path);
-      const place = source.experiment
-        ? await this.experimentFiles(source.experiment)
-        : await this.files(source.node ?? null);
-      const [current] = (await place.history(from)) ?? [];
-      if (!current) throw new ExperimentError(`No file at ${from} to use as an input`);
-      const path = normalizePath(`inputs/${source.as ?? from.split("/").pop()}`);
-      if (links.some((l) => l.path === path)) {
-        throw new ExperimentError(`Two inputs would both be ${path}; give one of them another name`);
-      }
-      links.push({ path, versionId: current.id });
-      recorded.push({
-        path,
-        from: { node: place.nodeId, experiment: place.experimentId, path: from },
-        version: current.id,
-        sha256: current.sha256,
-        size: current.size,
-      });
-    }
+    const { links, recorded } = await this.resolveInputs(inputs);
     const who = await this.parts.access.user(userId);
     const record = {
       ...provenance,
@@ -254,6 +233,73 @@ export class Session {
       await files.write(REPORT_PATH, new TextEncoder().encode(newReport(run)));
     }
     return this.experiment(run.id);
+  }
+
+  /**
+   * Each input's current version, to link in read only under inputs/, and
+   * what the run's provenance records about it. You need to be able to read
+   * every input; `taken` are inputs/ paths the run already has.
+   */
+  private async resolveInputs(inputs: RunInputSource[], taken: string[] = []) {
+    const links: LinkedInput[] = [];
+    const recorded: Record<string, unknown>[] = [];
+    for (const source of inputs) {
+      const from = normalizePath(source.path);
+      const place = source.experiment
+        ? await this.experimentFiles(source.experiment)
+        : await this.files(source.node ?? null);
+      const [current] = (await place.history(from)) ?? [];
+      if (!current) throw new ExperimentError(`No file at ${from} to use as an input`);
+      const path = normalizePath(`inputs/${source.as ?? from.split("/").pop()}`);
+      if (taken.includes(path)) {
+        throw new ExperimentError(`The run already has an input at ${path}; give this one another name`);
+      }
+      if (links.some((l) => l.path === path)) {
+        throw new ExperimentError(`Two inputs would both be ${path}; give one of them another name`);
+      }
+      links.push({ path, versionId: current.id });
+      recorded.push({
+        path,
+        from: { node: place.nodeId, experiment: place.experimentId, path: from },
+        version: current.id,
+        sha256: current.sha256,
+        size: current.size,
+      });
+    }
+    return { links, recorded };
+  }
+
+  /**
+   * Adds input files to an existing run or experiment (issue #114): each is
+   * linked in read only under inputs/ at its current version and appended to
+   * the inputs its provenance records, so a rerun reads them too. Only its
+   * author can, while it isn't archived; a finished run stays as it ended.
+   */
+  async addRunInputs(id: string, inputs: RunInputSource[]): Promise<Experiment> {
+    const current = await this.experiment(id);
+    this.needAuthor(current);
+    if (current.status === "archived") {
+      throw new ForbiddenError("This experiment is archived; restore it to change it");
+    }
+    if (current.state === "done" || current.state === "failed") {
+      throw new ExperimentError(
+        `This run already finished (${current.state}); start a new run to add inputs`,
+      );
+    }
+    if (!inputs.length) throw new ExperimentError("Name at least one file to add as an input");
+    const before = (current.provenance.inputs as { path: string }[] | undefined) ?? [];
+    const { links, recorded } = await this.resolveInputs(inputs, before.map((i) => i.path));
+    await this.scoped((db) =>
+      on(this.parts.experiments, db).addInputs(
+        id,
+        links,
+        recorded,
+        this.audit("experiment.inputs", { experiment: id, inputs: links.map((l) => l.path) }),
+      ),
+    );
+    const run = await this.experiment(id);
+    await this.refreshReport(run);
+    return run;
   }
 
   /**

@@ -303,6 +303,11 @@ export const createServerExperiment = (nodeId: string | null, title: string) =>
   experimentRequest("POST", "", { nodeId, title });
 export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
+/** Links an experiment's own files (by path) in read only under inputs/, recorded as run inputs. */
+export const addServerRunInputs = (id: string, paths: string[]) =>
+  experimentRequest("POST", `/${encodeURIComponent(id)}/inputs`, {
+    inputs: paths.map((path) => ({ path, experiment: id })),
+  });
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 

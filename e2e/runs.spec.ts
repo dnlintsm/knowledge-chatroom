@@ -180,6 +180,40 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText(first.title);
 });
 
+test("files can be uploaded into an existing run and added as its inputs", async ({ page, request }) => {
+  const run = await makeRun(request, "Wafer data", { "report.md": "# Wafer data\n" });
+  await gotoRun(page, run, "Wafer data");
+  // The Runs view leads to the run's panel, where files are added.
+  await showView(page, "Runs");
+  await page.getByRole("button", { name: `Add files to ${run.title}` }).click();
+  const add = page.getByTestId("add-files");
+  await expect(add).toContainText(`Upload to ${run.title}`);
+  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeChecked();
+  await page.getByTestId("add-files-input").setInputFiles([
+    { name: "lot-7.csv", mimeType: "text/csv", buffer: Buffer.from("wafer,dose\n7,31\n") },
+  ]);
+  const panel = page.getByTestId("experiment-panel");
+  await expect(panel.getByRole("status")).toContainText("added it as run inputs under inputs/");
+  const inputs = page.getByRole("list", { name: "Inputs" });
+  await expect(inputs).toContainText("from uploads/lot-7.csv");
+  await shot(page, "02e-run-add-files");
+
+  // Both land in the run: the upload, and its read-only input copy.
+  await showFiles(page);
+  await expect(page.locator('[role="treeitem"][title="uploads/lot-7.csv"]')).toBeVisible();
+  await expect(page.locator('[role="treeitem"][title="inputs/lot-7.csv"]')).toBeVisible();
+
+  // A finished run keeps its inputs: uploads only.
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
+  await panel.getByRole("combobox", { name: "Run state" }).selectOption("done");
+  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeDisabled();
+  await page.getByTestId("add-files-input").setInputFiles([
+    { name: "late.csv", mimeType: "text/csv", buffer: Buffer.from("x\n") },
+  ]);
+  await expect(panel.getByRole("status")).toContainText("Uploaded 1 file to uploads/.");
+  await expect(inputs).not.toContainText("late.csv");
+});
+
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {
   await page.goto("/?experiment=00000000-0000-4000-8000-000000000000");
   await expect(page.getByTestId("notices")).toContainText("That run isn't there, or isn't shared with you.");
