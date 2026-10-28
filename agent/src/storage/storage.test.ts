@@ -1004,6 +1004,60 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual([old.state, old.results], ["done", { tilt_urad: 1.5 }]);
     });
 
+    test("files uploaded later can be added to an existing run as inputs", async () => {
+      const run = await as(alice).createExperiment(null, { title: "Late data" });
+      const files = await as(alice).experimentFiles(run.id);
+      await files.write("uploads/extra.csv", text("wafer,dose\n2,31"));
+      await (await as(alice).files(null)).write("uploads/root.csv", text("wafer\n9"));
+
+      const added = await as(alice).addRunInputs(run.id, [
+        { path: "uploads/extra.csv", experiment: run.id },
+        { path: "uploads/root.csv", as: "baseline.csv" },
+      ]);
+      type Inputs = { inputs: { path: string; from: { experiment: string | null; path: string } }[] };
+      assert.deepEqual(
+        (added.provenance as Inputs).inputs.map((i) => [i.path, i.from.experiment, i.from.path]),
+        [["inputs/extra.csv", run.id, "uploads/extra.csv"], ["inputs/baseline.csv", null, "uploads/root.csv"]],
+      );
+      const input = (await files.stat("inputs/extra.csv"))!;
+      assert.equal(input.readOnly, true);
+      await assert.rejects(files.write("inputs/extra.csv", text("changed")), ReadOnlyFileError);
+      // The upload stays editable; the input keeps the version it linked.
+      await files.write("uploads/extra.csv", text("wafer,dose\n2,32"));
+      assert.equal(await read(files, "inputs/extra.csv"), "wafer,dose\n2,31");
+
+      // More inputs append; the same name twice, or none at all, is refused.
+      await files.write("uploads/more.csv", text("x"));
+      const more = await as(alice).addRunInputs(run.id, [{ path: "uploads/more.csv", experiment: run.id }]);
+      assert.equal((more.provenance as Inputs).inputs.length, 3);
+      await assert.rejects(
+        as(alice).addRunInputs(run.id, [{ path: "uploads/extra.csv", experiment: run.id }]),
+        ExperimentError,
+      );
+      await assert.rejects(as(alice).addRunInputs(run.id, []), ExperimentError);
+
+      // Only its author: others may look at a shared run, not add to it.
+      await as(alice).updateExperiment(run.id, { status: "shared" });
+      await assert.rejects(
+        as(bob).addRunInputs(run.id, [{ path: "uploads/more.csv", experiment: run.id, as: "b.csv" }]),
+      );
+      // A rerun reads them too.
+      const rerun = await as(alice).rerun(run.id);
+      assert.deepEqual(
+        (rerun.provenance as Inputs).inputs.map((i) => i.path),
+        ["inputs/extra.csv", "inputs/baseline.csv", "inputs/more.csv"],
+      );
+      // Not once it finished, or while archived.
+      await as(alice).updateExperiment(run.id, { state: "done" });
+      const late = [{ path: "uploads/more.csv", experiment: run.id, as: "late.csv" }];
+      await assert.rejects(as(alice).addRunInputs(run.id, late), ExperimentError);
+      // Also under the run's lock, should it finish between the check and the link.
+      await assert.rejects(storage.experiments.addInputs(run.id, [], []), ExperimentError);
+      await as(alice).updateExperiment(run.id, { state: "running" });
+      await as(alice).updateExperiment(run.id, { status: "archived" });
+      await assert.rejects(as(alice).addRunInputs(run.id, late), ForbiddenError);
+    });
+
     test("changes are audited", async () => {
       const log = await as(alice).auditLog(1000);
       const created = log.find((e) => e.action === "experiment.create" && e.target.title === "Shared run")!;

@@ -34,8 +34,9 @@ import { SearchPanel } from "./search-panel";
 import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
+import { uploadFiles } from "./upload";
 import { useWorkbench } from "./workbench";
-import { fileName, FileExistsError, isTextFile, mimeForPath, ReadOnlyFileError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { EXPERIMENT_TAB, fileName, FileExistsError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
@@ -92,18 +93,6 @@ export function ActivityBar({
   );
 }
 
-async function readUpload(file: File): Promise<{ content: string; mime: string }> {
-  const mime = file.type || mimeForPath(file.name);
-  if (isTextFile({ mime, path: file.name })) return { content: await file.text(), mime };
-  const content = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-  return { content, mime };
-}
-
 export function SidePanel({ view }: { view: SidebarView }) {
   const { files, write, canEdit } = useWorkspace();
   const { editor, notify } = useWorkbench();
@@ -112,18 +101,10 @@ export function SidePanel({ view }: { view: SidebarView }) {
   const [dragging, setDragging] = useState(false);
 
   const upload = async (list: FileList | null) => {
-    let last: string | null = null;
-    for (const file of Array.from(list ?? [])) {
-      const { content, mime } = await readUpload(file);
-      const path = `uploads/${file.name}`;
-      try {
-        last = write(path, content, { mime }).path;
-      } catch (err) {
-        if (!(err instanceof ReadOnlyFileError)) throw err;
-        notify(`${path} is read-only, so the upload was skipped.`, "warning");
-      }
-    }
-    if (last) open(last);
+    const written = await uploadFiles(list, write, (path) =>
+      notify(`${path} is read-only, so the upload was skipped.`, "warning"),
+    );
+    if (written.length) open(written[written.length - 1]);
   };
 
   const newFile = (kind: Extract<FileKind, "note" | "skill">) => {
@@ -581,6 +562,11 @@ function RunList() {
         <span className="min-w-0 flex-1 truncate">
           {ws.node === null ? "All runs" : `Runs in ${here}`}
         </span>
+        {ws.experiment?.access === "writer" && (
+          <IconButton label={`Add files to ${ws.experiment.title}`} onClick={() => editor.open(EXPERIMENT_TAB)}>
+            <Upload className="size-4" />
+          </IconButton>
+        )}
         {runs.length > 0 && (
           <IconButton label="Compare runs" onClick={() => editor.open(RUNS_TAB)}>
             <Table2 className="size-4" />

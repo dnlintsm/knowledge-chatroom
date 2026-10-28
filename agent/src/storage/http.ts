@@ -11,7 +11,7 @@ import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
 import { SearchError } from "./search";
-import type { Session } from "./session";
+import type { RunInputSource, Session } from "./session";
 
 /**
  * REST API for workspace files, the knowledge tree, experiments, search and
@@ -69,6 +69,11 @@ import type { Session } from "./session";
  *                                   status?: draft|shared|archived,
  *                                   state?: ready|running|done|failed}
  *   DELETE /experiments/<id>        soft delete, with its files
+ *   POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
+ *                                   → the experiment, with each file linked in
+ *                                   read only under inputs/ and recorded in its
+ *                                   provenance (its author, not archived, not
+ *                                   a finished run)
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
  *
@@ -180,6 +185,7 @@ export function agentRefusal(method: string, url: URL): string | null {
     case "experiments":
       if (method === "POST" && sub === "") return null;
       if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
+      if (method === "POST" && /^[^/]+\/inputs$/.test(sub)) return null;
       return "Claude doesn't delete experiments or move folders into them";
     case "proposals":
       return method === "POST" && sub === "" ? null : "Claude doesn't accept, reject or withdraw proposals";
@@ -325,6 +331,27 @@ const STATUS_REFUSED = "Claude doesn't share or archive experiments with a stora
 const refusesStatus = (session: Session, input: ExperimentInput) =>
   Boolean(session.principal.via) && input.status !== undefined && input.status !== "draft";
 
+/** A list of run inputs from a request body, or null when it isn't one. */
+function runInputs(value: unknown): RunInputSource[] | null {
+  if (!Array.isArray(value)) return null;
+  const optional = (v: unknown) => v === undefined || v === null || typeof v === "string";
+  const out: RunInputSource[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const { path, node, experiment, as } = item as Record<string, unknown>;
+    if (typeof path !== "string" || !optional(node) || !optional(experiment) || !(as === undefined || typeof as === "string")) {
+      return null;
+    }
+    out.push({
+      path,
+      node: (node as string | null | undefined) ?? null,
+      experiment: (experiment as string | null | undefined) ?? null,
+      ...(as !== undefined && { as }),
+    });
+  }
+  return out;
+}
+
 async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
   const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
   const expected =
@@ -347,6 +374,19 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
       json(res, 405, { error: "Method not allowed" });
     }
     return;
+  }
+
+  const inputsOf = /^([^/]+)\/inputs$/.exec(id)?.[1];
+  if (inputsOf) {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    const body = await readJson(req);
+    const inputs = body && runInputs(body.inputs);
+    if (!inputs) {
+      return json(res, 400, {
+        error: "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}",
+      });
+    }
+    return json(res, 200, await session.addRunInputs(inputsOf, inputs));
   }
 
   switch (req.method) {
