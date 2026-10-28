@@ -92,6 +92,16 @@ Open <http://localhost:3000>, then start a run from the Runs view (runs need ser
 storage).
 Server storage and login are optional; see [Development](docs/development.md).
 
+### Upgrading
+
+After pulling a new version, compare your `.env` with `.env.example`, then follow the
+"Upgrading" steps for each version in the [CHANGELOG](CHANGELOG.md):
+
+```bash
+npm run env:check              # removed, renamed and new settings; prints no values
+npm run env:upgrade            # applies it, after backing up .env
+```
+
 ## Documentation
 
 Start with the guide that matches what you want to do:
