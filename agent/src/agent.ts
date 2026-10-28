@@ -19,6 +19,7 @@ import type { RunAgentInput } from "@ag-ui/core";
 
 import { allowServer, externalServersFromEnv, serverConfigs, type RunTokens } from "./mcp";
 import { resolveModel } from "./model";
+import { keepFailureReason } from "./run-errors";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
 import { generateA2ui } from "./a2ui_dynamic_schema";
@@ -256,6 +257,10 @@ function withoutChatroomProps(input: RunAgentInput): RunAgentInput {
   delete rest[CHATROOM_PROPS];
   return { ...input, forwardedProps: rest };
 }
+
+// Failed turns say why (a bad API key, an unknown model, ...), not just
+// "SDK resume/run failed".
+keepFailureReason();
 
 export const adapter = new WorkspaceAgentAdapter({
   agentId: "claude-sdk-typescript",

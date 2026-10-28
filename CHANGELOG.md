@@ -1,5 +1,11 @@
 # Changelog
 
+### Fixed
+
+- A failed Claude run says why in the chat and the agent log (for example a bad API key,
+  an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
+  original files, tools, credentials and execution configuration." (#116).
+
 ## Unreleased
 
 ### Upgrading

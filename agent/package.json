@@ -9,7 +9,7 @@
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "tsx --test src/agent.test.ts src/mcp.test.ts src/model.test.ts src/suggest.test.ts src/skills/skills.test.ts src/storage/api-embedder.test.ts src/storage/http.test.ts src/storage/tools.test.ts",
+    "test:unit": "tsx --test src/agent.test.ts src/mcp.test.ts src/model.test.ts src/run-errors.test.ts src/suggest.test.ts src/skills/skills.test.ts src/storage/api-embedder.test.ts src/storage/http.test.ts src/storage/tools.test.ts",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "dependencies": {
