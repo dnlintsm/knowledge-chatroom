@@ -10,6 +10,14 @@ and the agent on 8000. `npm run dev:ui` and `npm run dev:agent` run them separat
 Check the agent with `curl http://localhost:8000/health`; storage can still be
 migrating after this health endpoint answers.
 
+After an upgrade, `npm run env:check` compares `.env` with `.env.example`: settings a
+release removed or renamed, new settings, and ones `.env.example` doesn't know. Only
+names are printed. `npm run env:upgrade` backs up `.env` to `.env.backup-<time>`,
+comments out removed settings, applies renames, and appends new settings commented out
+with their explanations. `--env` and `--example` point it at other files, e.g.
+`node scripts/env-upgrade.mjs --env /srv/knowledge/.env`. A release that removes or renames a
+setting adds a row to `MIGRATIONS` in `scripts/env-upgrade-plan.mjs`.
+
 ## Optional server storage
 
 ```bash

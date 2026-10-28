@@ -21,7 +21,9 @@
     "test:e2e:storage": "node scripts/run-e2e.mjs storage",
     "test:e2e:login": "node scripts/run-e2e.mjs login",
     "test:live": "node scripts/run-e2e.mjs live",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "env:check": "node scripts/env-upgrade.mjs",
+    "env:upgrade": "node scripts/env-upgrade.mjs --write"
   },
   "dependencies": {
     "@ag-ui/client": "1.0.2",

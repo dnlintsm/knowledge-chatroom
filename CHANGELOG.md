@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- After pulling a new version, run `npm run env:check` to compare your `.env` with
+  `.env.example`, and `npm run env:upgrade` to apply it (#112). See Added below.
+
+### Added
+
+- `npm run env:check` and `npm run env:upgrade` for an outdated `.env` (#112). The check
+  lists settings a release removed (`IDENTITY_FORMAT`, `RUN_DIR_MARKERS`) or renamed
+  (an old `AGENT_URL` on port 8000, in a `.env` without `LOCAL_AGENT_URL`, becomes
+  `LOCAL_AGENT_URL`), settings new in
+  `.env.example`, and settings `.env.example` doesn't know. The upgrade backs up `.env`
+  to `.env.backup-<time>`, comments out removed settings, renames, and appends the new
+  settings commented out with their explanations, so nothing else changes until you
+  uncomment them. Only names are printed, never values.
+
 ## 0.2.1
 
 Files preview in the editor pane (images, PDFs, audio, video, code, HTML, TSV), the file
