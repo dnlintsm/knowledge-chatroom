@@ -82,13 +82,14 @@ export function planUpgrade(envText, exampleText, { date = new Date().toISOStrin
     if (!m.renamed) {
       plan.removed.push(m);
       commentOut(m.key, `Removed in ${m.since}: ${m.note}`);
+    } else if (mentioned.has(m.renamed)) {
+      // A .env that already knows the new name uses the old one with its new meaning.
     } else if (m.when(current.value)) {
       plan.renamed.push(m);
-      if (active.has(m.renamed)) commentOut(m.key, `Replaced by ${m.renamed} in ${m.since}`);
-      else for (const index of current.indexes) replace.set(index, [lines[index].replace(m.key, m.renamed)]);
+      for (const index of current.indexes) replace.set(index, [lines[index].replace(m.key, m.renamed)]);
       mentioned.add(m.renamed);
       mentioned.delete(m.key); // the old name has a new meaning, offered below like any new setting
-    } else if (!mentioned.has(m.renamed)) {
+    } else {
       plan.check.push(m);
     }
   }

@@ -11,7 +11,8 @@
 
 - `npm run env:check` and `npm run env:upgrade` for an outdated `.env` (#112). The check
   lists settings a release removed (`IDENTITY_FORMAT`, `RUN_DIR_MARKERS`) or renamed
-  (`AGENT_URL` pointing at port 8000 becomes `LOCAL_AGENT_URL`), settings new in
+  (an old `AGENT_URL` on port 8000, in a `.env` without `LOCAL_AGENT_URL`, becomes
+  `LOCAL_AGENT_URL`), settings new in
   `.env.example`, and settings `.env.example` doesn't know. The upgrade backs up `.env`
   to `.env.backup-<time>`, comments out removed settings, renames, and appends the new
   settings commented out with their explanations, so nothing else changes until you

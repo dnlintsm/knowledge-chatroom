@@ -55,7 +55,7 @@ test("an old .env gets removals commented out, AGENT_URL renamed and new setting
   expect(again.added).toEqual([]);
 });
 
-test("AGENT_URL is only renamed when it points at the agent server's port", () => {
+test("AGENT_URL is only renamed in a pre-0.1.2 .env pointing at the agent server's port", () => {
   const remote = planUpgrade("AGENT_URL=https://backend.example.com\n", example);
   expect(remote.renamed).toEqual([]);
   expect(remote.check.map((m) => m.key)).toEqual(["AGENT_URL"]);
@@ -63,8 +63,11 @@ test("AGENT_URL is only renamed when it points at the agent server's port", () =
   expect(current.check).toEqual([]);
   const twice = planUpgrade("IDENTITY_FORMAT=v1\nIDENTITY_FORMAT=v2\n", example);
   expect(twice.text.split("\n").filter((l) => l.startsWith("IDENTITY_FORMAT"))).toEqual([]);
-  const both = planUpgrade("LOCAL_AGENT_URL=http://agent:8000\nAGENT_URL=http://agent:8000\n", example);
-  expect(both.text).toContain("# Replaced by LOCAL_AGENT_URL in 0.1.2:\n# AGENT_URL=http://agent:8000");
+  for (const local of ["LOCAL_AGENT_URL=http://localhost:8000", "# LOCAL_AGENT_URL=http://localhost:8000"]) {
+    const migrated = planUpgrade(`${local}\nAGENT_URL=http://remote-backend:8000\n`, example);
+    expect(migrated.renamed).toEqual([]);
+    expect(migrated.text).toContain("\nAGENT_URL=http://remote-backend:8000\n");
+  }
 });
 
 test("a .env made from the current example is up to date, and CRLF line endings survive", () => {
