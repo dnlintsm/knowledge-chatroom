@@ -1,11 +1,5 @@
 # Changelog
 
-### Fixed
-
-- A failed Claude run says why in the chat and the agent log (for example a bad API key,
-  an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
-  original files, tools, credentials and execution configuration." (#116).
-
 ## Unreleased
 
 ### Upgrading
@@ -23,6 +17,12 @@
   to `.env.backup-<time>`, comments out removed settings, renames, and appends the new
   settings commented out with their explanations, so nothing else changes until you
   uncomment them. Only names are printed, never values.
+
+### Fixed
+
+- A failed Claude run says why in the chat and the agent log (for example a bad API key,
+  an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
+  original files, tools, credentials and execution configuration." (#116).
 
 ## 0.2.1
 
