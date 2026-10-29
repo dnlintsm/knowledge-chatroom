@@ -505,31 +505,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("pagehide", flushSaves);
   }, [flushSaves]);
 
-  // One fetch per file and place, however many callers ask at once.
-  const loads = useRef(new Map<string, Promise<WorkspaceFile | undefined>>());
+  // One fetch per listed file, however many callers ask at once. Keyed by the
+  // file itself: coming back to a place lists its files anew, and those get
+  // their own fetch rather than one still running from the earlier visit.
+  const loads = useRef(new WeakMap<WorkspaceFile, Promise<WorkspaceFile | undefined>>());
   const loadFile = useCallback((rawPath: string) => {
-    const path = normalizePath(rawPath);
-    const at = placeRef.current;
-    const file = files.current.find((f) => f.path === path);
-    if (!file?.unloaded) return Promise.resolve(file);
-    const key = `${at ?? ""}\n${path}`;
-    const running = loads.current.get(key);
-    if (running) return running;
-    const load = loadServerText(path, at)
-      .then(({ content, sha256 }) => {
+    const load = (path: string): Promise<WorkspaceFile | undefined> => {
+      const at = placeRef.current;
+      const file = files.current.find((f) => f.path === path);
+      if (!file?.unloaded) return Promise.resolve(file);
+      const running = loads.current.get(file);
+      if (running) return running;
+      const loading = loadServerText(path, at).then(({ content, sha256 }) => {
         const now = files.current.find((f) => f.path === path);
-        // Moved elsewhere, or the file changed (edited, reloaded, deleted) meanwhile.
-        if (placeRef.current !== at || now !== file) return now;
+        if (placeRef.current !== at) return now;
+        // Listed anew meanwhile (left and came back): load that one instead.
+        if (now !== file) return now?.unloaded ? load(path) : now;
         const loaded: WorkspaceFile = { ...file, content };
         delete loaded.unloaded;
         if (sha256) sync.remember(path, sha256, at);
         files.current = files.current.map((f) => (f === file ? loaded : f));
         upsert(loaded);
         return loaded;
-      })
-      .finally(() => loads.current.delete(key));
-    loads.current.set(key, load);
-    return load;
+      });
+      loads.current.set(file, loading);
+      // A failed fetch can be asked for again.
+      loading.catch(() => loads.current.delete(file));
+      return loading;
+    };
+    return load(normalizePath(rawPath));
   }, [upsert, sync]);
 
   const getFile = useCallback(
