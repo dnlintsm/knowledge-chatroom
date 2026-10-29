@@ -18,6 +18,12 @@
   settings commented out with their explanations, so nothing else changes until you
   uncomment them. Only names are printed, never values.
 
+### Fixed
+
+- A failed Claude run says why in the chat and the agent log (for example a bad API key,
+  an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
+  original files, tools, credentials and execution configuration." (#116).
+
 ## 0.2.1
 
 Files preview in the editor pane (images, PDFs, audio, video, code, HTML, TSV), the file
