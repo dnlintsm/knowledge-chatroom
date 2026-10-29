@@ -67,7 +67,7 @@ export function EditorPane() {
     activeFile && canPreview(activeFile)
       ? readOnly
         ? "preview"
-        : (modes[activeFile.path] ?? (activeFile.content || !canEdit ? "preview" : "edit"))
+        : (modes[activeFile.path] ?? (activeFile.content || activeFile.unloaded || !canEdit ? "preview" : "edit"))
       : null;
 
   return (
@@ -199,6 +199,8 @@ export function EditorPane() {
           <MemoryEditor />
         ) : storageMode === "loading" ? (
           <FileLoading />
+        ) : activeFile?.unloaded ? (
+          <UnloadedFile key={activeFile.path} path={activeFile.path} />
         ) : activeFile ? (
           <FileView key={activeFile.path} file={activeFile} mode={mode} />
         ) : (
@@ -401,13 +403,46 @@ function lineTop(textarea: HTMLTextAreaElement, index: number) {
 }
 
 /** Shown instead of this browser's copy of a file until storage has answered. */
-function FileLoading() {
+function FileLoading({ label = "Loading files…" }: { label?: string }) {
   return (
     <Centered>
       <div role="status" data-testid="file-loading" className="flex items-center gap-2">
         <Spinner size="sm" />
-        Loading files…
+        {label}
       </div>
+    </Centered>
+  );
+}
+
+/** A file only listed so far: fetches its content, which then replaces this. */
+function UnloadedFile({ path }: { path: string }) {
+  const { loadFile } = useWorkspace();
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    loadFile(path).catch((err: unknown) => {
+      console.error("[workspace] file failed to load:", err);
+      if (live) setError(`Couldn't load ${fileName(path)}.`);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loadFile, path, attempt]);
+  if (!error) return <FileLoading label={`Loading ${fileName(path)}…`} />;
+  return (
+    <Centered>
+      <p className="mb-2">{error}</p>
+      <button
+        type="button"
+        onClick={() => {
+          setError(null);
+          setAttempt((n) => n + 1);
+        }}
+        className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer"
+      >
+        Try again
+      </button>
     </Centered>
   );
 }

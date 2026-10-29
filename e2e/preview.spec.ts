@@ -624,3 +624,30 @@ test("files loading", async ({ page }) => {
   await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toHaveCount(0);
   await shot(page, "31-files-loading");
 });
+
+test("a file loads when it is opened", async ({ page }) => {
+  // Server storage that lists a note right away but is slow to send it: the
+  // list shows at once, and the note says it's loading until it arrives.
+  const info = {
+    path: "notes/big-note.md", kind: "note", mime: "text/markdown", size: 12,
+    sha256: "a".repeat(64), updatedAt: new Date().toISOString(), author: "user", readOnly: false,
+  };
+  let send = () => {};
+  const sent = new Promise<void>((resolve) => { send = resolve; });
+  await page.route(/\/api\/(files|nodes|experiments|proposals)([/?]|$)/, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("watch")) return; // The change stream stays quiet.
+    if (url.pathname === "/api/nodes") return route.fulfill({ json: { types: [], rootRole: "owner", nodes: [] } });
+    if (url.pathname === "/api/experiments") return route.fulfill({ json: { experiments: [] } });
+    if (url.pathname === "/api/proposals") return route.fulfill({ json: { proposals: [] } });
+    if (url.pathname === "/api/files") return route.fulfill({ json: { files: [info] } });
+    await sent;
+    return route.fulfill({ body: "# Big note\n\nAll here now.", contentType: "text/markdown" });
+  });
+  await page.goto("/");
+  await page.getByRole("treeitem", { name: /big-note\.md/ }).click();
+  await expect(page.getByTestId("file-loading")).toContainText("Loading big-note.md");
+  await shot(page, "32-file-loading-on-open");
+  send();
+  await expect(page.getByTestId("file-preview")).toContainText("All here now.");
+});

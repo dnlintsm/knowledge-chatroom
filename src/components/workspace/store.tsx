@@ -38,8 +38,10 @@ import {
   experimentOf,
   experimentPlace,
   getAccount,
+  listedServerFile,
   listServerFiles,
   loadServerFile,
+  loadServerText,
   promoteExperiment,
   putServerFile,
   renameServerFile,
@@ -113,6 +115,11 @@ interface WorkspaceValue {
   /** Set by the last open() that named lines; cleared by any other open or an edit to that file. */
   reveal: Reveal | null;
   getFile: (path: string) => WorkspaceFile | undefined;
+  /**
+   * The file with its content, fetched first when it is only listed
+   * (`unloaded`); undefined when there is no such file (any more).
+   */
+  loadFile: (path: string) => Promise<WorkspaceFile | undefined>;
   /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
   open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
@@ -255,10 +262,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setState((s) => reduceWorkspace(s, { type: "remove", path }));
   }, []);
 
-  // Brings local files in line with the server's list: fetches what changed,
+  // Brings local files in line with the server's list: lists what's new,
+  // refetches what changed among the files already loaded from the server,
   // drops what was deleted, and leaves files with unsaved edits alone, also
   // when the user starts editing while the fetches are in flight. `keep` names
   // files that aren't on the server but must stay (failed first uploads).
+  // Other text files stay `unloaded` until loadFile fetches them, so a place
+  // with many files shows its list without downloading them all.
   const resync = useCallback(async (list: ServerFile[], keep = new Set<string>()) => {
     const at = placeRef.current;
     const local = new Map(files.current.map((f) => [f.path, f]));
@@ -268,7 +278,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (mine && (busy(info.path) || sync.hash(info.path) === info.sha256)) {
           return mine;
         }
-        const file = await loadServerFile(info, at);
+        // Only a copy that came from the server is kept fresh; this browser's
+        // own files from before (with no known version) are just replaced.
+        const loaded = mine && !mine.unloaded && sync.hash(info.path) !== undefined;
+        const file = loaded ? await loadServerFile(info, at) : listedServerFile(info, at);
         sync.remember(info.path, info.sha256, at);
         return file;
       }),
@@ -379,6 +392,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const activateLocalStorage = () => {
       mode.current = "local";
       setStorageMode("local");
+      // Files only listed from a server that then failed have no content to keep.
+      setState((s) => (s.files.some((f) => f.unloaded) ? { ...s, files: s.files.filter((f) => !f.unloaded) } : s));
     };
 
     (async () => {
@@ -489,6 +504,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     window.addEventListener("pagehide", flushSaves);
     return () => window.removeEventListener("pagehide", flushSaves);
   }, [flushSaves]);
+
+  // One fetch per listed file, however many callers ask at once. Keyed by the
+  // file itself: coming back to a place lists its files anew, and those get
+  // their own fetch rather than one still running from the earlier visit.
+  const loads = useRef(new WeakMap<WorkspaceFile, Promise<WorkspaceFile | undefined>>());
+  const loadFile = useCallback((rawPath: string) => {
+    const load = (path: string): Promise<WorkspaceFile | undefined> => {
+      const at = placeRef.current;
+      const file = files.current.find((f) => f.path === path);
+      if (!file?.unloaded) return Promise.resolve(file);
+      const running = loads.current.get(file);
+      if (running) return running;
+      const loading = loadServerText(path, at).then(({ content, sha256 }) => {
+        const now = files.current.find((f) => f.path === path);
+        if (placeRef.current !== at) return now;
+        // Listed anew meanwhile (left and came back): load that one instead.
+        if (now !== file) return now?.unloaded ? load(path) : now;
+        const loaded: WorkspaceFile = { ...file, content };
+        delete loaded.unloaded;
+        if (sha256) sync.remember(path, sha256, at);
+        files.current = files.current.map((f) => (f === file ? loaded : f));
+        upsert(loaded);
+        return loaded;
+      });
+      loads.current.set(file, loading);
+      // A failed fetch can be asked for again.
+      loading.catch(() => loads.current.delete(file));
+      return loading;
+    };
+    return load(normalizePath(rawPath));
+  }, [upsert, sync]);
 
   const getFile = useCallback(
     (path: string) => state.files.find((f) => f.path === normalizePath(path)),
@@ -759,6 +805,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openCount,
       reveal,
       getFile,
+      loadFile,
       open,
       close,
       write,
@@ -792,7 +839,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       promote,
     };
   }, [
-    state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilotkit/react-core/v2";
 import { useActions } from "./actions";
@@ -50,6 +50,12 @@ export function useWorkspaceAgent() {
   const open = ws.activeFile;
   const reportPath = ws.experiment ? findReport(ws.files.map((f) => f.path)) : null;
   const report = reportPath ? ws.getFile(reportPath) : undefined;
+  // Claude sees the run's report, so it's fetched like an open file.
+  const { loadFile } = ws;
+  const reportUnloaded = report?.unloaded === true;
+  useEffect(() => {
+    if (reportPath && reportUnloaded) loadFile(reportPath).catch(() => {});
+  }, [reportPath, reportUnloaded, loadFile]);
   // Only while files are browser-only; see the comment above.
   const browserFiles = ws.storageMode === "local";
   useAgentContext({
@@ -79,20 +85,24 @@ export function useWorkspaceAgent() {
               ? null
               : report.path === open?.path
                 ? { path: report.path, content: "(the open file)" }
-                : {
-                    path: report.path,
-                    content: numberLines(report.content.slice(0, MAX_CONTEXT_CHARS)),
-                    truncated: report.content.length > MAX_CONTEXT_CHARS,
-                  },
+                : report.unloaded
+                  ? { path: report.path, content: "(still loading)" }
+                  : {
+                      path: report.path,
+                      content: numberLines(report.content.slice(0, MAX_CONTEXT_CHARS)),
+                      truncated: report.content.length > MAX_CONTEXT_CHARS,
+                    },
           }
         : null,
       openFile: open
         ? {
             path: open.path,
             kind: open.kind,
-            content: isTextFile(open)
-              ? numberLines(open.content.slice(0, MAX_CONTEXT_CHARS))
-              : `(binary ${open.mime}, not shown)`,
+            content: !isTextFile(open)
+              ? `(binary ${open.mime}, not shown)`
+              : open.unloaded
+                ? "(still loading)"
+                : numberLines(open.content.slice(0, MAX_CONTEXT_CHARS)),
             truncated: isTextFile(open) && open.content.length > MAX_CONTEXT_CHARS,
           }
         : ws.active === TASKS_TAB

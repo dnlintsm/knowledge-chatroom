@@ -7,8 +7,14 @@
  */
 
 import { extension, isTextFile as isTextContent, mimeForPath } from "../../../shared/files";
-import type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
-export type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
+import type { LocalFile } from "../../../shared/storage-contract";
+
+/**
+ * A workspace file. With server storage, a text file is only listed until it
+ * is opened (or otherwise needed): it is `unloaded`, with empty content, until
+ * the store fetches it (store.tsx).
+ */
+export type WorkspaceFile = LocalFile & { unloaded?: true };
 export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "../../../shared/files";
 
 /** An edit or delete of a read-only file. */
