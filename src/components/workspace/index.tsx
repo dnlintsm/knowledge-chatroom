@@ -16,6 +16,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsProvider } from "./actions";
 import { AdminButton } from "./admin";
@@ -212,7 +213,14 @@ function HomeLink() {
 /** Where files are saved, and whether the last save failed. */
 function StorageStatus() {
   const { storageMode, syncError } = useWorkspace();
-  if (storageMode === "loading") return null;
+  if (storageMode === "loading") {
+    return (
+      <span role="status" className="ml-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+        <Spinner size="sm" />
+        <span className="max-sm:hidden">Loading files</span>
+      </span>
+    );
+  }
   const [Icon, label, title] = syncError
     ? [CloudAlert, "Not saved", syncError]
     : storageMode === "server"

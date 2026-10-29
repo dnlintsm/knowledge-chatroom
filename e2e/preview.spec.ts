@@ -613,3 +613,14 @@ test("preview images, code, HTML, tables, audio and other files", async ({ page 
   await openFile("raw-data.zip");
   await expect(page.getByRole("link", { name: "Download" })).toBeVisible();
 });
+
+test("files loading", async ({ page }) => {
+  // Storage that hasn't answered yet: the workspace waits for it instead of
+  // showing this browser's files first and swapping them for the server's.
+  await page.route(/\/api\/files([/?]|$)/, () => {});
+  await page.goto("/");
+  await expect(page.getByTestId("files-loading")).toBeVisible();
+  await expect(page.getByTestId("file-loading")).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toHaveCount(0);
+  await shot(page, "31-files-loading");
+});

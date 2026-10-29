@@ -382,16 +382,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
 
     (async () => {
+      // Open the run a link names (?experiment=), else return to the place
+      // this browser was last in, if it still exists. Its files are asked for
+      // alongside the root's and the account, rather than one after another.
+      const linked = experimentFromSearch(window.location.search);
+      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
+      const firstThere = lastNode ? listServerFiles(lastNode).catch(() => null) : Promise.resolve(null);
+      // Storage answers 503 while it migrates on startup; give it a moment.
+      const firstList = (async () => {
+        let list = await listServerFiles();
+        for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
+          await new Promise((r) => setTimeout(r, STARTUP_RETRY_MS));
+          if (cancelled) return null;
+          list = await listServerFiles();
+        }
+        return list;
+      })();
       const who = await getAccount();
       if (cancelled) return;
       setAccount(who);
-      // Storage answers 503 while it migrates on startup; give it a moment.
-      let list = await listServerFiles();
-      for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
-        await new Promise((r) => setTimeout(r, STARTUP_RETRY_MS));
-        if (cancelled) return;
-        list = await listServerFiles();
-      }
+      let list = await firstList;
       if (cancelled) return;
       if (!Array.isArray(list)) return activateLocalStorage();
 
@@ -419,11 +429,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
 
-      // Open the run a link names (?experiment=), else return to the place
-      // this browser was last in, if it still exists.
-      const linked = experimentFromSearch(window.location.search);
-      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
-      const there = lastNode ? await listServerFiles(lastNode) : null;
+      let there = await firstThere;
+      // Asked while storage was still starting: ask again now that it's up.
+      if (lastNode && there === "starting") there = await listServerFiles(lastNode);
       if (cancelled) return;
       if (lastNode && Array.isArray(there)) {
         placeRef.current = lastNode;
@@ -433,9 +441,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const ui = readPlaceUi(window.localStorage)[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
-      await resync(list, placeRef.current === null ? new Set(failed) : new Set());
-      // Roles come with the tree; load it first so edit controls are right from the start.
-      await Promise.all([refreshTree(), refreshProposals()]);
+      // Roles come with the tree; load it before showing the files so edit
+      // controls are right from the start.
+      await Promise.all([
+        resync(list, placeRef.current === null ? new Set(failed) : new Set()),
+        refreshTree(),
+        refreshProposals(),
+      ]);
       if (cancelled) return;
       mode.current = "server";
       setStorageMode("server");
@@ -734,8 +746,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<WorkspaceValue>(() => {
+    // While loading, the files are this browser's copy; none is shown as open
+    // (or given to Claude as the open file) until the server's have arrived.
     const activeFile =
-      state.active && !isBuiltInTab(state.active)
+      state.active && !isBuiltInTab(state.active) && storageMode !== "loading"
         ? (state.files.find((f) => f.path === state.active) ?? null)
         : null;
     return {
