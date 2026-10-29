@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
 import { ExperimentPanel, RunsPanel } from "./experiment-panel";
@@ -47,7 +48,7 @@ function canPreview(file: WorkspaceFile) {
 }
 
 export function EditorPane() {
-  const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment } = useWorkspace();
+  const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment, storageMode } = useWorkspace();
   // Changes proposed to the open file, waiting for review.
   const pending = activeFile && !experiment
     ? proposals.filter((p) => p.node === node && p.path === activeFile.path)
@@ -196,6 +197,8 @@ export function EditorPane() {
           <RunsPanel />
         ) : active === MEMORY_TAB ? (
           <MemoryEditor />
+        ) : storageMode === "loading" ? (
+          <FileLoading />
         ) : activeFile ? (
           <FileView key={activeFile.path} file={activeFile} mode={mode} />
         ) : (
@@ -395,6 +398,18 @@ function lineTop(textarea: HTMLTextAreaElement, index: number) {
   const top = marker.offsetTop;
   mirror.remove();
   return top;
+}
+
+/** Shown instead of this browser's copy of a file until storage has answered. */
+function FileLoading() {
+  return (
+    <Centered>
+      <div role="status" data-testid="file-loading" className="flex items-center gap-2">
+        <Spinner size="sm" />
+        Loading files…
+      </div>
+    </Centered>
+  );
 }
 
 function EmptyState() {

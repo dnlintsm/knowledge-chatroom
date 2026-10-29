@@ -21,6 +21,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
@@ -94,9 +95,13 @@ export function ActivityBar({
 }
 
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write, canEdit } = useWorkspace();
+  const { files, write, canEdit: mayEdit, storageMode } = useWorkspace();
   const { editor, notify } = useWorkbench();
   const { open } = editor;
+  // Until storage answers, the files here may be this browser's copy rather
+  // than the server's, so the panel waits instead of showing one, then the other.
+  const loading = storageMode === "loading" && view !== "search" && view !== "memory";
+  const canEdit = mayEdit && !loading;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -183,36 +188,42 @@ export function SidePanel({ view }: { view: SidebarView }) {
         }}
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
-        {view === "files" && <FileTree files={files} />}
-        {view === "runs" && <RunList />}
-        {view === "search" && <SearchPanel />}
-        {view === "knowledge" && <KnowledgeTree />}
-        {view === "skills" && (
-          <SkillsPanel
-            fallback={
-              <FlatList
-                files={files.filter((f) => f.kind === "skill")}
-                label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
-                empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+        {loading ? (
+          <FilesLoading />
+        ) : (
+          <>
+            {view === "files" && <FileTree files={files} />}
+            {view === "runs" && <RunList />}
+            {view === "search" && <SearchPanel />}
+            {view === "knowledge" && <KnowledgeTree />}
+            {view === "skills" && (
+              <SkillsPanel
+                fallback={
+                  <FlatList
+                    files={files.filter((f) => f.kind === "skill")}
+                    label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
+                    empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+                  />
+                }
               />
-            }
-          />
-        )}
-        {view === "memory" && <MemoryPanel />}
-        {view === "uploads" && (
-          <FlatList
-            files={files.filter((f) => f.kind === "upload")}
-            empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
-          />
-        )}
-        {view === "artifacts" && (
-          <FlatList
-            files={files.filter((f) => f.kind === "artifact")}
-            empty="Files Claude creates show up here."
-          />
+            )}
+            {view === "memory" && <MemoryPanel />}
+            {view === "uploads" && (
+              <FlatList
+                files={files.filter((f) => f.kind === "upload")}
+                empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
+              />
+            )}
+            {view === "artifacts" && (
+              <FlatList
+                files={files.filter((f) => f.kind === "artifact")}
+                empty="Files Claude creates show up here."
+              />
+            )}
+          </>
         )}
       </div>
-      {view === "files" && <ActionsBlock />}
+      {view === "files" && !loading && <ActionsBlock />}
       {view !== "runs" && (
         <button
           type="button"
@@ -223,6 +234,26 @@ export function SidePanel({ view }: { view: SidebarView }) {
         </button>
       )}
     </section>
+  );
+}
+
+/** Placeholder rows while the workspace asks storage for its files. */
+function FilesLoading() {
+  return (
+    <div role="status" aria-live="polite" data-testid="files-loading" className="px-3 py-2">
+      <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+        <Spinner size="sm" />
+        Loading files…
+      </div>
+      <div aria-hidden className="mt-3 space-y-2.5">
+        {[70, 55, 80, 45, 65].map((width, i) => (
+          <div key={i} className="flex animate-pulse items-center gap-2" style={{ paddingLeft: i % 2 ? 16 : 0 }}>
+            <span className="size-4 shrink-0 rounded bg-[var(--muted)]" />
+            <span className="h-3 rounded bg-[var(--muted)]" style={{ width: `${width}%` }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
