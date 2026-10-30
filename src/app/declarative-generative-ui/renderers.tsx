@@ -30,6 +30,11 @@ import type { CatalogRenderers } from "@copilotkit/a2ui-renderer";
 import { demonstrationCatalogDefinitions } from "./definitions";
 import type { DemonstrationCatalogDefinitions } from "./definitions";
 
+interface ChildItem {
+  id: string;
+  basePath?: string;
+}
+
 // ─── Theme-aware colors ─────────────────────────────────────────────
 
 const c = {
@@ -188,7 +193,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
             width: "100%",
           }}
         >
-          {items.map((item: any, i: number) => {
+          {items.map((item: string | ChildItem, i: number) => {
             if (typeof item === "string")
               return (
                 <React.Fragment key={`${item}-${i}`}>
@@ -198,7 +203,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
             if (item && typeof item === "object" && "id" in item)
               return (
                 <React.Fragment key={`${item.id}-${i}`}>
-                  {(children as any)(item.id, item.basePath)}
+                  {children(item.id, item.basePath)}
                 </React.Fragment>
               );
             return null;
