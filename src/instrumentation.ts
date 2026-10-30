@@ -7,5 +7,4 @@ export async function register() {
   const { authSettings, checkOidcSettings } = await import("../shared/auth-mode");
   const { mode } = authSettings();
   if (mode === "oidc") checkOidcSettings();
-  console.log(`[auth] ${mode === "oidc" ? "sign-in with OpenID Connect" : "no login (local mode)"}`);
 }
