@@ -1,11 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
-### Upgrading
+Files load faster when the app opens, you can upload files straight into an existing
+run and add them as its inputs, a failed Claude run says why, and a new
+`npm run env:check` / `npm run env:upgrade` keeps your `.env` in step with each release.
+Nothing is removed or renamed in this release.
 
-- After pulling a new version, run `npm run env:check` to compare your `.env` with
-  `.env.example`, and `npm run env:upgrade` to apply it (#112). See Added below.
+### Upgrading from 0.2.1
+
+- No database migrations, no new or renamed settings, and no breaking changes: pull,
+  then rebuild and restart the app and the agent (with Docker,
+  `docker compose up --build -d` with the profile you use).
+- Run `npm run env:check` after pulling (#112). It should report nothing to change when
+  you come from 0.2.1. When you come from an older release, it lists the settings later
+  releases removed (`IDENTITY_FORMAT`, `RUN_DIR_MARKERS`) or renamed (`AGENT_URL` on port
+  8000 becomes `LOCAL_AGENT_URL`), and `npm run env:upgrade` applies that after backing up
+  `.env`. Still follow the "Upgrading" steps of each release you skip.
+- If chat showed "SDK resume/run failed; check the original files, tools, credentials and
+  execution configuration.", the chat and the agent log now show the real reason after
+  this upgrade (#116).
 
 ### Added
 
@@ -17,12 +31,37 @@
   to `.env.backup-<time>`, comments out removed settings, renames, and appends the new
   settings commented out with their explanations, so nothing else changes until you
   uncomment them. Only names are printed, never values.
+- Upload files into an existing run (#114, #115). The run panel has an **Add files**
+  section (button and drop zone), and the Runs view an **Add files to ‹run›** button that
+  opens it. Files go to the run's `uploads/`; with **Add as run inputs** (on by default)
+  each one is also linked read-only under `inputs/` and recorded in the run's provenance,
+  so a rerun reads it too. A finished (done or failed) run keeps the inputs it ran with,
+  so its files go to `uploads/` only. Only the run's author can add files, and not to an
+  archived run. The agent server has a matching `POST /experiments/<id>/inputs`, which
+  storage tokens may call too.
+
+### Changed
+
+- Faster page loads with server storage (#118, #119, #120). The file list now comes from
+  metadata only, and a text file's content is fetched when it is opened (or when Claude is
+  given a run's `report.md`), instead of every text file being downloaded on every page
+  load and every move between places. Account, tree, proposals and the last place's
+  listing load in parallel. Until storage answers, the side panel shows "Loading files…",
+  the editor a spinner and the top bar "Loading files", instead of briefly showing local
+  files and swapping them out; a file being fetched shows "Loading ‹name›…" with a retry
+  if it fails.
 
 ### Fixed
 
 - A failed Claude run says why in the chat and the agent log (for example a bad API key,
   an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
-  original files, tools, credentials and execution configuration." (#116).
+  original files, tools, credentials and execution configuration." (#116, #117).
+
+### Known limitations
+
+- Claude runs that fail only for some non-owner accounts, while the owner's runs work,
+  are not fixed yet. With #117 the chat now shows the reason, which should point to the
+  cause.
 
 ## 0.2.1
 
