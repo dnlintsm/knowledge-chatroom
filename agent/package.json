@@ -1,6 +1,6 @@
 {
   "name": "claude-sdk-typescript-starter-agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Claude Agent SDK integration server for AG-UI",
