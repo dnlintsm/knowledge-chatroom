@@ -68,6 +68,11 @@ services:
       MEMORY_IDLE_MINUTES: ${MEMORY_IDLE_MINUTES:-10}
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      # Context window for a model the engine doesn't know, e.g. a local one
+      # (.env.example). No value: passed through only when set.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS:
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
       S3_ENDPOINT: http://s3:8333
       S3_REGION: us-east-1

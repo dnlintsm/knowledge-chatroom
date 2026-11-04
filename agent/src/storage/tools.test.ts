@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { withFrontMatter } from "./run-report";
 import { numberLines, readLines, skillProvenance } from "./tools";
+import { applyEdit } from "../../../shared/text-edit";
 
 const file = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
 
@@ -86,4 +87,33 @@ test("a skill is recorded with a hash that follows its files", () => {
   assert.equal(hash("v1"), hash("v1"));
   assert.notEqual(hash("v2"), hash("v1"));
   assert.deepEqual(skillProvenance("missing", [skill("v1")]), { name: "missing" });
+});
+
+test("applyEdit replaces exactly one match and says which lines changed", () => {
+  const result = applyEdit("a\nb\nc\nd", { oldText: "b\nc", newText: "B\nC\nC2" });
+  assert.deepEqual(result, { ok: true, content: "a\nB\nC\nC2\nd", replacements: 1, lines: [2, 4] });
+  const removed = applyEdit("a\nb\nc", { oldText: "b\n", newText: "" });
+  assert.deepEqual(removed, { ok: true, content: "a\nc", replacements: 1, lines: [2, 2] });
+});
+
+test("applyEdit refuses ambiguous, missing, empty and no-op edits", () => {
+  const twice = applyEdit("x y x", { oldText: "x", newText: "z" });
+  assert.equal(twice.ok, false);
+  assert.match((twice as { error: string }).error, /occurs 2 times/);
+  assert.deepEqual(applyEdit("x y x", { oldText: "x", newText: "z", replaceAll: true }), {
+    ok: true,
+    content: "z y z",
+    replacements: 2,
+    lines: [1, 1],
+  });
+  const numbered = applyEdit("a\nb", { oldText: "2\tb", newText: "c" });
+  assert.match((numbered as { error: string }).error, /Leave out the line numbers/);
+  assert.match((applyEdit("a", { oldText: "zzz", newText: "c" }) as { error: string }).error, /not found/);
+  assert.match((applyEdit("a", { oldText: "", newText: "c" }) as { error: string }).error, /empty/);
+  assert.match((applyEdit("a", { oldText: "a", newText: "a" }) as { error: string }).error, /same/);
+});
+
+test("applyEdit matches a CRLF file and keeps its line endings", () => {
+  const result = applyEdit("a\r\nb\r\nc", { oldText: "a\nb", newText: "A\nB" });
+  assert.deepEqual(result, { ok: true, content: "A\r\nB\r\nc", replacements: 1, lines: [1, 2] });
 });

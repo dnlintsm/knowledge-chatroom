@@ -388,8 +388,8 @@ export function workdirPrompt(summary: WorkdirSummary, scripts: boolean): string
     "workspace/.places.json maps each folder to its node or experiment id and the user's role there.",
     `It has ${summary.files} files; files too large to copy are listed under "skipped" there.`,
     "Use Glob and Grep to find things in it and Read to read them (paths relative to the current",
-    "directory, e.g. workspace/root/notes/welcome.md). To change a file, use write_file with that",
-    "place's node or experiment id; never assume a change to the copy is saved.",
+    "directory, e.g. workspace/root/notes/welcome.md). To change a file, use edit_file (or write_file",
+    "for a new file) with that place's node or experiment id; never assume a change to the copy is saved.",
   ];
   if (scripts) {
     lines.push(

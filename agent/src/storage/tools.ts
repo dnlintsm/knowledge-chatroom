@@ -24,6 +24,7 @@ import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
+import { applyEdit } from "../../../shared/text-edit";
 import { isInside, writeRunInputs } from "./workdir";
 import type { Skill } from "../skills/catalog";
 
@@ -68,8 +69,16 @@ export function skillProvenance(name: string, skills: Skill[] = []) {
   };
 }
 
-/** Keeps one tool result reasonable; Claude is told when a file was cut. */
-const MAX_READ_CHARS = 200_000;
+/**
+ * Keeps one tool result reasonable; Claude is told when a file was cut and
+ * pages on with offset. About 15k tokens, well under the SDK's limit for one
+ * MCP tool result (MAX_MCP_OUTPUT_TOKENS, 25k by default) and small enough
+ * for models with smaller windows (issue #126).
+ */
+const MAX_READ_CHARS = 50_000;
+/** Lines shown around an edit_file change, and at most how much of it. */
+const EDIT_CONTEXT_LINES = 2;
+const MAX_EDIT_PREVIEW_CHARS = 4_000;
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -284,6 +293,36 @@ export function createFileTools(
     });
   };
 
+  /**
+   * The text edit_file changes: where writes become proposals, the user's own
+   * open proposal for the file (so edits in a row build on each other), else
+   * the file as it is.
+   */
+  const currentText = async (
+    session: Session,
+    path: string,
+    place: { node?: string; experiment?: string },
+  ): Promise<{ path: string; text: string } | { error: string }> => {
+    const wanted = normalizePath(path);
+    const proposes = !place.experiment && (place.node || kindForPath(wanted) === "skill");
+    if (proposes) {
+      const mine = (await session.proposals({ node: place.node || null })).find(
+        (p) => p.path === wanted && p.authorId === session.principal.userId && p.status === "open",
+      );
+      if (mine) {
+        const { bytes } = await session.proposalContent(mine.id);
+        return { path: mine.path, text: new TextDecoder().decode(bytes) };
+      }
+    }
+    const service = place.experiment
+      ? await session.experimentFiles(place.experiment)
+      : await session.files(place.node || null);
+    const file = await service.read(wanted);
+    if (!file) return { error: `No file at ${wanted}. Use write_file to create it.` };
+    if (!isTextFile(file.info.path, file.info.mime)) return { error: `${file.info.path} is not a text file.` };
+    return { path: file.info.path, text: new TextDecoder().decode(file.bytes) };
+  };
+
   return [
     tool(
       "list_nodes",
@@ -465,6 +504,57 @@ export function createFileTools(
       },
       ({ path, content, summary, ...place }) =>
         run((session) => store(session, path, new TextEncoder().encode(content), place, summary)),
+    ),
+    tool(
+      "edit_file",
+      "Change part of an existing text file: replaces oldText, copied exactly from the file " +
+        "(without the line numbers read_file shows), with newText. Prefer this to write_file " +
+        "for any change to a file that already exists, even several edits in a row: it keeps " +
+        "the chat small. oldText must match exactly one place unless replaceAll is set, so " +
+        "include a few surrounding lines when a snippet repeats. Same rules as write_file: " +
+        "PROPOSED in a knowledge node or for skills (editing again revises your proposal), " +
+        "kept as a version, never on a read-only file. The result shows the changed lines.",
+      {
+        path: z.string().describe("Workspace path of the file, e.g. artifacts/page.html"),
+        oldText: z.string().describe("The exact text to replace, without line numbers."),
+        newText: z.string().describe("The replacement text (empty to delete oldText)."),
+        replaceAll: z
+          .boolean()
+          .optional()
+          .describe("Replace every occurrence of oldText instead of exactly one. Default false."),
+        node: nodeParam,
+        experiment: experimentParam,
+        summary: z
+          .string()
+          .optional()
+          .describe("One line on what changed and why; shown to whoever reviews a proposal."),
+      },
+      ({ path, oldText, newText, replaceAll, summary, ...place }) =>
+        run(async (session) => {
+          const current = await currentText(session, path, place);
+          if ("error" in current) return error(current.error);
+          const edit = applyEdit(current.text, { oldText, newText, replaceAll });
+          if (!edit.ok) return error(edit.error);
+          const result = await store(session, current.path, new TextEncoder().encode(edit.content), place, summary);
+          if (result.isError) return result;
+          const [from, to] = edit.lines;
+          const changed = readLines(current.path, edit.content, {
+            offset: Math.max(1, from - EDIT_CONTEXT_LINES),
+            limit: to - from + 1 + 2 * EDIT_CONTEXT_LINES,
+            maxChars: MAX_EDIT_PREVIEW_CHARS,
+          });
+          return {
+            content: [
+              ...result.content,
+              {
+                type: "text" as const,
+                text:
+                  `${edit.replacements} replacement${edit.replacements === 1 ? "" : "s"}; ` +
+                  `the first, with ${EDIT_CONTEXT_LINES} lines around it:\n${changed}`,
+              },
+            ],
+          };
+        }),
     ),
     ...(workdir
       ? [
