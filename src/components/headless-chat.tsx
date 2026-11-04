@@ -1,5 +1,6 @@
 import { useAgent } from "@copilotkit/react-core/v2";
 import { useCallback, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 
 export const HeadlessChat = () => {
   const { agent } = useAgent();
@@ -9,7 +10,7 @@ export const HeadlessChat = () => {
     (message: string) => {
       agent.addMessage({
         role: "user",
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         content: message,
       });
       agent.runAgent();

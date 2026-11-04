@@ -2,6 +2,7 @@
 
 import { TodoColumn } from "./todo-column";
 import { Button } from "@/components/ui/button";
+import { v4 as uuidv4 } from "uuid";
 
 interface Todo {
   id: string;
@@ -58,7 +59,7 @@ export function TodoList({ todos, onUpdate, isAgentRunning }: TodoListProps) {
 
   const addTodo = () => {
     const newTodo: Todo = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       title: "New Todo",
       description: "Add a description",
       emoji: "🎯",
