@@ -126,6 +126,63 @@ test("without server storage, memory stands in until the agent server says which
   expect((await store.list(null, {})).threads.map((t) => t.id)).toEqual(["later", "early"]);
 });
 
+test("MemoryChatStore.handOver preserves run order per chat and clears memory", async () => {
+  const store = new MemoryChatStore();
+  await store.save(null, "chat-a", {
+    agentId: "default",
+    runId: "a1",
+    parentRunId: null,
+    events: [{ type: "TEXT_MESSAGE_CONTENT", delta: "1" }],
+    messages: [{ role: "user", content: "A1" }],
+    name: "Chat A",
+  });
+  await store.save(null, "chat-a", {
+    agentId: "default",
+    runId: "a2",
+    parentRunId: "a1",
+    events: [{ type: "TEXT_MESSAGE_CONTENT", delta: "2" }],
+    messages: [{ role: "user", content: "A1" }, { role: "assistant", content: "A2" }],
+    name: "Chat A",
+  });
+  await store.save(null, "chat-b", {
+    agentId: "default",
+    runId: "b1",
+    parentRunId: null,
+    events: [{ type: "TEXT_MESSAGE_CONTENT", delta: "3" }],
+    messages: [{ role: "user", content: "B1" }],
+    name: "Chat B",
+  });
+
+  const handedOverRuns: { id: string; runId: string; parentRunId: string | null; messagesLen: number }[] = [];
+  await store.handOver(async (_user, id, run) => {
+    // Small artificial delay to simulate async handover
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    handedOverRuns.push({
+      id,
+      runId: run.runId,
+      parentRunId: run.parentRunId,
+      messagesLen: run.messages.length,
+    });
+  });
+
+  // Verify memory store is emptied after handover
+  expect((await store.list(null, {})).threads).toEqual([]);
+  expect(await store.get(null, "chat-a")).toBeNull();
+  expect(await store.get(null, "chat-b")).toBeNull();
+
+  // Verify runs for chat-a were handed over in strict sequence
+  const chatARuns = handedOverRuns.filter((r) => r.id === "chat-a");
+  expect(chatARuns).toEqual([
+    { id: "chat-a", runId: "a1", parentRunId: null, messagesLen: 0 },
+    { id: "chat-a", runId: "a2", parentRunId: "a1", messagesLen: 2 },
+  ]);
+
+  const chatBRuns = handedOverRuns.filter((r) => r.id === "chat-b");
+  expect(chatBRuns).toEqual([
+    { id: "chat-b", runId: "b1", parentRunId: null, messagesLen: 1 },
+  ]);
+});
+
 test.describe("with login on", () => {
   const LOGIN_ENV = {
     AUTH_MODE: "oidc",

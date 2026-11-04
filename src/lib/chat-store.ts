@@ -241,19 +241,22 @@ export class MemoryChatStore implements ChatStore {
     return this.find(user, id) ? this.chats.delete(id) : false;
   }
 
-  /** Hands every chat, oldest first, to `save` run by run, and forgets those it took. */
+  /** Hands every chat to `save` run by run in parallel across chats, and forgets those it took. */
   async handOver(save: (user: ChatUser, id: string, run: NewRun) => Promise<void>) {
-    for (const chat of [...this.chats.values()]) {
-      for (const [i, run] of chat.runs.entries()) {
-        await save(chat.user, chat.id, {
-          ...run,
-          agentId: chat.agentId,
-          messages: i === chat.runs.length - 1 ? chat.messages : [],
-          name: chat.name,
-        });
-      }
-      this.chats.delete(chat.id);
-    }
+    const chats = [...this.chats.values()];
+    await Promise.all(
+      chats.map(async (chat) => {
+        for (const [i, run] of chat.runs.entries()) {
+          await save(chat.user, chat.id, {
+            ...run,
+            agentId: chat.agentId,
+            messages: i === chat.runs.length - 1 ? chat.messages : [],
+            name: chat.name,
+          });
+        }
+        this.chats.delete(chat.id);
+      }),
+    );
   }
 }
 
