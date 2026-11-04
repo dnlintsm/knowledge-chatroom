@@ -307,7 +307,11 @@ export function createFileTools(
     const proposes = !place.experiment && (place.node || kindForPath(wanted) === "skill");
     if (proposes) {
       const mine = (await session.proposals({ node: place.node || null })).find(
-        (p) => p.path === wanted && p.authorId === session.principal.userId && p.status === "open",
+        (p) =>
+          p.path === wanted &&
+          p.author === session.principal.actor &&
+          p.authorId === session.principal.userId &&
+          p.status === "open",
       );
       if (mine) {
         const { bytes } = await session.proposalContent(mine.id);

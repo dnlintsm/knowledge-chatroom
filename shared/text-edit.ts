@@ -36,13 +36,12 @@ export function applyEdit(content: string, { oldText, newText, replaceAll = fals
   }
   if (oldText === newText) return { ok: false, error: "oldText and newText are the same; nothing to change." };
 
-  // Read tools show lines split on any line ending; match a CRLF file too.
+  // Read tools show lines split on any line ending: match a CRLF file too,
+  // and keep its line endings in the replacement.
+  const crlf = content.includes("\r\n");
   let find = oldText;
-  let put = newText;
-  if (!content.includes(find) && content.includes("\r\n") && !find.includes("\r\n")) {
-    find = find.replace(/\n/g, "\r\n");
-    put = put.replace(/\r?\n/g, "\r\n");
-  }
+  const put = crlf ? newText.replace(/\r?\n/g, "\r\n") : newText;
+  if (crlf && !content.includes(find) && !find.includes("\r\n")) find = find.replace(/\n/g, "\r\n");
 
   const first = content.indexOf(find);
   if (first === -1) {

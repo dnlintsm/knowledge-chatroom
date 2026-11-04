@@ -116,4 +116,7 @@ test("applyEdit refuses ambiguous, missing, empty and no-op edits", () => {
 test("applyEdit matches a CRLF file and keeps its line endings", () => {
   const result = applyEdit("a\r\nb\r\nc", { oldText: "a\nb", newText: "A\nB" });
   assert.deepEqual(result, { ok: true, content: "A\r\nB\r\nc", replacements: 1, lines: [1, 2] });
+  // A one-line match that grows to several lines keeps CRLF too.
+  const grown = applyEdit("first\r\nsecond\r\nthird", { oldText: "second", newText: "second\ninserted" });
+  assert.deepEqual(grown, { ok: true, content: "first\r\nsecond\r\ninserted\r\nthird", replacements: 1, lines: [2, 3] });
 });

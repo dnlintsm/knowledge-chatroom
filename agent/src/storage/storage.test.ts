@@ -1648,14 +1648,19 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
       const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
       assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
-      // Edits in a node are proposals too, and edits in a row build on Claude's open proposal.
+      // Edits in a node are proposals too, and edits in a row build on Claude's open
+      // proposal, never on the user's own draft of the same file.
+      const draft = await local.propose(child.id, "notes/wear.md", text("the user's draft"));
       for (const [from, to] of [["worn", "worn out"], ["out", "out fast"]]) {
         const edit = await call("edit_file", { node: child.id, path: "notes/wear.md", oldText: from, newText: to });
         assert.match(edit.text, /"proposed":true/, edit.text);
       }
-      const [editProposal] = await local.proposals({ node: child.id });
+      const open = await local.proposals({ node: child.id });
+      const editProposal = open.find((p) => p.author === "agent")!;
       assert.equal(new TextDecoder().decode((await local.proposalContent(editProposal.id)).bytes), "worn out fast");
+      assert.equal(new TextDecoder().decode((await local.proposalContent(draft.id)).bytes), "the user's draft");
       await local.decide(editProposal.id, "reject");
+      await local.decide(draft.id, "withdraw");
       // Skills at the root are proposed too: Claude doesn't add skills itself.
       const skill = JSON.parse(
         (await call("write_file", { path: "skills/recap/SKILL.md", content: "---\nname: recap\n---\nRecap." })).text,
