@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,7 +42,7 @@ export async function migrate(sql: Sql): Promise<string[]> {
     const applied: string[] = [];
     for (const name of files) {
       if (done.has(name)) continue;
-      await tx.unsafe(readFileSync(path.join(MIGRATIONS_DIR, name), "utf8"));
+      await tx.file(path.join(MIGRATIONS_DIR, name));
       await tx`INSERT INTO schema_migrations (name) VALUES (${name})`;
       applied.push(name);
     }
@@ -73,26 +73,18 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     if (!row?.ok) return false;
     const [{ schema }] = await tx<{ schema: string }[]>`SELECT current_schema() AS schema`;
     const role = APP_ROLE;
-    await tx.unsafe(`GRANT USAGE ON SCHEMA "${schema.replace(/"/g, '""')}" TO ${role}`);
-    await tx.unsafe(
-      `GRANT SELECT ON workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals TO ${role}`,
-    );
-    await tx.unsafe(
-      `GRANT INSERT ON blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals TO ${role}`,
-    );
+    await tx`GRANT USAGE ON SCHEMA ${tx(schema)} TO ${tx(role)}`;
+    await tx`GRANT SELECT ON workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals TO ${tx(role)}`;
+    await tx`GRANT INSERT ON blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals TO ${tx(role)}`;
     // UPDATE also covers the row locks (FOR SHARE / FOR UPDATE) the services take.
-    await tx.unsafe(`GRANT UPDATE ON nodes, files, experiments, proposals TO ${role}`);
-    await tx.unsafe(`GRANT USAGE ON SEQUENCE audit_log_id_seq TO ${role}`);
+    await tx`GRANT UPDATE ON nodes, files, experiments, proposals TO ${tx(role)}`;
+    await tx`GRANT USAGE ON SEQUENCE audit_log_id_seq TO ${tx(role)}`;
     // Chat history (017_chats.sql): only its owner's, row security sees to that.
-    await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON chats, chat_runs TO ${role}`);
+    await tx`GRANT SELECT, INSERT, UPDATE, DELETE ON chats, chat_runs TO ${tx(role)}`;
     // Personalized memory (018_memory.sql): likewise only its owner's.
-    await tx.unsafe(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, memory_learned_chats, shared_memories, shared_memory_versions, shared_memory_proposals, shared_memory_settings TO ${role}`,
-    );
+    await tx`GRANT SELECT, INSERT, UPDATE, DELETE ON memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, memory_learned_chats, shared_memories, shared_memory_versions, shared_memory_proposals, shared_memory_settings TO ${tx(role)}`;
     // Installed memory packs (021_memory_packs.sql): the pack service writes them as the server.
-    await tx.unsafe(
-      `GRANT SELECT ON memory_pack_installs, hub_memory_packs, hub_memory_pack_versions TO ${role}`,
-    );
+    await tx`GRANT SELECT ON memory_pack_installs, hub_memory_packs, hub_memory_pack_versions TO ${tx(role)}`;
     return true;
   }) as Promise<boolean>;
 }
@@ -118,7 +110,7 @@ export function inTransaction(tx: Tx): Sql {
  */
 export function asUser<T>(sql: Sql, userId: string, fn: (db: Sql) => Promise<T>): Promise<T> {
   return sql.begin(async (tx) => {
-    await tx.unsafe(`SET LOCAL ROLE ${APP_ROLE}`);
+    await tx`SET LOCAL ROLE ${tx(APP_ROLE)}`;
     await tx`SELECT set_config('app.user_id', ${userId}, true)`;
     return fn(inTransaction(tx));
   }) as Promise<T>;
