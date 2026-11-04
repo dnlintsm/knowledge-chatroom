@@ -158,7 +158,7 @@ to it.
    - **Workbench**: `openWorkspaceFile`, `openTaskBoard`, `showPane`, `hidePane`, `listRuns`,
      `openRun`, `listActions`, `runAction`.
    - **Files**, only while `storage` is `"local"`: `listWorkspaceFiles`, `readWorkspaceFile`,
-     `writeWorkspaceFile`.
+     `writeWorkspaceFile`, `editWorkspaceFile`.
    - **Demo UI**: the chart components, the meeting picker and `toggleTheme`.
 4. **Give the model each run's context.** Its workspace entry has the open file (each line
    starts with its line number and a tab), the selection, the files where the user is, `run`
