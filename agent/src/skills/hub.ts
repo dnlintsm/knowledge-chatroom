@@ -589,8 +589,9 @@ export class SkillHub {
     const locked = files.find((f) => f.readOnly);
     if (locked) throw new HubConflictError(`${locked.path} is read-only, so ${name} can't be deleted`);
     const main = `${prefix}SKILL.md`;
-    files.sort((a, b) => Number(a.path === main) - Number(b.path === main));
-    for (const file of files) await session.remove(file.path);
+    const others = files.filter((f) => f.path !== main);
+    await Promise.all(others.map((f) => session.remove(f.path)));
+    if (files.some((f) => f.path === main)) await session.remove(main);
     return { name, deleted: files.length };
   }
 
