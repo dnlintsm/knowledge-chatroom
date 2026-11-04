@@ -188,10 +188,13 @@ export class MemoryLearner {
     this.running = true;
     let learned = 0;
     try {
-      for (const chat of await this.due()) {
-        await this.learn(chat);
-        learned++;
-      }
+      const chats = await this.due();
+      await Promise.all(
+        chats.map(async (chat) => {
+          await this.learn(chat);
+          learned++;
+        }),
+      );
     } catch (err) {
       console.error(`[memory] learning sweep failed: ${err instanceof Error ? err.message : err}`);
     } finally {
