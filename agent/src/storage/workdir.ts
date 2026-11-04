@@ -129,7 +129,10 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
   const skipped: WorkdirSummary["skipped"] = [];
   const wanted = new Map<string, Wanted>();
 
-  const { rootRole, nodes } = await session.tree();
+  const [{ rootRole, nodes }, experiments] = await Promise.all([
+    session.tree(),
+    session.experiments(),
+  ]);
 
   // Folder of each node: its ancestors' names, with siblings of the same name told apart by id.
   const folders = new Map<string, string>();
@@ -160,6 +163,7 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
   };
   walk(null, "nodes");
 
+  const collectTasks: Promise<void>[] = [];
   const collect = async (files: FilesSession, folder: string, children?: Set<string>) => {
     for (const info of await files.list()) {
       if (children?.has(info.path.split("/")[0])) {
@@ -173,19 +177,21 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
 
   if (rootRole) {
     places.push({ folder: `${WORKSPACE_DIR}/root`, root: true, role: rootRole });
-    await collect(await session.files(null), "root");
+    collectTasks.push(session.files(null).then((files) => collect(files, "root")));
   }
   for (const node of nodes) {
     const folder = folders.get(node.id)!;
     if (!node.role) continue;
     places.push({ folder: `${WORKSPACE_DIR}/${folder}`, node: node.id, role: node.role });
-    await collect(await session.files(node.id), folder, childNames.get(node.id));
+    collectTasks.push(session.files(node.id).then((files) => collect(files, folder, childNames.get(node.id))));
   }
-  for (const experiment of await session.experiments()) {
+  for (const experiment of experiments) {
     const folder = `experiments/${folderName(experiment.title)} (${experiment.id.slice(0, 8)})`;
     places.push({ folder: `${WORKSPACE_DIR}/${folder}`, experiment: experiment.id, role: experiment.access });
-    await collect(await session.experimentFiles(experiment.id), folder);
+    collectTasks.push(session.experimentFiles(experiment.id).then((files) => collect(files, folder)));
   }
+
+  await Promise.all(collectTasks);
 
   // Newest-first would need dates; smallest-first keeps the most files under the cap.
   let bytes = 0;
