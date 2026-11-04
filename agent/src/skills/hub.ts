@@ -604,7 +604,9 @@ export class SkillHub {
     }
     for (const file of files) await session.write(prefix + file.path, file.bytes);
     const kept = new Set(files.map((f) => prefix + f.path));
-    for (const old of existing) if (!kept.has(old.path)) await session.remove(old.path);
+    await Promise.all(
+      existing.filter((old) => !kept.has(old.path)).map((old) => session.remove(old.path)),
+    );
   }
 
   /** Storage, and the user's role at the root, which must be at least `min`. */
