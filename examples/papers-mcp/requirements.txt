@@ -1,0 +1,6 @@
+# The MCP server (papers_mcp/server.py). mcp 2 renamed FastMCP to MCPServer.
+mcp>=2.2,<3
+# Checks the chatroom's Ed25519-signed identity tokens (papers_mcp/identity.py).
+cryptography>=42
+# Text out of open-access PDFs for read_paper.
+pypdf>=5
