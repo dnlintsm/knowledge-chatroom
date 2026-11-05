@@ -546,6 +546,7 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
     node: null,
     experiment: null,
     selected_path: `${RUN}/effects.csv`,
+    tools: [],
   });
 });
 
@@ -568,6 +569,45 @@ function toneWav(seconds = 1, rate = 8000) {
   for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
   return wav;
 }
+
+test("paper search: the + menu, the Papers chip and paper cards", async ({ page, request }) => {
+  await openHome(page);
+  // The "+" menu lists the agent's tool servers (GET /api/tools) under "Add file".
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await shot(page, "33-plus-menu-papers");
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  const chip = page.locator('[data-tool-chip="papers"]');
+  await expect(chip).toContainText("Papers");
+  await page.getByTestId("copilot-chat-textarea").fill("Find the key papers on retrieval augmented generation");
+  await page.mouse.move(0, 0);
+  await shot(page, "33b-papers-chip");
+
+  await page.getByTestId("copilot-send-button").click();
+  const cards = page.getByTestId("paper-results");
+  await expect(cards).toContainText("3 of 18,342 papers for “retrieval augmented generation”", reply);
+  await expect(page.getByTestId("paper-card")).toHaveCount(3);
+  await expect(page.getByTestId("paper-card").first()).toContainText("4,473 citations");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("The key paper is", reply);
+  // Without server storage there is nowhere to save to; asking about one fills the message box.
+  await expect(page.getByTestId("paper-save")).toHaveCount(0);
+  await page.getByTestId("paper-ask").first().click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toHaveValue(/^Tell me more about \[Retrieval-Augmented Generation/);
+  await shot(page, "33c-paper-cards");
+
+  // The chip went out with the run, and stays on in this chat until it's turned off.
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom.tools).toEqual(["papers"]);
+  await page.getByRole("button", { name: "Turn off Search papers" }).click();
+  await expect(chip).toHaveCount(0);
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  await expect(chip).toBeVisible();
+  // A new chat starts without chips.
+  await page.getByRole("button", { name: "New chat" }).click();
+  await expect(chip).toHaveCount(0);
+});
 
 test("preview images, code, HTML, tables, audio and other files", async ({ page }) => {
   await gotoReport(page);

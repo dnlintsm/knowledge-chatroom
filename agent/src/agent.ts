@@ -17,7 +17,7 @@ import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { RunAgentInput } from "@ag-ui/core";
 
-import { allowServer, externalServersFromEnv, serverConfigs, type RunTokens } from "./mcp";
+import { allowServer, chipsFrom, externalServersFromEnv, serverConfigs, withToolChips, type RunTokens } from "./mcp";
 import { resolveModel } from "./model";
 import { keepFailureReason } from "./run-errors";
 import { queryData } from "./query";
@@ -119,7 +119,7 @@ const toolServer = (tools: Tools) =>
 const fileTools = serverStorage ? createFileTools(currentStorage) : [];
 const backendTools: Tools = [...baseTools, ...fileTools];
 // Outside MCP servers from MCP_SERVERS (see ./mcp.ts), e.g. Python tools.
-const externalServers = externalServersFromEnv();
+export const externalServers = externalServersFromEnv();
 
 interface RunContext {
   userId: string | null | undefined;
@@ -185,7 +185,12 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   }
 
   // Called synchronously when a run starts, so runAs()'s context is in scope.
+  // The chat's tool chips ("+" menu, ./mcp.ts) apply to every run.
   override buildOptions(input: RunAgentInput, ...rest: OptionsRest) {
+    return withToolChips(this.runOptions(input, ...rest), chipsFrom(input.forwardedProps, externalServers), externalServers);
+  }
+
+  private runOptions(input: RunAgentInput, ...rest: OptionsRest) {
     const options = super.buildOptions(withoutChatroomProps(input), ...rest);
     const ctx = runContext.getStore();
     if (!ctx) return options;

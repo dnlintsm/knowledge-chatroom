@@ -14,7 +14,8 @@
  * src/storage/http.ts). `/skills` lists the user's skills and their modes
  * (src/skills/http.ts), with or without storage; `/hub` is the skill hub.
  * With MEMORY=on and storage, `/memory` is each user's personalized memory
- * (src/memory/http.ts).
+ * (src/memory/http.ts). `/tools` is the chat's "+" menu of outside MCP tools
+ * and the app's calls to them (src/tools-api.ts).
  *
  * (The TypeScript adapter ships no FastAPI-style helper like the Python package's
  * `add_claude_fastapi_endpoint`, so this is the tiny node:http equivalent.)
@@ -26,7 +27,8 @@ import { EventType } from "@ag-ui/core";
 import type { RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 
-import { adapter, runAs } from "./agent";
+import { adapter, externalServers, runAs } from "./agent";
+import { createToolsHandler } from "./tools-api";
 import { currentStorage, startStorage, storageState, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
@@ -174,6 +176,11 @@ function identityForTools(
 
 const TOOL_IDENTITY_SECONDS = 60 * 60;
 
+// The chat's "+" menu of outside tools and the app's direct calls to them (./tools-api.ts).
+const handleTools = createToolsHandler(externalServers, (req, res) =>
+  signedIn(req, res) ? identityForTools(req, null) : null,
+);
+
 /** The AG-UI run input in the body; null after answering 400 when it isn't JSON. */
 async function readInput(req: http.IncomingMessage, res: http.ServerResponse): Promise<RunAgentInput | null> {
   const chunks: Buffer[] = [];
@@ -205,6 +212,11 @@ const server = http.createServer(async (req, res) => {
 
   if (/^\/(skills|hub)(\/|$)/.test(pathname)) {
     await handleSkills(req, res, url);
+    return;
+  }
+
+  if (/^\/tools(\/|$)/.test(pathname)) {
+    await handleTools(req, res, url);
     return;
   }
 

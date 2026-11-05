@@ -28,6 +28,12 @@
  * proposes the note to the inbox instead. /memory answers like the
  * agent's memory API (src/memory/http.ts) with notes kept in memory.
  *
+ * With the "Papers" chip on (forwardedProps.knowledge_chatroom.tools has
+ * "papers"), a run calls mcp__papers__search_papers as Claude would through the
+ * papers MCP server (examples/papers-mcp) and answers citing the results, so the
+ * preview shows the paper cards. `GET /tools` lists that server for the "+"
+ * menu, and `POST /tools/papers/save_paper` saves like the agent's tool API.
+ *
  * `POST /suggest` answers the chat's follow-up chips with two canned ones
  * (FOLLOW_UPS), as the real agent's src/suggest.ts does with a small model.
  *
@@ -49,6 +55,52 @@ const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
 
 /** The input of the last chat run, for GET /last-run. */
 let lastRun = null;
+
+/** The "+" menu, as the agent's GET /tools lists a papers server (agent/src/tools-api.ts). */
+const TOOL_MENU = [
+  {
+    server: "papers", label: "Search papers", chip: "Papers", description: "Academic papers from OpenAlex and arXiv",
+    icon: "book-open", mode: "auto", callable: ["search_papers", "get_paper", "save_paper"],
+  },
+];
+
+/** What the papers server's search_papers returns (examples/papers-mcp/papers_mcp/models.py). */
+const PAPERS = {
+  query: "retrieval augmented generation",
+  total: 18342,
+  next_cursor: "IlsxMDAuMCwgNDQ3M10i",
+  results: [
+    {
+      id: "openalex:W3027879771", title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+      authors: [{ name: "Patrick Lewis" }, { name: "Ethan Perez" }, { name: "Aleksandra Piktus" }], author_count: 12,
+      year: 2020, published: "2020-05-22", venue: "arXiv (Cornell University)",
+      abstract: "Large pre-trained language models have been shown to store factual knowledge in their parameters, and achieve state-of-the-art results when fine-tuned on downstream NLP tasks. However, their ability to access and precisely manipulate knowledge is still limited. We explore a general-purpose fine-tuning recipe for retrieval-augmented generation (RAG).",
+      url: "https://arxiv.org/abs/2005.11401", pdf_url: "https://arxiv.org/pdf/2005.11401", doi: "10.48550/arxiv.2005.11401",
+      arxiv_id: "2005.11401", citation_count: 4473, open_access: true, source: "openalex",
+    },
+    {
+      id: "openalex:W3099700870", title: "Dense Passage Retrieval for Open-Domain Question Answering",
+      authors: [{ name: "Vladimir Karpukhin" }, { name: "Barlas Oğuz" }, { name: "Sewon Min" }], author_count: 8,
+      year: 2020, published: "2020-11-01", venue: "Empirical Methods in Natural Language Processing",
+      abstract: "Open-domain question answering relies on efficient passage retrieval to select candidate contexts, where traditional sparse vector space models, such as TF-IDF or BM25, are the de facto method. We show that retrieval can be practically implemented using dense representations alone.",
+      url: "https://doi.org/10.18653/v1/2020.emnlp-main.550", pdf_url: "https://aclanthology.org/2020.emnlp-main.550.pdf",
+      doi: "10.18653/v1/2020.emnlp-main.550", arxiv_id: null, citation_count: 3120, open_access: true, source: "openalex",
+    },
+    {
+      id: "openalex:W4385245566", title: "Retrieval-Augmented Generation for Large Language Models: A Survey",
+      authors: [{ name: "Yunfan Gao" }, { name: "Yun Xiong" }], author_count: 10,
+      year: 2023, published: "2023-12-18", venue: null,
+      abstract: "Large Language Models (LLMs) showcase impressive capabilities but encounter challenges like hallucination, outdated knowledge, and non-transparent, untraceable reasoning processes.",
+      url: "https://arxiv.org/abs/2312.10997", pdf_url: "https://arxiv.org/pdf/2312.10997", doi: null,
+      arxiv_id: "2312.10997", citation_count: 1650, open_access: true, source: "openalex",
+    },
+  ],
+};
+
+const PAPERS_REPLY =
+  "The key paper is [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (2020)](https://arxiv.org/abs/2005.11401), " +
+  "which pairs a retriever with a generator; [Dense Passage Retrieval (2020)](https://doi.org/10.18653/v1/2020.emnlp-main.550) " +
+  "is the retriever it builds on, and the [2023 survey](https://arxiv.org/abs/2312.10997) covers what came after.";
 
 const REPLY =
   "Hi! I'm a mock agent running in CI, so this preview works without an " +
@@ -375,6 +427,25 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && (pathname === "/tools" || pathname === "/tools/")) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ tools: TOOL_MENU }));
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/tools/papers/save_paper") {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const { arguments: args = {} } = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
+    const paper = PAPERS.results.find((p) => p.id === args.id);
+    res.writeHead(paper ? 200 : 422, { "Content-Type": "application/json" });
+    const slug = paper?.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+    res.end(JSON.stringify(paper
+      ? { result: { path: `papers/${slug}.md`, node: args.node ?? null, experiment: args.experiment ?? null, pdf_path: null, proposed: Boolean(args.node && !args.experiment), note: null } }
+      : { error: `Not a paper id: ${args.id}` }));
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/last-run") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastRun));
@@ -441,10 +512,15 @@ const server = http.createServer(async (req, res) => {
   // "Remember …" saves a note, where memory is on for this chat.
   const remember =
     last?.role === "user" && /^remember\b/i.test(asked) && memory.mode !== "off" && !memory.incognito.has(input.threadId);
+  // The "Papers" chip is on: search papers first, as Claude does with the papers server.
+  const papers =
+    last?.role === "user" && (input.forwardedProps?.knowledge_chatroom?.tools ?? []).includes("papers");
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")
-      : slashSkill
+      : papers
+        ? PAPERS_REPLY
+        : slashSkill
         ? SKILL_REPLY
         : asked.includes("read next")
           ? CITING_REPLY
@@ -471,6 +547,15 @@ const server = http.createServer(async (req, res) => {
       "agent",
     );
     send({ type: "CUSTOM", name: "memory", value: { id: event.id, name: event.name, description: event.description, kind: event.kind, version: event.version } });
+  }
+  if (papers) {
+    // A backend tool: the agent runs it and streams its result, then answers.
+    const toolCallId = randomUUID();
+    send({ type: "TOOL_CALL_START", toolCallId, toolCallName: "mcp__papers__search_papers", parentMessageId: messageId });
+    send({ type: "TOOL_CALL_ARGS", toolCallId, delta: JSON.stringify({ query: PAPERS.query, limit: 3 }) });
+    send({ type: "TOOL_CALL_END", toolCallId });
+    await new Promise((r) => setTimeout(r, 300));
+    send({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}-result`, toolCallId, content: JSON.stringify(PAPERS, null, 2), role: "tool" });
   }
   if (toolCall) {
     const toolCallId = randomUUID();
