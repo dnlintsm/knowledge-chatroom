@@ -124,6 +124,8 @@ test("only menu servers, only their listed tools, signed in, with arguments", as
   assert.equal((await request("POST", "/tools/nope/search_papers", { arguments: {} })).status, 404);
   assert.equal((await request("POST", "/tools/papers/search_papers", { arguments: [] })).status, 400);
   assert.equal((await request("POST", "/tools/papers/search_papers", "{not json")).status, 400);
+  assert.equal((await request("POST", "/tools/%E0%A4/search_papers", { arguments: {} })).status, 400);
+  assert.equal((await request("GET", "/tools/papers/%E0%A4")).status, 400);
   assert.equal((await request("GET", "/tools/papers/search_papers")).status, 405);
   assert.equal((await request("POST", "/tools/papers/search_papers", { arguments: {} }, false)).status, 401);
   assert.equal(seen.length, 0);

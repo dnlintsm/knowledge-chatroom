@@ -115,6 +115,15 @@ async function readJson(req: http.IncomingMessage): Promise<unknown> {
   }
 }
 
+/** The path's parts after /tools, or null when one has a malformed %-escape. */
+function decodePath(pathname: string): string[] | null {
+  try {
+    return pathname.split("/").slice(2).map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+}
+
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -129,7 +138,9 @@ export function createToolsHandler(
 ) {
   const menu = toolMenu(servers);
   return async (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {
-    const [server, tool, ...extra] = url.pathname.split("/").slice(2).map(decodeURIComponent);
+    const parts = decodePath(url.pathname);
+    if (!parts) return json(res, 400, { error: "Bad path" });
+    const [server, tool, ...extra] = parts;
     if (!server) {
       if (req.method !== "GET") return json(res, 405, { error: "Method not allowed" });
       if (tokens(req, res) === null) return;
