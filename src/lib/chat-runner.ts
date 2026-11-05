@@ -122,7 +122,10 @@ export class ChatRunner extends AgentRunner {
   private async execute(threadId: string, user: ChatUser, live: LiveRun, input: AgentRunnerRunRequest["input"]) {
     const { agent, events } = live;
     const seen: BaseEvent[] = [];
-    const emit = (event: BaseEvent) => {
+    const emit = (original: BaseEvent) => {
+      // Stamped with the server's time, streamed and saved, so the chat can say
+      // how long a turn's steps took, also when it is reopened (issue #154).
+      const event = original.timestamp === undefined ? { ...original, timestamp: Date.now() } : original;
       seen.push(event);
       events.next(event);
     };
