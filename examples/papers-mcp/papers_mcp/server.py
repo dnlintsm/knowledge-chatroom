@@ -211,10 +211,11 @@ def note_markdown(paper: PaperDetails, pdf_path: str | None = None) -> str:
         if part
     )
     links = [f"[Paper page]({paper.url})"]
-    if pdf_path:
-        links.append(f"[PDF]({posixpath.basename(pdf_path)})")
-    elif paper.pdf_url:
+    if paper.pdf_url:
         links.append(f"[PDF]({paper.pdf_url})")
+    # The workspace preview drops bare relative links, so the saved copy is named, not linked.
+    if pdf_path:
+        links.append(f"PDF saved next to this note: `{posixpath.basename(pdf_path)}`")
     return (
         f"---\n{front}\n---\n\n# {paper.title}\n\n{byline}\n\n{' · '.join(links)}\n\n"
         f"## Abstract\n\n{paper.abstract or '_No abstract available._'}\n\n"

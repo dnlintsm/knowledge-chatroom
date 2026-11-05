@@ -243,6 +243,19 @@ def test_read_paper_without_open_text(web, ctx):
         run(server.read_paper("openalex:W3027879771", ctx))
 
 
+def test_related_papers_rank_every_reference_not_just_the_first(web, ctx, monkeypatch):
+    refs = [f"https://openalex.org/W{i}" for i in range(1, 151)]
+    monkeypatch.setitem(RAG, "referenced_works", refs)
+    answers = iter([
+        {"results": [dict(NQ, id="https://openalex.org/W7", cited_by_count=10)]},
+        {"results": [dict(NQ, id="https://openalex.org/W140", cited_by_count=900)]},
+    ])
+    real = web.get_json
+    monkeypatch.setattr(net, "get_json", lambda url: next(answers) if "ids.openalex" in url else real(url))
+    result = run(server.related_papers("openalex:W3027879771", ctx, kind="cites", limit=1))
+    assert [p.id for p in result.results] == ["openalex:W140"]
+
+
 def test_related_papers(web, ctx):
     for kind, expected in (("cites", "ids.openalex:W2963403868|W2896457183"), ("similar", "ids.openalex:W2963403868"),
                            ("cited_by", "cites:W3027879771")):
@@ -309,7 +322,8 @@ def test_save_paper_in_a_node_is_a_proposal_and_in_an_experiment_is_not(web, ctx
     pdf, note = storage_api
     assert pdf["type"] == "application/pdf" and pdf["body"].startswith(b"%PDF")
     assert note["query"]["node"] == ["n1"] and "propose" in note["query"]
-    assert "[PDF](rag.pdf)" in note["body"].decode()
+    body = note["body"].decode()
+    assert "[PDF](https://arxiv.org/pdf/2005.11401)" in body and "PDF saved next to this note: `rag.pdf`" in body
     storage_api.clear()
     saved = run(server.save_paper("openalex:W3027879771", ctx, node="n1", experiment="e1"))
     assert not saved.proposed and storage_api[0]["query"] == {"node": ["n1"], "experiment": ["e1"]}

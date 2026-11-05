@@ -193,17 +193,22 @@ def work(scheme: str, bare: str) -> dict[str, Any]:
     return net.get_json(_url(f"/works/{urllib.parse.quote(key, safe=':/')}", {}))
 
 
+# OpenAlex takes at most 100 values in one OR filter.
+MAX_OR_IDS = 100
+
+
 def related(work_raw: dict[str, Any], kind: Literal["cites", "cited_by", "similar"], limit: int) -> list[Paper]:
-    """Papers this one cites, papers citing it, or OpenAlex's similar papers."""
+    """Papers this one cites, papers citing it, or OpenAlex's similar papers, most cited first."""
     if kind == "cited_by":
-        filt = f"cites:{short_id(work_raw.get('id'))}"
-        sort = "cited_by_count:desc"
+        filters = [f"cites:{short_id(work_raw.get('id'))}"]
     else:
-        ids = work_raw.get("referenced_works" if kind == "cites" else "related_works") or []
-        ids = [short_id(i) for i in ids[:limit]]
-        if not ids:
-            return []
-        filt = "ids.openalex:" + "|".join(i for i in ids if i)
-        sort = "cited_by_count:desc"
-    found = net.get_json(_url("/works", {"filter": filt, "sort": sort, "per-page": limit, "select": FIELDS}))
-    return [to_paper(w) for w in found.get("results") or []]
+        ids = [short_id(i) for i in work_raw.get("referenced_works" if kind == "cites" else "related_works") or []]
+        ids = list(dict.fromkeys(i for i in ids if i))
+        # Rank all of them, not just the first `limit`: ask for the most cited of each batch, then merge.
+        filters = ["ids.openalex:" + "|".join(ids[i : i + MAX_OR_IDS]) for i in range(0, len(ids), MAX_OR_IDS)]
+    works: list[dict[str, Any]] = []
+    for filt in filters:
+        found = net.get_json(_url("/works", {"filter": filt, "sort": "cited_by_count:desc", "per-page": limit, "select": FIELDS}))
+        works.extend(found.get("results") or [])
+    works.sort(key=lambda w: w.get("cited_by_count") or 0, reverse=True)
+    return [to_paper(w) for w in works[:limit]]
