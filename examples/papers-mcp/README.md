@@ -8,7 +8,9 @@ too new for OpenAlex. Neither needs a key.
 
 This server is the demo source. For real use, put your own paper search behind
 the same five tools (below) and point `MCP_SERVERS` at it instead: the chat's
-paper cards and buttons only depend on the tool names and result shapes.
+paper cards and buttons only depend on the tool names and result shapes. A
+Python chat backend (`AGENT_URL`) connects to the same server as `papers`; see
+docs/remote-agent.md, step 8.
 
 ## Run it
 
@@ -23,20 +25,24 @@ paper cards and buttons only depend on the tool names and result shapes.
 2. Connect the agent to it in the repository's `.env`, then restart the agent:
 
    ```bash
-   MCP_SERVERS={"mcpServers":{"papers":{"url":"http://127.0.0.1:9200/mcp","forwardIdentity":true,"storageAccess":true}}}
+   MCP_SERVERS={"mcpServers":{"papers":{"url":"http://127.0.0.1:9200/mcp","forwardIdentity":true,"storageAccess":true,"ui":{"label":"Search papers","chip":"Papers","icon":"book-open","tools":["search_papers","get_paper","save_paper"]}}}}
    ```
 
-   Keep the name `papers`: Claude sees the tools as `mcp__papers__<tool>`, and the
-   chat's paper cards look for those names. If you already have servers in
+   Claude sees the tools as `mcp__papers__<tool>`. The `ui` block puts **Search papers**
+   in the chat's "+" menu, and lets the paper cards' Save button call `save_paper`
+   (docs/development.md, "Outside MCP servers"). If you already have servers in
    `MCP_SERVERS`, add `papers` next to them.
 
-3. Ask: *"Find recent papers on retrieval-augmented generation and save the most cited one."*
+3. In the chat, pick "+" → **Search papers** (a "Papers" chip appears), then ask:
+   *"Find recent papers on retrieval-augmented generation."* The results show as cards
+   with *Save to workspace*, *Ask about this*, *PDF* and *Page*. The built-in
+   `paper-search` skill (`/paper-search`) gives Claude the same steps without the chip.
 
 With Docker, the `papers` profile runs the server next to the demo. Use the
 service name in `.env`:
 
 ```bash
-MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true}}}
+MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true,"ui":{"label":"Search papers","chip":"Papers","icon":"book-open","tools":["search_papers","get_paper","save_paper"]}}}}
 docker compose --profile demo --profile papers up --build
 ```
 
