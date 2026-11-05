@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { stepsModeFrom } from "@/components/workspace/agent-steps";
 import { SESSION_COOKIE, authSecret, readSession } from "@/lib/auth";
 import { Home } from "./home";
 
@@ -13,5 +14,6 @@ export default async function HomePage() {
   if (authSecret() && !readSession((await cookies()).get(SESSION_COOKIE)?.value)) {
     redirect("/api/auth/login");
   }
-  return <Home />;
+  // How much of each turn's steps the chat shows until a user picks (issue #154).
+  return <Home chatSteps={stepsModeFrom(process.env.CHAT_STEPS)} />;
 }

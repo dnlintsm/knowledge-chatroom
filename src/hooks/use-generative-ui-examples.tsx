@@ -65,7 +65,7 @@ export const useGenerativeUIExamples = () => {
     render: ({ name, status, parameters, result }) => {
       if (ignoredTools.includes(name)) return <></>;
       // Paper search results show as cards (issue #151).
-      return renderPaperTool({ name, status, parameters, result }) ?? <ToolReasoning name={name} status={status} args={parameters} />;
+      return renderPaperTool({ name, status, parameters, result }) ?? <ToolReasoning name={name} status={status} args={parameters} result={result} />;
     },
   });
 

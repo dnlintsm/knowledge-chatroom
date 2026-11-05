@@ -112,6 +112,16 @@ const CITING_REPLY =
   "Read [The Pragmatic Programmer](notes/reading-list.md#L7) next: it's the one marked Next. " +
   "Meanwhile [sales.csv:3-4](uploads/sales.csv#L3-L4) shows revenue still climbing.";
 
+// "Think it through": thinking and backend tool calls before the answer, as
+// Claude streams them, so the chat folds them into one steps block (issue #154).
+const STEPS_REPLY = "Your reading list puts **The Pragmatic Programmer** next, and none of your notes cover it yet.";
+const STEPS = [
+  { thinking: "The user wants to know what to read next. I should check the reading list first." },
+  { narration: "Let me look at your reading list.", tool: "mcp__copilotkit__read_file", args: { path: "notes/reading-list.md" }, result: "# Reading list\n- The Pragmatic Programmer (Next)" },
+  { thinking: "It's marked Next. I'll check whether any note already covers it." },
+  { tool: "mcp__copilotkit__search_files", args: { query: "Pragmatic Programmer" }, result: "No matches." },
+];
+
 const ARTIFACT_PATH = "artifacts/welcome-summary.md";
 const ARTIFACT = `# Summary
 
@@ -515,10 +525,13 @@ const server = http.createServer(async (req, res) => {
   // The "Papers" chip is on: search papers first, as Claude does with the papers server.
   const papers =
     last?.role === "user" && (input.forwardedProps?.knowledge_chatroom?.tools ?? []).includes("papers");
+  const thinkThrough = last?.role === "user" && /think it through/i.test(asked);
   const reply =
     last?.role === "tool"
       ? (TOOL_REPLIES[calledTool] ?? "Done.")
-      : papers
+      : thinkThrough
+        ? STEPS_REPLY
+        : papers
         ? PAPERS_REPLY
         : slashSkill
         ? SKILL_REPLY
@@ -549,13 +562,42 @@ const server = http.createServer(async (req, res) => {
     send({ type: "CUSTOM", name: "memory", value: { id: event.id, name: event.name, description: event.description, kind: event.kind, version: event.version } });
   }
   if (papers) {
-    // A backend tool: the agent runs it and streams its result, then answers.
+    // A backend tool: the agent runs it and streams its result, then answers
+    // in a message of its own, as Claude's next API message.
     const toolCallId = randomUUID();
-    send({ type: "TOOL_CALL_START", toolCallId, toolCallName: "mcp__papers__search_papers", parentMessageId: messageId });
+    send({ type: "TOOL_CALL_START", toolCallId, toolCallName: "mcp__papers__search_papers", parentMessageId: randomUUID() });
     send({ type: "TOOL_CALL_ARGS", toolCallId, delta: JSON.stringify({ query: PAPERS.query, limit: 3 }) });
     send({ type: "TOOL_CALL_END", toolCallId });
     await new Promise((r) => setTimeout(r, 300));
     send({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}-result`, toolCallId, content: JSON.stringify(PAPERS, null, 2), role: "tool" });
+  }
+  if (thinkThrough) {
+    for (const step of STEPS) {
+      if (step.thinking) {
+        const reasoningId = randomUUID();
+        send({ type: "REASONING_START", messageId: reasoningId });
+        send({ type: "REASONING_MESSAGE_START", messageId: reasoningId, role: "reasoning" });
+        for (const word of step.thinking.split(/(?<= )/)) {
+          send({ type: "REASONING_MESSAGE_CONTENT", messageId: reasoningId, delta: word });
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        send({ type: "REASONING_MESSAGE_END", messageId: reasoningId });
+        send({ type: "REASONING_END", messageId: reasoningId });
+        continue;
+      }
+      const stepMessageId = randomUUID();
+      if (step.narration) {
+        send({ type: "TEXT_MESSAGE_START", messageId: stepMessageId, role: "assistant" });
+        send({ type: "TEXT_MESSAGE_CONTENT", messageId: stepMessageId, delta: step.narration });
+        send({ type: "TEXT_MESSAGE_END", messageId: stepMessageId });
+      }
+      const toolCallId = randomUUID();
+      send({ type: "TOOL_CALL_START", toolCallId, toolCallName: step.tool, parentMessageId: stepMessageId });
+      send({ type: "TOOL_CALL_ARGS", toolCallId, delta: JSON.stringify(step.args) });
+      send({ type: "TOOL_CALL_END", toolCallId });
+      await new Promise((r) => setTimeout(r, 700));
+      send({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}-result`, toolCallId, content: step.result, role: "tool" });
+    }
   }
   if (toolCall) {
     const toolCallId = randomUUID();
