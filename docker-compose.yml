@@ -137,7 +137,7 @@ services:
 
   # --- Paper search (examples/papers-mcp, issue #151) ---
   # Add `--profile papers` and, in .env,
-  # MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true}}}
+  # MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true,"ui":{"label":"Search papers","chip":"Papers","icon":"book-open","tools":["search_papers","get_paper","save_paper"]}}}}
   papers:
     profiles: [papers]
     build: ./examples/papers-mcp

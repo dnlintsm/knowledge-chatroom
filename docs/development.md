@@ -125,6 +125,33 @@ hour), and only the storage API takes it. Servers must not connect to the databa
 or object store directly: the app's connection owns the tables, so row security
 doesn't apply to it, and presigned links skip every check.
 
+A `ui` block puts a server in the chat's "+" menu (#151), next to "Add attachments":
+
+```json
+"papers": {"url": "http://localhost:9200/mcp", "forwardIdentity": true, "storageAccess": true,
+           "ui": {"label": "Search papers", "chip": "Papers", "icon": "book-open",
+                  "mode": "auto", "tools": ["search_papers", "get_paper", "save_paper"]}}
+```
+
+Picking it puts a chip (`chip`, default `label`) above the message box. The chip stays on
+for that chat (remembered in the browser) until the user removes it. While it is on, every
+run carries it as `forwardedProps.knowledge_chatroom.tools`, and the agent adds a prompt
+line telling Claude to answer with that server's tools. With `"mode": "auto"` (the default)
+Claude has the tools in every run anyway. With `"manual"` they are left out of runs
+without the chip. `icon` is a lucide name (`book-open`, `globe`, `search`,
+`database`; otherwise a wrench). `tools` lists the tools the app itself may call for the
+signed-in user, as the paper cards' Save button does:
+
+| Route (agent server, `/api/tools` in the app) | Answer |
+| --- | --- |
+| `GET /tools` | `{tools: [{server, label, chip, description, icon, mode, callable}]}` |
+| `POST /tools/<server>/<tool>` with `{arguments: {...}}` | `{result, text}`: the tool's structured content (or the JSON in its text). `422 {error}` is the tool's own error, `403` a tool not in `tools`, `502` a server that is down. |
+
+The call reaches the server with the same `X-Knowledge-User` and `X-Knowledge-Storage`
+headers a chat run sends, so the server sees the same person either way. `ui` needs an
+http or sse server. [examples/papers-mcp](../examples/papers-mcp/README.md) is the paper
+search server for it.
+
 `memoryAccess` gives a server the user's memory in the chat that calls it (#93):
 in runs where memory is on, each run also sends an `X-Knowledge-Memory` token
 (aud `memory`, with the chat's `thread` and `node`; without login an unsigned
