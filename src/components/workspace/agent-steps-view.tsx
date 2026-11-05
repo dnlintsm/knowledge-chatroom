@@ -273,7 +273,8 @@ export function ReasoningStep({ message, isRunning, isLatest }: CopilotChatReaso
   const id = useId();
   if (view.inBlock && !view.open) return null;
   const streaming = Boolean(isRunning && isLatest);
-  const ms = times.duration([message.id]);
+  // Its own time, not since the run started: thinking after a tool call says how long it thought.
+  const ms = times.span([message.id]);
   const label = streaming ? "Thinking…" : ms !== null && ms > 0 ? `Thought for ${formatDuration(ms)}` : "Thought";
   const content = typeof message.content === "string" ? message.content.trim() : "";
   const shown = (open ?? view.detailed) && content.length > 0;

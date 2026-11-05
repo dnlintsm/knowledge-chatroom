@@ -269,6 +269,12 @@ export class StepTimes {
     return span.last - (span.start?.at ?? span.first);
   }
 
+  /** How long one step took on its own: from its first event to its last, e.g. a thinking block. */
+  span(ids: string[]): number | null {
+    const span = this.start(ids);
+    return span ? span.last - span.first : null;
+  }
+
   /** When, by this browser's clock, the block's run started: for the live timer. */
   liveStart(ids: string[]): number | null {
     return this.start(ids)?.start?.local ?? null;

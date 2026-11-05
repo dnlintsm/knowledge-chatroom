@@ -140,6 +140,12 @@ test("step times: from the run's start to the block's last event, by the events'
   times.record({ type: "RUN_FINISHED", timestamp: 12_000 });
   expect(times.duration(["r1", "a1", "c1", "t1"])).toBe(8_000);
   expect(times.duration(["r1"])).toBe(3_000);
+  // One step's own time: thinking after a tool call isn't timed from the run's start.
+  times.record({ type: "REASONING_MESSAGE_START", messageId: "r2", timestamp: 9_100 });
+  times.record({ type: "REASONING_MESSAGE_END", messageId: "r2", timestamp: 9_400 });
+  expect(times.span(["r2"])).toBe(300);
+  expect(times.span(["r1"])).toBe(2_500);
+  expect(times.span(["unknown"])).toBeNull();
   expect(times.duration(["unknown"])).toBeNull();
   // The live timer counts from when this browser saw the run start.
   expect(times.liveStart(["r1"])).toBe(50_000);
