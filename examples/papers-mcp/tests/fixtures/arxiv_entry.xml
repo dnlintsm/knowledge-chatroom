@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query: id_list=2611.00001</title>
+  <entry>
+    <id>http://arxiv.org/abs/2611.00001v2</id>
+    <published>2026-11-02T17:59:59Z</published>
+    <title>A Very New Paper
+      on Paper Search</title>
+    <summary>  We search papers.
+      It works.</summary>
+    <author><name>Ada Example</name></author>
+    <author><name>Bo Sample</name></author>
+    <arxiv:primary_category term="cs.IR"/>
+    <link href="http://arxiv.org/abs/2611.00001v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2611.00001v2" rel="related" type="application/pdf"/>
+  </entry>
+</feed>
