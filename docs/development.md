@@ -137,6 +137,8 @@ Incognito chats and memory turned off get no token, and each call checks again.
 [examples/python-agent](../examples/python-agent/README.md) is a complete sample:
 a Python agent's prompt moved into a skill and its tools into an MCP server, with
 the forwarded user checked and tests. Start there when bringing a Python agent in.
+[examples/papers-mcp](../examples/papers-mcp/README.md) is another one: paper
+search, with workspace writes through `storageAccess`.
 
 A minimal Python server (`pip install mcp`; with mcp 1.x import `FastMCP` from
 `mcp.server.fastmcp` instead):
