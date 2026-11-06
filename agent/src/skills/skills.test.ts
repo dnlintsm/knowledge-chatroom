@@ -88,7 +88,7 @@ test("modes: a skill Claude may not invoke is never auto; one without /name is n
 
 test("the built-in skills load", () => {
   const names = builtinSkills().map((s) => s.name);
-  assert.deepEqual(names, ["analysis", "tldr", "write-skill"]);
+  assert.deepEqual(names, ["analysis", "paper-search", "tldr", "write-skill"]);
   const analysis = builtinSkills().find((s) => s.name === "analysis")!;
   assert.equal(analysis.needsExecution, true, "it ships a script");
   assert.deepEqual(
