@@ -4,12 +4,19 @@
 
 `docker compose --profile demo up --build` builds the UI and agent images from the
 root `Dockerfile` (targets `app` and `agent`) and starts them with PostgreSQL and
-SeaweedFS. Only the UI (3000) and the object store (8333, for signed binary
-downloads) are published; the agent stays on the compose network. It runs without
-login, with the local storage credentials from `deploy/seaweedfs/s3.json`, and reads
-`ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`) from `.env`. The search model
-downloads into the `models` volume on first start. Treat it as a single-user demo:
-for anything shared, change the storage credentials and configure login as below.
+SeaweedFS. The UI (3000), the object store (8333, for signed binary downloads) and
+PostgreSQL (5432, for local development) are published on the host; the agent stays on
+the compose network. It runs without login, with the local storage credentials from
+`deploy/seaweedfs/s3.json`, and reads `ANTHROPIC_API_KEY` and the optional model, memory,
+embedding and `MCP_SERVERS` settings from `.env` (the `agent` and `app` services in
+`docker-compose.yml` list them). The search model downloads into the `models` volume on
+first start. Treat it as a single-user demo: for anything shared, change the storage
+credentials, stop publishing 5432 and configure login as below.
+
+Optional profiles start sample MCP servers next to the demo: `papers`
+(`examples/papers-mcp`, paper search) and `python-sample` (`examples/python-agent`). Add
+the profile and the matching `MCP_SERVERS` line from `docker-compose.yml` to `.env`, using
+service names such as `http://papers:9200/mcp` rather than localhost.
 
 ## Production
 
@@ -54,12 +61,24 @@ knowledge.example.com:8443 {
 ```
 
 Then set `APP_URL=https://knowledge.example.com` on the UI (session cookies become
-Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`) and
-`S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent, so image and PDF
-previews don't break as mixed content. `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
+Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`). For binary files,
+pick one:
+
+- **Keep the store private (simpler)**: leave `S3_PUBLIC_URL` unset on the agent and drop
+  the second block. Images, PDFs and other binary files then stream through the app after
+  the same access check. Each file passes through the agent in one piece (uploads are
+  capped by `MAX_UPLOAD_BYTES`, 50 MB by default) and there are no range requests, so
+  long videos can't seek.
+- **Signed links to the store**: keep the second block and set
+  `S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent. Left at
+  `http://localhost:8333`, previews break on an https page as mixed content.
+
+`LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
 `AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,
 add `proxy_buffering off;` for the UI so the `/api/files?watch` event stream isn't
-held back; Caddy streams it as is.
+held back; Caddy streams it as is. Set a request-size limit at the proxy that fits
+your largest upload (`client_max_body_size` in nginx, `request_body { max_size }` in
+Caddy); see [Dependency security](development.md#dependency-security) for why.
 
 ## Storage and upgrades
 
@@ -67,7 +86,9 @@ Persist PostgreSQL and the S3 bucket together; files and their versions referenc
 content hashes in the bucket. Set database/object-store credentials for the agent.
 Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
-downloads; signed links expire after five minutes. Text is served through the app.
+downloads; signed links expire after five minutes. Without it, binary files are served
+through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
+50 MB) caps one upload.
 
 Migrations apply at agent startup. Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
