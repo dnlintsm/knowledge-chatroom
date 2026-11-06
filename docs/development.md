@@ -69,6 +69,11 @@ the agent's `POST /suggest` makes one small-model call for follow-ups:
 not a Claude model). `CHAT_SUGGESTIONS=static` on the UI keeps the first-round chips
 and makes no extra calls. See [Chat suggestions](architecture.md#chat-suggestions).
 
+Each answer's thinking and tool calls fold into one "Worked for 14s · 5 steps" line above it.
+The steps button in the chat header switches a user to Detailed (every step open, with its
+arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. See
+[Agent steps in the chat](architecture.md#agent-steps-in-the-chat).
+
 ## Skills
 
 Built-in skills live in `agent/skills/`; with server storage, the agent also loads

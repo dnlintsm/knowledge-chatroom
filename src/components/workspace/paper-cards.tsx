@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BookOpen, Check, ExternalLink, FileText, MessageSquareQuote, Save } from "lucide-react";
 import { ToolReasoning } from "@/components/tool-rendering";
 import { Spinner } from "@/components/ui/spinner";
+import { useStepHidden } from "./agent-steps-view";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "./store";
 import { parsePaperResult, splitToolName, PAPER_CARD_TOOLS, type PaperInfo } from "./tool-chips";
@@ -36,7 +37,10 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
 function PaperToolCard({ server, tool, name, status, parameters, result }: ToolCallView & { server: string; tool: string }) {
   const args = (parameters && typeof parameters === "object" ? parameters : {}) as Record<string, unknown>;
   const query = typeof args.query === "string" ? args.query : "";
+  // In a closed steps block, the block's header says it is searching (issue #154).
+  const hidden = useStepHidden();
   if (status !== "complete") {
+    if (hidden) return null;
     const doing =
       tool === "search_papers" ? `Searching papers${query ? ` for “${query}”` : ""}…` : tool === "get_paper" ? "Looking up the paper…" : "Finding related papers…";
     return (
@@ -48,7 +52,7 @@ function PaperToolCard({ server, tool, name, status, parameters, result }: ToolC
     );
   }
   const parsed = parsePaperResult(result);
-  if (!parsed) return <ToolReasoning name={name} status={status} args={parameters} />;
+  if (!parsed) return <ToolReasoning name={name} status={status} args={parameters} result={result} />;
   if (parsed.kind === "error") {
     return (
       <div className="my-1.5 flex items-start gap-2 text-sm text-[var(--muted-foreground)]">
