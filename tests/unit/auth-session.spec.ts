@@ -243,3 +243,57 @@ test.describe("readSession when login is enabled", () => {
     expect(sessionFromRequest(plainReq5)).toBeNull();
   });
 });
+
+test.describe("sessionFromRequest edge cases", () => {
+  const saved: Record<string, string | undefined> = {};
+  const ALICE: SessionUser = { sub: "test|alice", email: "alice@example.com", name: "Alice" };
+  const withCookie = (cookie: string) =>
+    new Request("https://app.example.com/api/copilotkit", { headers: { cookie } });
+
+  test.beforeEach(() => {
+    for (const [key, value] of Object.entries(LOGIN_ENV)) {
+      saved[key] = process.env[key];
+      process.env[key] = value;
+    }
+  });
+
+  test.afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("returns null for an empty or whitespace-only cookie header", () => {
+    expect(sessionFromRequest(withCookie(""))).toBeNull();
+    expect(sessionFromRequest(withCookie("   ;  "))).toBeNull();
+  });
+
+  test("finds the session cookie with extra whitespace around separators", () => {
+    const cookie = sessionCookie(new NextRequest("https://app.example.com"), ALICE);
+    const header = `unrelated=123;  ${SESSION_COOKIE}=${encodeURIComponent(cookie.value)} ;  theme=light`;
+    expect(sessionFromRequest(withCookie(header))).toEqual(ALICE);
+  });
+
+  test("returns null for an expired, correctly signed session cookie", () => {
+    const expired = makeCookie("s1", { ...ALICE, exp: Math.floor(Date.now() / 1000) - 10 });
+    expect(sessionFromRequest(withCookie(`${SESSION_COOKIE}=${expired}`))).toBeNull();
+    // The same cookie, still valid, is accepted: only the expiry differs.
+    const valid = makeCookie("s1", { ...ALICE, exp: Math.floor(Date.now() / 1000) + 3600 });
+    expect(sessionFromRequest(withCookie(`${SESSION_COOKIE}=${valid}`))).toEqual(ALICE);
+  });
+
+  test("returns null for a tampered or malformed session cookie", () => {
+    const cookie = sessionCookie(new NextRequest("https://app.example.com"), ALICE);
+    const tampered = cookie.value.slice(0, -5) + "abcde";
+    expect(sessionFromRequest(withCookie(`${SESSION_COOKIE}=${tampered}`))).toBeNull();
+    expect(sessionFromRequest(withCookie(`${SESSION_COOKIE}=s1.invalid.payload`))).toBeNull();
+  });
+
+  test("returns null in local mode even with a cookie signed while login was on", () => {
+    const cookie = sessionCookie(new NextRequest("https://app.example.com"), ALICE);
+    process.env.AUTH_MODE = "local";
+    delete process.env.AUTH_SECRET;
+    expect(sessionFromRequest(withCookie(`${SESSION_COOKIE}=${cookie.value}`))).toBeNull();
+  });
+});
