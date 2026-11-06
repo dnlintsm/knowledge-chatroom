@@ -1517,7 +1517,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         content: { text: string }[];
         isError?: boolean;
       };
-      return { text: result.content[0].text, isError: Boolean(result.isError) };
+      return { text: result.content.map((part) => part.text).join("\n"), isError: Boolean(result.isError) };
     };
 
     before(() => {
@@ -1545,6 +1545,40 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.ok(listed.some((f) => f.path === "artifacts/tool.md"));
     });
 
+    test("edit_file changes part of a file and shows the changed lines", async () => {
+      const page = "<html>\n<body>\n<h1>Hi</h1>\n<p>one</p>\n<p>one</p>\n</body>\n</html>";
+      await call("write_file", { path: "artifacts/page.html", content: page });
+
+      const edited = await call("edit_file", {
+        path: "artifacts/page.html",
+        oldText: "<h1>Hi</h1>",
+        newText: "<h1 style=\"color: blue\">Hi</h1>",
+      });
+      assert.equal(edited.isError, false, edited.text);
+      assert.match(edited.text, /"ok":true/);
+      assert.match(edited.text, /1 replacement;/);
+      assert.match(edited.text, /3\t<h1 style="color: blue">Hi<\/h1>/);
+      const stored = await storage.files.read("artifacts/page.html");
+      assert.equal(new TextDecoder().decode(stored!.bytes), page.replace("<h1>", '<h1 style="color: blue">'));
+      assert.equal(stored!.info.author, "agent");
+
+      const twice = await call("edit_file", { path: "artifacts/page.html", oldText: "<p>one</p>", newText: "<p>two</p>" });
+      assert.equal(twice.isError, true);
+      assert.match(twice.text, /occurs 2 times/);
+      const all = await call("edit_file", {
+        path: "artifacts/page.html",
+        oldText: "<p>one</p>",
+        newText: "<p>two</p>",
+        replaceAll: true,
+      });
+      assert.match(all.text, /2 replacements;/);
+
+      const missing = await call("edit_file", { path: "artifacts/page.html", oldText: "4\t<p>one</p>", newText: "x" });
+      assert.equal(missing.isError, true);
+      assert.match(missing.text, /Leave out the line numbers/);
+      assert.equal((await call("edit_file", { path: "artifacts/none.html", oldText: "a", newText: "b" })).isError, true);
+    });
+
     test("errors are reported, not thrown", async () => {
       assert.equal((await call("read_file", { path: "notes/missing.md" })).isError, true);
       assert.equal((await call("write_file", { path: "../x", content: "" })).isError, true);
@@ -1558,6 +1592,9 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const result = await call("write_file", { path: "runs/r2/models/general_rules.md", content: "x" });
       assert.equal(result.isError, true);
       assert.match(result.text, /read-only/);
+      const edit = await call("edit_file", { path: "runs/r2/models/general_rules.md", oldText: "Rules", newText: "x" });
+      assert.equal(edit.isError, true);
+      assert.match(edit.text, /read-only/);
       const listed = JSON.parse((await call("list_files")).text) as { path: string; readOnly?: boolean }[];
       assert.equal(listed.find((f) => f.path === "runs/r2/models/general_rules.md")?.readOnly, true);
     });
@@ -1611,6 +1648,19 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
       const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
       assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
+      // Edits in a node are proposals too, and edits in a row build on Claude's open
+      // proposal, never on the user's own draft of the same file.
+      const draft = await local.propose(child.id, "notes/wear.md", text("the user's draft"));
+      for (const [from, to] of [["worn", "worn out"], ["out", "out fast"]]) {
+        const edit = await call("edit_file", { node: child.id, path: "notes/wear.md", oldText: from, newText: to });
+        assert.match(edit.text, /"proposed":true/, edit.text);
+      }
+      const open = await local.proposals({ node: child.id });
+      const editProposal = open.find((p) => p.author === "agent")!;
+      assert.equal(new TextDecoder().decode((await local.proposalContent(editProposal.id)).bytes), "worn out fast");
+      assert.equal(new TextDecoder().decode((await local.proposalContent(draft.id)).bytes), "the user's draft");
+      await local.decide(editProposal.id, "reject");
+      await local.decide(draft.id, "withdraw");
       // Skills at the root are proposed too: Claude doesn't add skills itself.
       const skill = JSON.parse(
         (await call("write_file", { path: "skills/recap/SKILL.md", content: "---\nname: recap\n---\nRecap." })).text,

@@ -56,3 +56,19 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Sample Python agent tests
         run: python -m pytest -q
+
+  papers-mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/papers-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the server's dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Paper search server tests
+        run: python -m pytest -q

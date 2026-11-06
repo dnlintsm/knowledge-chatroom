@@ -98,7 +98,7 @@ the workspace like on a local project:
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.
-- **Writing back**: changes still go through `write_file`, so read-only files stay unchanged,
+- **Writing back**: changes still go through `write_file` / `edit_file`, so read-only files stay unchanged,
   writes in a node or to skills become proposals and every write is a version. `save_file` stores
   a file a script made in the run folder (a plot, a CSV) the same way.
 
@@ -279,6 +279,25 @@ makes one Messages API call on a small model with the conversation and the works
 and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
+
+### Agent steps in the chat
+
+Each turn's thinking, tool calls and narration ("Let me read the file") fold into one block
+above the answer (issue #154): "Worked for 14s · 5 steps", with a live status line ("Reading
+notes/x.md…") and a timer while the run lasts. `groupSteps()` in
+`src/components/workspace/agent-steps.ts` makes the rows that CopilotKit's `groupMessages`
+renders: a turn's answer is its last assistant message with text, and the steps before it go
+into the block (while the turn runs, text that came with tool calls is narration). The block
+(`agent-steps-view.tsx`) always renders its messages, inside a context the step renderers read:
+the thinking row, narration and the generic tool row (`src/components/tool-rendering.tsx`) hide
+while the block is closed, so paper cards, charts, A2UI and a tool waiting for the user still
+show. Follow-up chips sit under the message list and are not affected.
+
+The chat header's steps button switches between Compact (closed blocks) and Detailed (open
+blocks with every tool's arguments and result), per user in `localStorage`; `CHAT_STEPS=detailed`
+on the UI makes Detailed the default. Durations come from the events' `timestamp`, which the chat
+runner (`src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
+from the history still says how long its steps took.
 
 ### Chat history
 
@@ -534,14 +553,17 @@ For local setup, see [Development](development.md).
   browser can't load one (the store unreachable from the browser, or a format it can't
   show, like HEIC) it says so and offers Open and Download instead of a broken image.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
-  `write_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
+  `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
   `update_experiment` and `propose_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in
-  lines (and `column` for lines longer than one read) and returns at most 200,000 characters
+  lines (and `column` for lines longer than one read) and returns at most 50,000 characters
   per call, saying where to continue, so long
-  files are read in pages. Its writes are versions authored by the
+  files are read in pages. `edit_file` replaces one exact piece of text (or every occurrence
+  with `replaceAll`) instead of rewriting the whole file, which keeps chats within smaller
+  models' windows (issue #126); in a node, edits in a row build on Claude's open proposal.
+  Its writes are versions authored by the
   agent; in a knowledge node they are proposed changes until someone accepts them.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and

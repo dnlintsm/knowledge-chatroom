@@ -17,7 +17,7 @@ import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { RunAgentInput } from "@ag-ui/core";
 
-import { allowServer, externalServersFromEnv, serverConfigs, type RunTokens } from "./mcp";
+import { allowServer, chipsFrom, externalServersFromEnv, serverConfigs, withToolChips, type RunTokens } from "./mcp";
 import { resolveModel } from "./model";
 import { keepFailureReason } from "./run-errors";
 import { queryData } from "./query";
@@ -50,8 +50,10 @@ const SYSTEM_PROMPT = [
   "  ag_ui_update_state with the COMPLETE list to add or change todos.",
   "- Workspace: the user works on files beside the chat. The open file and their",
   "  selection arrive as context. Use the workspace file tools to look around (list,",
-  "  read) and to create or edit files (write, full content); new generated",
-  "  documents go under artifacts/. Say what you changed in one line.",
+  "  read), to create files (write, full content) and to change them (edit: replace",
+  "  just the part that changes; don't rewrite a whole file for a small change, and",
+  "  read only the lines you need). New generated documents go under artifacts/.",
+  "  Say what you changed in one line.",
   "- Runs: a run is an experiment with a report (its report.md).",
   "  The one the user is in arrives as currentExperiment in context, with its state",
   "  (ready, running, done, failed) and report. Answer about that run unless told",
@@ -117,7 +119,7 @@ const toolServer = (tools: Tools) =>
 const fileTools = serverStorage ? createFileTools(currentStorage) : [];
 const backendTools: Tools = [...baseTools, ...fileTools];
 // Outside MCP servers from MCP_SERVERS (see ./mcp.ts), e.g. Python tools.
-const externalServers = externalServersFromEnv();
+export const externalServers = externalServersFromEnv();
 
 interface RunContext {
   userId: string | null | undefined;
@@ -155,9 +157,25 @@ export const runAs = <T>(
 // The adapter's own extra arguments (profile options, frontend tool results).
 type OptionsRest = Parameters<ClaudeAgentAdapter["buildOptions"]> extends [unknown, ...infer R] ? R : never;
 
+/**
+ * The chat sends earlier turns' thinking back with each run. The adapter's
+ * end-of-run MESSAGES_SNAPSHOT is the input's messages plus this run's text
+ * and tool calls (never its thinking), and the chat keeps a thinking block
+ * the snapshot lacks only when the snapshot carries no thinking at all. So
+ * with earlier thinking in the input, each turn after the first lost its
+ * thinking block when the reply finished (#156). The adapter never reads
+ * thinking from the input (Claude resumes its own session), so drop it.
+ */
+function withoutReasoning(input: RunAgentInput): RunAgentInput {
+  const messages = input.messages ?? [];
+  const kept = messages.filter((message) => message.role !== "reasoning");
+  return kept.length === messages.length ? input : { ...input, messages: kept };
+}
+
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   // Slash commands only for the run's own skills (guardSlashCommand).
-  override run(input: RunAgentInput) {
+  override run(sent: RunAgentInput) {
+    const input = withoutReasoning(sent);
     const messages = input.messages ?? [];
     const last = messages[messages.length - 1];
     if (last?.role !== "user") return super.run(input);
@@ -183,7 +201,12 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   }
 
   // Called synchronously when a run starts, so runAs()'s context is in scope.
+  // The chat's tool chips ("+" menu, ./mcp.ts) apply to every run.
   override buildOptions(input: RunAgentInput, ...rest: OptionsRest) {
+    return withToolChips(this.runOptions(input, ...rest), chipsFrom(input.forwardedProps, externalServers), externalServers);
+  }
+
+  private runOptions(input: RunAgentInput, ...rest: OptionsRest) {
     const options = super.buildOptions(withoutChatroomProps(input), ...rest);
     const ctx = runContext.getStore();
     if (!ctx) return options;
