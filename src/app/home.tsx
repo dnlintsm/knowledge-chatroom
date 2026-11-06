@@ -1,6 +1,8 @@
 "use client";
 
 import { Workspace, WorkspaceProvider } from "@/components/workspace";
+import type { StepsMode } from "@/components/workspace/agent-steps";
+import { StepsDefaultContext } from "@/components/workspace/agent-steps-view";
 import { useGenerativeUIExamples } from "@/hooks";
 
 import { CopilotChatConfigurationProvider } from "@copilotkit/react-core/v2";
@@ -10,7 +12,7 @@ function Demos() {
   return null;
 }
 
-export function Home() {
+export function Home({ chatSteps = "compact" }: { chatSteps?: StepsMode }) {
   return (
     /*
       One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
@@ -19,10 +21,12 @@ export function Home() {
       block "New chat" from resetting the conversation.
     */
     <CopilotChatConfigurationProvider agentId="default">
-      <WorkspaceProvider>
-        <Demos />
-        <Workspace />
-      </WorkspaceProvider>
+      <StepsDefaultContext.Provider value={chatSteps}>
+        <WorkspaceProvider>
+          <Demos />
+          <Workspace />
+        </WorkspaceProvider>
+      </StepsDefaultContext.Provider>
     </CopilotChatConfigurationProvider>
   );
 }

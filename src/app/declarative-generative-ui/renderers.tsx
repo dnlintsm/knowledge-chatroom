@@ -30,6 +30,13 @@ import type { CatalogRenderers } from "@copilotkit/a2ui-renderer";
 import { demonstrationCatalogDefinitions } from "./definitions";
 import type { DemonstrationCatalogDefinitions } from "./definitions";
 
+export interface ChildItemObject {
+  id: string;
+  basePath?: string;
+}
+
+export type ChildItem = string | ChildItemObject;
+
 // ─── Theme-aware colors ─────────────────────────────────────────────
 
 const c = {
@@ -138,7 +145,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
         end: "flex-end",
         spaceBetween: "space-between",
       };
-      const items = Array.isArray(props.children) ? props.children : [];
+      const items = Array.isArray(props.children) ? (props.children as ChildItem[]) : [];
       return (
         <div
           style={{
@@ -152,7 +159,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
             width: "100%",
           }}
         >
-          {items.map((item: any, i: number) => {
+          {items.map((item: ChildItem, i: number) => {
             if (typeof item === "string")
               return (
                 <div
@@ -168,7 +175,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
                   key={`${item.id}-${i}`}
                   style={{ flex: "1 1 0", minWidth: 0 }}
                 >
-                  {(children as any)(item.id, item.basePath)}
+                  {children(item.id, item.basePath)}
                 </div>
               );
             return null;
@@ -178,7 +185,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
     },
 
     Column: ({ props, children }) => {
-      const items = Array.isArray(props.children) ? props.children : [];
+      const items = Array.isArray(props.children) ? (props.children as ChildItem[]) : [];
       return (
         <div
           style={{
@@ -188,7 +195,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
             width: "100%",
           }}
         >
-          {items.map((item: any, i: number) => {
+          {items.map((item: ChildItem, i: number) => {
             if (typeof item === "string")
               return (
                 <React.Fragment key={`${item}-${i}`}>
@@ -198,7 +205,7 @@ const demonstrationCatalogRenderers: CatalogRenderers<DemonstrationCatalogDefini
             if (item && typeof item === "object" && "id" in item)
               return (
                 <React.Fragment key={`${item.id}-${i}`}>
-                  {(children as any)(item.id, item.basePath)}
+                  {children(item.id, item.basePath)}
                 </React.Fragment>
               );
             return null;
