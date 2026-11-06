@@ -81,7 +81,8 @@ from the signed-in session (`src/agent.ts`), replacing anything the browser sent
     "id": "9f8e…", "node_id": "6d0e…", "title": "Lower RF power, 40 W",
     "status": "draft", "state": "done", "can_change": true, "report": "report.md"
   },
-  "selected_path": "report.md"
+  "selected_path": "report.md",
+  "tools": ["papers"]
 }
 ```
 
@@ -93,6 +94,7 @@ from the signed-in session (`src/agent.ts`), replacing anything the browser sent
 | `node` | The knowledge node the user is in, with `path` from the top level down to it. `null` = the workspace root. |
 | `experiment` | The experiment (run) the user is working in, a sandbox on `node` with its own copy of the node's files, or at the workspace root (`node_id` null). When set, file work belongs here, not in the node. `state` is how far the run got (`ready`, `running`, `done`, `failed`), `report` its report's path in it (`null` until it has one), and `can_change` is false when the user isn't its author or it's archived. |
 | `selected_path` | The file open in the middle pane. `null` when a non-file tab is open, such as the task board. |
+| `tools` | The tool chips the user turned on in this chat from the "+" menu: names of MCP servers in this repo's `MCP_SERVERS` that have a `ui` block, e.g. `"papers"` for paper search. Empty when none is on. See step 8 below. Added without a new `version`. |
 
 Paths are relative to the place: the experiment when there is one, else the node, else the
 workspace root. That is how the storage API (`/files/<path>?node=` or `?experiment=`) and file
@@ -183,6 +185,23 @@ to it.
    tools return, the same way. Links to working-folder copies or other places show greyed out.
 7. **Optional**: report each skill a run uses as an AG-UI `CUSTOM` event named `skill_used`
    (`{skill, source, trigger}`), as this repo's agent does, to show it under the chat input.
+8. **Honour tool chips.** The chat's "+" menu lists the MCP servers in this repo's
+   `MCP_SERVERS` that have a `ui` block (`GET /tools` on `LOCAL_AGENT_URL`), and
+   `knowledge_chatroom.tools` names the ones whose chip is on. For each server you run:
+   - **Connect to the same MCP server, under the same name.** For paper search that is
+     `papers` (`examples/papers-mcp`), so its tools reach the chat as
+     `mcp__papers__search_papers` and friends. The chat shows paper cards for any
+     `mcp__<server>__search_papers`, `related_papers` and `get_paper` result in the paper
+     tool format (`examples/papers-mcp/papers_mcp/models.py`).
+   - **When its chip is on, tell the model to use it** for this message, as this repo's
+     agent does: one line such as `The user turned on "Papers" for this chat: answer with
+     the mcp__papers__ tools.` A server with `"mode": "manual"` should only be offered
+     while its chip is on.
+   - **Forward the user** to it as this repo's agent does (`forwardIdentity`,
+     `storageAccess`), so the server knows who is asking and can save to the workspace.
+
+   The "+" menu and the paper cards' buttons (`POST /tools/<server>/<tool>`) always go
+   through this repo's agent server, so they work the same with a remote backend.
 
 ## With `ag_ui_claude_sdk` (Python)
 
@@ -244,6 +263,9 @@ Notes (checked against `ag_ui_claude_sdk` 0.2.2):
   note, built from this run's `context` and `knowledge_chatroom`, in front of the last user
   message (this repo's `WorkspaceAgentAdapter.run` rewrites that message in the same way for
   slash commands).
+- **Tool chips change in the middle of a chat**, like the place: read
+  `knowledge_chatroom.tools` on every run (in `run()`, next to the "the user now has … open"
+  note), not only in `build_options`.
 - **Tools should take the place as a parameter**, as `agent/src/storage/tools.ts` does with
   `node`/`experiment`, rather than fix it when the session starts: the user can move to
   another node, experiment or run in the middle of a chat.
