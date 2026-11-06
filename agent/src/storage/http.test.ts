@@ -34,7 +34,6 @@ test("nothing is renamed, deleted, reviewed or shared", () => {
   assert.ok(may("POST", "/experiments"));
   assert.ok(may("PATCH", "/experiments/e1"));
   assert.ok(!may("DELETE", "/experiments/e1"));
-  assert.ok(!may("POST", "/experiments/from-folder"));
   assert.ok(may("POST", "/proposals"));
   for (const action of ["accept", "reject", "withdraw"]) assert.ok(!may("POST", `/proposals/p1/${action}`), action);
   assert.ok(!may("POST", "/access/grants"));

@@ -16,7 +16,7 @@ async function shot(page: Page, name: string) {
 // Without server storage it is only a folder: runs are experiments, which
 // live on the server (runs.spec.ts shows them).
 const RUN = "runs/etch-2026-10-01";
-const REPORT = `${RUN}/xdoe-report/report.md`;
+const REPORT = `${RUN}/report.md`;
 
 /** The file list, with the sample run folder's report open. */
 async function gotoReport(page: Page) {
@@ -375,6 +375,31 @@ test("files and layout survive a reload", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
 });
 
+test("collapsed folders stay collapsed across views and reloads", async ({ page }) => {
+  await page.goto("/");
+  const files = page.getByRole("button", { name: "Files", exact: true });
+  const folder = (name: string) => page.getByRole("button", { name, exact: true });
+  const skill = page.locator('[role="treeitem"][title="skills/summarize/SKILL.md"]');
+  await expect(skill).toBeVisible();
+  await folder("summarize").click();
+  await folder("runs").click();
+  await expect(folder("summarize")).toHaveAttribute("aria-expanded", "false");
+  await expect(skill).toHaveCount(0);
+  await shot(page, "19-collapsed-folders");
+
+  // Away to another view and back, then a reload: still as left.
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  await files.click();
+  await expect(folder("summarize")).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await expect(folder("runs")).toHaveAttribute("aria-expanded", "false");
+  await expect(folder("skills")).toHaveAttribute("aria-expanded", "true");
+  await expect(skill).toHaveCount(0);
+
+  await folder("summarize").click();
+  await expect(skill).toBeVisible();
+});
+
 test("rename a file", async ({ page }) => {
   const NOTES = "notes";
   await gotoReport(page);
@@ -520,6 +545,211 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
     storage: "local",
     node: null,
     experiment: null,
-    selected_path: `${RUN}/xdoe-report/effects.csv`,
+    selected_path: `${RUN}/effects.csv`,
+    tools: [],
   });
+});
+
+/** A short 440 Hz tone as a WAV file. */
+function toneWav(seconds = 1, rate = 8000) {
+  const samples = seconds * rate;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write("RIFF", 0);
+  wav.writeUInt32LE(36 + samples * 2, 4);
+  wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36);
+  wav.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+  return wav;
+}
+
+test("paper search: the + menu, the Papers chip and paper cards", async ({ page, request }) => {
+  await openHome(page);
+  // The "+" menu lists the agent's tool servers (GET /api/tools) under "Add file".
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await shot(page, "33-plus-menu-papers");
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  const chip = page.locator('[data-tool-chip="papers"]');
+  await expect(chip).toContainText("Papers");
+  await page.getByTestId("copilot-chat-textarea").fill("Find the key papers on retrieval augmented generation");
+  await page.mouse.move(0, 0);
+  await shot(page, "33b-papers-chip");
+
+  await page.getByTestId("copilot-send-button").click();
+  const cards = page.getByTestId("paper-results");
+  await expect(cards).toContainText("3 of 18,342 papers for “retrieval augmented generation”", reply);
+  await expect(page.getByTestId("paper-card")).toHaveCount(3);
+  await expect(page.getByTestId("paper-card").first()).toContainText("4,473 citations");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("The key paper is", reply);
+  // Without server storage there is nowhere to save to; asking about one fills the message box.
+  await expect(page.getByTestId("paper-save")).toHaveCount(0);
+  await page.getByTestId("paper-ask").first().click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toHaveValue(/^Tell me more about \[Retrieval-Augmented Generation/);
+  await shot(page, "33c-paper-cards");
+
+  // The chip went out with the run, and stays on in this chat until it's turned off.
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom.tools).toEqual(["papers"]);
+  await page.getByRole("button", { name: "Turn off Search papers" }).click();
+  await expect(chip).toHaveCount(0);
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  await expect(chip).toBeVisible();
+  // A new chat starts without chips.
+  await page.getByRole("button", { name: "New chat" }).click();
+  await expect(chip).toHaveCount(0);
+});
+
+test("thinking and tool steps fold into one block per turn", async ({ page }) => {
+  await openHome(page);
+  const question = `Think it through: what should I read next? ${Date.now()}`;
+  await send(page, question);
+
+  // While it runs: one live status line, not a stack of tool cards.
+  const steps = page.getByTestId("agent-steps");
+  const summary = steps.getByTestId("agent-steps-summary");
+  await expect(summary).toContainText("Reading notes/reading-list.md…", reply);
+  await expect(steps).toHaveAttribute("data-live", "true");
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/34-steps-running.png` });
+
+  // Done: the block says how long it worked, and only the answer shows below it.
+  await expect(summary).toHaveText(/^Worked for \d+s · 4 steps$/, reply);
+  const answer = page.getByTestId("copilot-assistant-message").last();
+  await expect(answer).toContainText("none of your notes cover it yet");
+  await expect(page.getByText("Let me look at your reading list.")).toHaveCount(0);
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
+  await shot(page, "34b-steps-collapsed");
+
+  // Opened: each step in plain words, and a step opens into its tool call.
+  await summary.click();
+  await expect(steps).toHaveAttribute("data-open", "true");
+  const rows = page.getByTestId("agent-step");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText(/^Thought for \d+s/);
+  await expect(rows.nth(1)).toContainText("Read notes/reading-list.md");
+  await expect(rows.nth(3)).toContainText("Searched your files for “Pragmatic Programmer”");
+  await expect(page.getByTestId("agent-step-narration")).toContainText("Let me look at your reading list.");
+  await rows.nth(1).getByRole("button").click();
+  const details = rows.nth(1).getByTestId("agent-step-details");
+  await expect(details).toContainText("mcp__copilotkit__read_file");
+  await expect(details).toContainText("The Pragmatic Programmer (Next)");
+  await rows.nth(0).getByRole("button").click();
+  await expect(rows.nth(0)).toContainText("check the reading list first");
+  await shot(page, "34c-steps-open");
+
+  // Detailed mode, for developers: blocks start open with every step's details.
+  await page.getByTestId("steps-mode").click();
+  await expect(page.getByTestId("steps-mode")).toHaveAttribute("aria-pressed", "true");
+  await summary.click();
+  await expect(steps).toHaveAttribute("data-open", "false");
+
+  // Reopened from the history after a reload: still timed, and in Detailed
+  // mode (remembered) open with every tool call's details.
+  await page.reload();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await page.getByRole("button", { name: "Chat history" }).click();
+  await page.getByTestId("chat-history").getByRole("option", { name: question }).click();
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("none of your notes cover it yet", reply);
+  await expect(summary).toHaveText(/^Worked for \d+s · 4 steps$/);
+  await expect(steps).toHaveAttribute("data-open", "true");
+  await expect(page.getByTestId("agent-step-details")).toHaveCount(2);
+  await shot(page, "34d-steps-detailed");
+
+  // Back to compact for the other screens.
+  await page.getByTestId("steps-mode").click();
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+});
+
+test("preview images, code, HTML, tables, audio and other files", async ({ page }) => {
+  await gotoReport(page);
+  // A real PNG: a capture of the report that is open.
+  const png = await page.getByTestId("file-preview").screenshot();
+  await page.getByTestId("upload-input").setInputFiles([
+    { name: "etch-report.png", mimeType: "image/png", buffer: png },
+    { name: "fit.py", mimeType: "text/x-python", buffer: Buffer.from("import numpy as np\n\n\ndef etch_rate(power: float, pressure: float) -> float:\n    \"\"\"Fitted rate in nm/min.\"\"\"\n    return 12.5 + 0.8 * power - 0.05 * pressure ** 2\n\n\nprint(etch_rate(300, 40))\n") },
+    { name: "summary.html", mimeType: "text/html", buffer: Buffer.from("<h1 style=\"font-family:sans-serif\">Etch summary</h1><p>Rate rose with <b>power</b>.</p><script>document.body.append('scripts ran')</script>") },
+    { name: "rates.tsv", mimeType: "text/tab-separated-values", buffer: Buffer.from("run\tpower\trate\nA\t200\t171\nB\t300\t252\n") },
+    { name: "chamber-tone.wav", mimeType: "audio/wav", buffer: toneWav() },
+    { name: "photo.heic", mimeType: "image/heic", buffer: Buffer.from("not an image the browser can show") },
+    { name: "raw-data.zip", mimeType: "application/zip", buffer: Buffer.from("PK") },
+  ]);
+  const openFile = (name: string) => page.getByRole("treeitem", { name: new RegExp(name.replace(".", "\\.")) }).click();
+
+  await openFile("etch-report.png");
+  await expect(page.getByTestId("image-size")).toContainText("×");
+  await shot(page, "30-image-preview");
+
+  await openFile("fit.py");
+  await expect(page.getByTestId("code-preview")).toContainText("def etch_rate");
+  await shot(page, "30b-code-preview");
+
+  await openFile("summary.html");
+  const html = page.frameLocator('[data-testid="html-preview"]');
+  await expect(html.getByRole("heading", { name: "Etch summary" })).toBeVisible();
+  // Sandboxed: the page's own scripts don't run.
+  await expect(html.locator("body")).not.toContainText("scripts ran");
+  await shot(page, "30c-html-preview");
+
+  await openFile("rates.tsv");
+  await expect(page.getByTestId("file-preview").getByRole("cell", { name: "252" })).toBeVisible();
+
+  await openFile("chamber-tone.wav");
+  await expect(page.getByTestId("audio-preview")).toBeVisible();
+  await shot(page, "30d-audio-preview");
+
+  await openFile("photo.heic");
+  await expect(page.getByTestId("preview-error")).toContainText("Couldn't show this image");
+  await shot(page, "30e-image-unsupported");
+
+  await openFile("raw-data.zip");
+  await expect(page.getByRole("link", { name: "Download" })).toBeVisible();
+});
+
+test("files loading", async ({ page }) => {
+  // Storage that hasn't answered yet: the workspace waits for it instead of
+  // showing this browser's files first and swapping them for the server's.
+  await page.route(/\/api\/files([/?]|$)/, () => {});
+  await page.goto("/");
+  await expect(page.getByTestId("files-loading")).toBeVisible();
+  await expect(page.getByTestId("file-loading")).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toHaveCount(0);
+  await shot(page, "31-files-loading");
+});
+
+test("a file loads when it is opened", async ({ page }) => {
+  // Server storage that lists a note right away but is slow to send it: the
+  // list shows at once, and the note says it's loading until it arrives.
+  const info = {
+    path: "notes/big-note.md", kind: "note", mime: "text/markdown", size: 12,
+    sha256: "a".repeat(64), updatedAt: new Date().toISOString(), author: "user", readOnly: false,
+  };
+  let send = () => {};
+  const sent = new Promise<void>((resolve) => { send = resolve; });
+  await page.route(/\/api\/(files|nodes|experiments|proposals)([/?]|$)/, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("watch")) return; // The change stream stays quiet.
+    if (url.pathname === "/api/nodes") return route.fulfill({ json: { types: [], rootRole: "owner", nodes: [] } });
+    if (url.pathname === "/api/experiments") return route.fulfill({ json: { experiments: [] } });
+    if (url.pathname === "/api/proposals") return route.fulfill({ json: { proposals: [] } });
+    if (url.pathname === "/api/files") return route.fulfill({ json: { files: [info] } });
+    await sent;
+    return route.fulfill({ body: "# Big note\n\nAll here now.", contentType: "text/markdown" });
+  });
+  await page.goto("/");
+  await page.getByRole("treeitem", { name: /big-note\.md/ }).click();
+  await expect(page.getByTestId("file-loading")).toContainText("Loading big-note.md");
+  await shot(page, "32-file-loading-on-open");
+  send();
+  await expect(page.getByTestId("file-preview")).toContainText("All here now.");
 });

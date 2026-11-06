@@ -896,35 +896,6 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(Number(row.n), 0);
     });
 
-    test("a folder becomes an experiment, its files moving in with their history", async () => {
-      const node = await as(alice).files(leveling);
-      await node.write("runs/etch-1/xdoe-report/report.md", text("v1"));
-      await node.write("runs/etch-1/xdoe-report/report.md", text("v2"));
-      await node.write("runs/etch-1/data.csv", text("a,b"));
-      await node.write("runs/etch-10/other.md", text("not in etch-1"));
-
-      // Moving files out of a place takes editor there.
-      await assert.rejects(as(carol).experimentFromFolder(leveling, "runs/etch-1", {}), ForbiddenError);
-      const { experiment, moved } = await as(bob).experimentFromFolder(leveling, "runs/etch-1/", {});
-      assert.deepEqual(moved, ["runs/etch-1/data.csv", "runs/etch-1/xdoe-report/report.md"]);
-      assert.deepEqual(
-        [experiment.title, experiment.nodeId, experiment.mine, experiment.status, experiment.fileCount],
-        ["etch-1", leveling, true, "draft", 2],
-      );
-      const files = await as(bob).experimentFiles(experiment.id);
-      assert.deepEqual((await files.list()).map((f) => f.path), ["data.csv", "xdoe-report/report.md"]);
-      assert.equal(await read(files, "xdoe-report/report.md"), "v2");
-      assert.equal((await files.history("xdoe-report/report.md"))!.length, 2);
-      assert.equal(await node.stat("runs/etch-1/data.csv"), null);
-      assert.ok(await node.stat("runs/etch-10/other.md"), "a folder with a longer name stays");
-      // Nothing else of the node's is copied in, unlike a fork.
-      assert.equal(await files.stat("notes/recipe.md"), null);
-
-      await assert.rejects(as(bob).experimentFromFolder(leveling, "runs/nothing-here", {}), ExperimentError);
-      const log = await as(alice).auditLog(1000);
-      assert.ok(log.some((e) => e.action === "experiment.from_folder" && e.target.folder === "runs/etch-1"));
-    });
-
     test("a run started by Claude links its inputs read only and records where it came from", async () => {
       await (await as(alice).files(null)).write("uploads/wafers.csv", text("wafer,dose\n1,30"));
       const claude = (user: string) => as(user, "agent");
@@ -1031,6 +1002,60 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.match(await read(rerunFiles, "report.md"), new RegExp(`\nrerun_of: "${run.id}"\n`));
       const old = await as(carol).experiment(run.id);
       assert.deepEqual([old.state, old.results], ["done", { tilt_urad: 1.5 }]);
+    });
+
+    test("files uploaded later can be added to an existing run as inputs", async () => {
+      const run = await as(alice).createExperiment(null, { title: "Late data" });
+      const files = await as(alice).experimentFiles(run.id);
+      await files.write("uploads/extra.csv", text("wafer,dose\n2,31"));
+      await (await as(alice).files(null)).write("uploads/root.csv", text("wafer\n9"));
+
+      const added = await as(alice).addRunInputs(run.id, [
+        { path: "uploads/extra.csv", experiment: run.id },
+        { path: "uploads/root.csv", as: "baseline.csv" },
+      ]);
+      type Inputs = { inputs: { path: string; from: { experiment: string | null; path: string } }[] };
+      assert.deepEqual(
+        (added.provenance as Inputs).inputs.map((i) => [i.path, i.from.experiment, i.from.path]),
+        [["inputs/extra.csv", run.id, "uploads/extra.csv"], ["inputs/baseline.csv", null, "uploads/root.csv"]],
+      );
+      const input = (await files.stat("inputs/extra.csv"))!;
+      assert.equal(input.readOnly, true);
+      await assert.rejects(files.write("inputs/extra.csv", text("changed")), ReadOnlyFileError);
+      // The upload stays editable; the input keeps the version it linked.
+      await files.write("uploads/extra.csv", text("wafer,dose\n2,32"));
+      assert.equal(await read(files, "inputs/extra.csv"), "wafer,dose\n2,31");
+
+      // More inputs append; the same name twice, or none at all, is refused.
+      await files.write("uploads/more.csv", text("x"));
+      const more = await as(alice).addRunInputs(run.id, [{ path: "uploads/more.csv", experiment: run.id }]);
+      assert.equal((more.provenance as Inputs).inputs.length, 3);
+      await assert.rejects(
+        as(alice).addRunInputs(run.id, [{ path: "uploads/extra.csv", experiment: run.id }]),
+        ExperimentError,
+      );
+      await assert.rejects(as(alice).addRunInputs(run.id, []), ExperimentError);
+
+      // Only its author: others may look at a shared run, not add to it.
+      await as(alice).updateExperiment(run.id, { status: "shared" });
+      await assert.rejects(
+        as(bob).addRunInputs(run.id, [{ path: "uploads/more.csv", experiment: run.id, as: "b.csv" }]),
+      );
+      // A rerun reads them too.
+      const rerun = await as(alice).rerun(run.id);
+      assert.deepEqual(
+        (rerun.provenance as Inputs).inputs.map((i) => i.path),
+        ["inputs/extra.csv", "inputs/baseline.csv", "inputs/more.csv"],
+      );
+      // Not once it finished, or while archived.
+      await as(alice).updateExperiment(run.id, { state: "done" });
+      const late = [{ path: "uploads/more.csv", experiment: run.id, as: "late.csv" }];
+      await assert.rejects(as(alice).addRunInputs(run.id, late), ExperimentError);
+      // Also under the run's lock, should it finish between the check and the link.
+      await assert.rejects(storage.experiments.addInputs(run.id, [], []), ExperimentError);
+      await as(alice).updateExperiment(run.id, { state: "running" });
+      await as(alice).updateExperiment(run.id, { status: "archived" });
+      await assert.rejects(as(alice).addRunInputs(run.id, late), ForbiddenError);
     });
 
     test("changes are audited", async () => {
@@ -1492,7 +1517,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         content: { text: string }[];
         isError?: boolean;
       };
-      return { text: result.content[0].text, isError: Boolean(result.isError) };
+      return { text: result.content.map((part) => part.text).join("\n"), isError: Boolean(result.isError) };
     };
 
     before(() => {
@@ -1520,6 +1545,40 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.ok(listed.some((f) => f.path === "artifacts/tool.md"));
     });
 
+    test("edit_file changes part of a file and shows the changed lines", async () => {
+      const page = "<html>\n<body>\n<h1>Hi</h1>\n<p>one</p>\n<p>one</p>\n</body>\n</html>";
+      await call("write_file", { path: "artifacts/page.html", content: page });
+
+      const edited = await call("edit_file", {
+        path: "artifacts/page.html",
+        oldText: "<h1>Hi</h1>",
+        newText: "<h1 style=\"color: blue\">Hi</h1>",
+      });
+      assert.equal(edited.isError, false, edited.text);
+      assert.match(edited.text, /"ok":true/);
+      assert.match(edited.text, /1 replacement;/);
+      assert.match(edited.text, /3\t<h1 style="color: blue">Hi<\/h1>/);
+      const stored = await storage.files.read("artifacts/page.html");
+      assert.equal(new TextDecoder().decode(stored!.bytes), page.replace("<h1>", '<h1 style="color: blue">'));
+      assert.equal(stored!.info.author, "agent");
+
+      const twice = await call("edit_file", { path: "artifacts/page.html", oldText: "<p>one</p>", newText: "<p>two</p>" });
+      assert.equal(twice.isError, true);
+      assert.match(twice.text, /occurs 2 times/);
+      const all = await call("edit_file", {
+        path: "artifacts/page.html",
+        oldText: "<p>one</p>",
+        newText: "<p>two</p>",
+        replaceAll: true,
+      });
+      assert.match(all.text, /2 replacements;/);
+
+      const missing = await call("edit_file", { path: "artifacts/page.html", oldText: "4\t<p>one</p>", newText: "x" });
+      assert.equal(missing.isError, true);
+      assert.match(missing.text, /Leave out the line numbers/);
+      assert.equal((await call("edit_file", { path: "artifacts/none.html", oldText: "a", newText: "b" })).isError, true);
+    });
+
     test("errors are reported, not thrown", async () => {
       assert.equal((await call("read_file", { path: "notes/missing.md" })).isError, true);
       assert.equal((await call("write_file", { path: "../x", content: "" })).isError, true);
@@ -1533,6 +1592,9 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const result = await call("write_file", { path: "runs/r2/models/general_rules.md", content: "x" });
       assert.equal(result.isError, true);
       assert.match(result.text, /read-only/);
+      const edit = await call("edit_file", { path: "runs/r2/models/general_rules.md", oldText: "Rules", newText: "x" });
+      assert.equal(edit.isError, true);
+      assert.match(edit.text, /read-only/);
       const listed = JSON.parse((await call("list_files")).text) as { path: string; readOnly?: boolean }[];
       assert.equal(listed.find((f) => f.path === "runs/r2/models/general_rules.md")?.readOnly, true);
     });
@@ -1586,6 +1648,19 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal((await call("read_file", { path: "notes/wear.md" })).isError, true);
       const read = await call("read_file", { node: child.id, path: "notes/wear.md" });
       assert.equal(read.text, `notes/wear.md\n${numberLines("worn")}`);
+      // Edits in a node are proposals too, and edits in a row build on Claude's open
+      // proposal, never on the user's own draft of the same file.
+      const draft = await local.propose(child.id, "notes/wear.md", text("the user's draft"));
+      for (const [from, to] of [["worn", "worn out"], ["out", "out fast"]]) {
+        const edit = await call("edit_file", { node: child.id, path: "notes/wear.md", oldText: from, newText: to });
+        assert.match(edit.text, /"proposed":true/, edit.text);
+      }
+      const open = await local.proposals({ node: child.id });
+      const editProposal = open.find((p) => p.author === "agent")!;
+      assert.equal(new TextDecoder().decode((await local.proposalContent(editProposal.id)).bytes), "worn out fast");
+      assert.equal(new TextDecoder().decode((await local.proposalContent(draft.id)).bytes), "the user's draft");
+      await local.decide(editProposal.id, "reject");
+      await local.decide(draft.id, "withdraw");
       // Skills at the root are proposed too: Claude doesn't add skills itself.
       const skill = JSON.parse(
         (await call("write_file", { path: "skills/recap/SKILL.md", content: "---\nname: recap\n---\nRecap." })).text,
@@ -2119,6 +2194,16 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         const text = await fetch(`${url}/files/notes/plain.md`, { redirect: "manual" });
         assert.equal(text.status, 200);
         assert.equal(await text.text(), "plain");
+        // SVG is text too: opened as a page from this origin, it must not run scripts.
+        await fetch(`${url}/files/uploads/logo.svg`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/svg+xml" },
+          body: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
+        });
+        const svg = await fetch(`${url}/files/uploads/logo.svg`, { redirect: "manual" });
+        assert.equal(svg.status, 200);
+        assert.equal(svg.headers.get("content-security-policy"), "sandbox");
+        assert.equal(svg.headers.get("x-content-type-options"), "nosniff");
         assert.equal((await fetch(`${url}/files/uploads/missing.png`, { redirect: "manual" })).status, 404);
       } finally {
         await new Promise<void>((resolve) => srv.close(() => resolve()));

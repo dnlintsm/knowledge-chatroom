@@ -74,7 +74,7 @@ description: Summarize one or more workspace files into a short brief.
 `,
   },
   {
-    path: "runs/etch-2026-10-01/xdoe-report/report.md",
+    path: "runs/etch-2026-10-01/report.md",
     kind: "note",
     mime: "text/markdown",
     author: "user",
@@ -108,7 +108,7 @@ Run \`etch-2026-10-01\`, 2-factor full factorial with a center point, 3 replicat
 `,
   },
   {
-    path: "runs/etch-2026-10-01/xdoe-report/effects.csv",
+    path: "runs/etch-2026-10-01/effects.csv",
     kind: "note",
     mime: "text/csv",
     author: "user",
@@ -120,7 +120,7 @@ power:pressure,-4.0,0.41
 `,
   },
   {
-    path: "runs/litho-2026-10-03/xdoe-report/report.md",
+    path: "runs/litho-2026-10-03/report.md",
     kind: "note",
     mime: "text/markdown",
     author: "user",

@@ -616,6 +616,19 @@ export class SharedMemoryService {
     });
   }
 
+  /** The run's shared notes (not Off) with their text: for search by meaning (../memory/recall.ts). */
+  async texts(userId: string, nodeId: string | null): Promise<(RunSharedNote & { body: string; version: number })[]> {
+    const notes = await this.forRun(userId, nodeId);
+    if (!notes.length) return [];
+    const rows = await this.as(userId, (db) => db<{ id: string; body: string; version: number }[]>`
+      SELECT id, body, version FROM shared_memories WHERE id = ANY(${notes.map((n) => n.id)}::uuid[])`);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return notes.flatMap((n) => {
+      const row = byId.get(n.id);
+      return row ? [{ ...n, body: row.body, version: row.version }] : [];
+    });
+  }
+
   /** Shared notes in the run's set (not Off) matching words in the query. */
   async search(userId: string, nodeId: string | null, query: string, limit = 10): Promise<(RunSharedNote & { snippet: string })[]> {
     const words = [...new Set(query.toLowerCase().split(/\s+/).filter((w) => w.length > 1))].slice(0, 12);

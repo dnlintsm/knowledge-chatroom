@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, X } from "lucide-react";
+import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { runsUnder } from "./runs";
 import {
@@ -15,6 +15,7 @@ import {
 } from "./server-files";
 import { useWorkspace } from "./store";
 import { REVIEW_TAB } from "./types";
+import { uploadFiles } from "./upload";
 
 const STATUS_LABEL: Record<ExperimentStatus, string> = {
   draft: "Draft",
@@ -218,6 +219,7 @@ export function ExperimentPanel() {
           onSave={(results) => save({ results })}
         />
       </Section>
+      {canChange && <AddFiles key={`add-${exp.id}`} experiment={exp} />}
       <Provenance experiment={exp} />
       {canChange && <Promote experiment={exp} nodeName={nodeName} />}
       <Compare current={exp} nodeName={nodeName} />
@@ -350,11 +352,126 @@ function Promote({ experiment, nodeName }: { experiment: Experiment; nodeName: s
   );
 }
 
+/**
+ * Uploads into this experiment (issue #114): files go to its uploads/ and,
+ * unless the run already finished, are also added as run inputs, read-only
+ * copies under inputs/ recorded in its provenance, so a rerun reads them too.
+ */
+function AddFiles({ experiment }: { experiment: Experiment }) {
+  const ws = useWorkspace();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const finished = experiment.state === "done" || experiment.state === "failed";
+  const [asInputs, setAsInputs] = useState(true);
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const linking = asInputs && !finished;
+  // Where uploads would land now; null once this panel is gone.
+  const here = useRef<string | null>(null);
+  here.current = ws.experiment?.id ?? null;
+  useEffect(() => () => void (here.current = null), []);
+
+  const add = async (list: FileList | null) => {
+    setBusy(true);
+    const skipped: string[] = [];
+    try {
+      const written = await uploadFiles(
+        list,
+        ws.write,
+        (path) => skipped.push(path),
+        () => here.current === experiment.id,
+      );
+      if (!written.length) {
+        if (skipped.length) setMessage({ text: `${skipped.join(", ")} is read-only, so nothing was uploaded.`, error: true });
+        return;
+      }
+      const count = `${written.length} ${written.length === 1 ? "file" : "files"}`;
+      if (linking) await ws.addRunInputs(experiment.id, written);
+      setMessage({
+        text: linking
+          ? `Uploaded ${count} to uploads/ and added ${written.length === 1 ? "it" : "them"} as run inputs under inputs/.`
+          : `Uploaded ${count} to uploads/.`,
+      });
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : String(err), error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title="Add files">
+      <div
+        data-testid="add-files"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          void add(e.dataTransfer.files);
+        }}
+        className={cn(
+          "flex flex-col gap-2 rounded-md border border-dashed border-[var(--border)] px-3 py-3",
+          dragging && "ring-2 ring-[var(--ring)]",
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className="flex h-7 items-center gap-1 rounded-md bg-[var(--primary)] px-2 text-xs text-[var(--primary-foreground)] cursor-pointer disabled:cursor-default disabled:opacity-50"
+          >
+            <Upload className="size-3.5" /> Upload to {experiment.title}
+          </button>
+          <span className="text-xs text-[var(--muted-foreground)]">or drop files here</span>
+          <label className="ml-auto flex items-center gap-1.5 text-xs" title={finished ? "A finished run keeps the inputs it ran with; start a rerun to add more" : undefined}>
+            <input
+              type="checkbox"
+              checked={linking}
+              disabled={finished}
+              onChange={(e) => setAsInputs(e.target.checked)}
+            />
+            Add as run inputs
+          </label>
+        </div>
+        <p className="text-xs text-[var(--muted-foreground)]">
+          {finished
+            ? "Files go to uploads/. This run finished, so its inputs stay as they were."
+            : linking
+              ? "Files go to uploads/, and a read-only copy under inputs/ is recorded with the run, so a rerun reads it too."
+              : "Files go to uploads/ in this experiment."}
+        </p>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          hidden
+          data-testid="add-files-input"
+          onChange={(e) => {
+            void add(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      {message && (
+        <p role={message.error ? "alert" : "status"} className={cn("text-xs", message.error ? "text-red-500" : "text-[var(--muted-foreground)]")}>
+          {message.text}
+        </p>
+      )}
+    </Section>
+  );
+}
+
 /** Where a run came from: who started it, from which chat, with what, and the exact inputs. */
 function Provenance({ experiment }: { experiment: Experiment }) {
   const ws = useWorkspace();
   const p = experiment.provenance;
-  if (!p || !p.startedAt) return null;
+  // Hand-made experiments have a record only once inputs are added to them.
+  if (!p || !(p.startedAt || p.inputs?.length)) return null;
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : null);
   // The record keeps only the old run's id; its title shows only to those who can see it.
   const source = p.rerunOf && ws.experiments.find((e) => e.id === p.rerunOf!.id);

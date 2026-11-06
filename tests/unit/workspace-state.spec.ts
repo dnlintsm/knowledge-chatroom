@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { reduceWorkspace, type PersistedWorkspace } from "../../src/components/workspace/workspace-state";
-import { NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
+import { parsePersistedWorkspace, reduceWorkspace, type PersistedWorkspace } from "../../src/components/workspace/workspace-state";
+import { COLLAPSED_FOLDERS_KEY, NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistCollapsedFolders, persistWorkspace, readCollapsedFolders, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
 import type { WorkspaceFile } from "../../src/components/workspace/types";
 
 const file: WorkspaceFile = { path: "notes/a.md", kind: "note", content: "first", mime: "text/markdown", updatedAt: 1, author: "user" };
@@ -75,4 +75,83 @@ test("renaming a file moves its tab in place and keeps it active", () => {
   expect(next.files).toEqual([renamed]);
   expect(next.tabs).toEqual(["notes/plan.md", "notes/b.md", "::tasks"]);
   expect(next.active).toBe("notes/plan.md");
+});
+
+test("collapsed folders are remembered per place and tolerate bad data", () => {
+  const storage = browserStorage({ [COLLAPSED_FOLDERS_KEY]: JSON.stringify({ "": ["runs", 3], n1: "x" }) });
+  expect(readCollapsedFolders(storage, null)).toEqual(["runs"]);
+  expect(readCollapsedFolders(storage, "n1")).toEqual([]);
+  persistCollapsedFolders(storage, "n1", ["skills/summarize", "notes"]);
+  expect(readCollapsedFolders(storage, "n1")).toEqual(["notes", "skills/summarize"]);
+  expect(readCollapsedFolders(storage, null)).toEqual(["runs"]);
+  persistCollapsedFolders(storage, null, []);
+  expect(JSON.parse(storage.getItem(COLLAPSED_FOLDERS_KEY)!)).toEqual({ n1: ["notes", "skills/summarize"] });
+  expect(readCollapsedFolders(browserStorage({ [COLLAPSED_FOLDERS_KEY]: "{" }), null)).toEqual([]);
+});
+
+test("parsePersistedWorkspace validates structure and rejects non-objects, bad tabs, and bad file lists", () => {
+  // Non-objects and falsy values
+  expect(parsePersistedWorkspace(null)).toBeNull();
+  expect(parsePersistedWorkspace(undefined)).toBeNull();
+  expect(parsePersistedWorkspace("")).toBeNull();
+  expect(parsePersistedWorkspace(123)).toBeNull();
+  expect(parsePersistedWorkspace(true)).toBeNull();
+  expect(parsePersistedWorkspace([])).toBeNull();
+
+  // Missing or malformed tab states
+  expect(parsePersistedWorkspace({ files: [] })).toBeNull();
+  expect(parsePersistedWorkspace({ files: [], tabs: "not-an-array", active: null })).toBeNull();
+  expect(parsePersistedWorkspace({ files: [], tabs: [123], active: null })).toBeNull();
+  expect(parsePersistedWorkspace({ files: [], tabs: [""], active: null })).toBeNull();
+  expect(parsePersistedWorkspace({ files: [], tabs: [], active: 123 })).toBeNull();
+  expect(parsePersistedWorkspace({ files: [], tabs: [], active: "" })).toBeNull();
+
+  // Missing or malformed files property
+  expect(parsePersistedWorkspace({ tabs: [], active: null })).toBeNull();
+  expect(parsePersistedWorkspace({ tabs: [], active: null, files: null })).toBeNull();
+  expect(parsePersistedWorkspace({ tabs: [], active: null, files: "not-an-array" })).toBeNull();
+  expect(parsePersistedWorkspace({ tabs: [], active: null, files: {} })).toBeNull();
+
+  // Valid minimal workspace
+  expect(parsePersistedWorkspace({ tabs: [], active: null, files: [] })).toEqual({
+    tabs: [],
+    active: null,
+    files: [],
+  });
+
+  // Valid workspace with active tab and files
+  const validWorkspace = {
+    tabs: ["notes/a.md"],
+    active: "notes/a.md",
+    files: [{ ...file, readOnly: false }],
+  };
+  expect(parsePersistedWorkspace(validWorkspace)).toEqual(validWorkspace);
+
+  // Malformed individual file entries that fail parseLocalFile
+  const invalidFiles: unknown[] = [
+    null,
+    "not-a-file-object",
+    { ...file, path: "" },
+    { ...file, path: "../secret.md" },
+    { ...file, path: "notes/./a.md" },
+    { ...file, kind: "unknown-kind" },
+    { ...file, kind: "" },
+    { ...file, content: 123 },
+    { ...file, mime: "" },
+    { ...file, author: "unknown-author" },
+    { ...file, updatedAt: "2026-01-01" },
+    { ...file, updatedAt: NaN },
+    { ...file, updatedAt: Infinity },
+    { ...file, readOnly: "false" },
+  ];
+
+  for (const badFile of invalidFiles) {
+    expect(
+      parsePersistedWorkspace({
+        tabs: [file.path],
+        active: file.path,
+        files: [badFile],
+      }),
+    ).toBeNull();
+  }
 });

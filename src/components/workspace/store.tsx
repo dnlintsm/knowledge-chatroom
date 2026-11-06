@@ -30,6 +30,7 @@ import {
   createServerExperiment,
   createServerNode,
   decideProposal as decideServerProposal,
+  addServerRunInputs,
   deleteServerExperiment,
   deleteServerFile,
   deleteServerNode,
@@ -37,13 +38,14 @@ import {
   experimentOf,
   experimentPlace,
   getAccount,
+  listedServerFile,
   listServerFiles,
   loadServerFile,
+  loadServerText,
   promoteExperiment,
   putServerFile,
   renameServerFile,
   renameServerNode,
-  serverExperimentFromFolder,
   updateServerExperiment,
   WATCH_URL,
   type Account,
@@ -113,6 +115,11 @@ interface WorkspaceValue {
   /** Set by the last open() that named lines; cleared by any other open or an edit to that file. */
   reveal: Reveal | null;
   getFile: (path: string) => WorkspaceFile | undefined;
+  /**
+   * The file with its content, fetched first when it is only listed
+   * (`unloaded`); undefined when there is no such file (any more).
+   */
+  loadFile: (path: string) => Promise<WorkspaceFile | undefined>;
   /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
   open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
@@ -176,10 +183,13 @@ interface WorkspaceValue {
    * the root (null, empty) and moves into it. These throw with a message too.
    */
   createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
-  /** Moves a folder here into a new experiment of yours and moves into it. */
-  experimentFromFolder: (folder: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
+  /**
+   * Adds files of experiment `id` (by path) as its run inputs: read-only
+   * copies under inputs/, recorded in its provenance. Throws with a message.
+   */
+  addRunInputs: (id: string, paths: string[]) => Promise<Experiment>;
   /** Open proposals you can see, anywhere, newest first. */
   proposals: Proposal[];
   /** Accept, reject or withdraw a proposal; throws with a message. */
@@ -252,10 +262,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setState((s) => reduceWorkspace(s, { type: "remove", path }));
   }, []);
 
-  // Brings local files in line with the server's list: fetches what changed,
+  // Brings local files in line with the server's list: lists what's new,
+  // refetches what changed among the files already loaded from the server,
   // drops what was deleted, and leaves files with unsaved edits alone, also
   // when the user starts editing while the fetches are in flight. `keep` names
   // files that aren't on the server but must stay (failed first uploads).
+  // Other text files stay `unloaded` until loadFile fetches them, so a place
+  // with many files shows its list without downloading them all.
   const resync = useCallback(async (list: ServerFile[], keep = new Set<string>()) => {
     const at = placeRef.current;
     const local = new Map(files.current.map((f) => [f.path, f]));
@@ -265,7 +278,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (mine && (busy(info.path) || sync.hash(info.path) === info.sha256)) {
           return mine;
         }
-        const file = await loadServerFile(info, at);
+        // Only a copy that came from the server is kept fresh; this browser's
+        // own files from before (with no known version) are just replaced.
+        const loaded = mine && !mine.unloaded && sync.hash(info.path) !== undefined;
+        const file = loaded ? await loadServerFile(info, at) : listedServerFile(info, at);
         sync.remember(info.path, info.sha256, at);
         return file;
       }),
@@ -376,19 +392,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const activateLocalStorage = () => {
       mode.current = "local";
       setStorageMode("local");
+      // Files only listed from a server that then failed have no content to keep.
+      setState((s) => (s.files.some((f) => f.unloaded) ? { ...s, files: s.files.filter((f) => !f.unloaded) } : s));
     };
 
     (async () => {
+      // Open the run a link names (?experiment=), else return to the place
+      // this browser was last in, if it still exists. Its files are asked for
+      // alongside the root's and the account, rather than one after another.
+      const linked = experimentFromSearch(window.location.search);
+      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
+      const firstThere = lastNode ? listServerFiles(lastNode).catch(() => null) : Promise.resolve(null);
+      // Storage answers 503 while it migrates on startup; give it a moment.
+      const firstList = (async () => {
+        let list = await listServerFiles();
+        for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
+          await new Promise((r) => setTimeout(r, STARTUP_RETRY_MS));
+          if (cancelled) return null;
+          list = await listServerFiles();
+        }
+        return list;
+      })();
       const who = await getAccount();
       if (cancelled) return;
       setAccount(who);
-      // Storage answers 503 while it migrates on startup; give it a moment.
-      let list = await listServerFiles();
-      for (let i = 0; list === "starting" && i < STARTUP_RETRIES; i++) {
-        await new Promise((r) => setTimeout(r, STARTUP_RETRY_MS));
-        if (cancelled) return;
-        list = await listServerFiles();
-      }
+      let list = await firstList;
       if (cancelled) return;
       if (!Array.isArray(list)) return activateLocalStorage();
 
@@ -416,11 +444,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
 
-      // Open the run a link names (?experiment=), else return to the place
-      // this browser was last in, if it still exists.
-      const linked = experimentFromSearch(window.location.search);
-      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
-      const there = lastNode ? await listServerFiles(lastNode) : null;
+      let there = await firstThere;
+      // Asked while storage was still starting: ask again now that it's up.
+      if (lastNode && there === "starting") there = await listServerFiles(lastNode);
       if (cancelled) return;
       if (lastNode && Array.isArray(there)) {
         placeRef.current = lastNode;
@@ -430,9 +456,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const ui = readPlaceUi(window.localStorage)[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
-      await resync(list, placeRef.current === null ? new Set(failed) : new Set());
-      // Roles come with the tree; load it first so edit controls are right from the start.
-      await Promise.all([refreshTree(), refreshProposals()]);
+      // Roles come with the tree; load it before showing the files so edit
+      // controls are right from the start.
+      await Promise.all([
+        resync(list, placeRef.current === null ? new Set(failed) : new Set()),
+        refreshTree(),
+        refreshProposals(),
+      ]);
       if (cancelled) return;
       mode.current = "server";
       setStorageMode("server");
@@ -474,6 +504,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     window.addEventListener("pagehide", flushSaves);
     return () => window.removeEventListener("pagehide", flushSaves);
   }, [flushSaves]);
+
+  // One fetch per listed file, however many callers ask at once. Keyed by the
+  // file itself: coming back to a place lists its files anew, and those get
+  // their own fetch rather than one still running from the earlier visit.
+  const loads = useRef(new WeakMap<WorkspaceFile, Promise<WorkspaceFile | undefined>>());
+  const loadFile = useCallback((rawPath: string) => {
+    const load = (path: string): Promise<WorkspaceFile | undefined> => {
+      const at = placeRef.current;
+      const file = files.current.find((f) => f.path === path);
+      if (!file?.unloaded) return Promise.resolve(file);
+      const running = loads.current.get(file);
+      if (running) return running;
+      const loading = loadServerText(path, at).then(({ content, sha256 }) => {
+        const now = files.current.find((f) => f.path === path);
+        if (placeRef.current !== at) return now;
+        // Listed anew meanwhile (left and came back): load that one instead.
+        if (now !== file) return now?.unloaded ? load(path) : now;
+        const loaded: WorkspaceFile = { ...file, content };
+        delete loaded.unloaded;
+        if (sha256) sync.remember(path, sha256, at);
+        files.current = files.current.map((f) => (f === file ? loaded : f));
+        upsert(loaded);
+        return loaded;
+      });
+      loads.current.set(file, loading);
+      // A failed fetch can be asked for again.
+      loading.catch(() => loads.current.delete(file));
+      return loading;
+    };
+    return load(normalizePath(rawPath));
+  }, [upsert, sync]);
 
   const getFile = useCallback(
     (path: string) => state.files.find((f) => f.path === normalizePath(path)),
@@ -672,25 +733,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment, settleSaves],
   );
-  const experimentFromFolder = useCallback(
-    async (folder: string) => {
-      const at = placeRef.current;
-      if (experimentOf(at)) throw new Error("This is already an experiment; go to its node to turn a folder into a run");
-      // The move takes what the server has, so recent edits go first.
-      await settleSaves(at);
-      const created = await serverExperimentFromFolder(at, folder);
-      await refreshExperiments();
-      await enterExperiment(created.id);
-      return created;
-    },
-    [refreshExperiments, enterExperiment, settleSaves],
-  );
   const updateExperiment = useCallback(
     async (id: string, change: ExperimentChange) => {
       // Archived is read only, so edits still on their way would be refused.
       const here = experimentPlace(id);
       if (change.status === "archived" && placeRef.current === here) await settleSaves(here);
       const updated = await updateServerExperiment(id, change);
+      setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
+      return updated;
+    },
+    [settleSaves, setExperiments],
+  );
+  const addRunInputs = useCallback(
+    async (id: string, paths: string[]) => {
+      // Inputs link what the server has, so new uploads go first.
+      const here = experimentPlace(id);
+      if (placeRef.current === here) await settleSaves(here);
+      const updated = await addServerRunInputs(id, paths);
       setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
       return updated;
     },
@@ -733,8 +792,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<WorkspaceValue>(() => {
+    // While loading, the files are this browser's copy; none is shown as open
+    // (or given to Claude as the open file) until the server's have arrived.
     const activeFile =
-      state.active && !isBuiltInTab(state.active)
+      state.active && !isBuiltInTab(state.active) && storageMode !== "loading"
         ? (state.files.find((f) => f.path === state.active) ?? null)
         : null;
     return {
@@ -744,6 +805,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openCount,
       reveal,
       getFile,
+      loadFile,
       open,
       close,
       write,
@@ -769,18 +831,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       renameNode,
       deleteNode,
       createExperiment,
-      experimentFromFolder,
       updateExperiment,
       deleteExperiment,
+      addRunInputs,
       proposals,
       decideProposal,
       promote,
     };
   }, [
-    state, selection, openCount, reveal, setSelection, getFile, open, close, write, create, remove, rename, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
-    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, experimentFromFolder,
-    updateExperiment, deleteExperiment, proposals, decideProposal, promote,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
+    updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

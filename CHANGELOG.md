@@ -1,9 +1,226 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
-### Upgrading
+Search papers from the chat (OpenAlex and arXiv) with a new "+" menu, Papers chip and paper
+cards; each answer's thinking and tool steps fold into one "Worked for 14s · 5 steps" line;
+and Claude edits files in place instead of rewriting them, so chats fit smaller models.
+Nothing is removed or renamed in this release.
 
+### Upgrading from 0.2.2
+
+- No database migrations, no removed or renamed settings, and no breaking changes: pull,
+  then rebuild and restart the app and the agent (with Docker,
+  `docker compose up --build -d` with the profile you use).
+- `npm run env:check` lists four new optional settings: `CLAUDE_CODE_MAX_CONTEXT_TOKENS`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and `CHAT_STEPS`.
+  `npm run env:upgrade` appends them commented out; nothing changes until you set them.
+- Paper search is opt-in: run the `papers` MCP server (`docker compose --profile papers`, or
+  `examples/papers-mcp`) and add it to `MCP_SERVERS` with its `ui` block, as in
+  `.env.example`. Without it the "+" menu has no Search papers entry.
+- Remote agent backends keep working: forwarded props stay at version 2 and only gain an
+  optional `tools` field (the chips the user turned on). A Python backend that wants the
+  Papers chip follows step 8 in `docs/remote-agent.md`.
+
+### Added
+
+- Paper search MCP server, `examples/papers-mcp` (#151, #152): `search_papers` (OpenAlex,
+  with year, author, venue and open-access filters, sorting and paging), `get_paper`
+  (abstract, BibTeX; `openalex:`, `doi:` or `arxiv:` ids, with an arXiv fallback for new
+  papers), `read_paper` (open-access PDF text, paged by lines, with section headings),
+  `related_papers` (cites, cited by, similar) and `save_paper` (a markdown note at
+  `papers/<title>.md` in the current place, optionally with the PDF; a proposal in a
+  knowledge node). Callers are checked with the forwarded identity, like the Python agent
+  sample. `docker compose --profile papers` runs it, and CI tests it.
+- Paper search in the chat (#151, #153). The composer's "+" menu lists MCP tools whose
+  `MCP_SERVERS` entry has a `ui` block; **Search papers** turns on a **Papers** chip above
+  the message box, kept per chat. Search results show as paper cards (title, authors, venue,
+  year, citations, open access, abstract) with **Save to workspace**, **Ask about this**,
+  **PDF** and **Page**. The agent serves the menu at `GET /tools` and single tool calls at
+  `POST /tools/<server>/<tool>` (proxied as `/api/tools`), only for tools listed in the
+  `ui` block. New built-in `paper-search` skill.
+- `edit_file` tool, and `editWorkspaceFile` for browser-only workspaces (#126, #127). Claude
+  replaces one exact piece of text (or every match with `replaceAll`) and gets the changed
+  lines back, instead of reading and rewriting a whole file. Same rules as `write_file`:
+  proposals in knowledge nodes and skills, read-only files refused, every write versioned.
+- Context-window settings for models the engine doesn't know, such as a local model behind
+  `ANTHROPIC_BASE_URL` (#127): `CLAUDE_CODE_MAX_CONTEXT_TOKENS`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, passed to the
+  agent by docker compose when set.
+
+### Changed
+
+- Each answer's thinking, tool calls and narration fold into one line above the answer,
+  "Worked for 14s · 5 steps" (#154, #155). While Claude works it is a live status with a
+  timer; clicking it opens the steps, and each step its arguments and result. Paper cards,
+  charts, A2UI surfaces, questions for the user and errors stay visible. A **Compact /
+  Detailed** button in the chat header switches per user; `CHAT_STEPS=detailed` on the UI
+  makes Detailed the default. Durations survive a reload from chat history.
+- `read_file` returns at most 50,000 characters per read (was 200,000), so one read stays
+  under the engine's limit for a single tool result (#127). Paging with `offset`/`limit`
+  works as before.
+
+### Fixed
+
+- From the second turn of a chat, a turn's thinking block disappeared when the reply
+  finished (#156, #157).
+
+### Known limitations
+
+- Paper search was tested against recorded OpenAlex and arXiv responses, not the live APIs.
+- The steps line doesn't count failed tool calls: the Claude adapter's tool results don't
+  say whether a tool failed.
+
+## 0.2.2
+
+Files load faster when the app opens, you can upload files straight into an existing
+run and add them as its inputs, a failed Claude run says why, and a new
+`npm run env:check` / `npm run env:upgrade` keeps your `.env` in step with each release.
+Nothing is removed or renamed in this release.
+
+### Upgrading from 0.2.1
+
+- No database migrations, no new or renamed settings, and no breaking changes: pull,
+  then rebuild and restart the app and the agent (with Docker,
+  `docker compose up --build -d` with the profile you use).
+- Run `npm run env:check` after pulling (#112). It should report nothing to change when
+  you come from 0.2.1. When you come from an older release, it lists the settings later
+  releases removed (`IDENTITY_FORMAT`, `RUN_DIR_MARKERS`) or renamed (`AGENT_URL` on port
+  8000 becomes `LOCAL_AGENT_URL`), and `npm run env:upgrade` applies that after backing up
+  `.env`. Still follow the "Upgrading" steps of each release you skip.
+- If chat showed "SDK resume/run failed; check the original files, tools, credentials and
+  execution configuration.", the chat and the agent log now show the real reason after
+  this upgrade (#116).
+
+### Added
+
+- `npm run env:check` and `npm run env:upgrade` for an outdated `.env` (#112). The check
+  lists settings a release removed (`IDENTITY_FORMAT`, `RUN_DIR_MARKERS`) or renamed
+  (an old `AGENT_URL` on port 8000, in a `.env` without `LOCAL_AGENT_URL`, becomes
+  `LOCAL_AGENT_URL`), settings new in
+  `.env.example`, and settings `.env.example` doesn't know. The upgrade backs up `.env`
+  to `.env.backup-<time>`, comments out removed settings, renames, and appends the new
+  settings commented out with their explanations, so nothing else changes until you
+  uncomment them. Only names are printed, never values.
+- Upload files into an existing run (#114, #115). The run panel has an **Add files**
+  section (button and drop zone), and the Runs view an **Add files to ‹run›** button that
+  opens it. Files go to the run's `uploads/`; with **Add as run inputs** (on by default)
+  each one is also linked read-only under `inputs/` and recorded in the run's provenance,
+  so a rerun reads it too. A finished (done or failed) run keeps the inputs it ran with,
+  so its files go to `uploads/` only. Only the run's author can add files, and not to an
+  archived run. The agent server has a matching `POST /experiments/<id>/inputs`, which
+  storage tokens may call too.
+
+### Changed
+
+- Faster page loads with server storage (#118, #119, #120). The file list now comes from
+  metadata only, and a text file's content is fetched when it is opened (or when Claude is
+  given a run's `report.md`), instead of every text file being downloaded on every page
+  load and every move between places. Account, tree, proposals and the last place's
+  listing load in parallel. Until storage answers, the side panel shows "Loading files…",
+  the editor a spinner and the top bar "Loading files", instead of briefly showing local
+  files and swapping them out; a file being fetched shows "Loading ‹name›…" with a retry
+  if it fails.
+
+### Fixed
+
+- A failed Claude run says why in the chat and the agent log (for example a bad API key,
+  an unknown model or a gateway error) instead of only "SDK resume/run failed; check the
+  original files, tools, credentials and execution configuration." (#116, #117).
+
+### Known limitations
+
+- Claude runs that fail only for some non-owner accounts, while the owner's runs work,
+  are not fixed yet. With #117 the chat now shows the reason, which should point to the
+  cause.
+
+## 0.2.1
+
+Files preview in the editor pane (images, PDFs, audio, video, code, HTML, TSV), the file
+tree remembers which folders you collapsed, and two leftovers kept for one release are
+removed: `v1` identity tokens and old `xdoe-report/` run folders. Those removals can break
+an upgrade, so follow the steps below.
+
+### Upgrading from 0.2.0
+
+- **Check `IDENTITY_FORMAT` first.** `IDENTITY_FORMAT=v1` is gone (#100, #106). Identity,
+  storage and memory tokens are only `v2` (Ed25519), and `v1` HMAC tokens are refused. If
+  the app or agent still has `IDENTITY_FORMAT=v1` (or any value other than `v2`) set, the
+  agent refuses to start and says why: remove the variable from `.env` and the compose
+  file, and make sure remote backends and MCP servers verify with the public key from
+  `GET /identity/public-key` (see `docs/remote-agent.md`). Deployments without outside
+  services only need the variable unset, if it was set.
+- **Convert old run folders before upgrading** (#107). Folders holding `xdoe-report/` can
+  no longer be turned into runs, and a run's report is only its top-level `report.md`.
+  Use **Make run** on 0.2.0 for any such folder you still want as a run, then upgrade. A
+  run made from one earlier keeps its files, but its report no longer opens by itself:
+  rename its `xdoe-report/report.md` to `report.md`. Folders never converted stay
+  ordinary folders.
+- No database migrations in this release, and no new settings.
+- File previews load stored files through their signed S3 links, so `S3_PUBLIC_URL` must
+  be reachable from the browser (and https when the app is https). If it isn't, the image
+  viewer now says so instead of showing a broken image.
+
+### Added
+
+- Previews in the editor pane (#103, #104). Images get a viewer with Fit / Actual size,
+  pixel size and an Open link; PDFs open in the browser's viewer; audio and video play in
+  native players; code is highlighted with Preview / Edit like markdown (chat line
+  references highlight here too); HTML renders in a fully sandboxed frame with the source
+  under Edit; TSV shows as a table like CSV. Anything else shows "No preview" with a
+  Download link. More file types get the right MIME type (bmp, ico, avif, apng, tsv, htm,
+  common audio and video), and more text extensions (go, rs, java, c/cpp, rb, php, swift,
+  log, ini, jsonl, ipynb, vue, svelte and others) can be read by Claude too.
+- Folders you collapse in the file tree stay collapsed when you switch views or reload,
+  separately for the workspace root, each knowledge node and each run (#109). This is
+  kept per browser, like open tabs and the pane layout.
+
+### Fixed
+
+- An image that can't be loaded, or a format browsers don't show (HEIC, TIFF), no longer
+  shows a silent broken-image icon; the viewer explains the likely cause and offers Open /
+  Download (#103). Files with extensions missing from the MIME table, previously stored as
+  `application/octet-stream`, now preview by extension.
+
+### Removed
+
+- The `v1` (HMAC with `AUTH_SECRET`) identity token format and the `IDENTITY_FORMAT`
+  setting, kept in 0.2.0 for one release while services moved to the public key.
+- The `xdoe-report/` run folder marker (#82): the Runs view's **Make run** list of old run
+  folders, `POST /experiments/from-folder`, and `xdoe-report/report.md` as a run's report.
+  The sample run folders in the browser-only workspace keep their report at `report.md`.
+
+### Known limitations
+
+- No previews for Office files (docx, xlsx, pptx) or HEIC/TIFF images, which need a
+  converter; notebooks show as JSON. Signed links last five minutes, so a long video
+  paused past that may need a reload to seek.
+- Memory still hasn't been tried with real Claude (#108). Server sessions and CSRF checks
+  (#64) and the audit finding in CopilotKit's unused Vertex AI provider (#75) are still
+  open.
+
+## 0.2.0
+
+Claude remembers: with `MEMORY=on`, Claude keeps notes about each user that only they
+see, learns from quiet chats, finds notes by meaning and searches your past chats, and
+shares notes with a workspace, node or group under review. Chat history moves to the
+server, one private list per user, and outside services verify users with a public key
+and get their own storage tokens.
+
+### Upgrading from 0.1.2
+
+- **Back up Postgres first.** Migrations `017_chats.sql` to `021_memory_packs.sql` run on
+  agent start.
+- Chats kept before this release are not carried over. Without server storage they were
+  only in the app's memory anyway; from now on each user's chats are saved (#91).
+- Memory is off until you set `MEMORY=on` (the Docker compose file passes it through),
+  and it needs server storage. Learning from chats uses `MEMORY_MODEL` (default: the
+  follow-up chips' Haiku), so with memory on expect a small model call per chat once it
+  has been quiet for `MEMORY_IDLE_MINUTES` (default 10). `MEMORY_LEARN=off` keeps memory
+  but stops learning.
+- MCP servers get nothing new unless their `MCP_SERVERS` entry opts in with
+  `"storageAccess": true` or `"memoryAccess": true`. Remote backends (`AGENT_URL`) now
+  receive an `X-Knowledge-Storage` token with every run.
 - Identity tokens (`X-Knowledge-User`) are now signed with a key pair derived from
   `AUTH_SECRET` (`v2`, Ed25519) instead of HMAC with the secret itself (#88). Outside
   services verify them with the public key from the agent's `GET /identity/public-key`
@@ -15,6 +232,16 @@
 
 ### Added
 
+- Search by meaning over memory, and Claude searching past chats (#93, step 5). When the
+  agent runs an embedding model (the one file search uses), `memory_search` also lists
+  notes close in meaning to the query. In chats with memory, Claude can find and read
+  the user's earlier chats with `chats_search` and `chats_read`; incognito chats are
+  never found, and changes to memory after reading a past chat wait in the inbox.
+- Memory for Python MCP servers (#93, step 5). With `"memoryAccess": true` in
+  `MCP_SERVERS`, runs where memory is on send the server an `X-Knowledge-Memory` token
+  for that chat. Through the agent's `/memory/agent` API the server gets the chat's
+  memory prompt and the same memory tools as Claude; its changes always wait in the
+  user's Memory inbox. The sample Python agent's `recall_user_notes` tool shows how.
 - Memory packs and import (#93, step 4). A place's editors publish its shared notes to
   the hub as a memory pack, with numbered versions scanned like skills. Installing one
   in a workspace, node or group adds its notes there pinned to that version, read-only
@@ -62,6 +289,18 @@
   through. Tokens last `STORAGE_TOKEN_SECONDS` (default an hour), so long remote runs keep
   access. The Python sample gains `describe_column`, which reads a CSV from the workspace
   this way.
+
+### Changed
+
+- The AG-UI Claude adapter is 0.0.8 (still on Claude Agent SDK 0.3.296, which it pins).
+
+### Known limitations
+
+- Memory is experimental and hasn't been tried with real Claude yet. Turning notes into
+  skills or knowledge nodes is planned for later (#93).
+- Background jobs for long runs (#82), server sessions and CSRF checks (#64), and the
+  `@fastify/busboy` audit finding in CopilotKit's unused Vertex AI provider (#75) are
+  still open.
 
 ## 0.1.2
 

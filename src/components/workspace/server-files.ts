@@ -107,12 +107,16 @@ export async function listServerFiles(
 }
 
 /**
- * Loads a file into the workspace model. Text is fetched; binary files point
- * at their URL (versioned by hash so caches never show stale bytes), which
- * works anywhere the UI used a data: URL, like <img src>.
+ * A listed file without its text: binary files point at their URL as in
+ * loadServerFile, text files are `unloaded` until loadServerFile fetches them.
  */
-export async function loadServerFile(info: ServerFile, place: PlaceId = null): Promise<WorkspaceFile> {
-  const base = {
+export function listedServerFile(info: ServerFile, place: PlaceId = null): WorkspaceFile {
+  if (!isTextFile(info)) return binaryServerFile(info, place);
+  return { ...fileBase(info), content: "", unloaded: true };
+}
+
+function fileBase(info: ServerFile) {
+  return {
     path: info.path,
     kind: info.kind,
     mime: info.mime,
@@ -120,13 +124,31 @@ export async function loadServerFile(info: ServerFile, place: PlaceId = null): P
     updatedAt: Date.parse(info.updatedAt),
     ...(info.readOnly ? { readOnly: true } : {}),
   };
+}
+
+function binaryServerFile(info: ServerFile, place: PlaceId): WorkspaceFile {
   const url = fileUrl(info.path, place);
-  if (!isTextFile(info)) {
-    return { ...base, content: `${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}` };
-  }
-  const res = await apiFetch(url, { cache: "no-store" });
+  return { ...fileBase(info), content: `${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}` };
+}
+
+/**
+ * Loads a file into the workspace model. Text is fetched; binary files point
+ * at their URL (versioned by hash so caches never show stale bytes), which
+ * works anywhere the UI used a data: URL, like <img src>.
+ */
+export async function loadServerFile(info: ServerFile, place: PlaceId = null): Promise<WorkspaceFile> {
+  if (!isTextFile(info)) return binaryServerFile(info, place);
+  const res = await apiFetch(fileUrl(info.path, place), { cache: "no-store" });
   if (!res.ok) throw new Error(`GET ${info.path}: ${res.status}`);
-  return { ...base, content: await res.text() };
+  return { ...fileBase(info), content: await res.text() };
+}
+
+/** A text file's content and the version it is (its sha256, from the ETag). */
+export async function loadServerText(path: string, place: PlaceId = null): Promise<{ content: string; sha256: string | null }> {
+  const res = await apiFetch(fileUrl(path, place), { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
+  const etag = res.headers.get("etag");
+  return { content: await res.text(), sha256: etag ? etag.replace(/^(W\/)?"|"$/g, "") : null };
 }
 
 /**
@@ -301,19 +323,13 @@ async function experimentRequest(method: string, path: string, body?: unknown): 
 
 export const createServerExperiment = (nodeId: string | null, title: string) =>
   experimentRequest("POST", "", { nodeId, title });
-/** Moves a folder's files into a new experiment of yours (needs editor where the folder is). */
-export const serverExperimentFromFolder = (nodeId: string | null, folder: string) =>
-  apiFetch("/api/experiments/from-folder", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, folder }),
-  }).then(async (res) => {
-    const data = (await res.json().catch(() => ({}))) as { experiment?: Experiment; error?: string };
-    if (!res.ok || !data.experiment) throw new Error(data.error ?? `Convert folder: ${res.status}`);
-    return data.experiment;
-  });
 export const updateServerExperiment = (id: string, change: ExperimentChange) =>
   experimentRequest("PATCH", `/${encodeURIComponent(id)}`, change);
+/** Links an experiment's own files (by path) in read only under inputs/, recorded as run inputs. */
+export const addServerRunInputs = (id: string, paths: string[]) =>
+  experimentRequest("POST", `/${encodeURIComponent(id)}/inputs`, {
+    inputs: paths.map((path) => ({ path, experiment: id })),
+  });
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 

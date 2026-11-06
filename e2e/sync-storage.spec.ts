@@ -43,3 +43,29 @@ test("two tabs synchronize saved edits and deletion through the real storage str
     await request.delete(url);
   }
 });
+
+test("a page load lists the files and fetches a text file only when it is opened", async ({ page, request }) => {
+  await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
+  const lazy = ["notes/lazy-a.md", "notes/lazy-b.md"];
+  for (const p of lazy) {
+    expect((await request.put(`/api/files/${p}`, { data: `# ${p}`, headers })).ok()).toBe(true);
+  }
+  const fetched: string[] = [];
+  page.on("request", (req) => {
+    const { pathname } = new URL(req.url());
+    if (req.method() === "GET" && pathname.startsWith("/api/files/")) fetched.push(pathname.slice("/api/files/".length));
+  });
+  try {
+    await page.goto("/");
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await showFiles(page);
+    await expect(page.getByRole("treeitem", { name: /lazy-b\.md/ })).toBeVisible();
+    expect(fetched.filter((p) => lazy.includes(p))).toEqual([]);
+
+    await page.getByRole("treeitem", { name: /lazy-a\.md/ }).click();
+    await expect(page.getByTestId("file-preview")).toContainText("notes/lazy-a.md");
+    expect(fetched.filter((p) => lazy.includes(p))).toEqual(["notes/lazy-a.md"]);
+  } finally {
+    for (const p of lazy) await request.delete(`/api/files/${p}`);
+  }
+});

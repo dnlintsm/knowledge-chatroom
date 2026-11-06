@@ -18,6 +18,7 @@ import {
 } from "@/components/generative-ui/charts/bar-chart";
 import { MeetingTimePicker } from "@/components/generative-ui/meeting-time-picker";
 import { ToolReasoning } from "@/components/tool-rendering";
+import { renderPaperTool } from "@/components/workspace/paper-cards";
 
 export const useGenerativeUIExamples = () => {
   const { theme, setTheme } = useTheme();
@@ -61,9 +62,10 @@ export const useGenerativeUIExamples = () => {
     "log_a2ui_event", // Internal A2UI event tracker
   ];
   useDefaultRenderTool({
-    render: ({ name, status, parameters }) => {
+    render: ({ name, status, parameters, result }) => {
       if (ignoredTools.includes(name)) return <></>;
-      return <ToolReasoning name={name} status={status} args={parameters} />;
+      // Paper search results show as cards (issue #151).
+      return renderPaperTool({ name, status, parameters, result }) ?? <ToolReasoning name={name} status={status} args={parameters} result={result} />;
     },
   });
 

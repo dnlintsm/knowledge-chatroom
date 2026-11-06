@@ -31,7 +31,8 @@ work easier to find, understand, and reuse.
   review. Teams share memory too: notes for the whole workspace, a knowledge node or a
   group, which Claude reads but only proposes changes to. Bring your memory from ChatGPT
   or Claude by pasting it in, and publish or install memory packs (a team's shared notes)
-  on the hub.
+  on the hub. Claude can also look back through your earlier chats, and with an
+  embedding model it finds notes by meaning, not just by words.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,
@@ -87,9 +88,19 @@ npm ci                         # installs the UI and agent from their lockfiles
 npm run dev                    # UI :3000, agent :8000
 ```
 
-Open <http://localhost:3000>, then start a run or turn a sample run folder into one
-from the Runs view (runs need server storage).
+Open <http://localhost:3000>, then start a run from the Runs view (runs need server
+storage).
 Server storage and login are optional; see [Development](docs/development.md).
+
+### Upgrading
+
+After pulling a new version, compare your `.env` with `.env.example`, then follow the
+"Upgrading" steps for each version in the [CHANGELOG](CHANGELOG.md):
+
+```bash
+npm run env:check              # removed, renamed and new settings; prints no values
+npm run env:upgrade            # applies it, after backing up .env
+```
 
 ## Documentation
 
@@ -125,6 +136,7 @@ Keep PRs small and describe the behavior changed and how you validated it.
 | `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `agent/src/storage/migrations` | Database schema and access policies |
 | `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
+| `examples/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `tests/unit` | Pure frontend tests without an application server or browser |
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |

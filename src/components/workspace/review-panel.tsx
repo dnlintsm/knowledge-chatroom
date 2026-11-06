@@ -53,7 +53,9 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
   const [busy, setBusy] = useState(false);
   const text = isTextFile(p);
   // In its place, the open copy is the latest (it may hold edits not saved yet).
-  const local = !ws.experiment && ws.node === p.node ? ws.getFile(p.path) : undefined;
+  const here = !ws.experiment && ws.node === p.node ? ws.getFile(p.path) : undefined;
+  // Only listed so far: the server's copy is the same, so fetch that below.
+  const local = here?.unloaded ? undefined : here;
 
   useEffect(() => {
     if (!text) return;

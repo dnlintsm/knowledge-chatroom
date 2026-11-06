@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   Bot,
   Brain,
@@ -9,7 +9,6 @@ import {
   Files,
   FilePlus,
   FlaskConical,
-  FolderInput,
   ListTodo,
   Lock,
   Network,
@@ -22,19 +21,23 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
 import { KnowledgeTree } from "./knowledge-tree";
+import { persistCollapsedFolders, readCollapsedFolders } from "./local-persistence";
+import { experimentPlace, type PlaceId } from "./server-files";
 import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
-import { findRunFolders, runsUnder, type RunFolder } from "./runs";
+import { runsUnder } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
+import { uploadFiles } from "./upload";
 import { useWorkbench } from "./workbench";
-import { fileName, FileExistsError, isTextFile, mimeForPath, ReadOnlyFileError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import { EXPERIMENT_TAB, fileName, FileExistsError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
 
 export type { SidebarView };
 
@@ -91,38 +94,22 @@ export function ActivityBar({
   );
 }
 
-async function readUpload(file: File): Promise<{ content: string; mime: string }> {
-  const mime = file.type || mimeForPath(file.name);
-  if (isTextFile({ mime, path: file.name })) return { content: await file.text(), mime };
-  const content = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-  return { content, mime };
-}
-
 export function SidePanel({ view }: { view: SidebarView }) {
-  const { files, write, canEdit } = useWorkspace();
+  const { files, write, canEdit: mayEdit, storageMode } = useWorkspace();
   const { editor, notify } = useWorkbench();
   const { open } = editor;
+  // Until storage answers, the files here may be this browser's copy rather
+  // than the server's, so the panel waits instead of showing one, then the other.
+  const loading = storageMode === "loading" && view !== "search" && view !== "memory";
+  const canEdit = mayEdit && !loading;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   const upload = async (list: FileList | null) => {
-    let last: string | null = null;
-    for (const file of Array.from(list ?? [])) {
-      const { content, mime } = await readUpload(file);
-      const path = `uploads/${file.name}`;
-      try {
-        last = write(path, content, { mime }).path;
-      } catch (err) {
-        if (!(err instanceof ReadOnlyFileError)) throw err;
-        notify(`${path} is read-only, so the upload was skipped.`, "warning");
-      }
-    }
-    if (last) open(last);
+    const written = await uploadFiles(list, write, (path) =>
+      notify(`${path} is read-only, so the upload was skipped.`, "warning"),
+    );
+    if (written.length) open(written[written.length - 1]);
   };
 
   const newFile = (kind: Extract<FileKind, "note" | "skill">) => {
@@ -201,36 +188,42 @@ export function SidePanel({ view }: { view: SidebarView }) {
         }}
       />
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 text-[13px]">
-        {view === "files" && <FileTree files={files} />}
-        {view === "runs" && <RunList />}
-        {view === "search" && <SearchPanel />}
-        {view === "knowledge" && <KnowledgeTree />}
-        {view === "skills" && (
-          <SkillsPanel
-            fallback={
-              <FlatList
-                files={files.filter((f) => f.kind === "skill")}
-                label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
-                empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+        {loading ? (
+          <FilesLoading />
+        ) : (
+          <>
+            {view === "files" && <FileTree files={files} />}
+            {view === "runs" && <RunList />}
+            {view === "search" && <SearchPanel />}
+            {view === "knowledge" && <KnowledgeTree />}
+            {view === "skills" && (
+              <SkillsPanel
+                fallback={
+                  <FlatList
+                    files={files.filter((f) => f.kind === "skill")}
+                    label={(f) => f.path.split("/")[1] ?? fileName(f.path)}
+                    empty="No skills yet. Skills are SKILL.md files that teach Claude a workflow."
+                  />
+                }
               />
-            }
-          />
-        )}
-        {view === "memory" && <MemoryPanel />}
-        {view === "uploads" && (
-          <FlatList
-            files={files.filter((f) => f.kind === "upload")}
-            empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
-          />
-        )}
-        {view === "artifacts" && (
-          <FlatList
-            files={files.filter((f) => f.kind === "artifact")}
-            empty="Files Claude creates show up here."
-          />
+            )}
+            {view === "memory" && <MemoryPanel />}
+            {view === "uploads" && (
+              <FlatList
+                files={files.filter((f) => f.kind === "upload")}
+                empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
+              />
+            )}
+            {view === "artifacts" && (
+              <FlatList
+                files={files.filter((f) => f.kind === "artifact")}
+                empty="Files Claude creates show up here."
+              />
+            )}
+          </>
         )}
       </div>
-      {view === "files" && <ActionsBlock />}
+      {view === "files" && !loading && <ActionsBlock />}
       {view !== "runs" && (
         <button
           type="button"
@@ -241,6 +234,26 @@ export function SidePanel({ view }: { view: SidebarView }) {
         </button>
       )}
     </section>
+  );
+}
+
+/** Placeholder rows while the workspace asks storage for its files. */
+function FilesLoading() {
+  return (
+    <div role="status" aria-live="polite" data-testid="files-loading" className="px-3 py-2">
+      <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+        <Spinner size="sm" />
+        Loading files…
+      </div>
+      <div aria-hidden className="mt-3 space-y-2.5">
+        {[70, 55, 80, 45, 65].map((width, i) => (
+          <div key={i} className="flex animate-pulse items-center gap-2" style={{ paddingLeft: i % 2 ? 16 : 0 }}>
+            <span className="size-4 shrink-0 rounded bg-[var(--muted)]" />
+            <span className="h-3 rounded bg-[var(--muted)]" style={{ width: `${width}%` }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -476,16 +489,44 @@ function buildTree(files: WorkspaceFile[]): Folder {
   return root;
 }
 
+const NO_FOLDERS = new Set<string>();
+
+/** Reading localStorage itself throws when the browser blocks site storage. */
+function localStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which folders are collapsed in this place's file tree, remembered in this
+ * browser so switching views or reloading keeps them as the user left them.
+ */
+function useCollapsedFolders() {
+  const { node, experiment } = useWorkspace();
+  const place: PlaceId = experiment ? experimentPlace(experiment.id) : node;
+  const [saved, setSaved] = useState<{ place: PlaceId; paths: Set<string> } | null>(null);
+  useEffect(() => {
+    const storage = localStorageOrNull();
+    setSaved({ place, paths: new Set(storage ? readCollapsedFolders(storage, place) : []) });
+  }, [place]);
+  const collapsed = saved?.place === place ? saved.paths : NO_FOLDERS;
+  const toggle = (path: string) => {
+    const next = new Set(collapsed);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    setSaved({ place, paths: next });
+    const storage = localStorageOrNull();
+    if (storage) persistCollapsedFolders(storage, place, [...next]);
+  };
+  return { collapsed, toggle };
+}
+
 export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
   const tree = useMemo(() => buildTree(files), [files]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggle = (path: string) =>
-    setCollapsed((s) => {
-      const next = new Set(s);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+  const { collapsed, toggle } = useCollapsedFolders();
 
   const render = (folder: Folder, depth: number): ReactNode => (
     <>
@@ -520,8 +561,7 @@ export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; 
 
 /**
  * Runs view: every run here and below (all of them at the workspace root),
- * newest first; picking one moves into it and opens its report. Below, old
- * run folders here that can become runs.
+ * newest first; picking one moves into it and opens its report.
  */
 function RunList() {
   const ws = useWorkspace();
@@ -553,6 +593,11 @@ function RunList() {
         <span className="min-w-0 flex-1 truncate">
           {ws.node === null ? "All runs" : `Runs in ${here}`}
         </span>
+        {ws.experiment?.access === "writer" && (
+          <IconButton label={`Add files to ${ws.experiment.title}`} onClick={() => editor.open(EXPERIMENT_TAB)}>
+            <Upload className="size-4" />
+          </IconButton>
+        )}
         {runs.length > 0 && (
           <IconButton label="Compare runs" onClick={() => editor.open(RUNS_TAB)}>
             <Table2 className="size-4" />
@@ -593,56 +638,7 @@ function RunList() {
           </p>
         )
       )}
-      {!ws.experiment && ws.canEdit && <RunFolders />}
     </div>
-  );
-}
-
-/** Folders here from before runs were experiments (holding xdoe-report/), each one click from being a run. */
-function RunFolders() {
-  const ws = useWorkspace();
-  const { notify } = useWorkbench();
-  const [busy, setBusy] = useState<string | null>(null);
-  const folders = useMemo(() => findRunFolders(ws.files.map((f) => f.path)), [ws.files]);
-  if (!folders.length) return null;
-  const convert = async (folder: RunFolder) => {
-    setBusy(folder.path);
-    try {
-      await ws.experimentFromFolder(folder.path);
-      notify(`${folder.name} is a run now; its files moved into it.`, "success");
-    } catch (err) {
-      notify(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setBusy(null);
-    }
-  };
-  return (
-    <section aria-label="Run folders" data-testid="run-folders" className="mt-3 border-t border-[var(--border)] pt-2">
-      <p className="px-3 pb-1 text-xs text-[var(--muted-foreground)]">
-        Run folders here. Turn one into a run to give it a state, parameters and results; its files move into it.
-      </p>
-      <ul>
-        {folders.map((f) => (
-          <li key={f.path} className="flex items-center gap-2 px-3 py-1">
-            <FolderInput className="size-4 shrink-0 text-[var(--muted-foreground)]" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{f.name}</span>
-              <span className="block truncate text-xs text-[var(--muted-foreground)]">
-                {f.path} · {f.fileCount} file{f.fileCount === 1 ? "" : "s"}
-              </span>
-            </span>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void convert(f)}
-              className="h-6 shrink-0 rounded-md border border-[var(--border)] px-2 text-xs hover:bg-[var(--secondary)] cursor-pointer disabled:cursor-default disabled:opacity-50"
-            >
-              {busy === f.path ? "Moving…" : "Make run"}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

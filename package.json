@@ -1,6 +1,6 @@
 {
   "name": "knowledge-chatroom",
-  "version": "0.1.2",
+  "version": "0.2.3",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:ui\" \"npm run dev:agent\" --names ui,agent --prefix-colors blue,green --kill-others",
@@ -21,7 +21,9 @@
     "test:e2e:storage": "node scripts/run-e2e.mjs storage",
     "test:e2e:login": "node scripts/run-e2e.mjs login",
     "test:live": "node scripts/run-e2e.mjs live",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "env:check": "node scripts/env-upgrade.mjs",
+    "env:upgrade": "node scripts/env-upgrade.mjs --write"
   },
   "dependencies": {
     "@ag-ui/client": "1.0.2",
@@ -72,6 +74,10 @@
     "@ag-ui/core": "1.0.2",
     "@ag-ui/encoder": "1.0.2",
     "@ag-ui/proto": "1.0.2",
-    "katex": "0.18.11"
+    "katex": "0.18.11",
+    "body-parser": "2.4.0",
+    "follow-redirects": "1.16.2",
+    "graphql-scalars": "2.0.1",
+    "undici": "6.29.1"
   }
 }

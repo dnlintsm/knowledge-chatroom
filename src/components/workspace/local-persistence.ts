@@ -8,6 +8,8 @@ export const PLACE_UI_KEY = "knowledge-chatroom.workspace.place-ui.v1";
 export const NODE_KEY = "knowledge-chatroom.workspace.node.v1";
 /** "1" when seeded, or a JSON list of paths to retry uploading on reload. */
 export const SERVER_SEEDED_KEY = "knowledge-chatroom.workspace.server-seeded.v1";
+/** Folders collapsed in the file tree, per place: { [place]: paths }. */
+export const COLLAPSED_FOLDERS_KEY = "knowledge-chatroom.workspace.collapsed-folders.v1";
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 type PlaceUi = Record<string, Pick<PersistedWorkspace, "tabs" | "active">>;
@@ -65,4 +67,32 @@ export function persistWorkspace(
   storage.setItem(PLACE_UI_KEY, JSON.stringify(ui));
   if (place) storage.setItem(NODE_KEY, place);
   else storage.removeItem(NODE_KEY);
+}
+
+function readAllCollapsed(storage: BrowserStorage): Record<string, string[]> {
+  try {
+    const all = JSON.parse(storage.getItem(COLLAPSED_FOLDERS_KEY) ?? "null");
+    if (!all || typeof all !== "object" || Array.isArray(all)) return {};
+    return Object.fromEntries(Object.entries(all).flatMap(([place, paths]) =>
+      Array.isArray(paths) ? [[place, paths.filter((p): p is string => typeof p === "string")]] : []));
+  } catch {
+    return {};
+  }
+}
+
+/** The folders collapsed in this place's file tree; everything else is open. */
+export function readCollapsedFolders(storage: BrowserStorage, place: PlaceId): string[] {
+  return readAllCollapsed(storage)[place ?? ""] ?? [];
+}
+
+/** Storage may be unavailable or full; the tree then only remembers until reload. */
+export function persistCollapsedFolders(storage: BrowserStorage, place: PlaceId, paths: string[]) {
+  try {
+    const all = readAllCollapsed(storage);
+    if (paths.length) all[place ?? ""] = [...paths].sort();
+    else delete all[place ?? ""];
+    storage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify(all));
+  } catch {
+    // Keep the in-memory state.
+  }
 }

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from lab_tools import identity, server, stats, workspace
+from lab_tools import identity, memory, server, stats, workspace
 
 # The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",
 # and tokens its agent signed with it (shared/identity-token.ts, the same values
@@ -150,3 +150,52 @@ def test_workspace_files_need_the_storage_token(storage_api):
     ctx.headers[workspace.STORAGE_HEADER] = "someone-elses-token"
     with pytest.raises(server.ToolError, match=r"\(401\)"):
         server.describe_column("data/run.csv", "loss", ctx)
+
+
+@pytest.fixture
+def memory_api(monkeypatch):
+    """A stand-in for the chatroom's /memory/agent: alice's memory token finds one note."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import json
+    import threading
+
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append((self.path, self.headers.get(memory.MEMORY_HEADER), body))
+            if self.headers.get(memory.MEMORY_HEADER) != "alice-memory-token":
+                self._send(401, {"error": "This needs the X-Knowledge-Memory token of a run (memoryAccess)"})
+            else:
+                self._send(200, {"text": "- reporting (preference): p < 0.01 for significance", "isError": False})
+
+        def _send(self, status, body):
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setattr(server, "STORAGE_URL", f"http://127.0.0.1:{httpd.server_port}")
+    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
+    monkeypatch.setattr(server, "SERVER_NAME", "lab")
+    yield seen
+    httpd.shutdown()
+
+
+def test_user_notes_are_searched_with_the_runs_memory_token(memory_api):
+    ctx = SimpleNamespace(headers={identity.HEADER: FOR_LAB, memory.MEMORY_HEADER: "alice-memory-token"})
+    assert "p < 0.01" in server.recall_user_notes("significance", ctx)
+    assert memory_api[-1] == ("/memory/agent/tools/memory_search", "alice-memory-token", {"query": "significance"})
+    ctx.headers[memory.MEMORY_HEADER] = "stale-token"
+    with pytest.raises(server.ToolError, match=r"\(401\)"):
+        server.recall_user_notes("significance", ctx)
+    del ctx.headers[memory.MEMORY_HEADER]
+    with pytest.raises(server.ToolError, match="memoryAccess"):
+        server.recall_user_notes("significance", ctx)

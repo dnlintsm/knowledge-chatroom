@@ -51,12 +51,35 @@ const MIME_BY_EXT: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   svg: "image/svg+xml",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+  apng: "image/apng",
+  tsv: "text/tab-separated-values",
+  htm: "text/html",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/ogg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  webm: "video/webm",
+  ogv: "video/ogg",
+  mov: "video/quicktime",
 };
 
 // The browser keeps SVG image URLs; the agent can read the same SVG bytes as text.
 const TEXT_EXTENSIONS = new Set([
   "md", "markdown", "txt", "json", "csv", "ts", "tsx", "js", "jsx", "py",
   "yaml", "yml", "html", "css", "sql", "sh", "toml", "xml",
+  "htm", "tsv", "log", "ini", "cfg", "conf", "env", "jsonl", "ipynb",
+  "mjs", "cjs", "mts", "cts", "scss", "less", "vue", "svelte", "graphql",
+  "go", "rs", "java", "kt", "c", "h", "cpp", "hpp", "cc", "cs", "rb", "php",
+  "swift", "scala", "r", "lua", "pl", "bash", "zsh", "ps1", "bat", "tex", "rst",
 ]);
 
 export function extension(path: string): string {

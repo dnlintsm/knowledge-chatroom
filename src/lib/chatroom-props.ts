@@ -11,7 +11,10 @@
  */
 
 export const CHATROOM_PROPS = "knowledge_chatroom";
-/** 2: runs are experiments, so `run_dir` is gone and `experiment` says how far the run got. */
+/**
+ * 2: runs are experiments, so `run_dir` is gone and `experiment` says how far the run got.
+ * New fields (e.g. `tools`) come without a new version.
+ */
 export const CHATROOM_PROPS_VERSION = 2;
 
 export interface ChatroomUser {
@@ -56,6 +59,12 @@ export interface ChatroomPlace {
   } | null;
   /** The file open in the middle pane, a path in the place's files. */
   selected_path: string | null;
+  /**
+   * The tool servers whose chip is on in this chat ("+" menu, e.g. "papers"):
+   * the user wants this message answered with that server's tools. Names are
+   * MCP_SERVERS names, so their tools are mcp__<name>__<tool>.
+   */
+  tools: string[];
 }
 
 export interface ChatroomProps extends ChatroomPlace {
@@ -71,9 +80,11 @@ export interface PlaceInput {
   /** The experiment's report path, if it has one. */
   report: string | null;
   selectedPath: string | null;
+  /** The chat's tool chips that are on. */
+  tools?: string[];
 }
 
-export function chatroomPlace({ storage, lineage, experiment, report, selectedPath }: PlaceInput): ChatroomPlace {
+export function chatroomPlace({ storage, lineage, experiment, report, selectedPath, tools = [] }: PlaceInput): ChatroomPlace {
   const path = lineage.map(({ id, name, type }) => ({ id, name, type }));
   const node = path.at(-1);
   return {
@@ -92,6 +103,7 @@ export function chatroomPlace({ storage, lineage, experiment, report, selectedPa
         }
       : null,
     selected_path: selectedPath,
+    tools,
   };
 }
 

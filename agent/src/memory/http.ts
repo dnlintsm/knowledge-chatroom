@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { identify } from "../storage/identity";
+import { z } from "zod";
+
+import { identify, identifyMemory } from "../storage/identity";
 import type { Storage, StorageState } from "../storage";
 import {
   INDEX_CHARS,
@@ -13,7 +15,7 @@ import {
   MemoryNotFoundError,
 } from "../storage/memory";
 import { importMemory } from "./import";
-import { memoryEnabled } from "./run";
+import { liveRunEvents, memoryEnabled, memoryPrompt, memoryTools, prepareMemory } from "./run";
 
 /**
  * Memory API (issue #93), mounted on the agent server. Needs MEMORY=on and
@@ -75,6 +77,17 @@ import { memoryEnabled } from "./run";
  *                                 or hub admins)
  *   DELETE /memory/installs/<id>  uninstalls it, with its notes (editors)
  *   POST /memory/installs/<id>/fork     makes its notes the place's own
+ *
+ * Outside MCP servers (step 5): with an X-Knowledge-Memory token (memoryAccess
+ * in MCP_SERVERS, ../mcp.ts), a server uses the user's memory in the chat the
+ * token was made for, as Claude does there, through the same memory_* tools.
+ * Its changes always wait in the user's Memory inbox (or go to a shared note's
+ * editors); nothing works once the chat is incognito or memory is off.
+ *
+ *   GET /memory/agent             {prompt, tools}: the memory section for the
+ *                                 server's own model, and the tools'
+ *                                 names, descriptions and JSON schemas
+ *   POST /memory/agent/tools/<name>   the tool's arguments: {text, isError}
  */
 /** An import's body at most: a pasted memory, a file or a .zip export. */
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -282,6 +295,48 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     return send(res, 404, { error: "Not found" });
   }
 
+  /** /memory/agent: an outside MCP server using the memory of one chat. */
+  async function agentRoute(req: IncomingMessage, res: ServerResponse, s: Storage, parts: string[]) {
+    const grant = await identifyMemory(req, s);
+    if (!grant) return send(res, 401, { error: "This needs the X-Knowledge-Memory token of a run (memoryAccess)" });
+    const live = liveRunEvents(grant.thread);
+    const memory = await prepareMemory(
+      s,
+      grant.userId,
+      { threadId: grant.thread, runId: grant.via },
+      (event) => live?.(event),
+      grant.node,
+    );
+    if (!memory) return send(res, 403, { error: "Memory is off in this chat (incognito, or turned off)" });
+    // Outside the chat: every change waits for the user.
+    memory.tainted = true;
+    const tools = memoryTools(memory);
+    const [, action, name] = parts;
+    if (req.method === "GET" && !action) {
+      return send(res, 200, {
+        prompt: memoryPrompt(memory),
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: z.toJSONSchema(z.object(t.inputSchema)),
+        })),
+      });
+    }
+    if (req.method === "POST" && action === "tools" && name && parts.length === 3) {
+      const found = tools.find((t) => t.name === name);
+      if (!found) return send(res, 404, { error: `No memory tool ${name}` });
+      const input = await json(req);
+      const args = input && z.object(found.inputSchema).safeParse(input);
+      if (!args?.success) return send(res, 400, { error: `Invalid arguments for ${name}` });
+      const result = await (found.handler as (a: unknown, extra: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(
+        args.data,
+        {},
+      );
+      return send(res, 200, { text: result.content.map((c) => c.text).join("\n"), isError: result.isError === true });
+    }
+    return send(res, req.method === "GET" ? 404 : 405, { error: req.method === "GET" ? "Not found" : "Method not allowed" });
+  }
+
   return async function handle(req: IncomingMessage, res: ServerResponse, url: URL) {
     if (!memoryEnabled()) return send(res, 404, { error: "Memory is off on this server (MEMORY=on turns it on)" });
     const s = storage();
@@ -290,6 +345,9 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
       return send(res, state() === "failed" ? 500 : 503, { error: "Storage is not available" });
     }
     try {
+      if (/^\/memory\/agent(\/|$)/.test(url.pathname)) {
+        return await agentRoute(req, res, s, url.pathname.slice("/memory".length).split("/").filter(Boolean));
+      }
       const principal = await identify(req, s);
       if (!principal) return send(res, 401, { error: "Sign in first" });
       let parts: string[];

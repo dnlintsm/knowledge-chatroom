@@ -61,8 +61,18 @@ services:
       SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
       # Outside MCP servers (JSON); use service names, not localhost, for URLs.
       MCP_SERVERS: ${MCP_SERVERS:-}
+      # Personalized memory (experimental): MEMORY=on turns it on (.env.example).
+      MEMORY: ${MEMORY:-}
+      MEMORY_MODEL: ${MEMORY_MODEL:-}
+      MEMORY_LEARN: ${MEMORY_LEARN:-}
+      MEMORY_IDLE_MINUTES: ${MEMORY_IDLE_MINUTES:-10}
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      # Context window for a model the engine doesn't know, e.g. a local one
+      # (.env.example). No value: passed through only when set.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS:
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
       S3_ENDPOINT: http://s3:8333
       S3_REGION: us-east-1
@@ -104,6 +114,7 @@ services:
       AGENT_URL: ${AGENT_URL:-}
       AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
+      CHAT_STEPS: ${CHAT_STEPS:-}
     ports:
       - "3000:3000"
     depends_on:
@@ -112,7 +123,7 @@ services:
 
   # --- Sample Python tools (examples/python-agent) for the demo's agent ---
   # Add `--profile python-sample` and, in .env,
-  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+  # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
   lab-tools:
     profiles: [python-sample]
     build: ./examples/python-agent
@@ -124,6 +135,23 @@ services:
       # this server the agent's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).
       KNOWLEDGE_PUBLIC_KEY: ""
+
+  # --- Paper search (examples/papers-mcp, issue #151) ---
+  # Add `--profile papers` and, in .env,
+  # MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true,"ui":{"label":"Search papers","chip":"Papers","icon":"book-open","tools":["search_papers","get_paper","save_paper"]}}}}
+  papers:
+    profiles: [papers]
+    build: ./examples/papers-mcp
+    environment:
+      PAPERS_NAME: papers
+      # save_paper writes through the storage API as the calling user.
+      KNOWLEDGE_STORAGE_URL: http://agent:8000
+      # The demo has no login, so every call is the local user. With login, give
+      # this server the agent's public key, never AUTH_SECRET.
+      KNOWLEDGE_PUBLIC_KEY: ""
+      # Optional: a bigger OpenAlex budget, and the "polite pool".
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      OPENALEX_MAILTO: ${OPENALEX_MAILTO:-}
 
 volumes:
   postgres-data:

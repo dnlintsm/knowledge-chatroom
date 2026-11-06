@@ -98,7 +98,7 @@ the workspace like on a local project:
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.
-- **Writing back**: changes still go through `write_file`, so read-only files stay unchanged,
+- **Writing back**: changes still go through `write_file` / `edit_file`, so read-only files stay unchanged,
   writes in a node or to skills become proposals and every write is a version. `save_file` stores
   a file a script made in the run folder (a plot, a CSV) the same way.
 
@@ -150,9 +150,8 @@ and `POST /api/skills/import?replace=1` move `.zip` files. For trust:
 
 ### Runs are experiments
 
-A **run** is an experiment (see Experiments below) with a report: its `report.md`, or
-`xdoe-report/report.md` for one made from an xDOE run folder. There is no separate run
-folder or mode (issue #82):
+A **run** is an experiment (see Experiments below) with a report: its `report.md`. There
+is no separate run folder or mode (issue #82):
 
 - The **Runs** view on the icon rail lists the runs where you are and below it. At the
   workspace root that is every run you can see, so the app name in the title bar goes there.
@@ -166,10 +165,6 @@ folder or mode (issue #82):
 - The run you're in is in the URL (`/?experiment=<id>`), so links open a run directly and
   back/forward move between runs. A link to one that isn't there, or isn't shared with you,
   drops out of the URL with a notice. Old `?run=` links are dropped the same way.
-- **Run folders** from before (a folder holding `xdoe-report/`) are listed at the bottom of
-  the Runs view for anyone who can edit there. **Make run** moves the folder's files, with
-  their history, into a new draft run named after the folder (`POST
-  /experiments/from-folder`).
 
 - **Runs Claude starts** (`create_experiment`, `agent/src/storage/session.ts` `startRun`)
   begin in state running. The files the run works from are its **inputs**: each is linked
@@ -285,6 +280,25 @@ and streams back only that tool call. Nothing is stored and no tools run. The br
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
 
+### Agent steps in the chat
+
+Each turn's thinking, tool calls and narration ("Let me read the file") fold into one block
+above the answer (issue #154): "Worked for 14s · 5 steps", with a live status line ("Reading
+notes/x.md…") and a timer while the run lasts. `groupSteps()` in
+`src/components/workspace/agent-steps.ts` makes the rows that CopilotKit's `groupMessages`
+renders: a turn's answer is its last assistant message with text, and the steps before it go
+into the block (while the turn runs, text that came with tool calls is narration). The block
+(`agent-steps-view.tsx`) always renders its messages, inside a context the step renderers read:
+the thinking row, narration and the generic tool row (`src/components/tool-rendering.tsx`) hide
+while the block is closed, so paper cards, charts, A2UI and a tool waiting for the user still
+show. Follow-up chips sit under the message list and are not affected.
+
+The chat header's steps button switches between Compact (closed blocks) and Detailed (open
+blocks with every tool's arguments and result), per user in `localStorage`; `CHAT_STEPS=detailed`
+on the UI makes Detailed the default. Durations come from the events' `timestamp`, which the chat
+runner (`src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
+from the history still says how long its steps took.
+
 ### Chat history
 
 Each user's chats are kept on the server, so they come back after a reload or a restart
@@ -376,8 +390,26 @@ Code's memory files and `SKILL.md`.
   into notes and merges it with the user's own (at most 30). Every note goes to the
   inbox (`source = 'import'`), never straight into memory. Without a model the text
   becomes one note.
-- Not yet: suggesting notes become skills or knowledge nodes, and access for Python
-  agents. These are the later steps of #93.
+- Outside MCP servers (`memoryAccess`, `/memory/agent` in `agent/src/memory/http.ts`):
+  a run with memory sends such servers an `X-Knowledge-Memory` token naming the user,
+  the chat and its node. With it, a server gets the chat's memory prompt and runs the
+  same `memory_*` tools as Claude, with the run marked as having read outside
+  content, so every change waits in the inbox. Events reach the browser through the
+  live run of that chat (`trackLiveRun`).
+- Search by meaning (`agent/src/memory/recall.ts`): when the agent runs an embedding
+  model for file search (`storage.semantic` is ready), `memory_search` also lists notes
+  close in meaning that the words missed, under "Close in meaning". Note vectors are
+  kept in the agent's memory only (an LRU of 5,000, keyed by the model and the note's
+  text), so nothing derived from private notes is stored and a changed note is simply
+  embedded again.
+- Past chats (`ChatService.search` and `lines` in `agent/src/storage/chats.ts`): runs with
+  memory and chat history get `chats_search` (the user's own chats with the query's
+  words in their name or in what the user and Claude said, tool output left out) and
+  `chats_read` (a chat in parts of 12,000 characters). Incognito chats and the chat
+  asking are never results. Using either marks the run as having read outside content,
+  since earlier chats may hold text from files or web pages. Outside MCP servers don't
+  get these tools.
+- Not yet: suggesting notes become skills or knowledge nodes.
 
 ### File references in answers
 
@@ -439,8 +471,7 @@ For local setup, see [Development](development.md).
   by everyone who can view the node; only the author changes it, and an archived one is read
   only until restored. Its `state` (ready, running, done, failed) says how far the run got.
   `GET|POST /api/experiments` lists (optionally `?node=<id>`, or `?node=root`) and forks
-  (`nodeId: null` for the root), `POST /api/experiments/from-folder {nodeId, folder}` moves a
-  folder into a new one, `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
+  (`nodeId: null` for the root), `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
   one, and every `/api/files` route takes `?experiment=<id>`. In the Knowledge view,
   experiments sit under their node (root ones under Workspace) with their status and state,
   and the Experiment tab holds the details and a comparison table. Its author brings its results to the node by proposing them (below).
@@ -518,15 +549,21 @@ For local setup, see [Development](development.md).
   and images and other binary files download straight from the store. After the access
   check, the API answers with a redirect to a signed link that works for five minutes.
   Text files are still served by the app, which the editor reads them through.
+  The editor pane shows images, PDFs, audio and video from those links; when the
+  browser can't load one (the store unreachable from the browser, or a format it can't
+  show, like HEIC) it says so and offers Open and Download instead of a broken image.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
-  `write_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
+  `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
   `update_experiment` and `propose_experiment` tools on the agent server
   (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in
-  lines (and `column` for lines longer than one read) and returns at most 200,000 characters
+  lines (and `column` for lines longer than one read) and returns at most 50,000 characters
   per call, saying where to continue, so long
-  files are read in pages. Its writes are versions authored by the
+  files are read in pages. `edit_file` replaces one exact piece of text (or every occurrence
+  with `replaceAll`) instead of rewriting the whole file, which keeps chats within smaller
+  models' windows (issue #126); in a node, edits in a row build on Claude's open proposal.
+  Its writes are versions authored by the
   agent; in a knowledge node they are proposed changes until someone accepts them.
 - **UI**: on load the workspace checks `/api/files`. If it answers, files load from the
   server, edits save there (debounced), and the change stream brings in Claude's writes and

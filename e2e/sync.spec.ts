@@ -189,6 +189,31 @@ test("a remote response from the previous place cannot replace the current file"
   } finally { read.release(); }
 });
 
+test("a file still loading when you leave and come back loads on return", async ({ page }) => {
+  const backend = await storage(page);
+  const read = gate();
+  let loading = false;
+  try {
+    const enterOther = async () => {
+      await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+      await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
+      await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
+    };
+    await enterOther();
+    backend.transport.beforeRead = async () => { loading = true; await read.ready; };
+    await showFiles(page);
+    await page.getByRole("treeitem", { name: /sync\.md/ }).click();
+    await expect.poll(() => loading).toBe(true);
+    await expect(page.getByTestId("file-loading")).toBeVisible();
+    // Leave while it loads, then come back: the place lists its files anew.
+    await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Workspace" }).click();
+    await expect(page.getByRole("navigation", { name: "Location" })).not.toContainText("Other");
+    await enterOther();
+    read.release();
+    await expect(page.getByTestId("file-editor")).toHaveValue("# Other place");
+  } finally { read.release(); }
+});
+
 async function reconnect(page: Page) {
   const response = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/files");
   await page.evaluate(() => window.dispatchEvent(new Event("test-storage-reconnect")));

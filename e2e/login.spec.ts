@@ -165,6 +165,10 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
 
   // The workspace role reaches Bob on his next request.
   await bob.goto("/");
+  // He comes back to the run he was last in, which he only reads; the new
+  // role is for the workspace itself.
+  await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("r1");
+  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Workspace" }).click();
   await showFiles(bob);
   await expect(bob.getByRole("button", { name: "New note" })).toBeVisible();
 

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { normalizePath, InvalidPathError } from "../../shared/files";
-import { parseFileInfo, parseFileList, parseWorkspaceEvent, type FileInfo } from "../../shared/storage-contract";
+import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "../../shared/storage-contract";
 import * as backend from "../../agent/src/storage/paths";
 import * as browser from "../../src/components/workspace/types";
 import { listServerFiles, loadServerFile, putServerFile } from "../../src/components/workspace/server-files";
@@ -23,6 +23,26 @@ test("MIME/kind compatibility is shared with an explicit SVG representation poli
   }
   expect(browser.isTextFile({ path: "uploads/a.svg", mime: "image/svg+xml" })).toBe(false);
   expect(backend.isTextFile("uploads/a.svg", "image/svg+xml")).toBe(true);
+});
+
+test("the editor pane picks a preview from the type, or the extension for untyped files", () => {
+  const kinds: [string, string, browser.PreviewKind][] = [
+    ["notes/a.md", "text/markdown", "markdown"],
+    ["uploads/a.tsv", "text/tab-separated-values", "table"],
+    ["uploads/a.htm", "text/html", "html"],
+    // Browsers type .ts uploads as MPEG transport streams.
+    ["uploads/a.ts", "video/mp2t", "code"],
+    ["uploads/a.go", "application/octet-stream", "code"],
+    ["uploads/a.txt", "text/plain", "text"],
+    ["uploads/a.svg", "image/svg+xml", "image"],
+    ["uploads/a.bmp", "application/octet-stream", "image"],
+    ["uploads/a.heic", "image/heic", "image"],
+    ["uploads/a.pdf", "application/pdf", "pdf"],
+    ["uploads/a.mp3", "audio/mpeg", "audio"],
+    ["uploads/a.mov", "application/octet-stream", "video"],
+    ["uploads/a.zip", "application/zip", "none"],
+  ];
+  for (const [path, mime, kind] of kinds) expect(browser.previewKind({ path, mime }), path).toBe(kind);
 });
 
 test("metadata allows additive fields and legacy missing readOnly but rejects bad payloads", () => {
@@ -88,4 +108,24 @@ test("bad tab payloads are isolated while valid root and legacy tabs remain comp
   const root = { tabs: ["::tasks"], active: "::tasks" };
   const value = JSON.stringify({ "": root, bad: { tabs: "wrong", active: null } });
   expect(readPlaceUi({ getItem: () => value, setItem: () => {}, removeItem: () => {} })).toEqual({ "": root });
+});
+
+test("StorageContractError extends TypeError and validates storage contract errors", () => {
+  const error = new StorageContractError("invalid payload");
+  expect(error).toBeInstanceOf(StorageContractError);
+  expect(error).toBeInstanceOf(TypeError);
+  expect(error).toBeInstanceOf(Error);
+  expect(error.name).toBe("TypeError");
+  expect(error.message).toBe("invalid payload");
+
+  // Contract parsing functions throw StorageContractError
+  expect(() => parseFileInfo(null)).toThrow(StorageContractError);
+  expect(() => parseFileInfo("not an object")).toThrow(StorageContractError);
+  expect(() => parseFileInfo({ ...info, size: -1 })).toThrow(StorageContractError);
+  expect(() => parseFileList(null)).toThrow(StorageContractError);
+  expect(() => parseFileList({})).toThrow(StorageContractError);
+  expect(() => parseWorkspaceEvent(null)).toThrow(StorageContractError);
+  expect(() => parseWorkspaceEvent({ op: "unknown" })).toThrow(StorageContractError);
+  expect(() => parseLocalFile(null)).toThrow(StorageContractError);
+  expect(() => parseLocalFile({ path: "../secret" })).toThrow(StorageContractError);
 });

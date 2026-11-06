@@ -25,7 +25,6 @@ async function shot(page: Page, name: string) {
 const reply = { timeout: 90_000 };
 const md = { "Content-Type": "text/markdown" };
 const ETCH = "runs/etch-2026-10-01";
-const LITHO = "runs/litho-2026-10-03";
 
 interface Experiment {
   id: string;
@@ -57,43 +56,37 @@ async function gotoRun(page: Page, run: Experiment, report: string) {
   await expect(page.getByTestId("file-preview")).toContainText(report);
 }
 
-// Each test starts with no runs, and with the two sample run folders at the
-// workspace root (a conversion moves their files away).
+// Each test starts with no runs.
 test.beforeEach(async ({ request }) => {
   // The agent's /health answers before storage finishes migrating (503 here).
   await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
   const { experiments } = await (await request.get("/api/experiments")).json();
   for (const e of experiments as Experiment[]) await request.delete(`/api/experiments/${e.id}`);
-  const samples = {
-    [`${ETCH}/xdoe-report/report.md`]: "# xDOE report: etch rate\n\nRF power dominates etch rate.\n",
-    [`${ETCH}/xdoe-report/effects.csv`]: "term,effect\npower,49.0\n",
-    [`${LITHO}/xdoe-report/report.md`]: "# xDOE report: CD vs. dose and focus\n",
-  };
-  for (const [path, content] of Object.entries(samples)) {
-    expect((await request.put(`/api/files/${path}`, { data: content, headers: md })).ok()).toBe(true);
-  }
 });
 
-test("runs: run folders become runs, which open from the Runs view and links", async ({ page }) => {
+test("runs: runs open from the Runs view and links", async ({ page, request }) => {
+  await makeRun(request, "etch-2026-10-01", {
+    "report.md": "# xDOE report: etch rate\n\nRF power dominates etch rate.\n",
+    "effects.csv": "term,effect\npower,49.0\n",
+  });
+  await makeRun(request, "litho-2026-10-03", { "report.md": "# xDOE report: CD vs. dose and focus\n" });
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
   await showView(page, "Runs");
-  await expect(page.getByText("No runs yet.")).toBeVisible();
-  const folders = page.getByTestId("run-folders");
-  await expect(folders).toContainText("etch-2026-10-01");
-  await expect(folders).toContainText("litho-2026-10-03");
+  const list = page.getByTestId("run-list");
+  await expect(list).toContainText("etch-2026-10-01");
+  await expect(list).toContainText("litho-2026-10-03");
   await shot(page, "01-runs");
 
-  // Make run moves the folder into a new run, opens it and its report.
-  await folders.locator("li").filter({ hasText: "etch-2026-10-01" }).getByRole("button", { name: "Make run" }).click();
+  // Picking a run moves into it and opens its report.
+  await list.getByRole("button").filter({ hasText: "etch-2026-10-01" }).click();
   await expect(page).toHaveURL(/\?experiment=[0-9a-f-]{36}$/);
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText("etch-2026-10-01");
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
   await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
   const etchUrl = page.url();
-  // Its files are the run's, at paths inside it.
   await showFiles(page);
-  await expect(page.locator('[role="treeitem"][title="xdoe-report/effects.csv"]')).toBeVisible();
+  await expect(page.locator('[role="treeitem"][title="effects.csv"]')).toBeVisible();
   await expect(page.getByTestId("actions")).toBeVisible();
   await expect(page.getByTestId("copilot-suggestion").filter({ hasText: "Analyze the report" })).toBeVisible();
   await shot(page, "02-run");
@@ -101,11 +94,9 @@ test("runs: run folders become runs, which open from the Runs view and links", a
   // Home: the workspace root's Runs view lists every run.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
   await expect(page).toHaveURL(/\/$/);
-  const list = page.getByTestId("run-list");
   await expect(list).toContainText("etch-2026-10-01");
-  await expect(page.getByTestId("run-folders")).not.toContainText("etch-2026-10-01");
   await shot(page, "19-home-link");
-  await page.getByTestId("run-folders").getByRole("button", { name: "Make run" }).click();
+  await list.getByRole("button").filter({ hasText: "litho-2026-10-03" }).click();
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: CD vs. dose and focus");
 
   // Back and forward move between runs, each with its own report.
@@ -187,6 +178,40 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   await provenance.getByRole("button", { name: first.title }).click();
   await expect(page).toHaveURL(new RegExp(`experiment=${first.id}$`));
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText(first.title);
+});
+
+test("files can be uploaded into an existing run and added as its inputs", async ({ page, request }) => {
+  const run = await makeRun(request, "Wafer data", { "report.md": "# Wafer data\n" });
+  await gotoRun(page, run, "Wafer data");
+  // The Runs view leads to the run's panel, where files are added.
+  await showView(page, "Runs");
+  await page.getByRole("button", { name: `Add files to ${run.title}` }).click();
+  const add = page.getByTestId("add-files");
+  await expect(add).toContainText(`Upload to ${run.title}`);
+  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeChecked();
+  await page.getByTestId("add-files-input").setInputFiles([
+    { name: "lot-7.csv", mimeType: "text/csv", buffer: Buffer.from("wafer,dose\n7,31\n") },
+  ]);
+  const panel = page.getByTestId("experiment-panel");
+  await expect(panel.getByRole("status")).toContainText("added it as run inputs under inputs/");
+  const inputs = page.getByRole("list", { name: "Inputs" });
+  await expect(inputs).toContainText("from uploads/lot-7.csv");
+  await shot(page, "02e-run-add-files");
+
+  // Both land in the run: the upload, and its read-only input copy.
+  await showFiles(page);
+  await expect(page.locator('[role="treeitem"][title="uploads/lot-7.csv"]')).toBeVisible();
+  await expect(page.locator('[role="treeitem"][title="inputs/lot-7.csv"]')).toBeVisible();
+
+  // A finished run keeps its inputs: uploads only.
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
+  await panel.getByRole("combobox", { name: "Run state" }).selectOption("done");
+  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeDisabled();
+  await page.getByTestId("add-files-input").setInputFiles([
+    { name: "late.csv", mimeType: "text/csv", buffer: Buffer.from("x\n") },
+  ]);
+  await expect(panel.getByRole("status")).toContainText("Uploaded 1 file to uploads/.");
+  await expect(inputs).not.toContainText("late.csv");
 });
 
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {
@@ -308,5 +333,6 @@ test("each chat run in a run tells the agent which run (docs/remote-agent.md)", 
       id: run.id, node_id: null, title: "Etch props", status: "draft", state: "ready", can_change: true, report: "report.md",
     },
     selected_path: "data/effects.csv",
+    tools: [],
   });
 });

@@ -26,6 +26,9 @@ const FORWARDED_RESPONSE_HEADERS = [
   "content-disposition",
   // Binary downloads may redirect to a signed object-store link.
   "location",
+  // Stored files opened as pages stay sandboxed (agent/src/storage/http.ts).
+  "content-security-policy",
+  "x-content-type-options",
 ];
 
 /** A route handler forwarding /api/<prefix>/* to LOCAL_AGENT_URL/<prefix>/*. */

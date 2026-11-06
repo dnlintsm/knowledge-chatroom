@@ -36,7 +36,7 @@ and `whoami` shows the forwarded user.
    (`npm run dev`):
 
    ```bash
-   MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+   MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
    ```
 
    Claude now has `mcp__lab__describe_metric`, `mcp__lab__compare_runs`,
@@ -57,7 +57,7 @@ demo. The demo has no login, so the server treats every call as the local user.
 Use the service name in `.env`:
 
 ```bash
-MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
 docker compose --profile demo --profile python-sample up --build
 ```
 
@@ -95,6 +95,25 @@ checked. With `"storageAccess": true`, each run sends the server an
 The token lasts an hour (`STORAGE_TOKEN_SECONDS` on the agent), and only the
 storage API accepts it. Small inputs can still come in as arguments, read by
 Claude with its own file tools.
+
+## The user's memory
+
+With the chatroom's memory on (`MEMORY=on`), `"memoryAccess": true` lets the server
+use what Claude remembers about the user, in the chat that calls it. Runs send an
+`X-Knowledge-Memory` token for that chat; pass it on unchanged to the agent
+server's `/memory/agent` API, as `memory.py` does for `recall_user_notes`:
+
+- `GET /memory/agent` gives `{prompt, tools}`: the memory section Claude gets in
+  that chat (the index of notes), for your own model's prompt, and the
+  `memory_view`, `memory_search`, `memory_save`, `memory_edit` and `memory_delete`
+  tools with JSON schemas.
+- `POST /memory/agent/tools/<tool>` runs one with its arguments and answers
+  `{text, isError}`.
+
+Reads work as they do for Claude. Changes never apply directly: they wait in the
+user's Memory inbox (or go to a shared note's editors), and the chat shows them
+under the reply. Incognito chats and memory turned off send no token, and a token
+stops working once the user turns memory off or makes the chat incognito.
 
 ## Turning your agent into this
 

@@ -6,9 +6,15 @@
  * (see store.tsx and docs/architecture.md).
  */
 
-import { extension, isTextFile as isTextContent } from "../../../shared/files";
-import type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
-export type { LocalFile as WorkspaceFile } from "../../../shared/storage-contract";
+import { extension, isTextFile as isTextContent, mimeForPath } from "../../../shared/files";
+import type { LocalFile } from "../../../shared/storage-contract";
+
+/**
+ * A workspace file. With server storage, a text file is only listed until it
+ * is opened (or otherwise needed): it is `unloaded`, with empty content, until
+ * the store fetches it (store.tsx).
+ */
+export type WorkspaceFile = LocalFile & { unloaded?: true };
 export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "../../../shared/files";
 
 /** An edit or delete of a read-only file. */
@@ -53,4 +59,44 @@ export function isTextFile(file: Pick<WorkspaceFile, "mime" | "path">) {
 
 export function isMarkdown(file: Pick<WorkspaceFile, "mime" | "path">) {
   return file.mime === "text/markdown" || ["md", "markdown"].includes(extension(file.path));
+}
+
+/** How the editor pane shows a file. */
+export type PreviewKind =
+  | "markdown" | "table" | "html" | "code" | "text"
+  | "image" | "pdf" | "audio" | "video" | "none";
+
+// Extensions whose preview is highlighted source; others that are text stay plain.
+const CODE_LANGUAGES: Record<string, string> = {
+  ts: "ts", tsx: "tsx", mts: "ts", cts: "ts", js: "js", jsx: "jsx", mjs: "js", cjs: "js",
+  py: "py", json: "json", jsonl: "jsonl", ipynb: "json", yaml: "yaml", yml: "yaml",
+  toml: "toml", xml: "xml", css: "css", scss: "scss", less: "less", sql: "sql",
+  sh: "sh", bash: "sh", zsh: "sh", ps1: "powershell", bat: "bat", vue: "vue",
+  svelte: "svelte", graphql: "graphql", go: "go", rs: "rust", java: "java", kt: "kotlin",
+  c: "c", h: "c", cpp: "cpp", hpp: "cpp", cc: "cpp", cs: "csharp", rb: "ruby", php: "php",
+  swift: "swift", scala: "scala", r: "r", lua: "lua", pl: "perl", tex: "latex", rst: "rst",
+  ini: "ini", cfg: "ini", conf: "ini", env: "dotenv", log: "log",
+};
+
+/** The highlighting language for a code file, or null when it isn't code. */
+export function codeLanguage(path: string): string | null {
+  return CODE_LANGUAGES[extension(path)] ?? null;
+}
+
+/**
+ * Picks the preview from the file's type. Files stored before their extension
+ * had a known type are `application/octet-stream`, so the extension decides then.
+ */
+export function previewKind(file: Pick<WorkspaceFile, "mime" | "path">): PreviewKind {
+  const ext = extension(file.path);
+  if (isTextFile(file)) {
+    if (isMarkdown(file)) return "markdown";
+    if (ext === "csv" || ext === "tsv") return "table";
+    if (ext === "html" || ext === "htm" || file.mime === "text/html") return "html";
+    return codeLanguage(file.path) ? "code" : "text";
+  }
+  const mime = !file.mime || file.mime === "application/octet-stream" ? mimeForPath(file.path) : file.mime;
+  if (mime === "application/pdf") return "pdf";
+  const top = mime.split("/")[0];
+  return top === "image" || top === "audio" || top === "video" ? top : "none";
 }

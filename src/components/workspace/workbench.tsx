@@ -195,12 +195,12 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       shownReportFor.current = null;
       return;
     }
-    if (shownReportFor.current === experimentId || !files.length) return;
+    if (shownReportFor.current === experimentId || storageMode === "loading" || !files.length) return;
     shownReportFor.current = experimentId;
     const report = findReport(files.map((f) => f.path));
     const fileOpen = active !== null && files.some((f) => f.path === active);
     if (report && !fileOpen && (active === null || active === EXPERIMENT_TAB)) open(report);
-  }, [experimentId, files, active, open]);
+  }, [experimentId, files, active, open, storageMode]);
 
   const startNewThread = chatConfig?.startNewThread;
   const setDrawerOpen = chatConfig?.setDrawerOpen;

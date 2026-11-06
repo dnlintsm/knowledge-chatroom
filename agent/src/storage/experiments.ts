@@ -235,6 +235,7 @@ export class ExperimentService {
    * copies, promoting the run never proposes them back to its node.
    */
   private async linkInputs(tx: Tx, id: string, inputs: LinkedInput[]) {
+    const linked: { path: string; sha256: string }[] = [];
     for (const input of inputs) {
       const [file] = await tx<{ id: string }[]>`
         INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from, read_only)
@@ -243,53 +244,56 @@ export class ExperimentService {
         ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING
         RETURNING id`;
       if (!file) throw new ExperimentError(`The run already has a file at ${input.path}; pick another name for this input`);
-      await tx`
+      const [version] = await tx<{ sha256: string }[]>`
         INSERT INTO file_versions (file_id, blob_sha256, size, mime, author_type, author_id, created_at)
         SELECT ${file.id}, v.blob_sha256, v.size, v.mime, v.author_type, v.author_id, v.created_at
-        FROM file_versions v WHERE v.id = ${input.versionId}`;
+        FROM file_versions v WHERE v.id = ${input.versionId}
+        RETURNING blob_sha256 AS sha256`;
       await tx`
         UPDATE files f SET current_version_id = v.id
         FROM file_versions v WHERE v.file_id = f.id AND f.id = ${file.id}`;
+      linked.push({ path: input.path, sha256: version.sha256 });
     }
+    return linked;
   }
 
   /**
-   * Turns a folder of `nodeId` (null: the workspace root) into a new draft
-   * experiment of `userId`'s: the folder's files move into it, keeping their
-   * history, at paths relative to the folder. Nothing else is copied in. For
-   * the run folders from before runs were experiments. Throws ExperimentError
-   * when the folder holds no files.
+   * Links more inputs into experiment `id` (see linkInputs) and appends
+   * `recorded` to the inputs its provenance lists; false if it is gone.
    */
-  async fromFolder(
-    userId: string,
-    nodeId: string | null,
-    folder: string,
-    input: ExperimentInput,
-    inTx?: (tx: Tx, id: string) => Promise<unknown>,
-  ): Promise<{ experiment: Experiment; moved: string[] }> {
-    const prefix = `${folder}/`;
-    let moved: string[] = [];
-    const experiment = await this.add(userId, nodeId, input, async (tx, id) => {
-      const rows = await tx<{ path: string; sha256: string }[]>`
-        UPDATE files f SET node_id = NULL, experiment_id = ${id},
-               path = substr(f.path, ${prefix.length + 1}), updated_at = now()
-        FROM file_versions v
-        WHERE v.id = f.current_version_id
-          AND f.workspace_id = ${this.workspaceId} AND f.experiment_id IS NULL
-          AND f.node_id IS NOT DISTINCT FROM ${nodeId}::uuid
-          AND starts_with(f.path, ${prefix}) AND f.deleted_at IS NULL
-        RETURNING f.path, v.blob_sha256 AS sha256`;
-      if (!rows.length) throw new ExperimentError(`There are no files in ${folder}`);
-      moved = rows.map((r) => `${prefix}${r.path}`).sort();
-      for (const row of rows) {
-        await this.events.notify(tx, { op: "delete", node: nodeId, path: `${prefix}${row.path}` });
-        await this.events.notify(tx, {
-          op: "write", node: null, experiment: id, path: row.path, sha256: row.sha256, author: "user",
-        });
+  async addInputs(
+    id: string,
+    inputs: LinkedInput[],
+    recorded: Record<string, unknown>[],
+    inTx?: (tx: Tx) => Promise<unknown>,
+  ): Promise<boolean> {
+    if (!isNodeId(id)) return false;
+    return this.sql.begin(async (tx) => {
+      const [before] = await tx<{ node_id: string | null; state: ExperimentState; status: ExperimentStatus }[]>`
+        SELECT node_id, state, status FROM experiments
+        WHERE id = ${id} AND workspace_id = ${this.workspaceId} AND deleted_at IS NULL
+        FOR UPDATE`;
+      if (!before) return false;
+      // Checked again under the lock: the run may have finished or been archived meanwhile.
+      if (before.state === "done" || before.state === "failed") {
+        throw new ExperimentError(`This run already finished (${before.state}); start a new run to add inputs`);
       }
-      await inTx?.(tx, id);
+      if (before.status === "archived") throw new ExperimentError("This experiment is archived; restore it to change it");
+      const linked = await this.linkInputs(tx, id, inputs);
+      await tx`
+        UPDATE experiments
+        SET provenance = jsonb_set(provenance, '{inputs}',
+              COALESCE(provenance->'inputs', '[]'::jsonb) || ${tx.json(recorded as never)}),
+            updated_at = now()
+        WHERE id = ${id}`;
+      await inTx?.(tx);
+      // Open copies of the run pick up the new files, and its record.
+      for (const file of linked) {
+        await this.events.notify(tx, { op: "write", node: null, experiment: id, ...file, author: "user" });
+      }
+      await this.events.notify(tx, { op: "experiment", change: "update", id, node: before.node_id });
+      return true;
     });
-    return { experiment, moved };
   }
 
   private async add(

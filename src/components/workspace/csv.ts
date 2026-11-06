@@ -8,9 +8,9 @@ export interface CsvRow {
 
 /**
  * RFC 4180 CSV: quoted fields may hold commas, newlines and doubled quotes
- * (`""`). Blank lines are skipped.
+ * (`""`). Blank lines are skipped. TSV is the same with `separator` "\t".
  */
-export function parseCsv(text: string): CsvRow[] {
+export function parseCsv(text: string, separator = ","): CsvRow[] {
   const rows: CsvRow[] = [];
   let row: string[] = [];
   let field = "";
@@ -37,7 +37,7 @@ export function parseCsv(text: string): CsvRow[] {
       }
     } else if (c === '"') {
       quoted = true;
-    } else if (c === ",") {
+    } else if (c === separator) {
       row.push(field);
       field = "";
     } else if (c === "\n" || c === "\r") {

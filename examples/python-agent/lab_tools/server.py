@@ -6,7 +6,7 @@ Run it:
 
 and point the chatroom at it (see ../README.md):
 
-    MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true}}}
+    MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}
 
 Claude sees these tools as mcp__lab__<tool>. Each tool's docstring and type
 hints become what Claude reads, so write them for Claude.
@@ -21,14 +21,15 @@ import os
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import identity, stats, workspace
+from . import identity, memory, stats, workspace
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
 # The chatroom's public key (agent GET /identity/public-key) when login is on;
 # unset = no login. Never give this server AUTH_SECRET.
 PUBLIC_KEY = identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
-# The chatroom's storage API (its agent server, LOCAL_AGENT_URL), for workspace files.
+# The chatroom's agent server (LOCAL_AGENT_URL): its storage API for workspace
+# files, and /memory/agent for the user's memory.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
 mcp = MCPServer(
@@ -98,6 +99,25 @@ def describe_column(
         return {"path": path, "column": column, **stats.as_dict(stats.describe_metric(values))}
     except ValueError as err:
         raise ToolError(f"{column}: {err}") from err
+
+
+@mcp.tool()
+def recall_user_notes(query: str, ctx: Context) -> str:
+    """Search what the chatroom remembers about the user (their notes and the shared ones) for `query`.
+
+    Use it before an analysis to find how the user likes results reported, e.g. "significance"
+    or "units". Returns matching notes, one per line; read one in full with memory_view in the chat.
+    """
+    require_user(ctx)
+    token = (ctx.headers or {}).get(memory.MEMORY_HEADER)
+    if not token:
+        raise ToolError(
+            'No memory in this chat: it is incognito, memory is off, or this server lacks "memoryAccess": true.'
+        )
+    try:
+        return memory.call_tool(STORAGE_URL, token, "memory_search", {"query": query})
+    except memory.MemoryError_ as err:
+        raise ToolError(str(err)) from err
 
 
 @mcp.tool()
