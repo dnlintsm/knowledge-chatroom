@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { normalizePath, InvalidPathError } from "../../shared/files";
-import { parseFileInfo, parseFileList, parseWorkspaceEvent, type FileInfo } from "../../shared/storage-contract";
+import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "../../shared/storage-contract";
 import * as backend from "../../agent/src/storage/paths";
 import * as browser from "../../src/components/workspace/types";
 import { listServerFiles, loadServerFile, putServerFile } from "../../src/components/workspace/server-files";
@@ -108,4 +108,24 @@ test("bad tab payloads are isolated while valid root and legacy tabs remain comp
   const root = { tabs: ["::tasks"], active: "::tasks" };
   const value = JSON.stringify({ "": root, bad: { tabs: "wrong", active: null } });
   expect(readPlaceUi({ getItem: () => value, setItem: () => {}, removeItem: () => {} })).toEqual({ "": root });
+});
+
+test("StorageContractError extends TypeError and validates storage contract errors", () => {
+  const error = new StorageContractError("invalid payload");
+  expect(error).toBeInstanceOf(StorageContractError);
+  expect(error).toBeInstanceOf(TypeError);
+  expect(error).toBeInstanceOf(Error);
+  expect(error.name).toBe("TypeError");
+  expect(error.message).toBe("invalid payload");
+
+  // Contract parsing functions throw StorageContractError
+  expect(() => parseFileInfo(null)).toThrow(StorageContractError);
+  expect(() => parseFileInfo("not an object")).toThrow(StorageContractError);
+  expect(() => parseFileInfo({ ...info, size: -1 })).toThrow(StorageContractError);
+  expect(() => parseFileList(null)).toThrow(StorageContractError);
+  expect(() => parseFileList({})).toThrow(StorageContractError);
+  expect(() => parseWorkspaceEvent(null)).toThrow(StorageContractError);
+  expect(() => parseWorkspaceEvent({ op: "unknown" })).toThrow(StorageContractError);
+  expect(() => parseLocalFile(null)).toThrow(StorageContractError);
+  expect(() => parseLocalFile({ path: "../secret" })).toThrow(StorageContractError);
 });
