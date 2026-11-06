@@ -182,15 +182,36 @@ export class MemoryLearner {
       LIMIT ${limit}`;
   }
 
-  /** One pass over the chats that are due. Never throws. */
+  /**
+   * One pass over the chats that are due (at most BATCH). Never throws.
+   * Different users' chats are learned from at the same time; one user's go
+   * one after another, oldest first, so each sees the notes the last changed.
+   */
   async sweep(): Promise<number> {
     if (this.running) return 0;
     this.running = true;
     let learned = 0;
     try {
+      const byUser = new Map<string, ChatRow[]>();
       for (const chat of await this.due()) {
-        await this.learn(chat);
-        learned++;
+        const chats = byUser.get(chat.user_id) ?? [];
+        chats.push(chat);
+        byUser.set(chat.user_id, chats);
+      }
+      // Settled, not Promise.all: the guard is released only once nothing is still learning.
+      const results = await Promise.allSettled(
+        [...byUser.values()].map(async (chats) => {
+          for (const chat of chats) {
+            await this.learn(chat);
+            learned++;
+          }
+        }),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          const err = result.reason;
+          console.error(`[memory] learning sweep failed: ${err instanceof Error ? err.message : err}`);
+        }
       }
     } catch (err) {
       console.error(`[memory] learning sweep failed: ${err instanceof Error ? err.message : err}`);
