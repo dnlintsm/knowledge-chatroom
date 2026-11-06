@@ -69,6 +69,11 @@ the agent's `POST /suggest` makes one small-model call for follow-ups:
 not a Claude model). `CHAT_SUGGESTIONS=static` on the UI keeps the first-round chips
 and makes no extra calls. See [Chat suggestions](architecture.md#chat-suggestions).
 
+Each answer's thinking and tool calls fold into one "Worked for 14s · 5 steps" line above it.
+The steps button in the chat header switches a user to Detailed (every step open, with its
+arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. See
+[Agent steps in the chat](architecture.md#agent-steps-in-the-chat).
+
 ## Skills
 
 Built-in skills live in `agent/skills/`; with server storage, the agent also loads
@@ -212,6 +217,24 @@ Postgres with `DATABASE_URL` and in memory without it ([Architecture](architectu
 `CPK_INTELLIGENCE_API_KEY` is optional and keeps threads in CopilotKit Intelligence
 instead. Its browser gate is resolved at build time, so rebuild after changing it for a
 production run.
+
+## Dependency security
+
+The root and agent lockfiles are audited separately (`npm audit` and
+`npm --prefix agent audit`). Their overrides pin patched transitive versions of
+`body-parser`, `follow-redirects`, `graphql-scalars`, and `undici`; the agent
+also aligns AG-UI packages on 1.0.4 to use Zod 4. When updating these dependencies,
+recheck the overrides and run the build and tests before removing them. The
+`undici` and `graphql-scalars` overrides cross an upstream major-version range,
+so also test any enabled provider or integration that relies on them.
+
+The UI still depends on Zod 3 through CopilotKit, which declares a Zod 3 range.
+It is affected by [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)
+and has no compatible patched 3.x release. Monitor upstream for a compatible
+upgrade; forcing Zod 4 across that dependency tree can break the app. On shared
+deployments, configure request-size limits at the reverse proxy according to the
+files and requests the deployment needs. This reduces exposure to oversized
+inputs but is not a substitute for upgrading the affected dependency.
 
 ## Troubleshooting
 

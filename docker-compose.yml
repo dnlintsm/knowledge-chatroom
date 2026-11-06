@@ -114,6 +114,7 @@ services:
       AGENT_URL: ${AGENT_URL:-}
       AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
+      CHAT_STEPS: ${CHAT_STEPS:-}
     ports:
       - "3000:3000"
     depends_on:
