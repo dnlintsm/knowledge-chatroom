@@ -27,12 +27,11 @@ export default function RootLayout({
           blocking inline script matches ThemeProvider's "system" default so
           there's no flash and no class mismatch when the provider re-applies.
         */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              "(function(){try{var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.add(d?'dark':'light');}catch(e){}})();",
-          }}
-        />
+        <script>
+          {
+            "(function(){try{var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.add(d?'dark':'light');}catch(e){}})();"
+          }
+        </script>
       </head>
       {/*
         suppressHydrationWarning: browser extensions (e.g. Grammarly) inject

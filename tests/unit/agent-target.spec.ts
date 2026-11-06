@@ -55,6 +55,7 @@ test("the place: root, node path, experiment (a run) and open file", () => {
     node: null,
     experiment: null,
     selected_path: null,
+    tools: [],
   });
 
   const place = chatroomPlace({
@@ -70,6 +71,8 @@ test("the place: root, node path, experiment (a run) and open file", () => {
   });
   expect(place).not.toHaveProperty("run_dir");
   expect(place.selected_path).toBe("report.md");
+  expect(chatroomPlace({ storage: "server", lineage: [], experiment: null, report: null, selectedPath: null, tools: ["papers"] }).tools)
+    .toEqual(["papers"]);
 
   // A run at the workspace root has no node.
   const atRoot = chatroomPlace({

@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { firstValueFrom, toArray, type Observable } from "rxjs";
-import type { AbstractAgent, BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
+import { HttpAgent, type AbstractAgent, type BaseEvent, type Message, type RunAgentInput } from "@ag-ui/client";
 
 import { IDENTITY_HEADER, identityHeader } from "../../src/lib/auth";
 import { handleChatRoute } from "../../src/lib/chat-routes";
 import { ChatRunner, chatName } from "../../src/lib/chat-runner";
-import { AutoChatStore, MemoryChatStore, type ChatStore } from "../../src/lib/chat-store";
+import { AutoChatStore, ChatTakenError, MemoryChatStore, type ChatStore } from "../../src/lib/chat-store";
 
 /** An agent that answers every run with `reply`, as the runtime's per-request clone would. */
 function fakeAgent(reply: string, headers: Record<string, string> = {}, agentId = "default") {
@@ -109,6 +109,173 @@ test("the follow-up chips' runs are not kept", async () => {
   const agent = fakeAgent("chips", {}, "suggester");
   await all(runner.run({ threadId: "s1", agent: agent as unknown as AbstractAgent, input: input("s1", "r1", []) }));
   expect((await store.list(null, {})).threads).toEqual([]);
+});
+
+test("HttpAgent HTTP error handling emits RUN_ERROR and cleans up live state", async () => {
+  const store = new MemoryChatStore();
+  const runner = new ChatRunner(store);
+  const agent = new HttpAgent({
+    url: "http://agent.internal:8000/agent",
+    fetch: async () =>
+      new Response("Agent error: 500 Internal Server Error", {
+        status: 500,
+        statusText: "Internal Server Error",
+      }),
+  });
+
+  const events = await all(
+    runner.run({
+      threadId: "http-err",
+      agent: agent as unknown as AbstractAgent,
+      input: input("http-err", "r-err", [{ id: "u1", role: "user", content: "Hello" }]),
+    }),
+  );
+
+  const errorEvent = events.find((e) => e.type === "RUN_ERROR") as { type: string; message: string; code?: string } | undefined;
+  expect(errorEvent).toBeDefined();
+  expect(errorEvent?.message).toContain("Agent error: 500 Internal Server Error");
+  expect(errorEvent?.code).toBe("INCOMPLETE_STREAM");
+  expect(await runner.isRunning({ threadId: "http-err" })).toBe(false);
+});
+
+test("agent run error mid-stream finalizes unclosed messages and saves partial run", async () => {
+  const store = new MemoryChatStore();
+  const runner = new ChatRunner(store);
+  const ask: Message = { id: "u1", role: "user", content: "Tell me a story" };
+
+  const failingAgent = {
+    agentId: "default",
+    headers: {},
+    messages: [] as Message[],
+    abortRun() {},
+    async runAgent(inReq: RunAgentInput, { onEvent }: { onEvent: (p: { event: BaseEvent }) => void }) {
+      const send = (event: Record<string, unknown>) => onEvent({ event: event as unknown as BaseEvent });
+      send({ type: "RUN_STARTED", threadId: inReq.threadId, runId: inReq.runId });
+      send({ type: "TEXT_MESSAGE_START", messageId: "msg-1", role: "assistant" });
+      send({ type: "TEXT_MESSAGE_CONTENT", messageId: "msg-1", delta: "Once upon a time..." });
+      failingAgent.messages = [ask, { id: "msg-1", role: "assistant", content: "Once upon a time..." }];
+      throw new Error("Agent connection severed mid-stream");
+    },
+  };
+
+  const events = await all(
+    runner.run({
+      threadId: "mid-stream-err",
+      agent: failingAgent as unknown as AbstractAgent,
+      input: input("mid-stream-err", "r-stream", [ask]),
+    }),
+  );
+
+  const eventTypes = events.map((e) => e.type);
+  expect(eventTypes).toEqual([
+    "RUN_STARTED",
+    "TEXT_MESSAGE_START",
+    "TEXT_MESSAGE_CONTENT",
+    "TEXT_MESSAGE_END",
+    "RUN_ERROR",
+  ]);
+
+  const runError = events.find((e) => e.type === "RUN_ERROR") as { type: string; message: string; code?: string };
+  expect(runError.message).toBe("Agent connection severed mid-stream");
+  expect(runError.code).toBe("INCOMPLETE_STREAM");
+
+  // Verify partial run was saved to store
+  const runs = await store.runs(null, "mid-stream-err");
+  expect(runs).toHaveLength(1);
+  expect(runs[0].runId).toBe("r-stream");
+  expect(await runner.isRunning({ threadId: "mid-stream-err" })).toBe(false);
+});
+
+test("store read failures emit RUN_ERROR and cleanup live state", async () => {
+  // Test non-ChatTakenError: returns generic unavailable message and logs error
+  const failingStore: ChatStore = {
+    runs: async () => {
+      throw new Error("Database connection lost");
+    },
+    save: async () => {},
+    list: async () => ({ threads: [], nextCursor: null }),
+    get: async () => null,
+    update: async () => false,
+    remove: async () => false,
+  };
+
+  const runner = new ChatRunner(failingStore);
+  const agent = fakeAgent("ignored");
+  const events = await all(
+    runner.run({
+      threadId: "db-fail",
+      agent: agent as unknown as AbstractAgent,
+      input: input("db-fail", "r1", []),
+    }),
+  );
+
+  expect(events).toEqual([
+    {
+      type: "RUN_ERROR",
+      message: "Chat history is unavailable right now; try again shortly.",
+    },
+  ]);
+  expect(await runner.isRunning({ threadId: "db-fail" })).toBe(false);
+
+  // Test ChatTakenError: returns specific taken message
+  const takenStore: ChatStore = {
+    ...failingStore,
+    runs: async () => {
+      throw new ChatTakenError();
+    },
+  };
+  const runnerTaken = new ChatRunner(takenStore);
+  const takenEvents = await all(
+    runnerTaken.run({
+      threadId: "ana-1",
+      agent: agent as unknown as AbstractAgent,
+      input: input("ana-1", "r1", []),
+    }),
+  );
+
+  expect(takenEvents).toEqual([
+    {
+      type: "RUN_ERROR",
+      message: "This chat belongs to someone else",
+    },
+  ]);
+  expect(await runnerTaken.isRunning({ threadId: "ana-1" })).toBe(false);
+});
+
+test("concurrency: running the same threadId concurrently throws an error", async () => {
+  const store = new MemoryChatStore();
+  const runner = new ChatRunner(store);
+
+  let finish!: () => void;
+  let started!: () => void;
+  const startedPromise = new Promise<void>((resolve) => (started = resolve));
+  const finishPromise = new Promise<void>((resolve) => (finish = resolve));
+
+  const slow = fakeAgent("slow");
+  slow.runAgent = async () => {
+    started();
+    await finishPromise;
+  };
+
+  const firstRun$ = runner.run({
+    threadId: "concurrent-thread",
+    agent: slow as unknown as AbstractAgent,
+    input: input("concurrent-thread", "r1", []),
+  });
+
+  await startedPromise;
+
+  expect(() =>
+    runner.run({
+      threadId: "concurrent-thread",
+      agent: slow as unknown as AbstractAgent,
+      input: input("concurrent-thread", "r2", []),
+    }),
+  ).toThrow("Thread already running");
+
+  finish();
+  await all(firstRun$);
+  expect(await runner.isRunning({ threadId: "concurrent-thread" })).toBe(false);
 });
 
 test("without server storage, memory stands in until the agent server says which", async () => {
