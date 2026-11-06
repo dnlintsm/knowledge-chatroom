@@ -1,0 +1,177 @@
+{
+ "id": "https://openalex.org/W3027879771",
+ "doi": "https://doi.org/10.48550/arxiv.2005.11401",
+ "display_name": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+ "publication_year": 2020,
+ "publication_date": "2020-05-22",
+ "authorships": [
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A0",
+    "display_name": "Patrick Lewis"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A1",
+    "display_name": "Ethan Perez"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A2",
+    "display_name": "Aleksandra Piktus"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A3",
+    "display_name": "Fabio Petroni"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A4",
+    "display_name": "Vladimir Karpukhin"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A5",
+    "display_name": "Naman Goyal"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A6",
+    "display_name": "Heinrich Küttler"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A7",
+    "display_name": "Mike Lewis"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A8",
+    "display_name": "Wen-tau Yih"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A9",
+    "display_name": "Tim Rocktäschel"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A10",
+    "display_name": "Sebastian Riedel"
+   }
+  },
+  {
+   "author_position": "first",
+   "author": {
+    "id": "https://openalex.org/A11",
+    "display_name": "Douwe Kiela"
+   }
+  }
+ ],
+ "primary_location": {
+  "landing_page_url": "http://arxiv.org/abs/2005.11401",
+  "pdf_url": "https://arxiv.org/pdf/2005.11401",
+  "is_oa": true,
+  "source": {
+   "id": "https://openalex.org/S4306400194",
+   "display_name": "arXiv (Cornell University)"
+  }
+ },
+ "best_oa_location": {
+  "landing_page_url": "http://arxiv.org/abs/2005.11401",
+  "pdf_url": "https://arxiv.org/pdf/2005.11401",
+  "is_oa": true,
+  "source": {
+   "id": "https://openalex.org/S4306400194",
+   "display_name": "arXiv (Cornell University)"
+  }
+ },
+ "open_access": {
+  "is_oa": true,
+  "oa_status": "green",
+  "oa_url": "https://arxiv.org/pdf/2005.11401"
+ },
+ "cited_by_count": 4473,
+ "abstract_inverted_index": {
+  "Large": [
+   0
+  ],
+  "pre-trained": [
+   1
+  ],
+  "language": [
+   2
+  ],
+  "models": [
+   3
+  ],
+  "have": [
+   4
+  ],
+  "been": [
+   5
+  ],
+  "shown": [
+   6
+  ],
+  "to": [
+   7
+  ],
+  "store": [
+   8
+  ],
+  "factual": [
+   9
+  ],
+  "knowledge": [
+   10
+  ],
+  "in": [
+   11
+  ],
+  "their": [
+   12
+  ],
+  "parameters": [
+   13
+  ]
+ },
+ "locations": [
+  {
+   "landing_page_url": "http://arxiv.org/abs/2005.11401"
+  },
+  {
+   "landing_page_url": "https://doi.org/10.48550/arxiv.2005.11401"
+  }
+ ],
+ "referenced_works_count": 59,
+ "referenced_works": [
+  "https://openalex.org/W2963403868",
+  "https://openalex.org/W2896457183"
+ ],
+ "related_works": [
+  "https://openalex.org/W2963403868"
+ ]
+}

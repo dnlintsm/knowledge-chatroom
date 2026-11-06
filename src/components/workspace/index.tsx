@@ -28,6 +28,7 @@ import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
 import { MemoryProvider } from "./memory";
 import { SkillsProvider } from "./skills";
+import { ToolMenuProvider } from "./tool-menu";
 import { Splitter } from "./splitter";
 import { useWorkspace, WorkspaceProvider } from "./store";
 import { EXPERIMENT_TAB, REVIEW_TAB } from "./types";
@@ -49,7 +50,9 @@ export function Workspace() {
       <ActionsProvider>
         <SkillsProvider>
           <MemoryProvider>
-            <WorkspaceLayout />
+            <ToolMenuProvider>
+              <WorkspaceLayout />
+            </ToolMenuProvider>
           </MemoryProvider>
         </SkillsProvider>
       </ActionsProvider>

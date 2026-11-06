@@ -546,6 +546,7 @@ test("each chat run tells the agent who the user is and where (docs/remote-agent
     node: null,
     experiment: null,
     selected_path: `${RUN}/effects.csv`,
+    tools: [],
   });
 });
 
@@ -568,6 +569,107 @@ function toneWav(seconds = 1, rate = 8000) {
   for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
   return wav;
 }
+
+test("paper search: the + menu, the Papers chip and paper cards", async ({ page, request }) => {
+  await openHome(page);
+  // The "+" menu lists the agent's tool servers (GET /api/tools) under "Add file".
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await shot(page, "33-plus-menu-papers");
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  const chip = page.locator('[data-tool-chip="papers"]');
+  await expect(chip).toContainText("Papers");
+  await page.getByTestId("copilot-chat-textarea").fill("Find the key papers on retrieval augmented generation");
+  await page.mouse.move(0, 0);
+  await shot(page, "33b-papers-chip");
+
+  await page.getByTestId("copilot-send-button").click();
+  const cards = page.getByTestId("paper-results");
+  await expect(cards).toContainText("3 of 18,342 papers for “retrieval augmented generation”", reply);
+  await expect(page.getByTestId("paper-card")).toHaveCount(3);
+  await expect(page.getByTestId("paper-card").first()).toContainText("4,473 citations");
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("The key paper is", reply);
+  // Without server storage there is nowhere to save to; asking about one fills the message box.
+  await expect(page.getByTestId("paper-save")).toHaveCount(0);
+  await page.getByTestId("paper-ask").first().click();
+  await expect(page.getByTestId("copilot-chat-textarea")).toHaveValue(/^Tell me more about \[Retrieval-Augmented Generation/);
+  await shot(page, "33c-paper-cards");
+
+  // The chip went out with the run, and stays on in this chat until it's turned off.
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom.tools).toEqual(["papers"]);
+  await page.getByRole("button", { name: "Turn off Search papers" }).click();
+  await expect(chip).toHaveCount(0);
+  await page.getByTestId("copilot-add-menu-button").click();
+  await expect(page.getByRole("menuitem", { name: "Search papers" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Search papers" }).click();
+  await expect(chip).toBeVisible();
+  // A new chat starts without chips.
+  await page.getByRole("button", { name: "New chat" }).click();
+  await expect(chip).toHaveCount(0);
+});
+
+test("thinking and tool steps fold into one block per turn", async ({ page }) => {
+  await openHome(page);
+  const question = `Think it through: what should I read next? ${Date.now()}`;
+  await send(page, question);
+
+  // While it runs: one live status line, not a stack of tool cards.
+  const steps = page.getByTestId("agent-steps");
+  const summary = steps.getByTestId("agent-steps-summary");
+  await expect(summary).toContainText("Reading notes/reading-list.md…", reply);
+  await expect(steps).toHaveAttribute("data-live", "true");
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/34-steps-running.png` });
+
+  // Done: the block says how long it worked, and only the answer shows below it.
+  await expect(summary).toHaveText(/^Worked for \d+s · 4 steps$/, reply);
+  const answer = page.getByTestId("copilot-assistant-message").last();
+  await expect(answer).toContainText("none of your notes cover it yet");
+  await expect(page.getByText("Let me look at your reading list.")).toHaveCount(0);
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+  await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
+  await shot(page, "34b-steps-collapsed");
+
+  // Opened: each step in plain words, and a step opens into its tool call.
+  await summary.click();
+  await expect(steps).toHaveAttribute("data-open", "true");
+  const rows = page.getByTestId("agent-step");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText(/^Thought for \d+s/);
+  await expect(rows.nth(1)).toContainText("Read notes/reading-list.md");
+  await expect(rows.nth(3)).toContainText("Searched your files for “Pragmatic Programmer”");
+  await expect(page.getByTestId("agent-step-narration")).toContainText("Let me look at your reading list.");
+  await rows.nth(1).getByRole("button").click();
+  const details = rows.nth(1).getByTestId("agent-step-details");
+  await expect(details).toContainText("mcp__copilotkit__read_file");
+  await expect(details).toContainText("The Pragmatic Programmer (Next)");
+  await rows.nth(0).getByRole("button").click();
+  await expect(rows.nth(0)).toContainText("check the reading list first");
+  await shot(page, "34c-steps-open");
+
+  // Detailed mode, for developers: blocks start open with every step's details.
+  await page.getByTestId("steps-mode").click();
+  await expect(page.getByTestId("steps-mode")).toHaveAttribute("aria-pressed", "true");
+  await summary.click();
+  await expect(steps).toHaveAttribute("data-open", "false");
+
+  // Reopened from the history after a reload: still timed, and in Detailed
+  // mode (remembered) open with every tool call's details.
+  await page.reload();
+  await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
+  await page.getByRole("button", { name: "Chat history" }).click();
+  await page.getByTestId("chat-history").getByRole("option", { name: question }).click();
+  await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("none of your notes cover it yet", reply);
+  await expect(summary).toHaveText(/^Worked for \d+s · 4 steps$/);
+  await expect(steps).toHaveAttribute("data-open", "true");
+  await expect(page.getByTestId("agent-step-details")).toHaveCount(2);
+  await shot(page, "34d-steps-detailed");
+
+  // Back to compact for the other screens.
+  await page.getByTestId("steps-mode").click();
+  await expect(page.getByTestId("agent-step")).toHaveCount(0);
+});
 
 test("preview images, code, HTML, tables, audio and other files", async ({ page }) => {
   await gotoReport(page);

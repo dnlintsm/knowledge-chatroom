@@ -136,6 +136,7 @@ Keep PRs small and describe the behavior changed and how you validated it.
 | `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `agent/src/storage/migrations` | Database schema and access policies |
 | `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
+| `examples/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `tests/unit` | Pure frontend tests without an application server or browser |
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |
