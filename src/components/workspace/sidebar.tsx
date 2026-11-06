@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   Bot,
   Brain,
@@ -549,6 +549,7 @@ function useExplorer() {
   /** The new-file box, with what it starts with; null when closed. */
   const [newFile, setNewFile] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ path: string; at: number } | null>(null);
+  const revealed = useCallback(() => setReveal(null), []);
   const [refreshing, setRefreshing] = useState(false);
 
   const allCollapsed = allFolders.length > 0 && allFolders.every((p) => folders.collapsed.has(p));
@@ -565,6 +566,7 @@ function useExplorer() {
     reveal,
     refreshing,
     allCollapsed,
+    revealed,
     hasFolders: allFolders.length > 0,
     canRefresh: storageMode === "server",
     activeFile,
@@ -596,6 +598,8 @@ function useExplorer() {
       let n = 1;
       while (taken.has(`${folder}untitled-${n}.md`)) n++;
       setNewFile(`${folder}untitled-${n}.md`);
+      // The box goes in the tree, which a filter may be hiding (or emptying).
+      if (filtering) setQuery("");
       if (folder) folders.expand(ancestorFolders(`${folder}x`));
     },
     cancelNewFile() {
@@ -704,6 +708,7 @@ function FilesView({ explorer, canEdit }: { explorer: Explorer; canEdit: boolean
           // Matches show wherever they are, inside collapsed folders too.
           allOpen={explorer.filtering}
           reveal={explorer.reveal}
+          onRevealed={explorer.revealed}
           onNewFileIn={canEdit ? (folder) => explorer.startNewFile(`${folder}/`) : undefined}
           newFile={
             explorer.newFile !== null && canEdit
@@ -739,8 +744,11 @@ function NewFileInput({
   onDone: (path: string) => void;
   onCancel: () => void;
 }) {
-  const { files, create } = useWorkspace();
+  const { files, create, node, experiment } = useWorkspace();
   const { open } = useWorkbench().editor;
+  // Where the user is now, read after the save, which may outlast a move.
+  const place = useRef<PlaceId>(null);
+  place.current = experiment ? experimentPlace(experiment.id) : node;
   const [value, setValue] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   // Leaving the box cancels it, except while it creates the file.
@@ -754,7 +762,13 @@ function NewFileInput({
     }
     busy.current = true;
     try {
+      const at = place.current;
       const file = await create(checked.path, "");
+      // Moved elsewhere meanwhile: the file is saved where it was made, not here.
+      if (place.current !== at) {
+        onCancel();
+        return;
+      }
       onDone(file.path);
       open(file.path);
     } catch (err) {
@@ -819,6 +833,7 @@ function FileTreeView({
   folders: { collapsed, toggle },
   allOpen = false,
   reveal = null,
+  onRevealed,
   onNewFileIn,
   newFile = null,
 }: {
@@ -829,6 +844,7 @@ function FileTreeView({
   allOpen?: boolean;
   /** Scrolls to and focuses this file once its row is shown. */
   reveal?: { path: string; at: number } | null;
+  onRevealed?: () => void;
   /** Adds a "new file here" button to each folder. */
   onNewFileIn?: (folder: string) => void;
   /** The new-file box, shown first in its folder (at the top when that isn't here yet). */
@@ -840,20 +856,20 @@ function FileTreeView({
     [newFile, tree],
   );
   const ref = useRef<HTMLDivElement>(null);
-  const revealed = useRef(0);
 
   // Once per request, as soon as the row is there: the folders it opened, or
-  // the file just created, may only show in a later render.
+  // the file just created, may only show in a later render. The request is
+  // then dropped, so a later remount of the tree doesn't take focus again.
   useEffect(() => {
-    if (!reveal || revealed.current === reveal.at) return;
+    if (!reveal) return;
     const row = [...(ref.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])].find(
       (el) => el.title === reveal.path,
     );
     if (!row) return;
-    revealed.current = reveal.at;
+    onRevealed?.();
     row.scrollIntoView({ block: "nearest" });
     row.focus({ preventScroll: true });
-  }, [reveal, collapsed, tree]);
+  }, [reveal, collapsed, tree, onRevealed]);
 
   const render = (folder: Folder, depth: number): ReactNode => (
     <>

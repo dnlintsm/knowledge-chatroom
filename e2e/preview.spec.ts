@@ -429,6 +429,11 @@ test("file toolbar: collapse all, reveal, filter and new file in a folder", asyn
   await shot(page, "35b-file-filter");
   await page.getByRole("searchbox", { name: "Filter files by name" }).fill("no such file");
   await expect(page.getByText("No file names match")).toBeVisible();
+  // New file still works after a search that found nothing: it clears the filter.
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "New file path" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Filter files by name" })).toHaveValue("");
+  await page.getByRole("textbox", { name: "New file path" }).press("Escape");
   await page.getByRole("searchbox", { name: "Filter files by name" }).press("Escape");
   await expect(page.getByRole("searchbox", { name: "Filter files by name" })).toHaveCount(0);
   await expect(folder("uploads")).toHaveAttribute("aria-expanded", "false");
