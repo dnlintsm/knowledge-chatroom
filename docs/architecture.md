@@ -14,7 +14,9 @@ when login is enabled. Browser state and authenticated storage access meet in
 flowchart LR
   Browser --> Next[Next.js UI and API proxy]
   Next --> Agent[AG-UI agent and storage HTTP]
+  Next -.->|AGENT_URL| Remote[Remote chat backend]
   Agent --> Claude[Claude SDK]
+  Agent --> MCP[Outside MCP servers]
   Agent --> PG[(PostgreSQL metadata and versions)]
   Agent --> S3[(S3 content bytes)]
   PG --> Events[LISTEN / NOTIFY]
@@ -25,6 +27,12 @@ The frontend and agent have separate manifests and lockfiles. `npm ci` at the
 root installs both. The starter's charts, meeting picker and A2UI examples remain
 under `src/app/declarative-generative-ui` and `src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
+
+This page first describes the workspace features (skills, runs, actions, the chat),
+then [file storage](#file-storage) and its access rules, and finally the
+[boundaries to keep](#boundaries-when-changing-code) when changing code.
+
+## Workspace features
 
 ### Skills
 
@@ -299,6 +307,24 @@ on the UI makes Detailed the default. Durations come from the events' `timestamp
 runner (`src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
 from the history still says how long its steps took.
 
+### Tool chips and paper search
+
+Outside MCP servers whose `MCP_SERVERS` entry has a `ui` block show up in the chat's
+"+" menu (issue #151). The agent lists them at `GET /tools` and
+runs single calls for the app's buttons at `POST /tools/<server>/<tool>`
+(`agent/src/tools-api.ts`, proxied as `/api/tools`), only for tools the block lists.
+Picking one puts a chip above the message box; the chips each chat has on are kept in the
+browser (`src/components/workspace/tool-chips.ts`, `tool-menu.tsx`) and sent with every run
+as `forwardedProps.knowledge_chatroom.tools`, and the agent then tells Claude to answer with
+that server's tools. The configuration is in
+[Development](development.md#outside-mcp-servers).
+
+Paper search (`examples/papers-mcp`) is the first such server. Results of its
+`search_papers`, `related_papers` and `get_paper` tools render as paper cards
+(`src/components/workspace/paper-cards.tsx`) with **Save to workspace** (a `save_paper`
+call through `/api/tools`, a proposal inside a knowledge node), **Ask about this**, **PDF**
+and **Page**. The built-in `paper-search` skill gives Claude the same steps without the chip.
+
 ### Chat history
 
 Each user's chats are kept on the server, so they come back after a reload or a restart
@@ -423,7 +449,8 @@ fragment (the format Claude Code uses in IDEs):
 | `[welcome.md:12](notes/welcome.md#L12)` | the file at line 12 |
 | `[welcome.md:12-18](notes/welcome.md#L12-L18)` | the file at lines 12–18 |
 
-Paths are relative to the workspace root; lines are 1-based and inclusive. The preview
+Paths are relative to the place the user is in (the experiment, else the node, else the
+workspace root), as the file list shows them; lines are 1-based and inclusive. The preview
 highlights the paragraphs, list items, table rows or code blocks the lines belong to, and the
 editor selects the lines themselves. Links to files that aren't in the workspace show greyed
 out, and web links work as before.
@@ -432,7 +459,6 @@ Claude learns the format from the system prompt (`agent/src/agent.ts`), and file
 reaches it with numbered lines (the open file in context, and `readWorkspaceFile`), so it can
 cite them. The contract lives in `src/components/workspace/file-refs.ts`, whose parser also
 accepts `#L12-18` and `notes/welcome.md:12`.
-
 
 ## File storage
 

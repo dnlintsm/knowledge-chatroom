@@ -9,12 +9,23 @@ The default test command runs only fast units; integration and E2E are explicit.
 | `npm test` / `npm run test:unit` | None | Frontend pure tests and agent unit tests |
 | `npm run test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
 | `npm run test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
-| `npm run test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage/knowledge/experiments with mock chat |
+| `npm run test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `npm run test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
 | `npm run test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
-browser installation. Put new pure frontend specs under `tests/unit`.
+browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
+are listed one by one: service-free ones in `agent/package.json` (`test:unit`), ones
+that need PostgreSQL and S3 in `agent/scripts/test-integration.mjs`. Add a new
+`*.test.ts` to the matching list, or it never runs.
+
+The two Python examples have their own pytest suites (Python 3.10+), which CI runs too:
+
+```bash
+cd examples/papers-mcp        # or examples/python-agent
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
 ## Disposable integration databases
 
@@ -81,11 +92,15 @@ mock coverage. It is not run by required CI.
 See [CI merge gates](ci.md) for the repository ruleset settings that enforce
 successful checks before merging and for preview-step limits.
 
-- `quality.yml`: locked root/agent install, lint/types/units, unchanged lockfiles.
+- `quality.yml`: the `checks` job (locked root/agent install, lint/types/units,
+  unchanged lockfiles) plus the pytest suites of `examples/python-agent` and
+  `examples/papers-mcp`.
 - `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
   including the cached real embedding-model test (`EMBEDDING_TEST=1`).
-- `ui-preview.yml`: production build, explicit browser/storage/login runs,
-  artifacts and the combined outcome in the preview comment.
+- `ui-preview.yml`: the `preview` job: production build, explicit browser/storage/login
+  runs, artifacts and the combined outcome in the preview comment.
+- `docker.yml`: checks the compose file and builds the demo images when the
+  `Dockerfile`, compose file, lockfiles or Python sample change.
 
 Inspect the first failed assertion and retained trace, not just the screenshot.
 Check test counts and skips in the list/TAP output. A prerequisite failure must
