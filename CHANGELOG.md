@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.2.3
+
+Search papers from the chat (OpenAlex and arXiv) with a new "+" menu, Papers chip and paper
+cards; each answer's thinking and tool steps fold into one "Worked for 14s · 5 steps" line;
+and Claude edits files in place instead of rewriting them, so chats fit smaller models.
+Nothing is removed or renamed in this release.
+
+### Upgrading from 0.2.2
+
+- No database migrations, no removed or renamed settings, and no breaking changes: pull,
+  then rebuild and restart the app and the agent (with Docker,
+  `docker compose up --build -d` with the profile you use).
+- `npm run env:check` lists four new optional settings: `CLAUDE_CODE_MAX_CONTEXT_TOKENS`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` and `CHAT_STEPS`.
+  `npm run env:upgrade` appends them commented out; nothing changes until you set them.
+- Paper search is opt-in: run the `papers` MCP server (`docker compose --profile papers`, or
+  `examples/papers-mcp`) and add it to `MCP_SERVERS` with its `ui` block, as in
+  `.env.example`. Without it the "+" menu has no Search papers entry.
+- Remote agent backends keep working: forwarded props stay at version 2 and only gain an
+  optional `tools` field (the chips the user turned on). A Python backend that wants the
+  Papers chip follows step 8 in `docs/remote-agent.md`.
+
+### Added
+
+- Paper search MCP server, `examples/papers-mcp` (#151, #152): `search_papers` (OpenAlex,
+  with year, author, venue and open-access filters, sorting and paging), `get_paper`
+  (abstract, BibTeX; `openalex:`, `doi:` or `arxiv:` ids, with an arXiv fallback for new
+  papers), `read_paper` (open-access PDF text, paged by lines, with section headings),
+  `related_papers` (cites, cited by, similar) and `save_paper` (a markdown note at
+  `papers/<title>.md` in the current place, optionally with the PDF; a proposal in a
+  knowledge node). Callers are checked with the forwarded identity, like the Python agent
+  sample. `docker compose --profile papers` runs it, and CI tests it.
+- Paper search in the chat (#151, #153). The composer's "+" menu lists MCP tools whose
+  `MCP_SERVERS` entry has a `ui` block; **Search papers** turns on a **Papers** chip above
+  the message box, kept per chat. Search results show as paper cards (title, authors, venue,
+  year, citations, open access, abstract) with **Save to workspace**, **Ask about this**,
+  **PDF** and **Page**. The agent serves the menu at `GET /tools` and single tool calls at
+  `POST /tools/<server>/<tool>` (proxied as `/api/tools`), only for tools listed in the
+  `ui` block. New built-in `paper-search` skill.
+- `edit_file` tool, and `editWorkspaceFile` for browser-only workspaces (#126, #127). Claude
+  replaces one exact piece of text (or every match with `replaceAll`) and gets the changed
+  lines back, instead of reading and rewriting a whole file. Same rules as `write_file`:
+  proposals in knowledge nodes and skills, read-only files refused, every write versioned.
+- Context-window settings for models the engine doesn't know, such as a local model behind
+  `ANTHROPIC_BASE_URL` (#127): `CLAUDE_CODE_MAX_CONTEXT_TOKENS`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, passed to the
+  agent by docker compose when set.
+
+### Changed
+
+- Each answer's thinking, tool calls and narration fold into one line above the answer,
+  "Worked for 14s · 5 steps" (#154, #155). While Claude works it is a live status with a
+  timer; clicking it opens the steps, and each step its arguments and result. Paper cards,
+  charts, A2UI surfaces, questions for the user and errors stay visible. A **Compact /
+  Detailed** button in the chat header switches per user; `CHAT_STEPS=detailed` on the UI
+  makes Detailed the default. Durations survive a reload from chat history.
+- `read_file` returns at most 50,000 characters per read (was 200,000), so one read stays
+  under the engine's limit for a single tool result (#127). Paging with `offset`/`limit`
+  works as before.
+
+### Fixed
+
+- From the second turn of a chat, a turn's thinking block disappeared when the reply
+  finished (#156, #157).
+
+### Known limitations
+
+- Paper search was tested against recorded OpenAlex and arXiv responses, not the live APIs.
+- The steps line doesn't count failed tool calls: the Claude adapter's tool results don't
+  say whether a tool failed.
+
 ## 0.2.2
 
 Files load faster when the app opens, you can upload files straight into an existing
