@@ -6,18 +6,15 @@ those merge gates.
 
 ## Required checks for main
 
-An administrator should update the existing
-[`main rule`](https://github.com/dnlintsm/knowledge-chatroom/settings/rules/24551761):
+The [`main rule`](https://github.com/dnlintsm/knowledge-chatroom/settings/rules/24551761)
+requires two checks from **GitHub Actions** (app ID `15368`), with branches up to date
+before merging:
 
-1. Enable **Require status checks to pass**.
-2. Require `checks` (Quality: lint, both typechecks and service-free units) and
-   `preview` (production build plus browser, storage and login E2E).
-3. Select **GitHub Actions** as their source (app ID `15368`) and require branches
-   to be up to date before merging.
-4. Keep the existing PR, deletion and non-fast-forward rules. Review the existing
-   integration bypass separately; requiring checks does not remove bypass access.
+- `checks` (Quality: lint, both typechecks and service-free units)
+- `preview` (UI preview: production build plus browser, storage and login E2E)
 
-Both checks run for every PR, including documentation changes. Do not require the
+The rule also keeps the PR, deletion and non-fast-forward rules. Both checks run for
+every PR, including documentation changes. Do not require the
 Storage workflow's `test` context unconditionally: it is path-filtered and would
 leave unrelated PRs waiting for a check that never starts. Storage/login E2E remain
 covered by the always-running `preview` check; storage-related changes additionally
@@ -31,11 +28,12 @@ gh api repos/dnlintsm/knowledge-chatroom/rulesets/24551761 \
 ```
 
 The result should list `checks` and `preview` with
-`strict_required_status_checks_policy: true`. No matching result means this rule
-does not enforce status checks. As of the 2026-10-12 review, the active rule has no
-required status checks. The environment's integration token returned HTTP 403
-when updating it; a GitHub App needs repository **Administration: write**, or an
-administrator must apply the setting in the UI. This document does not apply it.
+`strict_required_status_checks_policy: true` (it did when last checked, on
+2026-11-06). No matching result means the rule no longer enforces status checks.
+Changing the rule needs a repository administrator, or a GitHub App with
+**Administration: write**; editing workflow YAML doesn't change it. If a job is
+renamed, update the required contexts too, or every PR waits for a check that never
+reports.
 
 ## Preview limits and results
 

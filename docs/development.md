@@ -62,6 +62,16 @@ the gateway: enable reasoning there (LiteLLM `reasoning_effort`, OpenRouter
 reasoning settings), since the agent's adaptive thinking request is dropped by
 most proxies.
 
+Each chat is one Claude engine session that compacts (summarizes) its history before it
+outgrows the model's context window. For a model the engine doesn't know, such as a local
+model behind `ANTHROPIC_BASE_URL`, it has to guess that window: set
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the model's real window, and if chats still fail with
+a context-length error, compact earlier with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (tokens) or
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (percent of the window). They are read by the agent;
+docker compose passes them through when set. Claude changes files with `edit_file` (one
+exact replacement) and reads them in pages of at most 50,000 characters, so changing a
+large file doesn't put the whole file into the history again.
+
 The chips under the chat start from what is open (summarize the file, analyze the
 run's report, search similar experiments with server storage). After each reply
 the agent's `POST /suggest` makes one small-model call for follow-ups:
@@ -106,7 +116,8 @@ or a path to a JSON file, shaped like Claude's `.mcp.json`:
 }}
 ```
 
-`type` is `http` (the default), `sse` or `stdio` (give stdio servers absolute paths: runs with skills start in their own folder). `${VAR}` in `headers` and `env`
+`type` is `http` (the default), `sse` or `stdio` (give stdio servers absolute paths:
+runs with skills start in their own folder). `${VAR}` in `headers` and `env`
 reads the agent's environment, so secrets stay out of the file. Every tool of a
 configured server runs without asking, as `mcp__<name>__<tool>`; a server that is
 down is left out and the chat carries on. With login on, `forwardIdentity` sends
@@ -153,9 +164,10 @@ signed-in user, as the paper cards' Save button does:
 | `POST /tools/<server>/<tool>` with `{arguments: {...}}` | `{result, text}`: the tool's structured content (or the JSON in its text). `422 {error}` is the tool's own error, `403` a tool not in `tools`, `502` a server that is down. |
 
 The call reaches the server with the same `X-Knowledge-User` and `X-Knowledge-Storage`
-headers a chat run sends, so the server sees the same person either way. `ui` needs an
-http or sse server. [examples/papers-mcp](../examples/papers-mcp/README.md) is the paper
-search server for it.
+headers a chat run sends, so the server sees the same person either way. A call that takes
+longer than `TOOLS_CALL_TIMEOUT_MS` (default 120000) fails. `ui` needs an http or sse
+server. [examples/papers-mcp](../examples/papers-mcp/README.md) is the paper search server
+for it; `docker compose --profile papers` runs it next to the demo.
 
 `memoryAccess` gives a server the user's memory in the chat that calls it (#93):
 in runs where memory is on, each run also sends an `X-Knowledge-Memory` token
@@ -221,14 +233,18 @@ production run.
 ## Dependency security
 
 The root and agent lockfiles are audited separately (`npm audit` and
-`npm --prefix agent audit`). Their overrides pin patched transitive versions of
-`body-parser`, `follow-redirects`, `graphql-scalars`, and `undici`; the agent
-also aligns AG-UI packages on 1.0.4 to use Zod 4. When updating these dependencies,
-recheck the overrides and run the build and tests before removing them. The
-`undici` and `graphql-scalars` overrides cross an upstream major-version range,
-so also test any enabled provider or integration that relies on them.
+`npm --prefix agent audit`). Both use `overrides` to pin patched transitive versions:
 
-The UI still depends on Zod 3 through CopilotKit, which declares a Zod 3 range.
+| Lockfile | Overrides |
+| --- | --- |
+| Root (`package.json`) | `body-parser`, `follow-redirects`, `graphql-scalars`, `undici` and `katex`, plus `@ag-ui/core`, `encoder` and `proto` held on 1.0.2, the version of the UI's `@ag-ui/client` |
+| Agent (`agent/package.json`) | `body-parser`, `sharp` and `adm-zip`; its own `@ag-ui/core` and `@ag-ui/encoder` dependencies are on 1.0.4, which use Zod 4 |
+
+When updating these dependencies, recheck the overrides and run the build and tests
+before removing any. The `undici` and `graphql-scalars` overrides cross an upstream
+major-version range, so also test any enabled provider or integration that relies on them.
+
+The UI still uses Zod 3, directly and through CopilotKit, which declares a Zod 3 range.
 It is affected by [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)
 and has no compatible patched 3.x release. Monitor upstream for a compatible
 upgrade; forcing Zod 4 across that dependency tree can break the app. On shared

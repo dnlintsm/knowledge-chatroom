@@ -12,27 +12,31 @@ work easier to find, understand, and reuse.
 - **Runs** — a run is an experiment with a report: list and compare runs in the Runs
   view, then open one with its files, report, parameters, results, and chat together.
 - **Work with Claude in context** — discuss the open file or selected lines; follow
-  file citations back to the editor and let Claude work with accessible files.
-  Suggestion chips under the chat offer next steps based on what is open and what
-  Claude just did.
+  file citations back to the editor and let Claude read, write and edit the files you
+  can access. Suggestion chips under the chat offer next steps based on what is open
+  and what Claude just did. Each answer's thinking and tool steps fold into one
+  "Worked for 14s · 5 steps" line, which opens to show every step.
+- **Search papers** — pick **Search papers** in the chat's "+" menu to search OpenAlex
+  and arXiv, then save a paper to the workspace or ask about it from its card
+  ([paper search server](examples/papers-mcp/README.md)).
 - **Bring your own tools and models** — connect the agent to outside MCP servers,
   for example the Python tools of an existing agent
   ([example](examples/python-agent/README.md)), and run any model behind an
-  Anthropic-compatible gateway such as LiteLLM or OpenRouter.
+  Anthropic-compatible gateway such as LiteLLM or OpenRouter, local models included.
 - **Reuse skills** — choose Auto, Manual, or Off for each skill (for everyone, for
   yourself, or one chat), invoke it with `/name`, and see which skills a conversation used.
   Share them through the skill hub, which checks each version and shows what an update
   changes, or as `.zip` files that work in Claude Code too.
 - **Personalized memory (experimental)** — with `MEMORY=on`, Claude keeps short notes
-  about you across chats: who you are, how you like to work, your ongoing projects. Only
-  you see them. Each change shows under the reply with Undo, every note can be edited or
-  restored to an earlier version, and incognito chats leave memory alone. Claude also
-  learns from chats once they go quiet, and with "Ask first" every change waits for your
-  review. Teams share memory too: notes for the whole workspace, a knowledge node or a
-  group, which Claude reads but only proposes changes to. Bring your memory from ChatGPT
-  or Claude by pasting it in, and publish or install memory packs (a team's shared notes)
-  on the hub. Claude can also look back through your earlier chats, and with an
-  embedding model it finds notes by meaning, not just by words.
+  about you across chats (who you are, how you like to work, your ongoing projects) that
+  only you see. Every change shows under the reply with Undo, notes keep their versions,
+  and incognito chats leave memory alone. Claude also learns from chats once they go
+  quiet; with "Ask first", each change waits for your review.
+  - **Shared memory**: notes for the whole workspace, a knowledge node or a group, which
+    Claude reads but only proposes changes to. Teams can publish and install them as
+    memory packs on the hub.
+  - **Import and recall**: paste in your memory from ChatGPT or Claude. Claude can look
+    back through your earlier chats and, with an embedding model, find notes by meaning.
 - **Run common actions** — start a new chat about a run or generate its read-only
   rules through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,
@@ -45,6 +49,8 @@ work easier to find, understand, and reuse.
 - **Choose storage and sharing** — start with browser-local files, or use versioned
   PostgreSQL/S3 storage with optional OIDC login and viewer/editor/owner access.
   Workspace owners manage people, roles and groups in the Admin panel.
+- **Keep your chats** — each user's chat history is saved on the server, so chats can be
+  reopened, renamed or archived after a reload or restart.
 
 ## Screenshots
 
@@ -78,6 +84,10 @@ Open <http://localhost:3000>. Sample notes and runs are added on first visit and
 in the `postgres-data`/`s3-data` volumes; `docker compose --profile demo down -v`
 starts over. There is no login: one built-in user owns everything.
 
+Two optional profiles add sample MCP servers: `--profile papers` (paper search) and
+`--profile python-sample` (the Python agent's tools). Each also needs the `MCP_SERVERS`
+line from the comment above its service in `docker-compose.yml`, copied into `.env`.
+
 ### Run from source
 
 Use **Node 22** (`.nvmrc`) and npm. Add an Anthropic API key to `.env` for real chat.
@@ -88,9 +98,10 @@ npm ci                         # installs the UI and agent from their lockfiles
 npm run dev                    # UI :3000, agent :8000
 ```
 
-Open <http://localhost:3000>, then start a run from the Runs view (runs need server
-storage).
-Server storage and login are optional; see [Development](docs/development.md).
+Open <http://localhost:3000>. Without server storage, files stay in your browser. Runs,
+the knowledge tree, sharing and memory need it: `docker compose up -d` starts
+PostgreSQL and the object store, and [Development](docs/development.md) covers the
+`.env` values for storage and the optional login.
 
 ### Upgrading
 
@@ -108,11 +119,16 @@ Start with the guide that matches what you want to do:
 
 | Guide | What it covers |
 | --- | --- |
-| [Development](docs/development.md) | Local setup, environment variables, storage, and login |
+| [Development](docs/development.md) | Local setup, environment variables, models, outside MCP servers, storage, and login |
 | [Architecture](docs/architecture.md) | Runs, skills, actions/rules, file APIs, experiments, search, and access |
 | [Testing](docs/testing.md) | Fast checks, disposable integration services, E2E modes, and CI |
 | [Deployment](docs/deployment.md) | Production build, private agent routing, authentication, HTTPS, and storage |
 | [Remote agent backend](docs/remote-agent.md) | Using an agent from a separate backend (`AGENT_URL`): what it receives and must do |
+| [CI merge gates](docs/ci.md) | The checks required before a PR merges, and preview limits |
+
+Two examples show how to bring outside tools in as MCP servers:
+[Python agent](examples/python-agent/README.md) (an existing agent's tools and prompt) and
+[paper search](examples/papers-mcp/README.md) (OpenAlex and arXiv, with the chat's "+" menu).
 
 <details>
 <summary><strong>Contributor commands and project map</strong></summary>
@@ -126,7 +142,9 @@ npm run build                  # production compile with TypeScript checks
 
 Use `npm run test:e2e` for browser changes. Storage changes also need integration
 and storage/login E2E coverage; [Testing](docs/testing.md) explains prerequisites.
-Keep PRs small and describe the behavior changed and how you validated it.
+A PR that changes the UI adds a `shot()` step to `e2e/preview.spec.ts` (or the storage
+specs), so the preview comment shows it. Keep PRs small and describe the behavior
+changed and how you validated it.
 
 | Directory | Responsibility |
 | --- | --- |
@@ -135,6 +153,9 @@ Keep PRs small and describe the behavior changed and how you validated it.
 | `src/app/declarative-generative-ui`, `src/hooks` | Starter examples and A2UI renderers |
 | `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `agent/src/storage/migrations` | Database schema and access policies |
+| `agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
+| `shared` | Contracts used by both the UI and the agent: files, identity tokens, text edits |
+| `scripts` | Dev launchers, the E2E runner, CI summaries, and `env:check`/`env:upgrade` |
 | `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
 | `examples/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `tests/unit` | Pure frontend tests without an application server or browser |
