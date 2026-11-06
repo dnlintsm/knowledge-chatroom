@@ -6,25 +6,40 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Files,
   FilePlus,
   FlaskConical,
+  ListFilter,
   ListTodo,
+  LocateFixed,
   Lock,
   Network,
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Table2,
   Sparkles,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
+import {
+  ancestorFolders,
+  buildTree,
+  filterFiles,
+  folderOf,
+  folderPaths,
+  newFilePath,
+  type Folder,
+} from "./file-tree";
 import { KnowledgeTree } from "./knowledge-tree";
 import { persistCollapsedFolders, readCollapsedFolders } from "./local-persistence";
 import { experimentPlace, type PlaceId } from "./server-files";
@@ -37,7 +52,15 @@ import { SkillsPanel } from "./skills";
 import { useWorkspace } from "./store";
 import { uploadFiles } from "./upload";
 import { useWorkbench } from "./workbench";
-import { EXPERIMENT_TAB, fileName, FileExistsError, RUNS_TAB, TASKS_TAB, type FileKind, type WorkspaceFile } from "./types";
+import {
+  EXPERIMENT_TAB,
+  fileName,
+  FileExistsError,
+  ReadOnlyFileError,
+  RUNS_TAB,
+  TASKS_TAB,
+  type WorkspaceFile,
+} from "./types";
 
 export type { SidebarView };
 
@@ -104,6 +127,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
   const canEdit = mayEdit && !loading;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const explorer = useExplorer();
 
   const upload = async (list: FileList | null) => {
     const written = await uploadFiles(list, write, (path) =>
@@ -112,19 +136,12 @@ export function SidePanel({ view }: { view: SidebarView }) {
     if (written.length) open(written[written.length - 1]);
   };
 
-  const newFile = (kind: Extract<FileKind, "note" | "skill">) => {
+  const newSkill = () => {
     const taken = new Set(files.map((f) => f.path));
     let n = 1;
-    const pathFor = (i: number) =>
-      kind === "skill"
-        ? `skills/new-skill-${i}/SKILL.md`
-        : `notes/untitled-${i}.md`;
-    while (taken.has(pathFor(n))) n++;
-    const content =
-      kind === "skill"
-        ? `---\nname: new-skill-${n}\ndescription: When Claude should use this skill.\n---\n\n# New skill\n\nSteps Claude should follow.\n`
-        : "";
-    open(write(pathFor(n), content).path);
+    while (taken.has(`skills/new-skill-${n}/SKILL.md`)) n++;
+    const content = `---\nname: new-skill-${n}\ndescription: When Claude should use this skill.\n---\n\n# New skill\n\nSteps Claude should follow.\n`;
+    open(write(`skills/new-skill-${n}/SKILL.md`, content).path);
   };
 
   const onDrop = (e: DragEvent) => {
@@ -135,24 +152,26 @@ export function SidePanel({ view }: { view: SidebarView }) {
 
   const label = VIEWS.find((v) => v.id === view)?.label ?? "";
   const title = label;
+  const fileTools = view === "files" && !loading;
   // Viewers see the files but get no controls that change them.
-  const actions: ReactNode = canEdit && (
+  const actions: ReactNode = (
     <>
-      {(view === "files" || view === "uploads") && (
+      {canEdit && view === "files" && (
+        <IconButton label="New file" onClick={() => explorer.startNewFile()}>
+          <FilePlus className="size-4" />
+        </IconButton>
+      )}
+      {canEdit && (view === "files" || view === "uploads") && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
           <Upload className="size-4" />
         </IconButton>
       )}
-      {view === "files" && (
-        <IconButton label="New note" onClick={() => newFile("note")}>
+      {canEdit && view === "skills" && (
+        <IconButton label="New skill" onClick={newSkill}>
           <FilePlus className="size-4" />
         </IconButton>
       )}
-      {view === "skills" && (
-        <IconButton label="New skill" onClick={() => newFile("skill")}>
-          <FilePlus className="size-4" />
-        </IconButton>
-      )}
+      {fileTools && <ExplorerTools explorer={explorer} />}
     </>
   );
 
@@ -172,9 +191,11 @@ export function SidePanel({ view }: { view: SidebarView }) {
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
-      <header className="flex h-10 shrink-0 items-center justify-between px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-        {title}
-        <div className="flex items-center gap-0.5 normal-case">{actions}</div>
+      <header className="flex h-10 shrink-0 items-center justify-between gap-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+        <span className="min-w-0 truncate">{title}</span>
+        <div role="toolbar" aria-label={`${title} actions`} className="flex shrink-0 items-center normal-case">
+          {actions}
+        </div>
       </header>
       <input
         ref={inputRef}
@@ -192,7 +213,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           <FilesLoading />
         ) : (
           <>
-            {view === "files" && <FileTree files={files} />}
+            {view === "files" && <FilesView explorer={explorer} canEdit={canEdit} />}
             {view === "runs" && <RunList />}
             {view === "search" && <SearchPanel />}
             {view === "knowledge" && <KnowledgeTree />}
@@ -260,10 +281,14 @@ function FilesLoading() {
 function IconButton({
   label,
   onClick,
+  pressed,
+  disabled,
   children,
 }: {
   label: string;
   onClick: () => void;
+  pressed?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -271,8 +296,15 @@ function IconButton({
       type="button"
       title={label}
       aria-label={label}
+      aria-pressed={pressed}
+      disabled={disabled}
       onClick={onClick}
-      className="flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
+      className={cn(
+        "flex size-6 items-center justify-center rounded text-[var(--muted-foreground)] cursor-pointer",
+        "hover:bg-[var(--secondary)] hover:text-[var(--foreground)]",
+        "disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--muted-foreground)]",
+        pressed && "bg-[var(--secondary)] text-[var(--foreground)]",
+      )}
     >
       {children}
     </button>
@@ -457,38 +489,6 @@ function FlatList({
   );
 }
 
-interface Folder {
-  name: string;
-  path: string;
-  folders: Folder[];
-  files: WorkspaceFile[];
-}
-
-function buildTree(files: WorkspaceFile[]): Folder {
-  const root: Folder = { name: "", path: "", folders: [], files: [] };
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let node = root;
-    for (const part of parts.slice(0, -1)) {
-      const path = node.path ? `${node.path}/${part}` : part;
-      let next = node.folders.find((f) => f.name === part);
-      if (!next) {
-        next = { name: part, path, folders: [], files: [] };
-        node.folders.push(next);
-      }
-      node = next;
-    }
-    node.files.push(file);
-  }
-  const sort = (f: Folder) => {
-    f.folders.sort((a, b) => a.name.localeCompare(b.name));
-    f.files.sort((a, b) => a.path.localeCompare(b.path));
-    f.folders.forEach(sort);
-  };
-  sort(root);
-  return root;
-}
-
 const NO_FOLDERS = new Set<string>();
 
 /** Reading localStorage itself throws when the browser blocks site storage. */
@@ -513,38 +513,379 @@ function useCollapsedFolders() {
     setSaved({ place, paths: new Set(storage ? readCollapsedFolders(storage, place) : []) });
   }, [place]);
   const collapsed = saved?.place === place ? saved.paths : NO_FOLDERS;
-  const toggle = (path: string) => {
-    const next = new Set(collapsed);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
+  const set = (next: Set<string>) => {
     setSaved({ place, paths: next });
     const storage = localStorageOrNull();
     if (storage) persistCollapsedFolders(storage, place, [...next]);
   };
-  return { collapsed, toggle };
+  const toggle = (path: string) => {
+    const next = new Set(collapsed);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    set(next);
+  };
+  /** Opens these folders (e.g. the ones a file is in). */
+  const expand = (paths: string[]) => {
+    if (!paths.some((p) => collapsed.has(p))) return;
+    set(new Set([...collapsed].filter((p) => !paths.includes(p))));
+  };
+  return { collapsed, toggle, expand, set };
 }
 
-export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; depth?: number }) {
+type CollapsedFolders = ReturnType<typeof useCollapsedFolders>;
+
+/**
+ * State behind the Files view's toolbar: folders, the name filter, the
+ * new-file box, and requests to scroll the open file into view.
+ */
+function useExplorer() {
+  const { files, activeFile, refresh, storageMode } = useWorkspace();
+  const { notify } = useWorkbench();
+  const folders = useCollapsedFolders();
   const tree = useMemo(() => buildTree(files), [files]);
-  const { collapsed, toggle } = useCollapsedFolders();
+  const allFolders = useMemo(() => folderPaths(tree), [tree]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  /** The new-file box, with what it starts with; null when closed. */
+  const [newFile, setNewFile] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<{ path: string; at: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const allCollapsed = allFolders.length > 0 && allFolders.every((p) => folders.collapsed.has(p));
+  const filtering = filterOpen && query.trim() !== "";
+
+  return {
+    folders,
+    files,
+    filterOpen,
+    query,
+    filtering,
+    setQuery,
+    newFile,
+    reveal,
+    refreshing,
+    allCollapsed,
+    hasFolders: allFolders.length > 0,
+    canRefresh: storageMode === "server",
+    activeFile,
+    toggleAll() {
+      folders.set(allCollapsed ? new Set() : new Set(allFolders));
+    },
+    toggleFilter() {
+      if (filterOpen) setQuery("");
+      setFilterOpen(!filterOpen);
+    },
+    closeFilter() {
+      setQuery("");
+      setFilterOpen(false);
+    },
+    /** Opens the folders down to the open file and scrolls to it. */
+    revealActive() {
+      if (!activeFile) return;
+      // Keep the filter only while it still shows the file.
+      if (filtering && !filterFiles([activeFile], query).length) {
+        setQuery("");
+        setFilterOpen(false);
+      }
+      folders.expand(ancestorFolders(activeFile.path));
+      setReveal({ path: activeFile.path, at: Date.now() });
+    },
+    /** Opens the new-file box in `folder` ("a/b/"), or notes/ by default. */
+    startNewFile(folder = "notes/") {
+      const taken = new Set(files.map((f) => f.path));
+      let n = 1;
+      while (taken.has(`${folder}untitled-${n}.md`)) n++;
+      setNewFile(`${folder}untitled-${n}.md`);
+      if (folder) folders.expand(ancestorFolders(`${folder}x`));
+    },
+    cancelNewFile() {
+      setNewFile(null);
+    },
+    /** After the new-file box made `path`: show it in the tree. */
+    created(path: string) {
+      setNewFile(null);
+      if (filtering && !filterFiles([{ path }], query).length) setQuery("");
+      folders.expand(ancestorFolders(path));
+      setReveal({ path, at: Date.now() });
+    },
+    async refresh() {
+      setRefreshing(true);
+      try {
+        await refresh();
+      } catch (err) {
+        notify(err instanceof Error ? err.message : String(err), "error");
+      } finally {
+        setRefreshing(false);
+      }
+    },
+  };
+}
+
+type Explorer = ReturnType<typeof useExplorer>;
+
+/** The Files view's toolbar buttons that don't change files (viewers get them too). */
+function ExplorerTools({ explorer }: { explorer: Explorer }) {
+  return (
+    <>
+      <IconButton
+        label={explorer.filterOpen ? "Close filter" : "Filter files"}
+        pressed={explorer.filterOpen}
+        onClick={explorer.toggleFilter}
+      >
+        <ListFilter className="size-4" />
+      </IconButton>
+      <IconButton
+        label="Reveal open file"
+        disabled={!explorer.activeFile}
+        onClick={explorer.revealActive}
+      >
+        <LocateFixed className="size-4" />
+      </IconButton>
+      {explorer.canRefresh && (
+        <IconButton
+          label={explorer.refreshing ? "Refreshing files" : "Refresh files"}
+          disabled={explorer.refreshing}
+          onClick={() => void explorer.refresh()}
+        >
+          <RefreshCw className={cn("size-4", explorer.refreshing && "animate-spin")} />
+        </IconButton>
+      )}
+      <IconButton
+        label={explorer.allCollapsed ? "Expand all folders" : "Collapse all folders"}
+        disabled={!explorer.hasFolders}
+        onClick={explorer.toggleAll}
+      >
+        {explorer.allCollapsed ? <ChevronsUpDown className="size-4" /> : <ChevronsDownUp className="size-4" />}
+      </IconButton>
+    </>
+  );
+}
+
+/** The Files view: the filter and new-file boxes when open, then the tree. */
+function FilesView({ explorer, canEdit }: { explorer: Explorer; canEdit: boolean }) {
+  const shown = useMemo(
+    () => (explorer.filtering ? filterFiles(explorer.files, explorer.query) : explorer.files),
+    [explorer.files, explorer.filtering, explorer.query],
+  );
+  return (
+    <>
+      {explorer.filterOpen && (
+        <div className="flex h-8 items-center gap-1 px-3 pb-1">
+          <input
+            autoFocus
+            // A plain box (not type=search) so browsers don't add a second clear button.
+            role="searchbox"
+            aria-label="Filter files by name"
+            placeholder="Filter by name"
+            value={explorer.query}
+            onChange={(e) => explorer.setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && explorer.closeFilter()}
+            className="h-6 min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 text-[13px] outline-none focus:border-[var(--ring)]"
+          />
+          {explorer.query && (
+            <button
+              type="button"
+              aria-label="Clear filter"
+              title="Clear filter"
+              onClick={() => explorer.setQuery("")}
+              className="flex size-5 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+      {explorer.filtering && !shown.length ? (
+        <p className="px-3 py-2 text-[var(--muted-foreground)]">No file names match “{explorer.query.trim()}”.</p>
+      ) : (
+        <FileTreeView
+          files={shown}
+          folders={explorer.folders}
+          // Matches show wherever they are, inside collapsed folders too.
+          allOpen={explorer.filtering}
+          reveal={explorer.reveal}
+          onNewFileIn={canEdit ? (folder) => explorer.startNewFile(`${folder}/`) : undefined}
+          newFile={
+            explorer.newFile !== null && canEdit
+              ? {
+                  folder: folderOf(explorer.newFile).replace(/\/$/, ""),
+                  input: (depth) => (
+                    <NewFileInput
+                      key={explorer.newFile}
+                      initial={explorer.newFile!}
+                      depth={depth}
+                      onDone={explorer.created}
+                      onCancel={explorer.cancelNewFile}
+                    />
+                  ),
+                }
+              : null
+          }
+        />
+      )}
+    </>
+  );
+}
+
+/** Inline box for a new file's path; Enter creates and opens it, Escape cancels. */
+function NewFileInput({
+  initial,
+  depth,
+  onDone,
+  onCancel,
+}: {
+  initial: string;
+  depth: number;
+  onDone: (path: string) => void;
+  onCancel: () => void;
+}) {
+  const { files, create } = useWorkspace();
+  const { open } = useWorkbench().editor;
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  // Leaving the box cancels it, except while it creates the file.
+  const busy = useRef(false);
+  const submit = async () => {
+    if (busy.current) return;
+    const checked = newFilePath(value, new Set(files.map((f) => f.path)));
+    if ("error" in checked) {
+      setError(checked.error);
+      return;
+    }
+    busy.current = true;
+    try {
+      const file = await create(checked.path, "");
+      onDone(file.path);
+      open(file.path);
+    } catch (err) {
+      setError(
+        err instanceof FileExistsError
+          ? `${checked.path} already exists`
+          : err instanceof ReadOnlyFileError
+            ? `${checked.path} is read-only`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+      );
+    } finally {
+      busy.current = false;
+    }
+  };
+  return (
+    <div style={{ paddingLeft: 12 + depth * 12 }} className="pr-2">
+      <div className="flex h-7 items-center gap-1.5">
+        <FilePlus className="size-4 shrink-0 text-[var(--muted-foreground)]" />
+        <input
+          autoFocus
+          aria-label="New file path"
+          title="Type a path; folders in it are created too"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          // Select the name without its folder and extension, ready to type over.
+          onFocus={(e) => {
+            const start = folderOf(initial).length;
+            const dot = initial.lastIndexOf(".");
+            e.currentTarget.setSelectionRange(start, dot > start ? dot : initial.length);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void submit();
+            if (e.key === "Escape") onCancel();
+          }}
+          onBlur={() => !busy.current && onCancel()}
+          className="h-6 min-w-0 flex-1 rounded border border-[var(--ring)] bg-[var(--background)] px-1.5 text-[13px] outline-none"
+        />
+      </div>
+      {error && (
+        <p role="alert" className="pb-1 pl-5 text-[12px] text-[var(--destructive)]">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The place's files as a folder tree (also nested in the knowledge tree). */
+export function FileTree({ files, depth = 0 }: { files: WorkspaceFile[]; depth?: number }) {
+  const folders = useCollapsedFolders();
+  return <FileTreeView files={files} depth={depth} folders={folders} />;
+}
+
+function FileTreeView({
+  files,
+  depth: start = 0,
+  folders: { collapsed, toggle },
+  allOpen = false,
+  reveal = null,
+  onNewFileIn,
+  newFile = null,
+}: {
+  files: WorkspaceFile[];
+  depth?: number;
+  folders: CollapsedFolders;
+  /** Shows every folder open without changing what's remembered. */
+  allOpen?: boolean;
+  /** Scrolls to and focuses this file once its row is shown. */
+  reveal?: { path: string; at: number } | null;
+  /** Adds a "new file here" button to each folder. */
+  onNewFileIn?: (folder: string) => void;
+  /** The new-file box, shown first in its folder (at the top when that isn't here yet). */
+  newFile?: { folder: string; input: (depth: number) => ReactNode } | null;
+}) {
+  const tree = useMemo(() => buildTree(files), [files]);
+  const newFileAt = useMemo(
+    () => (newFile && folderPaths(tree).includes(newFile.folder) ? newFile.folder : ""),
+    [newFile, tree],
+  );
+  const ref = useRef<HTMLDivElement>(null);
+  const revealed = useRef(0);
+
+  // Once per request, as soon as the row is there: the folders it opened, or
+  // the file just created, may only show in a later render.
+  useEffect(() => {
+    if (!reveal || revealed.current === reveal.at) return;
+    const row = [...(ref.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])].find(
+      (el) => el.title === reveal.path,
+    );
+    if (!row) return;
+    revealed.current = reveal.at;
+    row.scrollIntoView({ block: "nearest" });
+    row.focus({ preventScroll: true });
+  }, [reveal, collapsed, tree]);
 
   const render = (folder: Folder, depth: number): ReactNode => (
     <>
+      {newFile && newFileAt === folder.path && newFile.input(depth)}
       {folder.folders.map((sub) => {
-        const isOpen = !collapsed.has(sub.path);
+        const isOpen = allOpen || !collapsed.has(sub.path);
         const Chevron = isOpen ? ChevronDown : ChevronRight;
         return (
           <div key={sub.path} role="group">
-            <button
-              type="button"
-              aria-expanded={isOpen}
-              onClick={() => toggle(sub.path)}
-              style={{ paddingLeft: 8 + depth * 12 }}
-              className="flex h-7 w-full items-center gap-1 pr-2 text-left font-medium hover:bg-[var(--secondary)] cursor-pointer"
-            >
-              <Chevron className="size-4 text-[var(--muted-foreground)]" />
-              {sub.name}
-            </button>
+            <div className="group flex h-7 items-center pr-2 hover:bg-[var(--secondary)]">
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => toggle(sub.path)}
+                style={{ paddingLeft: 8 + depth * 12 }}
+                className="flex h-full min-w-0 flex-1 items-center gap-1 text-left font-medium cursor-pointer"
+              >
+                <Chevron className="size-4 shrink-0 text-[var(--muted-foreground)]" />
+                <span className="truncate">{sub.name}</span>
+              </button>
+              {onNewFileIn && (
+                <button
+                  type="button"
+                  aria-label={`New file in ${sub.path}`}
+                  title="New file in this folder"
+                  onClick={() => onNewFileIn(sub.path)}
+                  className="hidden size-5 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] group-hover:flex group-focus-within:flex cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              )}
+            </div>
             {isOpen && render(sub, depth + 1)}
           </div>
         );
@@ -556,7 +897,11 @@ export function FileTree({ files, depth: start = 0 }: { files: WorkspaceFile[]; 
   );
 
   // Nested in the knowledge tree, this is a group inside that tree.
-  return <div role={start ? "group" : "tree"}>{render(tree, start)}</div>;
+  return (
+    <div ref={ref} role={start ? "group" : "tree"}>
+      {render(tree, start)}
+    </div>
+  );
 }
 
 /**

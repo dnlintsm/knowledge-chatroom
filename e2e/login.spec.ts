@@ -50,7 +50,8 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await aliceTree.getByTestId("knowledge-node").filter({ hasText: TECH }).click();
   await expect(alice.getByRole("navigation", { name: "Location" })).toContainText(TECH);
   await showFiles(alice);
-  await alice.getByRole("button", { name: "New note" }).click();
+  await alice.getByRole("button", { name: "New file", exact: true }).click();
+  await alice.getByRole("textbox", { name: "New file path" }).press("Enter");
   await alice.getByTestId("file-editor").fill("# Overlay\n\nAlignment marks moved to the scribe line.");
   await expectStoredNote(alice, TECH, "# Overlay\n\nAlignment marks moved to the scribe line.");
   await expect(alice.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
@@ -82,7 +83,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.getByRole("treeitem", { name: /untitled-1\.md/ }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("Alignment marks moved");
   await expect(bob.getByText("Read only")).toBeVisible();
-  await expect(bob.getByRole("button", { name: "New note" })).toHaveCount(0);
+  await expect(bob.getByRole("button", { name: "New file", exact: true })).toHaveCount(0);
   await expect(bob.getByRole("button", { name: "Upload files" })).toHaveCount(0);
   await bob.mouse.move(600, 500);
   await shot(bob, "17-read-only-viewer");
@@ -170,7 +171,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("r1");
   await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Workspace" }).click();
   await showFiles(bob);
-  await expect(bob.getByRole("button", { name: "New note" })).toBeVisible();
+  await expect(bob.getByRole("button", { name: "New file", exact: true })).toBeVisible();
 
   // Alice hands ownership to Bob and steps down to editor: the app reloads
   // with her new access, so the Admin button goes away.

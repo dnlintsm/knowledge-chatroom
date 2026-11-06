@@ -364,7 +364,8 @@ test("selection is dropped when its file closes", async ({ page }) => {
 
 test("files and layout survive a reload", async ({ page }) => {
   await gotoReport(page);
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill("# Kept after reload");
   await page.getByRole("button", { name: "Hide chat" }).click();
   await page.reload();
@@ -400,10 +401,60 @@ test("collapsed folders stay collapsed across views and reloads", async ({ page 
   await expect(skill).toBeVisible();
 });
 
+test("file toolbar: collapse all, reveal, filter and new file in a folder", async ({ page }) => {
+  await gotoReport(page);
+  const folder = (name: string) => page.getByRole("button", { name, exact: true });
+  const report = page.locator(`[role="treeitem"][title="${REPORT}"]`);
+
+  // Collapse all, then bring the open report back into view.
+  await page.getByRole("button", { name: "Collapse all folders" }).click();
+  for (const name of ["notes", "runs", "skills", "uploads"]) {
+    await expect(folder(name)).toHaveAttribute("aria-expanded", "false");
+  }
+  await expect(report).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Expand all folders" })).toBeVisible();
+  await page.getByRole("button", { name: "Reveal open file" }).click();
+  await expect(report).toBeFocused();
+  await expect(folder("runs")).toHaveAttribute("aria-expanded", "true");
+  await expect(folder("notes")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "Collapse all folders" })).toBeVisible();
+  await shot(page, "35-file-toolbar-reveal");
+
+  // The name filter shows matches inside collapsed folders, without opening them for good.
+  await page.getByRole("button", { name: "Filter files" }).click();
+  await page.getByRole("searchbox", { name: "Filter files by name" }).fill("csv");
+  await expect(page.getByRole("treeitem", { name: /effects\.csv/ })).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /sales\.csv/ })).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toHaveCount(0);
+  await shot(page, "35b-file-filter");
+  await page.getByRole("searchbox", { name: "Filter files by name" }).fill("no such file");
+  await expect(page.getByText("No file names match")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Filter files by name" }).press("Escape");
+  await expect(page.getByRole("searchbox", { name: "Filter files by name" })).toHaveCount(0);
+  await expect(folder("uploads")).toHaveAttribute("aria-expanded", "false");
+
+  // A new file in a folder, by its + button; a taken name is refused.
+  await folder("etch-2026-10-01").hover();
+  await page.getByRole("button", { name: "New file in runs/etch-2026-10-01" }).click();
+  const box = page.getByRole("textbox", { name: "New file path" });
+  await expect(box).toHaveValue("runs/etch-2026-10-01/untitled-1.md");
+  await box.pressSequentially("report");
+  await box.press("Enter");
+  await expect(page.getByRole("alert").filter({ hasText: `${REPORT} already exists` })).toBeVisible();
+  await box.fill("runs/etch-2026-10-01/plots/notes");
+  await shot(page, "35c-new-file");
+  await box.press("Enter");
+  const created = page.locator('[role="treeitem"][title="runs/etch-2026-10-01/plots/notes.md"]');
+  await expect(created).toBeVisible();
+  await expect(created).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /notes\.md/ })).toBeVisible();
+});
+
 test("rename a file", async ({ page }) => {
   const NOTES = "notes";
   await gotoReport(page);
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill("# Etch plan");
   const row = page.getByRole("treeitem", { name: /untitled-1\.md/ });
   await row.getByRole("button", { name: `Rename ${NOTES}/untitled-1.md` }).click();
@@ -420,7 +471,8 @@ test("rename a file", async ({ page }) => {
   await expect(page.getByTestId("file-preview")).toContainText("Etch plan");
 
   // A taken name is refused, and the file keeps its name.
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   const taken = (await page.getByRole("treeitem", { name: /untitled-\d+\.md/ }).innerText()).trim();
   await renamed.hover();
   await renamed.getByRole("button", { name: `Rename ${NOTES}/etch-plan.md` }).click();
