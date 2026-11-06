@@ -338,7 +338,10 @@ export class MemoryPackHub {
           VALUES (${memoryId}, ${next}, ${note.description}, ${note.type}, ${note.body}, ${userId}, 'user')`;
       }
       // Notes the version no longer has.
-      for (const gone of existing.values()) await db`DELETE FROM shared_memories WHERE id = ${gone.id}`;
+      if (existing.size > 0) {
+        const goneIds = Array.from(existing.values(), (gone) => gone.id);
+        await db`DELETE FROM shared_memories WHERE id = ANY(${goneIds}::uuid[])`;
+      }
       return installId;
     });
     return (await this.installs(userId)).find((i) => i.id === id)!;
