@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ClaudeAgentAdapter } from "@ag-ui/claude-agent-sdk";
+import { AbstractAgent, EventType, type BaseEvent } from "@ag-ui/client";
 import type { RunAgentInput } from "@ag-ui/core";
+import { Observable } from "rxjs";
 
 // The agent only adds workspace file tools when storage is configured.
 process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL || "postgres://localhost/unused";
@@ -62,4 +65,74 @@ test("outside MCP servers are pre-approved and get each run's signed user", () =
   const run = runAs("alice", () => adapter.buildOptions(input), null, () => {}, (server) => `alice-for-${server}`);
   assert.deepEqual((run.mcpServers?.lab as { headers?: object }).headers, { "x-knowledge-user": "alice-for-lab" });
   assert.ok(run.mcpServers?.copilotkit);
+});
+
+// A Claude SDK stream for one turn: a thinking block, then the answer.
+async function* thinkThenAnswer(turn: number) {
+  const id = `msg_${turn}`;
+  const event = (e: object) => ({ type: "stream_event", event: e });
+  yield event({ type: "message_start", message: { id } });
+  yield event({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } });
+  yield event({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: `thought ${turn}` } });
+  yield event({ type: "content_block_stop", index: 0 });
+  yield event({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } });
+  yield event({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: `answer ${turn}` } });
+  yield event({ type: "content_block_stop", index: 1 });
+  yield event({ type: "message_stop" });
+  yield {
+    type: "assistant",
+    uuid: `uuid-${turn}`,
+    message: { id, content: [{ type: "thinking", thinking: `thought ${turn}`, signature: "s" }, { type: "text", text: `answer ${turn}` }] },
+  };
+}
+
+test("every turn keeps its thinking block after the reply finishes (#156)", async (t) => {
+  // The adapter's own event handling, fed a recorded stream instead of Claude.
+  type Stream = (...args: unknown[]) => Promise<void>;
+  const proto = ClaudeAgentAdapter.prototype as unknown as { run: ClaudeAgentAdapter["run"]; streamMessages: Stream };
+  const realRun = proto.run;
+  t.after(() => {
+    proto.run = realRun;
+  });
+  const inputs: RunAgentInput[] = [];
+  proto.run = function (this: typeof proto, runInput: RunAgentInput) {
+    inputs.push(runInput);
+    return new Observable<BaseEvent>((sub) => {
+      const { threadId, runId } = runInput;
+      sub.next({ type: EventType.RUN_STARTED, threadId, runId } as BaseEvent);
+      this.streamMessages(thinkThenAnswer(inputs.length), threadId, runId, runInput, new Set(), sub, { currentState: {} })
+        .then(() => {
+          sub.next({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent);
+          sub.complete();
+        })
+        .catch((err: unknown) => sub.error(err));
+    });
+  } as ClaudeAgentAdapter["run"];
+
+  // The browser's side, as CopilotKit's chat applies the events.
+  class Chat extends AbstractAgent {
+    run(runInput: RunAgentInput) {
+      return adapter.run(runInput);
+    }
+  }
+  const chat = new Chat({ threadId: "t" });
+  const debug = console.debug;
+  console.debug = () => {};
+  t.after(() => {
+    console.debug = debug;
+  });
+  for (const turn of [1, 2, 3]) {
+    chat.addMessage({ id: `user-${turn}`, role: "user", content: `question ${turn}` });
+    await chat.runAgent();
+  }
+
+  assert.deepEqual(
+    chat.messages.map((m) => `${m.role}: ${m.content}`),
+    ["user: question 1", "reasoning: thought 1", "assistant: answer 1"]
+      .concat(["user: question 2", "reasoning: thought 2", "assistant: answer 2"])
+      .concat(["user: question 3", "reasoning: thought 3", "assistant: answer 3"]),
+  );
+  // The chat sends earlier thinking back; the adapter never gets it.
+  assert.equal(inputs.length, 3);
+  assert.ok(inputs.every((i) => i.messages.every((m) => m.role !== "reasoning")));
 });
