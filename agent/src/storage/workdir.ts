@@ -40,6 +40,8 @@ export const MANIFEST = ".workspace-manifest.json";
 const PLACES = ".places.json";
 /** Inputs of runs started this turn: run-inputs/<run id>/<name>. */
 export const RUN_INPUTS_DIR = "run-inputs";
+/** Places (root, nodes, experiments) listed at once while syncing. */
+export const LIST_CONCURRENCY = 8;
 
 /** On by default with storage; AGENT_WORKDIR=off turns it off. */
 export const workdirEnabled = () => process.env.AGENT_WORKDIR !== "off";
@@ -163,9 +165,43 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
   };
   walk(null, "nodes");
 
-  const collectTasks: Promise<void>[] = [];
-  const collect = async (files: FilesSession, folder: string, children?: Set<string>) => {
-    for (const info of await files.list()) {
+  // Every place the user can read, in a fixed order: root, nodes, experiments.
+  const sources: { place: Place; folder: string; open: () => Promise<FilesSession>; children?: Set<string> }[] = [];
+  if (rootRole) {
+    sources.push({ place: { folder: `${WORKSPACE_DIR}/root`, root: true, role: rootRole }, folder: "root", open: () => session.files(null) });
+  }
+  for (const node of nodes) {
+    const folder = folders.get(node.id)!;
+    if (!node.role) continue;
+    sources.push({
+      place: { folder: `${WORKSPACE_DIR}/${folder}`, node: node.id, role: node.role },
+      folder,
+      open: () => session.files(node.id),
+      children: childNames.get(node.id),
+    });
+  }
+  for (const experiment of experiments) {
+    const folder = `experiments/${folderName(experiment.title)} (${experiment.id.slice(0, 8)})`;
+    sources.push({
+      place: { folder: `${WORKSPACE_DIR}/${folder}`, experiment: experiment.id, role: experiment.access },
+      folder,
+      open: () => session.experimentFiles(experiment.id),
+    });
+  }
+
+  // Each place costs an access check and a file listing: a few at a time is
+  // faster than one by one without flooding the database in a big workspace.
+  const listed: { files: FilesSession; infos: Awaited<ReturnType<FilesSession["list"]>> }[] = [];
+  await pool([...sources.keys()], LIST_CONCURRENCY, async (i) => {
+    const files = await sources[i].open();
+    listed[i] = { files, infos: await files.list() };
+  });
+
+  // Gathered in place order, so the result doesn't depend on which listing finished first.
+  for (const [i, { place, folder, children }] of sources.entries()) {
+    places.push(place);
+    const { files, infos } = listed[i];
+    for (const info of infos) {
       if (children?.has(info.path.split("/")[0])) {
         skipped.push({ path: `${folder}/${info.path}`, reason: "a child node has this name" });
         continue;
@@ -173,25 +209,7 @@ async function sync(session: Session, cwd: string, limits: WorkdirLimits): Promi
       const rel = `${folder}/${info.path}`;
       wanted.set(rel, { rel, sha256: info.sha256, size: info.size, files, path: info.path });
     }
-  };
-
-  if (rootRole) {
-    places.push({ folder: `${WORKSPACE_DIR}/root`, root: true, role: rootRole });
-    collectTasks.push(session.files(null).then((files) => collect(files, "root")));
   }
-  for (const node of nodes) {
-    const folder = folders.get(node.id)!;
-    if (!node.role) continue;
-    places.push({ folder: `${WORKSPACE_DIR}/${folder}`, node: node.id, role: node.role });
-    collectTasks.push(session.files(node.id).then((files) => collect(files, folder, childNames.get(node.id))));
-  }
-  for (const experiment of experiments) {
-    const folder = `experiments/${folderName(experiment.title)} (${experiment.id.slice(0, 8)})`;
-    places.push({ folder: `${WORKSPACE_DIR}/${folder}`, experiment: experiment.id, role: experiment.access });
-    collectTasks.push(session.experimentFiles(experiment.id).then((files) => collect(files, folder)));
-  }
-
-  await Promise.all(collectTasks);
 
   // Newest-first would need dates; smallest-first keeps the most files under the cap.
   let bytes = 0;
@@ -314,13 +332,28 @@ export async function writeRunInputs(
   return out;
 }
 
+/**
+ * Runs `fn` over `items`, at most `size` at a time. After a failure no new
+ * item starts, and it throws only once the started ones have finished, so
+ * nothing from this call is still running when the caller sees the error.
+ */
 async function pool<T>(items: T[], size: number, fn: (item: T) => Promise<void>) {
   let next = 0;
+  let failed = false;
+  let firstError: unknown;
   await Promise.all(
     Array.from({ length: Math.min(size, items.length) }, async () => {
-      while (next < items.length) await fn(items[next++]);
+      while (!failed && next < items.length) {
+        try {
+          await fn(items[next++]);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      }
     }),
   );
+  if (failed) throw firstError;
 }
 
 /** Whether `target` (after following links) is `root` or inside it. */
