@@ -110,11 +110,12 @@ export const scriptsEnabled = () => process.env.SKILL_SCRIPTS === "on";
 
 /**
  * What a script run keeps of the server's environment: nothing secret, since
- * its commands see all of it. (Proxy settings can hold passwords, and the run
+ * its commands see all of it. The context-window settings (.env.example) keep
+ * auto-compact working the same in these runs. (Proxy settings can hold passwords, and the run
  * only talks to the key proxy on 127.0.0.1.)
  */
 const RUN_ENV =
-  /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|LC_[A-Z]+|TZ|TERM|TMPDIR|ANTHROPIC_(MODEL|SMALL_FAST_MODEL|DEFAULT_[A-Z]+_MODEL))$/;
+  /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|LC_[A-Z]+|TZ|TERM|TMPDIR|ANTHROPIC_(MODEL|SMALL_FAST_MODEL|DEFAULT_[A-Z]+_MODEL)|CLAUDE_CODE_AUTO_COMPACT_WINDOW|CLAUDE_CODE_MAX_CONTEXT_TOKENS|CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)$/;
 
 /** Where containers usually mount credentials (Docker, Kubernetes, some hosts). */
 const SECRET_MOUNTS = ["/run/secrets", "/var/run/secrets", "/etc/secrets"];

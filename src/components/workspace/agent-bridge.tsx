@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilotkit/react-core/v2";
 import { useActions } from "./actions";
+import { applyEdit } from "../../../shared/text-edit";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { findReport, runsUnder } from "./runs";
@@ -22,7 +23,7 @@ const MAX_CONTEXT_CHARS = 20_000;
  *   every run so "summarize this" or "rewrite the selected part" just works;
  * - run payload: the user and their place as forwardedProps, for a backend to
  *   set up its agent with (use-chatroom-props.ts);
- * - frontend tools: list / read / write / open files, open the task board, and
+ * - frontend tools: list / read / write / edit / open files, open the task board, and
  *   the workbench: show or hide panes, list and open runs, list and run the
  *   current run's actions (only those marked agentInvocable, with the user's
  *   role, through the same runner as the Actions block).
@@ -161,6 +162,38 @@ export function useWorkspaceAgent() {
       const file = latest.current.write(path, content, { author: "agent" });
       latestWorkbench.current.editor.open(file.path);
       return { ok: true, path: file.path, created: !existed };
+    },
+  }, [browserFiles]);
+
+  useFrontendTool({
+    name: "editWorkspaceFile",
+    available: browserFiles,
+    description:
+      "Change part of an existing text file: replaces oldText, copied exactly from the file (without the line numbers), with newText, then opens the file for the user. Prefer this to writeWorkspaceFile for any change to a file that already exists: it keeps the chat small. oldText must match exactly one place unless replaceAll is set, so include a few surrounding lines when a snippet repeats. The result shows the changed lines.",
+    parameters: z.object({
+      path: z.string().describe("Workspace path of the file, e.g. artifacts/page.html"),
+      oldText: z.string().describe("The exact text to replace, without line numbers."),
+      newText: z.string().describe("The replacement text (empty to delete oldText)."),
+      replaceAll: z.boolean().optional().describe("Replace every occurrence instead of exactly one. Default false."),
+    }),
+    handler: async ({ path, oldText, newText, replaceAll }) => {
+      const existing = latest.current.getFile(path);
+      if (!existing) return { error: `No file at ${path}. Use writeWorkspaceFile to create it.` };
+      if (existing.readOnly) return { error: `${existing.path} is read-only: it can't be changed or deleted.` };
+      if (!isTextFile(existing)) return { error: `${existing.path} is not a text file.` };
+      if (existing.unloaded) return { error: FILES_LOADING };
+      const edit = applyEdit(existing.content, { oldText, newText, replaceAll });
+      if (!edit.ok) return { error: edit.error };
+      const file = latest.current.write(existing.path, edit.content, { author: "agent" });
+      latestWorkbench.current.editor.open(file.path);
+      const [from, to] = edit.lines;
+      const first = Math.max(1, from - 2);
+      const changed = numberLines(edit.content)
+        .split("\n")
+        .slice(first - 1, to + 2)
+        .join("\n")
+        .slice(0, 4_000);
+      return { ok: true, path: file.path, replacements: edit.replacements, changedLines: changed };
     },
   }, [browserFiles]);
 
