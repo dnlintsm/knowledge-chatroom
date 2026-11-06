@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useMemo, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { FileText, FlaskConical, History, MessageSquarePlus, TextSelect } from "lucide-react";
-import { CopilotChat, useCopilotChatConfiguration, type CopilotChatInput } from "@copilotkit/react-core/v2";
+import {
+  CopilotChat,
+  useCopilotChatConfiguration,
+  type CopilotChatAssistantMessage,
+  type CopilotChatAssistantMessageProps,
+  type CopilotChatInput,
+  type CopilotChatReasoningMessage,
+  type Message,
+} from "@copilotkit/react-core/v2";
 import { defaultRehypePlugins } from "streamdown";
 import { cn } from "@/lib/utils";
+import { ChatStepsProvider, ReasoningStep, StepAssistantMessage, StepsModeButton, stepRows, useChatSteps } from "./agent-steps-view";
 import { ChatHistory } from "./chat-history";
 import { FileIcon } from "./file-icon";
 import { parseFileRef, rootRelativeLinks, type FileRef } from "./file-refs";
@@ -18,16 +27,28 @@ import { useWorkbench } from "./workbench";
 const { harden, ...beforeHarden } = defaultRehypePlugins;
 
 /** Defined once: CopilotKit memoizes chat slots by identity. */
-const MESSAGE_VIEW = {
-  assistantMessage: {
-    markdownRenderer: {
-      components: { a: AnswerLink },
-      rehypePlugins: [...Object.values(beforeHarden), rootRelativeLinks, harden],
-    },
-  },
+const MARKDOWN = {
+  components: { a: AnswerLink },
+  rehypePlugins: [...Object.values(beforeHarden), rootRelativeLinks, harden],
 };
 
+/** Answers, and narration inside a steps block (agent-steps-view.tsx). */
+function AssistantMessage(props: CopilotChatAssistantMessageProps) {
+  return <StepAssistantMessage markdownRenderer={MARKDOWN} {...props} />;
+}
+
+const groupWhileRunning = (messages: Message[]) => stepRows(messages, true);
+const groupWhenIdle = (messages: Message[]) => stepRows(messages, false);
+
 export function ChatPane() {
+  return (
+    <ChatStepsProvider>
+      <ChatPaneView />
+    </ChatStepsProvider>
+  );
+}
+
+function ChatPaneView() {
   const { activeFile, selection, experiment } = useWorkspace();
   const { chat } = useWorkbench();
   // Past chats show in place of the conversation (on phones the list slides
@@ -43,6 +64,18 @@ export function ChatPane() {
     setShownThread(threadId);
     chatConfig?.setDrawerOpen(false);
   }, [threadId, shownThread, chatConfig]);
+  // Each turn's thinking and tool calls fold into one block (issue #154). The
+  // grouping only changes when a run starts or ends, so the view is rebuilt then.
+  const { running } = useChatSteps();
+  const messageView = useMemo(
+    () => ({
+      // A slot may be any component taking the message's props; the type asks for its statics too.
+      assistantMessage: AssistantMessage as typeof CopilotChatAssistantMessage,
+      reasoningMessage: ReasoningStep as typeof CopilotChatReasoningMessage,
+      groupMessages: running ? groupWhileRunning : groupWhenIdle,
+    }),
+    [running],
+  );
   const headerButton =
     "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer";
 
@@ -75,6 +108,7 @@ export function ChatPane() {
         >
           <History className="size-4" />
         </button>
+        <StepsModeButton className={headerButton} />
       </header>
 
       {/* What Claude can see right now, so "this file" never feels like magic. */}
@@ -119,7 +153,7 @@ export function ChatPane() {
           attachments={{ enabled: true }}
           // A slot may be any component taking the input's props; the type asks for its statics too.
           input={SkillChatInput as typeof CopilotChatInput}
-          messageView={MESSAGE_VIEW}
+          messageView={messageView}
           className="h-full"
         />
       </div>
