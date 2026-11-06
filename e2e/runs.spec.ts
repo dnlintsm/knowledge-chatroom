@@ -333,5 +333,6 @@ test("each chat run in a run tells the agent which run (docs/remote-agent.md)", 
       id: run.id, node_id: null, title: "Etch props", status: "draft", state: "ready", can_change: true, report: "report.md",
     },
     selected_path: "data/effects.csv",
+    tools: [],
   });
 });

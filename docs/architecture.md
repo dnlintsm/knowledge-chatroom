@@ -280,6 +280,25 @@ and streams back only that tool call. Nothing is stored and no tools run. The br
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
 
+### Agent steps in the chat
+
+Each turn's thinking, tool calls and narration ("Let me read the file") fold into one block
+above the answer (issue #154): "Worked for 14s · 5 steps", with a live status line ("Reading
+notes/x.md…") and a timer while the run lasts. `groupSteps()` in
+`src/components/workspace/agent-steps.ts` makes the rows that CopilotKit's `groupMessages`
+renders: a turn's answer is its last assistant message with text, and the steps before it go
+into the block (while the turn runs, text that came with tool calls is narration). The block
+(`agent-steps-view.tsx`) always renders its messages, inside a context the step renderers read:
+the thinking row, narration and the generic tool row (`src/components/tool-rendering.tsx`) hide
+while the block is closed, so paper cards, charts, A2UI and a tool waiting for the user still
+show. Follow-up chips sit under the message list and are not affected.
+
+The chat header's steps button switches between Compact (closed blocks) and Detailed (open
+blocks with every tool's arguments and result), per user in `localStorage`; `CHAT_STEPS=detailed`
+on the UI makes Detailed the default. Durations come from the events' `timestamp`, which the chat
+runner (`src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
+from the history still says how long its steps took.
+
 ### Chat history
 
 Each user's chats are kept on the server, so they come back after a reload or a restart
