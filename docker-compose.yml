@@ -114,6 +114,7 @@ services:
       AGENT_URL: ${AGENT_URL:-}
       AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
+      CHAT_STEPS: ${CHAT_STEPS:-}
     ports:
       - "3000:3000"
     depends_on:
@@ -134,6 +135,23 @@ services:
       # this server the agent's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).
       KNOWLEDGE_PUBLIC_KEY: ""
+
+  # --- Paper search (examples/papers-mcp, issue #151) ---
+  # Add `--profile papers` and, in .env,
+  # MCP_SERVERS={"mcpServers":{"papers":{"url":"http://papers:9200/mcp","forwardIdentity":true,"storageAccess":true,"ui":{"label":"Search papers","chip":"Papers","icon":"book-open","tools":["search_papers","get_paper","save_paper"]}}}}
+  papers:
+    profiles: [papers]
+    build: ./examples/papers-mcp
+    environment:
+      PAPERS_NAME: papers
+      # save_paper writes through the storage API as the calling user.
+      KNOWLEDGE_STORAGE_URL: http://agent:8000
+      # The demo has no login, so every call is the local user. With login, give
+      # this server the agent's public key, never AUTH_SECRET.
+      KNOWLEDGE_PUBLIC_KEY: ""
+      # Optional: a bigger OpenAlex budget, and the "polite pool".
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      OPENALEX_MAILTO: ${OPENALEX_MAILTO:-}
 
 volumes:
   postgres-data:

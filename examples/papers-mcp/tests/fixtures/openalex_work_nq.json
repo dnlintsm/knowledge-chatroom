@@ -1,0 +1,31 @@
+{
+ "id": "https://openalex.org/W2963403868",
+ "doi": "https://doi.org/10.1162/tacl_a_00276",
+ "display_name": "Natural Questions: A Benchmark for Question Answering Research",
+ "publication_year": 2019,
+ "publication_date": "2019-08-01",
+ "authorships": [
+  {
+   "author": {
+    "id": "https://openalex.org/A9",
+    "display_name": "Tom Kwiatkowski"
+   }
+  }
+ ],
+ "primary_location": {
+  "landing_page_url": "https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00276",
+  "pdf_url": null,
+  "source": {
+   "id": "https://openalex.org/S2",
+   "display_name": "Transactions of the Association for Computational Linguistics"
+  }
+ },
+ "best_oa_location": null,
+ "open_access": {
+  "is_oa": false
+ },
+ "cited_by_count": 2100,
+ "abstract_inverted_index": null,
+ "locations": [],
+ "referenced_works_count": 30
+}

@@ -69,6 +69,11 @@ the agent's `POST /suggest` makes one small-model call for follow-ups:
 not a Claude model). `CHAT_SUGGESTIONS=static` on the UI keeps the first-round chips
 and makes no extra calls. See [Chat suggestions](architecture.md#chat-suggestions).
 
+Each answer's thinking and tool calls fold into one "Worked for 14s · 5 steps" line above it.
+The steps button in the chat header switches a user to Detailed (every step open, with its
+arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. See
+[Agent steps in the chat](architecture.md#agent-steps-in-the-chat).
+
 ## Skills
 
 Built-in skills live in `agent/skills/`; with server storage, the agent also loads
@@ -125,6 +130,33 @@ hour), and only the storage API takes it. Servers must not connect to the databa
 or object store directly: the app's connection owns the tables, so row security
 doesn't apply to it, and presigned links skip every check.
 
+A `ui` block puts a server in the chat's "+" menu (#151), next to "Add attachments":
+
+```json
+"papers": {"url": "http://localhost:9200/mcp", "forwardIdentity": true, "storageAccess": true,
+           "ui": {"label": "Search papers", "chip": "Papers", "icon": "book-open",
+                  "mode": "auto", "tools": ["search_papers", "get_paper", "save_paper"]}}
+```
+
+Picking it puts a chip (`chip`, default `label`) above the message box. The chip stays on
+for that chat (remembered in the browser) until the user removes it. While it is on, every
+run carries it as `forwardedProps.knowledge_chatroom.tools`, and the agent adds a prompt
+line telling Claude to answer with that server's tools. With `"mode": "auto"` (the default)
+Claude has the tools in every run anyway. With `"manual"` they are left out of runs
+without the chip. `icon` is a lucide name (`book-open`, `globe`, `search`,
+`database`; otherwise a wrench). `tools` lists the tools the app itself may call for the
+signed-in user, as the paper cards' Save button does:
+
+| Route (agent server, `/api/tools` in the app) | Answer |
+| --- | --- |
+| `GET /tools` | `{tools: [{server, label, chip, description, icon, mode, callable}]}` |
+| `POST /tools/<server>/<tool>` with `{arguments: {...}}` | `{result, text}`: the tool's structured content (or the JSON in its text). `422 {error}` is the tool's own error, `403` a tool not in `tools`, `502` a server that is down. |
+
+The call reaches the server with the same `X-Knowledge-User` and `X-Knowledge-Storage`
+headers a chat run sends, so the server sees the same person either way. `ui` needs an
+http or sse server. [examples/papers-mcp](../examples/papers-mcp/README.md) is the paper
+search server for it.
+
 `memoryAccess` gives a server the user's memory in the chat that calls it (#93):
 in runs where memory is on, each run also sends an `X-Knowledge-Memory` token
 (aud `memory`, with the chat's `thread` and `node`; without login an unsigned
@@ -137,6 +169,8 @@ Incognito chats and memory turned off get no token, and each call checks again.
 [examples/python-agent](../examples/python-agent/README.md) is a complete sample:
 a Python agent's prompt moved into a skill and its tools into an MCP server, with
 the forwarded user checked and tests. Start there when bringing a Python agent in.
+[examples/papers-mcp](../examples/papers-mcp/README.md) is another one: paper
+search, with workspace writes through `storageAccess`.
 
 A minimal Python server (`pip install mcp`; with mcp 1.x import `FastMCP` from
 `mcp.server.fastmcp` instead):
@@ -183,6 +217,24 @@ Postgres with `DATABASE_URL` and in memory without it ([Architecture](architectu
 `CPK_INTELLIGENCE_API_KEY` is optional and keeps threads in CopilotKit Intelligence
 instead. Its browser gate is resolved at build time, so rebuild after changing it for a
 production run.
+
+## Dependency security
+
+The root and agent lockfiles are audited separately (`npm audit` and
+`npm --prefix agent audit`). Their overrides pin patched transitive versions of
+`body-parser`, `follow-redirects`, `graphql-scalars`, and `undici`; the agent
+also aligns AG-UI packages on 1.0.4 to use Zod 4. When updating these dependencies,
+recheck the overrides and run the build and tests before removing them. The
+`undici` and `graphql-scalars` overrides cross an upstream major-version range,
+so also test any enabled provider or integration that relies on them.
+
+The UI still depends on Zod 3 through CopilotKit, which declares a Zod 3 range.
+It is affected by [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)
+and has no compatible patched 3.x release. Monitor upstream for a compatible
+upgrade; forcing Zod 4 across that dependency tree can break the app. On shared
+deployments, configure request-size limits at the reverse proxy according to the
+files and requests the deployment needs. This reduces exposure to oversized
+inputs but is not a substitute for upgrading the affected dependency.
 
 ## Troubleshooting
 
