@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { MemoryStatus } from "./memory";
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
+import { ToolChipRow, toolsMenuItems, useToolMenu } from "./tool-menu";
 
 /**
  * Skill management in the workspace (issue #7):
@@ -494,6 +495,16 @@ export function SkillChatInput(props: ChatInputProps) {
 
   const pick = (skill: SkillInfo) => props.onChange?.(`/${skill.name} `);
 
+  // The "+" menu's tool servers (tool-menu.tsx), and buttons that fill this box.
+  const tools = useToolMenu();
+  const { registerComposer } = tools;
+  const onChange = props.onChange;
+  useEffect(() => {
+    registerComposer(onChange ? (text) => onChange(text) : null);
+    return () => registerComposer(null);
+  }, [registerComposer, onChange]);
+  const toolsMenu = useMemo(() => toolsMenuItems(tools), [tools]);
+
   const slash: SlashMenu = {
     onKey: (e) => {
       if (!open || e.nativeEvent.isComposing) return false;
@@ -554,10 +565,12 @@ export function SkillChatInput(props: ChatInputProps) {
             </div>
           </div>
         )}
+        <ToolChipRow />
         <CopilotChatInput
           {...props}
-          // CopilotKit opens its own "/" menu (attach file) when it has items; ours replaces it.
+          // CopilotKit opens its own "/" menu (attach file, tools) when it has items; ours replaces it.
           onAddFile={value.startsWith("/") ? undefined : props.onAddFile}
+          toolsMenu={value.startsWith("/") ? undefined : toolsMenu}
           textArea={SkillTextArea}
           disclaimer={() => null}
         />
