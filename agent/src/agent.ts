@@ -157,9 +157,25 @@ export const runAs = <T>(
 // The adapter's own extra arguments (profile options, frontend tool results).
 type OptionsRest = Parameters<ClaudeAgentAdapter["buildOptions"]> extends [unknown, ...infer R] ? R : never;
 
+/**
+ * The chat sends earlier turns' thinking back with each run. The adapter's
+ * end-of-run MESSAGES_SNAPSHOT is the input's messages plus this run's text
+ * and tool calls (never its thinking), and the chat keeps a thinking block
+ * the snapshot lacks only when the snapshot carries no thinking at all. So
+ * with earlier thinking in the input, each turn after the first lost its
+ * thinking block when the reply finished (#156). The adapter never reads
+ * thinking from the input (Claude resumes its own session), so drop it.
+ */
+function withoutReasoning(input: RunAgentInput): RunAgentInput {
+  const messages = input.messages ?? [];
+  const kept = messages.filter((message) => message.role !== "reasoning");
+  return kept.length === messages.length ? input : { ...input, messages: kept };
+}
+
 class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
   // Slash commands only for the run's own skills (guardSlashCommand).
-  override run(input: RunAgentInput) {
+  override run(sent: RunAgentInput) {
+    const input = withoutReasoning(sent);
     const messages = input.messages ?? [];
     const last = messages[messages.length - 1];
     if (last?.role !== "user") return super.run(input);
