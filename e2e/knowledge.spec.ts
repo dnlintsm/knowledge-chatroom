@@ -60,7 +60,8 @@ test("knowledge tree", async ({ page }) => {
 
   // A note written in the module is saved there, not at the workspace root.
   await showFiles(page);
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill(`# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expectStoredNote(page, MODULE, `# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
@@ -108,7 +109,8 @@ test("experiments", async ({ page, request }) => {
   await node("Main etch").click();
   await expect(location).toContainText("Main etch");
   await showFiles(page);
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill("# Main etch recipe\n\nRF power: 300 W\nPressure: 30 mTorr");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 

@@ -69,3 +69,25 @@ test("a page load lists the files and fetches a text file only when it is opened
     for (const p of lazy) await request.delete(`/api/files/${p}`);
   }
 });
+
+test("refresh lists files the live updates missed", async ({ page, request }) => {
+  await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
+  const missed = "notes/missed-update.md";
+  // No live updates: the file below only shows after a refresh.
+  await page.route(
+    (u) => u.pathname === "/api/files" && u.searchParams.has("watch"),
+    (route) => route.abort(),
+  );
+  try {
+    await page.goto("/");
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await showFiles(page);
+    await expect(page.getByRole("treeitem").first()).toBeVisible();
+    expect((await request.put(`/api/files/${missed}`, { data: "# Missed", headers })).ok()).toBe(true);
+    await expect(page.getByRole("treeitem", { name: /missed-update\.md/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Refresh files" }).click();
+    await expect(page.getByRole("treeitem", { name: /missed-update\.md/ })).toBeVisible();
+  } finally {
+    await request.delete(`/api/files/${missed}`);
+  }
+});

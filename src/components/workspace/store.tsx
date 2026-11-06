@@ -148,6 +148,13 @@ interface WorkspaceValue {
    */
   rename: (from: string, to: string) => Promise<WorkspaceFile>;
   setSelection: (text: string) => void;
+  /**
+   * Lists this place's files on the server again (and the tree and
+   * proposals), as the live updates do after a dropped connection. Does
+   * nothing without server storage; throws with a message when storage
+   * can't be reached.
+   */
+  refresh: () => Promise<void>;
   /** Where files are kept; see the comment at the top of this file. */
   storageMode: StorageMode;
   /** A failed save, retained until all failed files have saved successfully. */
@@ -693,6 +700,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [sync, upsert, resync],
   );
 
+  const refresh = useCallback(async () => {
+    if (mode.current !== "server") return;
+    const at = placeRef.current;
+    const [list] = await Promise.all([listServerFiles(at), refreshTree(), refreshProposals()]);
+    if (placeRef.current !== at) return; // The user moved; that move loaded its own files.
+    if (list === null && at) {
+      await enterNode(null); // This place was deleted.
+      return;
+    }
+    if (!Array.isArray(list)) throw new Error("Couldn't reach storage to refresh the files.");
+    await resync(list);
+  }, [resync, refreshTree, refreshProposals, enterNode]);
+
   const createNode = useCallback(
     async (parentId: NodeId, name: string) => {
       const created = await createServerNode(parentId, name);
@@ -812,6 +832,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       create,
       remove,
       rename,
+      refresh,
       setSelection,
       storageMode,
       syncError,
@@ -839,7 +860,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       promote,
     };
   }, [
-    state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
     updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
