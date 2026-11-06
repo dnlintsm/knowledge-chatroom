@@ -683,6 +683,7 @@ test("preview images, code, HTML, tables, audio and other files", async ({ page 
     { name: "chamber-tone.wav", mimeType: "audio/wav", buffer: toneWav() },
     { name: "photo.heic", mimeType: "image/heic", buffer: Buffer.from("not an image the browser can show") },
     { name: "raw-data.zip", mimeType: "application/zip", buffer: Buffer.from("PK") },
+    { name: "etch-notes.md", mimeType: "text/markdown", buffer: Buffer.from("# Etch notes\n\nThe capture, next to this note:\n\n![Etch report](./etch-report.png)\n") },
   ]);
   const openFile = (name: string) => page.getByRole("treeitem", { name: new RegExp(name.replace(".", "\\.")) }).click();
 
@@ -714,6 +715,13 @@ test("preview images, code, HTML, tables, audio and other files", async ({ page 
 
   await openFile("raw-data.zip");
   await expect(page.getByRole("link", { name: "Download" })).toBeVisible();
+
+  // A Markdown image with a path relative to the note shows the workspace file.
+  await openFile("etch-notes.md");
+  const image = page.getByTestId("file-preview").getByRole("img", { name: "Etch report" });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);
+  await shot(page, "30f-markdown-image");
 });
 
 test("files loading", async ({ page }) => {

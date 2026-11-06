@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
@@ -10,6 +10,7 @@ import { parseCsv } from "./csv";
 import { ExperimentPanel, RunsPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
 import { Centered, CodePreview, HtmlPreview, MediaPreview, NoPreview } from "./file-previews";
+import { workspaceImages, workspaceImagePath, type WorkspaceImagesOptions } from "./markdown-images";
 import { MemoryEditor } from "./memory";
 import { ReviewPanel } from "./review-panel";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
@@ -38,7 +39,9 @@ const BUILT_IN_TABS = {
 
 type Mode = "preview" | "edit";
 
-const PREVIEW_REHYPE_PLUGINS = [...Object.values(defaultRehypePlugins), sourceLines];
+// Streamdown's harden step blocks bare relative image paths, so workspaceImages
+// points images at workspace files just before it runs.
+const { harden, ...beforeHarden } = defaultRehypePlugins;
 
 // Text files with a rendered view besides the editor.
 const RENDERED = new Set(["markdown", "table", "html", "code"]);
@@ -244,7 +247,7 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
         className="mx-auto max-w-3xl px-8 py-8 text-[15px] leading-relaxed"
       >
         {kind === "markdown" ? (
-          <Markdown text={file.content} />
+          <Markdown text={file.content} path={file.path} />
         ) : kind === "code" ? (
           <CodePreview file={file} />
         ) : (
@@ -277,8 +280,30 @@ function FileView({ file, mode }: { file: WorkspaceFile; mode: Mode | null }) {
 }
 
 /** Markdown with YAML front matter (as in SKILL.md) shown as a metadata card. */
-function Markdown({ text }: { text: string }) {
-  const { getFile } = useWorkspace();
+function Markdown({ text, path }: { text: string; path: string }) {
+  const { files, getFile } = useWorkspace();
+  // Streamdown re-renders only when the text changes, so it starts over (via
+  // its key) for another document or when an image file comes, goes or changes.
+  const images = files
+    .filter((f) => previewKind(f) === "image")
+    .map((f) => `${f.path}@${f.updatedAt}:${f.content.length}`)
+    .join("|");
+  const rehypePlugins = useMemo(() => {
+    // Images that point at workspace files show the file (once it's listed).
+    const imageUrl = (src: string) => {
+      const target = workspaceImagePath(path, src);
+      if (!target) return null;
+      let file: WorkspaceFile | undefined;
+      try {
+        file = getFile(target);
+      } catch {
+        return null; // Not a valid workspace path after all.
+      }
+      return file && !file.unloaded && previewKind(file) === "image" ? file.content : null;
+    };
+    const withImages: [typeof workspaceImages, WorkspaceImagesOptions] = [workspaceImages, { key: `${path}|${images}`, url: imageUrl }];
+    return [...Object.values(beforeHarden), withImages, harden, sourceLines];
+  }, [getFile, path, images]);
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   const frontMatter = match?.[0] ?? "";
   const meta = match?.[1]
@@ -303,22 +328,7 @@ function Markdown({ text }: { text: string }) {
       )}
       {/* Static mode parses the whole text at once, so source positions are file
           lines; blanking the front matter (not cutting it) keeps them that way. */}
-      <Streamdown
-        mode="static"
-        rehypePlugins={PREVIEW_REHYPE_PLUGINS}
-        components={{
-          img(props) {
-            const src = props.src;
-            if (src && !src.match(/^[a-z]+:/i) && !src.startsWith("/")) {
-              const file = getFile(src);
-              if (file?.content) {
-                return <img {...props} src={file.content} />;
-              }
-            }
-            return <img {...props} />;
-          },
-        }}
-      >
+      <Streamdown key={`${path}|${images}`} mode="static" rehypePlugins={rehypePlugins}>
         {frontMatter.replace(/[^\r\n]/g, "") + text.slice(frontMatter.length)}
       </Streamdown>
     </>
