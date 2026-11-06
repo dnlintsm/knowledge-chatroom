@@ -52,8 +52,9 @@ export async function migrate(sql: Sql): Promise<string[]> {
 
 /**
  * The database role a signed-in user's queries run as. Row-level security
- * policies (migrations/004_row_security.sql) apply to it, so even a bug in the
- * app's own checks can't read or change another person's files or nodes.
+ * policies (migrations/004_row_security.sql) apply to it as a safety net,
+ * ensuring queries cannot read or change another person's files or nodes
+ * even if an application-level check is missed.
  */
 export const APP_ROLE = "knowledge_user";
 
