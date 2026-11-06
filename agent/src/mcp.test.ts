@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { allowServer, externalServersFromEnv, serverConfigs } from "./mcp";
+import { allowServer, chipsFrom, externalServersFromEnv, serverConfigs, withToolChips } from "./mcp";
 import { signIdentity, verifyIdentity } from "./storage/identity";
 
 const quiet = <T>(fn: () => T): T => {
@@ -139,4 +139,62 @@ test("storageAccess servers get a storage token, which only the storage API take
   assert.equal(verifyIdentity(token, secret), null);
   assert.equal(verifyIdentity(token, secret, Date.now(), "mcp:lab"), null);
   assert.equal(verifyIdentity(token, secret, Date.now(), "storage")?.via, "mcp:lab");
+});
+
+test("a ui block puts a server in the + menu; bad ones leave the server out", () => {
+  const servers = quiet(() =>
+    externalServersFromEnv({
+      MCP_SERVERS: JSON.stringify({
+        papers: { url: "http://papers/mcp", ui: { label: "Search papers", chip: "Papers", icon: "book-open", tools: ["search_papers", "search_papers"] } },
+        plain: { url: "http://plain/mcp", ui: { label: "Plain", mode: "manual" } },
+        noLabel: { url: "http://x/mcp", ui: { chip: "X" } },
+        badMode: { url: "http://x/mcp", ui: { label: "X", mode: "always" } },
+        badTools: { url: "http://x/mcp", ui: { label: "X", tools: "search" } },
+        stdioUi: { type: "stdio", command: "x", ui: { label: "X" } },
+      }),
+    }),
+  );
+  assert.deepEqual(Object.keys(servers), ["papers", "plain"]);
+  assert.deepEqual(servers.papers.ui, {
+    label: "Search papers",
+    chip: "Papers",
+    description: null,
+    icon: "book-open",
+    mode: "auto",
+    tools: ["search_papers"],
+  });
+  assert.deepEqual(servers.plain.ui, { label: "Plain", chip: "Plain", description: null, icon: null, mode: "manual", tools: [] });
+});
+
+test("chips steer the run; manual servers only join runs with their chip", () => {
+  const servers = externalServersFromEnv({
+    MCP_SERVERS: JSON.stringify({
+      papers: { url: "http://papers/mcp", ui: { label: "Search papers", chip: "Papers" } },
+      patents: { url: "http://patents/mcp", ui: { label: "Search patents", mode: "manual" } },
+      lab: { url: "http://lab/mcp" },
+    }),
+  });
+  const props = (tools: unknown) => ({ knowledge_chatroom: { version: 3, tools }, other: 1 });
+  assert.deepEqual(chipsFrom(props(["papers", "lab", "nope", 3, "papers"]), servers), ["papers"]);
+  assert.deepEqual(chipsFrom(props("papers"), servers), []);
+  assert.deepEqual(chipsFrom(undefined, servers), []);
+
+  const options = {
+    systemPrompt: "Base.",
+    mcpServers: { copilotkit: {}, papers: {}, patents: {}, lab: {} },
+    allowedTools: ["mcp__copilotkit__query_data", "mcp__papers", "mcp__patents", "mcp__lab"],
+    model: "m",
+  };
+  const plain = withToolChips(options, [], servers);
+  assert.equal(plain.systemPrompt, "Base.");
+  assert.deepEqual(Object.keys(plain.mcpServers), ["copilotkit", "papers", "lab"]);
+  assert.deepEqual(plain.allowedTools, ["mcp__copilotkit__query_data", "mcp__papers", "mcp__lab"]);
+
+  const chipped = withToolChips(options, ["papers", "patents"], servers);
+  assert.match(chipped.systemPrompt, /^Base\.\n- The user turned on "Papers" \(Search papers\).*mcp__papers__ tools/);
+  assert.match(chipped.systemPrompt, /"Search patents".*mcp__patents__/);
+  assert.deepEqual(Object.keys(chipped.mcpServers), ["copilotkit", "papers", "patents", "lab"]);
+  assert.equal(chipped.model, "m");
+  // Nothing in the menu, nothing changes.
+  assert.equal(withToolChips(options, [], {}), options);
 });
