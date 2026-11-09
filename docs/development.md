@@ -30,7 +30,7 @@ The compose file pins PostgreSQL/pgvector and SeaweedFS by verified image digest
 Uncomment the workspace storage values in `.env.example` when copying to `.env`:
 `DATABASE_URL`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
 `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` and `S3_PUBLIC_URL`. Local defaults
-are documented there and in `deploy/seaweedfs/s3.json`.
+are documented there and in `infra/seaweedfs/s3.json`.
 
 Migrations run at agent startup. PostgreSQL stores metadata/history; the object
 store holds content keyed by SHA-256. Keep both volumes to retain the workspace.

@@ -13,7 +13,7 @@
 # point the same env vars at them.
 #
 # The S3 credentials below are local development defaults; change them in
-# deploy/seaweedfs/s3.json and .env before exposing anything.
+# infra/seaweedfs/s3.json and .env before exposing anything.
 
 services:
   postgres:
@@ -39,7 +39,7 @@ services:
       - "8333:8333"
     volumes:
       - s3-data:/data
-      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
       interval: 5s

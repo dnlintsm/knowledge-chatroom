@@ -7,7 +7,7 @@ root `Dockerfile` (targets `app` and `agent`) and starts them with PostgreSQL an
 SeaweedFS. The UI (3000), the object store (8333, for signed binary downloads) and
 PostgreSQL (5432, for local development) are published on the host; the agent stays on
 the compose network. It runs without login, with the local storage credentials from
-`deploy/seaweedfs/s3.json`, and reads `ANTHROPIC_API_KEY` and the optional model, memory,
+`infra/seaweedfs/s3.json`, and reads `ANTHROPIC_API_KEY` and the optional model, memory,
 embedding and `MCP_SERVERS` settings from `.env` (the `agent` and `app` services in
 `docker-compose.yml` list them). The search model downloads into the `models` volume on
 first start. Treat it as a single-user demo: for anything shared, change the storage

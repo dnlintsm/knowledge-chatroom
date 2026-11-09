@@ -8,6 +8,7 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - "docker-compose.yml"
+      - "infra/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
