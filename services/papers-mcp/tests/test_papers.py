@@ -12,7 +12,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
-from papers_mcp import fulltext, identity, models, net, openalex, server, workspace
+from knowledge_chatroom import identity, storage
+from papers_mcp import fulltext, models, net, openalex, server
 
 FIXTURES = Path(__file__).parent / "fixtures"
 RAG = json.loads((FIXTURES / "openalex_work_rag.json").read_text())
@@ -276,7 +277,7 @@ def storage_api(monkeypatch):
         def do_PUT(self):
             parsed = urllib.parse.urlparse(self.path)
             body = self.rfile.read(int(self.headers["Content-Length"]))
-            if self.headers.get(workspace.STORAGE_HEADER) != "alice-storage-token":
+            if self.headers.get(storage.STORAGE_HEADER) != "alice-storage-token":
                 self.send_response(401)
                 self.end_headers()
                 self.wfile.write(b'{"error": "Bad storage token"}')
@@ -303,7 +304,7 @@ def storage_api(monkeypatch):
 
 
 def test_save_paper_writes_a_note_at_the_root(web, ctx, storage_api):
-    ctx.headers[workspace.STORAGE_HEADER] = "alice-storage-token"
+    ctx.headers[storage.STORAGE_HEADER] = "alice-storage-token"
     saved = run(server.save_paper("arxiv:2005.11401", ctx))
     assert saved.path == "papers/retrieval-augmented-generation-for-knowledge-intensive-nlp.md"
     assert not saved.proposed and saved.pdf_path is None
@@ -316,7 +317,7 @@ def test_save_paper_writes_a_note_at_the_root(web, ctx, storage_api):
 
 
 def test_save_paper_in_a_node_is_a_proposal_and_in_an_experiment_is_not(web, ctx, storage_api):
-    ctx.headers[workspace.STORAGE_HEADER] = "alice-storage-token"
+    ctx.headers[storage.STORAGE_HEADER] = "alice-storage-token"
     saved = run(server.save_paper("openalex:W3027879771", ctx, node="n1", include_pdf=True, path="lit/rag"))
     assert saved.proposed and saved.path == "lit/rag.md" and saved.pdf_path == "lit/rag.pdf"
     pdf, note = storage_api
@@ -332,10 +333,10 @@ def test_save_paper_in_a_node_is_a_proposal_and_in_an_experiment_is_not(web, ctx
 def test_save_paper_refusals(web, ctx, storage_api):
     with pytest.raises(ToolError, match="storageAccess"):
         run(server.save_paper("openalex:W3027879771", ctx))
-    ctx.headers[workspace.STORAGE_HEADER] = "someone-elses-token"
+    ctx.headers[storage.STORAGE_HEADER] = "someone-elses-token"
     with pytest.raises(ToolError, match="401.*Bad storage token"):
         run(server.save_paper("openalex:W3027879771", ctx))
-    ctx.headers[workspace.STORAGE_HEADER] = "alice-storage-token"
+    ctx.headers[storage.STORAGE_HEADER] = "alice-storage-token"
     with pytest.raises(ToolError, match="Not a workspace path"):
         run(server.save_paper("openalex:W3027879771", ctx, path="../outside"))
     with pytest.raises(ToolError, match="no open-access PDF"):

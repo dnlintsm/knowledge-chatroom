@@ -321,7 +321,7 @@ as `forwardedProps.knowledge_chatroom.tools`, and the agent then tells Claude to
 that server's tools. The configuration is in
 [Development](development.md#outside-mcp-servers).
 
-Paper search (`examples/papers-mcp`) is the first such server. Results of its
+Paper search (`services/papers-mcp`) is the first such server. Results of its
 `search_papers`, `related_papers` and `get_paper` tools render as paper cards
 (`src/components/workspace/paper-cards.tsx`) with **Save to workspace** (a `save_paper`
 call through `/api/tools`, a proposal inside a knowledge node), **Ask about this**, **PDF**

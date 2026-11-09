@@ -15,7 +15,9 @@ on:
       - "agent/package.json"
       - "packages/**"
       - ".github/workflows/docker.yml"
-      - "examples/python-agent/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "services/**"
   workflow_dispatch:
 
 permissions:
@@ -32,10 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the compose file
-        run: docker compose --profile demo --profile python-sample config --quiet
+        run: docker compose --profile demo --profile python-sample --profile papers config --quiet
       - name: Build the UI image
         run: docker build --target app -t knowledge-chatroom-app .
       - name: Build the agent image
         run: docker build --target agent -t knowledge-chatroom-agent .
       - name: Build the sample Python tools image
-        run: docker build -t knowledge-chatroom-lab-tools examples/python-agent
+        run: docker build -f services/lab-tools/Dockerfile -t knowledge-chatroom-lab-tools .
+      - name: Build the paper search image
+        run: docker build -f services/papers-mcp/Dockerfile -t knowledge-chatroom-papers-mcp .

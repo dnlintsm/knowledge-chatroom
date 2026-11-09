@@ -14,7 +14,7 @@ first start. Treat it as a single-user demo: for anything shared, change the sto
 credentials, stop publishing 5432 and configure login as below.
 
 Optional profiles start sample MCP servers next to the demo: `papers`
-(`examples/papers-mcp`, paper search) and `python-sample` (`examples/python-agent`). Add
+(`services/papers-mcp`, paper search) and `python-sample` (`services/lab-tools`, from `examples/python-agent`). Add
 the profile and the matching `MCP_SERVERS` line from `docker-compose.yml` to `.env`, using
 service names such as `http://papers:9200/mcp` rather than localhost.
 

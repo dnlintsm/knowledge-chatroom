@@ -16,7 +16,7 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 const EXP = 4102444800; // 2100-01-01
 const ALICE = { sub: "test|alice", email: "alice@example.com", name: "Alice", exp: EXP };
 
-// The same values are in examples/python-agent/tests: the Python verifier must
+// The same values are in packages/knowledge-py/tests: the Python verifier must
 // accept what this code signs.
 const PUBLIC_KEY = "Z1iN8KqPV0u2Dk95GsXXFlHQE05RT15l2-1TzD3XDI8";
 

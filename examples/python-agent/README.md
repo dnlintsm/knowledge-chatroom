@@ -8,10 +8,14 @@ run beside it. Its parts move into that agent instead:
 | Python agent part | Where it goes in the chatroom | In this sample |
 | --- | --- | --- |
 | System prompt / instructions | A **skill** | [`skills/lab-analyst/SKILL.md`](skills/lab-analyst/SKILL.md) |
-| `@tool` functions | An **MCP server** in Python, connected with `MCP_SERVERS` | [`lab_tools/server.py`](lab_tools/server.py) |
-| The tools' logic | Plain Python, shared by both and unit-tested | [`lab_tools/stats.py`](lab_tools/stats.py) |
-| Who is calling | The signed user forwarded by the agent | [`lab_tools/identity.py`](lab_tools/identity.py) |
+| `@tool` functions | An **MCP server** in Python, connected with `MCP_SERVERS` | [`services/lab-tools/lab_tools/server.py`](../../services/lab-tools/lab_tools/server.py) |
+| The tools' logic | Plain Python, shared by both and unit-tested | [`services/lab-tools/lab_tools/stats.py`](../../services/lab-tools/lab_tools/stats.py) |
+| Who is calling | The signed user forwarded by the agent | [`knowledge_chatroom.identity`](../../packages/knowledge-py/src/knowledge_chatroom/identity.py), shared by every Python service |
 | `query()` loop, model, allowed tools | Nothing: the chatroom's agent does this | — |
+
+The server's code lives in [`services/lab-tools`](../../services/lab-tools), with the
+other Python services of the repository's uv workspace; this folder keeps the guide,
+the skill and the "before" version.
 
 [`before/agent.py`](before/agent.py) is the same sample written as a standalone
 Python Claude Agent SDK agent: a system prompt, two `@tool` functions and
@@ -24,12 +28,13 @@ and `whoami` shows the forwarded user.
 
 ## Run it
 
-1. Start the tools server (Python 3.10+):
+1. Start the tools server (Python 3.10+ and [uv](https://docs.astral.sh/uv/)), from
+   the repository root:
 
    ```bash
-   cd examples/python-agent
-   pip install -r requirements.txt
-   python -m lab_tools.server          # http://127.0.0.1:9100/mcp
+   uv sync --package lab-tools
+   cd services/lab-tools
+   uv run python -m lab_tools.server   # http://127.0.0.1:9100/mcp
    ```
 
 2. Connect the agent to it in the repository's `.env`, then restart the agent
@@ -82,7 +87,7 @@ A tool that needs workspace files reads or writes them through the chatroom's
 storage API (its agent server's `/files`, `/nodes`, `/experiments`, ...), never
 the database or object store directly: the API is where each user's access is
 checked. With `"storageAccess": true`, each run sends the server an
-`X-Knowledge-Storage` token. Pass it on unchanged, as `workspace.py` does for
+`X-Knowledge-Storage` token. Pass it on unchanged, as `knowledge_chatroom.storage` does for
 `describe_column`. Requests with it act as Claude for the signed-in user:
 
 - Only what that user can read or edit.
@@ -101,7 +106,7 @@ Claude with its own file tools.
 With the chatroom's memory on (`MEMORY=on`), `"memoryAccess": true` lets the server
 use what Claude remembers about the user, in the chat that calls it. Runs send an
 `X-Knowledge-Memory` token for that chat; pass it on unchanged to the agent
-server's `/memory/agent` API, as `memory.py` does for `recall_user_notes`:
+server's `/memory/agent` API, as `knowledge_chatroom.memory` does for `recall_user_notes`:
 
 - `GET /memory/agent` gives `{prompt, tools}`: the memory section Claude gets in
   that chat (the index of notes), for your own model's prompt, and the
@@ -132,10 +137,11 @@ stops working once the user turns memory off or makes the chat incognito.
 ## Test
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest -q
+uv sync --all-packages                             # from the repository root
+(cd services/lab-tools && uv run pytest -q)
+(cd packages/knowledge-py && uv run pytest -q)     # the identity tests
 ```
 
 The identity tests use tokens signed by the TypeScript agent, so they fail if
-the two sides stop agreeing on the format. CI runs them in the `python-sample`
-job.
+the two sides stop agreeing on the format. CI runs them in the Quality
+workflow's `python` job.

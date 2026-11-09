@@ -1,0 +1,26 @@
+[project]
+name = "papers-mcp"
+version = "0.2.3"
+description = "Paper search (OpenAlex + arXiv) as an MCP server for the chatroom"
+requires-python = ">=3.10"
+dependencies = [
+    "knowledge-chatroom",
+    # The MCP server (papers_mcp/server.py). mcp 2 renamed FastMCP to MCPServer.
+    "mcp>=2.2,<3",
+    # Text out of open-access PDFs for read_paper.
+    "pypdf>=5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# A server run from its folder (python -m papers_mcp.server), not a library.
+package = false
+
+[tool.uv.sources]
+knowledge-chatroom = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -14,12 +14,13 @@ docs/remote-agent.md, step 8.
 
 ## Run it
 
-1. Start the server (Python 3.10+):
+1. Start the server (Python 3.10+ and [uv](https://docs.astral.sh/uv/)), from the
+   repository root:
 
    ```bash
-   cd examples/papers-mcp
-   pip install -r requirements.txt
-   python -m papers_mcp.server          # http://127.0.0.1:9200/mcp
+   uv sync --package papers-mcp
+   cd services/papers-mcp
+   uv run python -m papers_mcp.server   # http://127.0.0.1:9200/mcp
    ```
 
 2. Connect the agent to it in the repository's `.env`, then restart the agent:
@@ -87,14 +88,15 @@ with login on, the agent sends each run's user as an `X-Knowledge-User` token
 signed for `mcp:papers`, and `require_user()` refuses calls without one. With
 `"storageAccess": true` it also sends an `X-Knowledge-Storage` token, which
 `save_paper` passes on to the storage API unchanged, so it can only save where
-the user can. `papers_mcp/identity.py` is a copy of the sample's verifier, so
-this server stands alone.
+the user can. Both checks come from `knowledge_chatroom` (`packages/knowledge-py`), which
+every Python service in `services/` shares.
 
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest -q
+uv sync --all-packages        # from the repository root
+cd services/papers-mcp
+uv run pytest -q
 ```
 
 The tests answer OpenAlex and arXiv from recorded responses in `tests/fixtures`, so

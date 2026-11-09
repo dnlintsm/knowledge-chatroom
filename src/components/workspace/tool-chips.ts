@@ -70,7 +70,7 @@ export function splitToolName(name: string): { server: string; tool: string } | 
   return match ? { server: match[1], tool: match[2] } : null;
 }
 
-/** A paper as the paper tools return it (examples/papers-mcp/papers_mcp/models.py). */
+/** A paper as the paper tools return it (services/papers-mcp/papers_mcp/models.py). */
 export interface PaperInfo {
   id: string;
   title: string;

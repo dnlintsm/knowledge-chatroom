@@ -124,7 +124,7 @@ configured server runs without asking, as `mcp__<name>__<tool>`; a server that i
 down is left out and the chat carries on. With login on, `forwardIdentity` sends
 the run's signed user as the `X-Knowledge-User` header (`v2.<payload>.<Ed25519
 signature>`, valid for an hour; verify it with the public key from the agent's
-`GET /identity/public-key` as in `examples/python-agent/lab_tools/identity.py`,
+`GET /identity/public-key` as in `packages/knowledge-py/src/knowledge_chatroom/identity.py`,
 and check its `aud` is `mcp:<name>`). Give the server that public key, never
 `AUTH_SECRET`: with the key it can check tokens but not sign them. The token is
 signed for that server only, and the agent refuses it, so a server can't call the
@@ -167,7 +167,7 @@ signed-in user, as the paper cards' Save button does:
 The call reaches the server with the same `X-Knowledge-User` and `X-Knowledge-Storage`
 headers a chat run sends, so the server sees the same person either way. A call that takes
 longer than `TOOLS_CALL_TIMEOUT_MS` (default 120000) fails. `ui` needs an http or sse
-server. [examples/papers-mcp](../examples/papers-mcp/README.md) is the paper search server
+server. [services/papers-mcp](../services/papers-mcp/README.md) is the paper search server
 for it; `docker compose --profile papers` runs it next to the demo.
 
 `memoryAccess` gives a server the user's memory in the chat that calls it (#93):
@@ -182,7 +182,10 @@ Incognito chats and memory turned off get no token, and each call checks again.
 [examples/python-agent](../examples/python-agent/README.md) is a complete sample:
 a Python agent's prompt moved into a skill and its tools into an MCP server, with
 the forwarded user checked and tests. Start there when bringing a Python agent in.
-[examples/papers-mcp](../examples/papers-mcp/README.md) is another one: paper
+Its server is `services/lab-tools`. New Python services go in `services/<name>` as members
+of the repository's uv workspace, and use `knowledge_chatroom` (`packages/knowledge-py`) for
+the forwarded user, workspace files and memory instead of copying that code.
+[services/papers-mcp](../services/papers-mcp/README.md) is another one: paper
 search, with workspace writes through `storageAccess`.
 
 A minimal Python server (`pip install mcp`; with mcp 1.x import `FastMCP` from
