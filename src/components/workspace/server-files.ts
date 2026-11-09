@@ -1,6 +1,6 @@
-import { parseFileInfo, parseFileList, StorageContractError } from "../../../shared/storage-contract";
-import type { FileInfo as ServerFile } from "../../../shared/storage-contract";
-export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "../../../shared/storage-contract";
+import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-chatroom/contracts/storage-contract";
+import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
+export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
 import { FileExistsError, isTextFile, ReadOnlyFileError, type FileKind, type WorkspaceFile } from "./types";
 
 /**

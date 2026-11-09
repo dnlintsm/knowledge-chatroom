@@ -10,9 +10,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { parseWorkspaceEvent } from "../../../shared/storage-contract";
-import { normalizePath } from "../../../shared/files";
-export { normalizePath } from "../../../shared/files";
+import { parseWorkspaceEvent } from "@knowledge-chatroom/contracts/storage-contract";
+import { normalizePath } from "@knowledge-chatroom/contracts/files";
+export { normalizePath } from "@knowledge-chatroom/contracts/files";
 import type { LineRange } from "./file-refs";
 import type { Reveal } from "./file-focus";
 export type { Reveal } from "./file-focus";

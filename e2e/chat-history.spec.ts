@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 // The agent's database client, to check where the chat was kept.
-import postgres from "../agent/node_modules/postgres";
+import postgres from "postgres";
 
 /**
  * Chats are kept per user on the server (issue #91): with server storage, in
  * Postgres through the agent's /chats API, so they outlive the app process.
- * Runs with storage (npm run test:e2e:storage); preview.spec.ts covers the
+ * Runs with storage (pnpm test:e2e:storage); preview.spec.ts covers the
  * same flow with chats in memory.
  */
 

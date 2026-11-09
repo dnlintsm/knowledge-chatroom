@@ -2,26 +2,26 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import * as oidc from "openid-client";
 
-import { authSettings, checkOidcSettings, httpAllowed } from "../../shared/auth-mode";
+import { authSettings, checkOidcSettings, httpAllowed } from "@knowledge-chatroom/contracts/auth-mode";
 import {
   STORAGE_AUDIENCE,
   STORAGE_HEADER,
   readIdentityToken,
   signIdentityToken,
   storageTokenSeconds,
-} from "../../shared/identity-token";
+} from "@knowledge-chatroom/contracts/identity-token";
 
 /**
  * Login, for deployments that set AUTH_SECRET (the agent server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
  * signed cookie. Every request it forwards to the agent server carries a
- * short-lived signed X-Knowledge-User header (shared/identity-token.ts makes
+ * short-lived signed X-Knowledge-User header (packages/contracts/src/identity-token.ts makes
  * it, agent/src/storage/identity.ts checks it), so the agent knows whose
  * access rules apply.
  *
  * AUTH_MODE=local turns login off and everyone is the local user; see
- * shared/auth-mode.ts for how the mode is chosen when it is unset.
+ * packages/contracts/src/auth-mode.ts for how the mode is chosen when it is unset.
  */
 
 export const SESSION_COOKIE = "kc_session";

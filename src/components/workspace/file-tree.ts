@@ -1,4 +1,4 @@
-import { normalizePath } from "../../../shared/files";
+import { normalizePath } from "@knowledge-chatroom/contracts/files";
 import type { WorkspaceFile } from "./types";
 
 /** Pure helpers behind the Files view's tree and its toolbar. */

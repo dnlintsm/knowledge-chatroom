@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { useAgentContext, useFrontendTool, type JsonSerializable } from "@copilotkit/react-core/v2";
 import { useActions } from "./actions";
-import { applyEdit } from "../../../shared/text-edit";
+import { applyEdit } from "@knowledge-chatroom/contracts/text-edit";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { findReport, runsUnder } from "./runs";

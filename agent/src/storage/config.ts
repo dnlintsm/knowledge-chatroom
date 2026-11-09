@@ -6,7 +6,7 @@
  * (docker-compose.yml), Garage, AWS S3, Cloudflare R2 or Backblaze B2.
  */
 
-import { authSettings } from "../../../shared/auth-mode";
+import { authSettings } from "@knowledge-chatroom/contracts/auth-mode";
 
 export interface StorageConfig {
   databaseUrl: string;

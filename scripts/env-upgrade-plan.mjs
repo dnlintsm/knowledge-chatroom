@@ -113,7 +113,7 @@ export function planUpgrade(envText, exampleText, { date = new Date().toISOStrin
   const out = lines.flatMap((line, index) => replace.get(index) ?? [line]);
   if (appended.length) {
     while (out.length && !out.at(-1).trim()) out.pop();
-    out.push("", `# ==== New in .env.example, added by npm run env:upgrade (${date}). ====`,
+    out.push("", `# ==== New in .env.example, added by pnpm env:upgrade (${date}). ====`,
       "# All commented out: nothing changes until you uncomment a setting.", ...appended, "");
   }
   plan.text = out.join(eol);
@@ -138,6 +138,6 @@ export function report(plan, { envPath = ".env", write = false } = {}) {
     [...bySection].map(([name, keys]) => `${name}: ${keys.join(", ")}`));
   list("Set in your .env but not in .env.example (yours, or no longer used):", plan.unknown);
   if (!plan.changed && !plan.check.length && !plan.unknown.length) return `${envPath} is up to date with .env.example.`;
-  if (!write && plan.changed) out.push("", `Run \`npm run env:upgrade\` to apply this (${envPath} is backed up first).`);
+  if (!write && plan.changed) out.push("", `Run \`pnpm env:upgrade\` to apply this (${envPath} is backed up first).`);
   return out.join("\n").trimStart();
 }

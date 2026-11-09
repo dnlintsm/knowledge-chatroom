@@ -1,7 +1,7 @@
 import type { Sql, Tx } from "./db";
 
-import type { WorkspaceEvent } from "../../../shared/storage-contract";
-export type { AuthorType, FileEvent, NodeEvent, ExperimentEvent, ProposalEvent, WorkspaceEvent } from "../../../shared/storage-contract";
+import type { WorkspaceEvent } from "@knowledge-chatroom/contracts/storage-contract";
+export type { AuthorType, FileEvent, NodeEvent, ExperimentEvent, ProposalEvent, WorkspaceEvent } from "@knowledge-chatroom/contracts/storage-contract";
 
 const CHANNEL = "workspace_files";
 

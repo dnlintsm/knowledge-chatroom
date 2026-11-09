@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { normalizePath, InvalidPathError } from "../../shared/files";
-import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "../../shared/storage-contract";
+import { normalizePath, InvalidPathError } from "@knowledge-chatroom/contracts/files";
+import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 import * as backend from "../../agent/src/storage/paths";
 import * as browser from "../../src/components/workspace/types";
 import { listServerFiles, loadServerFile, putServerFile } from "../../src/components/workspace/server-files";

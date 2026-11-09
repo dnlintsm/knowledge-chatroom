@@ -6,7 +6,10 @@ on:
   pull_request:
     paths:
       - "agent/**"
-      - "shared/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "scripts/ci-*.mjs"
       - "docker-compose.yml"
       - "deploy/**"
@@ -57,8 +60,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: agent/package-lock.json
+      # pnpm at the version in package.json "packageManager".
+      - name: Enable pnpm
+        run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Cache the embedding model
         uses: actions/cache@v4
@@ -67,16 +76,13 @@ jobs:
           key: embedding-model-multilingual-e5-small-q8
 
       - name: Install agent dependencies
-        working-directory: agent
-        run: npm ci
+        run: pnpm install --frozen-lockfile --filter ./agent...
 
       - name: Typecheck
-        working-directory: agent
-        run: npm run typecheck
+        run: pnpm -C agent typecheck
 
       - name: Test
-        working-directory: agent
-        run: node ../scripts/ci-tests.mjs run "Storage integration" tap -- npm run test:integration
+        run: node scripts/ci-tests.mjs run "Storage integration" tap -- pnpm -C agent test:integration
       - name: Summarize test suites
         if: always()
         run: node scripts/ci-tests.mjs summary "Storage integration"

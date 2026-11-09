@@ -9,10 +9,11 @@ on:
       - ".dockerignore"
       - "docker-compose.yml"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "next.config.ts"
       - "agent/package.json"
-      - "agent/package-lock.json"
+      - "packages/**"
       - ".github/workflows/docker.yml"
       - "examples/python-agent/**"
   workflow_dispatch:

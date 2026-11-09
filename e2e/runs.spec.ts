@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 // The agent's database client: provenance is only written by Claude's tools,
 // which the mock agent doesn't run, so this test writes one directly.
-import postgres from "../agent/node_modules/postgres";
+import postgres from "postgres";
 
 /** Shows a sidebar view; clicking it while it is already shown would fold the sidebar away. */
 async function showView(page: Page, name: "Files" | "Runs") {
@@ -12,7 +12,7 @@ const showFiles = (page: Page) => showView(page, "Files");
 
 /**
  * Runs are experiments with a report (issue #82). Runs need server storage,
- * so this runs with it (npm run test:e2e:storage). Screenshots continue the
+ * so this runs with it (pnpm test:e2e:storage). Screenshots continue the
  * numbering of preview.spec.ts.
  */
 const SCREENSHOT_DIR = "preview/screenshots";

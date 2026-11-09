@@ -9,7 +9,7 @@ async function showFiles(page: Page) {
 
 /**
  * Server storage and the knowledge tree. Runs when the agent has storage
- * (npm run test:e2e:storage); prerequisites are enforced by the config.
+ * (pnpm test:e2e:storage); prerequisites are enforced by the config.
  * Screenshots continue the numbering of preview.spec.ts.
  */
 const SCREENSHOT_DIR = "preview/screenshots";

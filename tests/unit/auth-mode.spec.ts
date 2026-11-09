@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { authSettings, checkOidcSettings, httpAllowed } from "../../shared/auth-mode";
+import { authSettings, checkOidcSettings, httpAllowed } from "@knowledge-chatroom/contracts/auth-mode";
 
-/** How the app and the agent decide whether people sign in (shared/auth-mode.ts, issue #64). */
+/** How the app and the agent decide whether people sign in (packages/contracts/src/auth-mode.ts, issue #64). */
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const OIDC = { OIDC_ISSUER: "https://login.example.com", OIDC_CLIENT_ID: "kc" };

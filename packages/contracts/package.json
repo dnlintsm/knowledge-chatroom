@@ -1,0 +1,9 @@
+{
+  "name": "@knowledge-chatroom/contracts",
+  "version": "0.2.3",
+  "private": true,
+  "description": "Contracts shared by the UI and the agent: files, storage API shapes, identity tokens, text edits, auth mode. TypeScript source, no build step.",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}
