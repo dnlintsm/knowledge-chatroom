@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 
 import { AccessError, ForbiddenError, ROLES, type Principal, type Role } from "./access";
 import { ChatError, ChatTakenError } from "./chats";
 import type { EventHub, WorkspaceEvent } from "./events";
-import { ExperimentError, type ExperimentInput } from "./experiments";
+import { ExperimentError, ExperimentExistsError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { FileExistsError, ReadOnlyFileError } from "./files";
@@ -11,7 +12,7 @@ import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
 import { SearchError } from "./search";
-import type { RunInputSource, Session } from "./session";
+import type { RunInputSource, Session, UploadedFile } from "./session";
 
 /**
  * REST API for workspace files, the knowledge tree, experiments, search and
@@ -74,6 +75,20 @@ import type { RunInputSource, Session } from "./session";
  *                                   read only under inputs/ and recorded in its
  *                                   provenance (its author, not archived, not
  *                                   a finished run)
+ *   POST   /experiments/upload      multipart/form-data → 201 {experiment,
+ *                                   lineage, created, files}: a new experiment
+ *                                   with its files, all or nothing. A "meta"
+ *                                   part (JSON) holds {id: uuid, path, title,
+ *                                   hypothesis?, params?, results?, state?};
+ *                                   every other part is a file, its field name
+ *                                   the file's path in the experiment (at most
+ *                                   MAX_UPLOAD_BYTES each). path names a node
+ *                                   at every level, as "Tech/Module/Loop/Process"
+ *                                   or a list of names; an empty name means a
+ *                                   node called "None", and missing nodes are
+ *                                   added (editor where they go). Starts with
+ *                                   only the uploaded files; 409 when the id is
+ *                                   taken. Not for storage tokens.
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
  *
@@ -183,6 +198,9 @@ export function agentRefusal(method: string, url: URL): string | null {
     case "nodes":
       return method === "POST" && sub === "" ? null : "Claude doesn't rename or delete nodes";
     case "experiments":
+      if (method === "POST" && sub === "upload") {
+        return "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload";
+      }
       if (method === "POST" && sub === "") return null;
       if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
       if (method === "POST" && /^[^/]+\/inputs$/.test(sub)) return null;
@@ -352,7 +370,89 @@ function runInputs(value: unknown): RunInputSource[] | null {
   return out;
 }
 
-async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+const UPLOAD_META =
+  'Expected a "meta" part with {id: uuid, path: "Tech/Module/Loop/Process" | string[], title: string, ' +
+  "hypothesis?: string, params?, results?: object, state?: ready|running|done|failed}";
+
+/** Why an upload request can't be read, with the status to answer. */
+class UploadError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The parts of a POST /experiments/upload: its "meta" JSON and its files,
+ * each named by its field. The form is read whole before anything is
+ * written, so a broken upload changes nothing.
+ */
+async function readUpload(req: IncomingMessage, url: URL, maxFileBytes: number) {
+  const type = req.headers["content-type"] ?? "";
+  if (!/^multipart\/form-data\s*;/i.test(type)) {
+    throw new UploadError(415, "Send the experiment as multipart/form-data: a \"meta\" part and one part per file");
+  }
+  let form: FormData;
+  try {
+    form = await new Request(url, {
+      method: "POST",
+      headers: { "content-type": type },
+      body: Readable.toWeb(req) as ReadableStream<Uint8Array>,
+      duplex: "half",
+    } as RequestInit).formData();
+  } catch {
+    throw new UploadError(400, "The multipart body could not be read");
+  }
+
+  let meta: unknown;
+  const files: UploadedFile[] = [];
+  for (const [name, value] of form.entries()) {
+    if (name === "meta") {
+      if (meta !== undefined) throw new UploadError(400, 'Send one "meta" part');
+      try {
+        meta = JSON.parse(typeof value === "string" ? value : await value.text());
+      } catch {
+        throw new UploadError(400, `The "meta" part isn't JSON. ${UPLOAD_META}`);
+      }
+      continue;
+    }
+    if (typeof value === "string") {
+      throw new UploadError(400, `"${name}" isn't a file: put everything but files in the "meta" part`);
+    }
+    if (value.size > maxFileBytes) throw new UploadError(413, `${name} exceeds ${maxFileBytes} bytes`);
+    const mime = value.type.split(";")[0].trim();
+    files.push({
+      path: name,
+      bytes: new Uint8Array(await value.arrayBuffer()),
+      ...(mime && mime !== "application/octet-stream" && { mime }),
+    });
+  }
+
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new UploadError(400, UPLOAD_META);
+  const body = meta as Record<string, unknown>;
+  const { id, path } = body;
+  const input = experimentInput(body);
+  const names =
+    typeof path === "string"
+      ? path.split("/")
+      : Array.isArray(path) && path.every((p) => p === null || typeof p === "string")
+        ? path.map((p: string | null) => p ?? "")
+        : null;
+  if (typeof id !== "string" || !names || !input || typeof body.title !== "string") {
+    throw new UploadError(400, UPLOAD_META);
+  }
+  return { id, path: names, input, files };
+}
+
+async function handleExperiments(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  session: Session,
+  maxUploadBytes: number,
+) {
   const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
   const expected =
     "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived, state?: ready|running|done|failed}";
@@ -374,6 +474,19 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
       json(res, 405, { error: "Method not allowed" });
     }
     return;
+  }
+
+  if (id === "upload") {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    let upload: Awaited<ReturnType<typeof readUpload>>;
+    try {
+      upload = await readUpload(req, url, maxUploadBytes);
+    } catch (err) {
+      if (err instanceof UploadError) return json(res, err.status, { error: err.message });
+      throw err;
+    }
+    // Like POST /experiments: a new experiment is a draft whatever status says.
+    return json(res, 201, await session.uploadExperiment(upload.id, upload.path, upload.input, upload.files));
   }
 
   const inputsOf = /^([^/]+)\/inputs$/.exec(id)?.[1];
@@ -716,7 +829,7 @@ export function createStorageHandler(
       const session = current.session(principal);
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
-      else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
+      else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session, maxUploadBytes);
       else if (/^\/search(\/|$)/.test(url.pathname)) await handleSearch(req, res, url, session);
       else if (/^\/proposals(\/|$)/.test(url.pathname)) await handleProposals(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
@@ -731,6 +844,10 @@ export function createStorageHandler(
       }
       if (err instanceof ReadOnlyFileError) {
         json(res, 403, { error: err.message, readOnly: true });
+        return;
+      }
+      if (err instanceof ExperimentExistsError) {
+        json(res, 409, { error: err.message, exists: true });
         return;
       }
       if (err instanceof FileExistsError) {

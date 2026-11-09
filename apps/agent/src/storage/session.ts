@@ -1,10 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { AccessService, atLeast, ForbiddenError, type Principal, type Role } from "./access";
-import { asUser, type Sql, type Tx } from "./db";
+import { asUser, inTransaction, type Sql, type Tx } from "./db";
 import type { WorkspaceEvent } from "./events";
 import {
+  cleanInput,
   ExperimentError,
+  ExperimentExistsError,
   type Experiment,
   type ExperimentInput,
   type ExperimentService,
@@ -13,7 +15,7 @@ import {
 import type { FileInfo, FileService, FileVersion } from "./files";
 import { normalizePath } from "./paths";
 import { newReport, REPORT_PATH, reportFrontMatter, withFrontMatter } from "./run-report";
-import { NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
+import { isNodeId, NodeError, NodeNotFoundError, type KnowledgeNode, type NodeService, type NodeType } from "./nodes";
 import {
   ProposalError,
   type Decision,
@@ -45,6 +47,27 @@ export interface RunInputSource {
   /** Its name under inputs/; its own file name by default. */
   as?: string;
 }
+
+/** One file of an uploaded experiment (see Session.uploadExperiment). */
+export interface UploadedFile {
+  /** Where it goes inside the experiment, e.g. "data/metrics.csv". */
+  path: string;
+  bytes: Uint8Array;
+  /** Picked from the path when left out. */
+  mime?: string;
+}
+
+export interface ExperimentUpload {
+  experiment: Experiment;
+  /** The node it sits on and that node's ancestors, top level first. */
+  lineage: KnowledgeNode[];
+  /** The nodes of the path that didn't exist and were added for it, top level first. */
+  created: KnowledgeNode[];
+  files: FileInfo[];
+}
+
+/** The node name an upload uses for a level its path leaves empty ("Etch/Module 3//"). */
+export const EMPTY_LEVEL_NAME = "None";
 
 export interface VisibleNode extends KnowledgeNode {
   /** null for a node shown only because something below it is visible. */
@@ -99,6 +122,15 @@ export class Session {
     this.parts.rowSecurity
       ? asUser(this.parts.sql, this.principal.userId, (db) => fn(db))
       : fn(null);
+
+  /**
+   * Runs `fn` in one transaction for this principal, as the restricted role
+   * when row security is on: what it does commits together or not at all.
+   */
+  private atomically<T>(fn: (db: Sql) => Promise<T>): Promise<T> {
+    if (this.parts.rowSecurity) return asUser(this.parts.sql, this.principal.userId, fn);
+    return this.parts.sql.begin((tx) => fn(inTransaction(tx))) as Promise<T>;
+  }
 
   private audit(action: string, target: Record<string, unknown>) {
     return (tx: Tx) => this.parts.access.audit(tx, this.principal, action, target);
@@ -189,6 +221,128 @@ export class Session {
         this.audit("experiment.create", { experiment: id, node: nodeId, title: input.title })(tx),
       ),
     );
+  }
+
+  /**
+   * Uploads a new experiment with its files in one go: `id` is its id, chosen
+   * by the caller (ExperimentExistsError when any experiment ever had it),
+   * and `path` names a node at every level of the knowledge tree, top level
+   * first, down to the deepest (tech › module › loop › process). An empty name
+   * stands for a node called EMPTY_LEVEL_NAME. Nodes of the path that don't
+   * exist yet are added, which needs editor access where the first one goes;
+   * an existing path needs viewer access, as for createExperiment.
+   *
+   * The experiment starts with only the uploaded files, not a copy of the
+   * node's. The new nodes, the experiment and its files are written in one
+   * transaction, so a failure part way leaves nothing behind.
+   */
+  async uploadExperiment(
+    rawId: string,
+    path: string[],
+    input: ExperimentInput,
+    files: UploadedFile[],
+  ): Promise<ExperimentUpload> {
+    if (!isNodeId(rawId)) {
+      throw new ExperimentError("An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b");
+    }
+    const id = rawId.toLowerCase();
+    const fields = cleanInput(input);
+    if (!fields.title) throw new ExperimentError("An experiment needs a title");
+    const levels = await this.parts.nodes.types();
+    if (!levels.length) throw new NodeError("No knowledge levels are set up");
+    if (path.length !== levels.length) {
+      throw new ExperimentError(
+        `The path needs a name for each of the ${levels.length} levels (${levels.map((l) => l.name).join("/")}), ` +
+          `got ${path.length}; leave a name empty for "${EMPTY_LEVEL_NAME}"`,
+      );
+    }
+    const names = path.map((name) => (name.trim() === "" ? EMPTY_LEVEL_NAME : name));
+    const uploads = files.map((f) => ({ ...f, path: normalizePath(f.path) }));
+    const seen = new Set<string>();
+    for (const f of uploads) {
+      if (seen.has(f.path)) throw new ExperimentError(`Two files would both be ${f.path}`);
+      seen.add(f.path);
+    }
+    if (await this.parts.experiments.idTaken(id)) throw new ExperimentExistsError(id);
+
+    // The part of the path that exists already. Looked up as the server, so a
+    // node you can't see is found rather than added twice; need() below then
+    // answers "not found" for it, as everywhere else.
+    const existing: KnowledgeNode[] = [];
+    for (const name of names) {
+      const node = await this.parts.nodes.findChild(existing.at(-1)?.id ?? null, name);
+      if (!node) break;
+      existing.push(node);
+    }
+    const missing = names.slice(existing.length);
+    // Nodes added below one you edit are yours too, so one check covers them all.
+    await this.need(existing.at(-1)?.id ?? null, missing.length ? "editor" : "viewer");
+
+    const { userId, actor } = this.principal;
+    const { created, written } = await this.atomically(async (db) => {
+      const nodes = on(this.parts.nodes, db);
+      const created: KnowledgeNode[] = [];
+      let nodeId = existing.at(-1)?.id ?? null;
+      for (const name of missing) {
+        const node = await this.findOrAddNode(nodes, nodeId, name);
+        if (node.added) created.push(node.node);
+        nodeId = node.node.id;
+      }
+      await on(this.parts.experiments, db).create(
+        userId,
+        nodeId,
+        fields,
+        (tx, newId) =>
+          this.audit("experiment.create", {
+            experiment: newId, node: nodeId, title: fields.title, files: uploads.map((f) => f.path), upload: true,
+          })(tx),
+        { id, fork: false },
+      );
+      const service = (await on(this.parts.files, db).inExperiment(id))!;
+      const written: FileInfo[] = [];
+      for (const f of uploads) {
+        written.push(
+          await service.write(f.path, f.bytes, {
+            mime: f.mime,
+            createOnly: true,
+            author: actor,
+            authorId: userId,
+            inTx: this.audit("file.write", { experiment: service.experimentId, path: f.path, size: f.bytes.byteLength }),
+          }),
+        );
+      }
+      return { created, written };
+    });
+
+    const experiment = await this.experiment(id);
+    const lineage = experiment.nodeId ? await this.lineage(experiment.nodeId) : [];
+    return { experiment, lineage, created, files: written };
+  }
+
+  /**
+   * The node `name` below `parentId`, added when missing. Someone adding the
+   * same node at the same moment makes the insert fail on the unique name;
+   * theirs is then used.
+   */
+  private async findOrAddNode(
+    nodes: NodeService,
+    parentId: string | null,
+    name: string,
+  ): Promise<{ node: KnowledgeNode; added: boolean }> {
+    const found = await nodes.findChild(parentId, name);
+    if (found) return { node: found, added: false };
+    try {
+      const node = await nodes.create(parentId, name, async (tx, id) => {
+        // With row security a trigger makes you its owner (013_node_creator_owns.sql).
+        if (!this.parts.rowSecurity) await this.parts.access.ownNewNode(tx, this.principal.userId, id);
+        await this.audit("node.create", { node: id, parent: parentId, name })(tx);
+      });
+      return { node, added: true };
+    } catch (err) {
+      const raced = err instanceof NodeError && (await nodes.findChild(parentId, name));
+      if (raced) return { node: raced, added: false };
+      throw err;
+    }
   }
 
   /**

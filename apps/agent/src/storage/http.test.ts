@@ -32,6 +32,8 @@ test("nothing is renamed, deleted, reviewed or shared", () => {
   assert.ok(!may("PATCH", "/nodes/n1"));
   assert.ok(!may("DELETE", "/nodes/n1"));
   assert.ok(may("POST", "/experiments"));
+  // Uploading an experiment is for people: it may add nodes all the way down.
+  assert.ok(!may("POST", "/experiments/upload"));
   assert.ok(may("PATCH", "/experiments/e1"));
   assert.ok(!may("DELETE", "/experiments/e1"));
   assert.ok(may("POST", "/proposals"));
