@@ -22,10 +22,12 @@ service names such as `http://papers:9200/mcp` rather than localhost.
 
 Use Node 22 for build and runtime. Install with `pnpm install --frozen-lockfile`, run `pnpm check`,
 then `pnpm build`. The build includes TypeScript checks. `pnpm start` serves the
-production build; the configured standalone output can also be packaged by a
-deployment host with its `.next/static` assets. Deploy the agent separately with
-its dependencies and `packages/contracts` (`pnpm install --filter "./agent..."`) and run
-`pnpm -C agent start`.
+production build of `apps/web`; its standalone output (`apps/web/.next/standalone`, server
+`apps/web/server.js` inside it) can also be packaged by a deployment host with
+`apps/web/.next/static` and `apps/web/public`, as the Dockerfile does. Deploy the agent
+separately with its dependencies and `packages/contracts`
+(`pnpm --filter ./apps/agent deploy <dir>`, or `pnpm install --filter "./apps/agent..."`)
+and run `pnpm -C apps/agent start`. Both read `.env` from the repository root.
 
 Configure `LOCAL_AGENT_URL` on Next.js to reach the agent over a private network,
 and `AGENT_URL` only when the chat uses a remote backend

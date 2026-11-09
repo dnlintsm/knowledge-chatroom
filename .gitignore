@@ -14,8 +14,8 @@ node_modules/
 /coverage
 
 # next.js
-/.next/
-/out/
+.next/
+/apps/web/out/
 
 # production
 /build
@@ -45,7 +45,7 @@ next-env.d.ts
 
 
 # python
-agent/venv/
+apps/agent/venv/
 __pycache__/
 .venv/
 
@@ -56,3 +56,6 @@ __pycache__/
 /playwright-report/
 /blob-report/
 /preview/
+
+# Written by `next dev` (Next 16) for coding agents
+apps/web/AGENTS.md

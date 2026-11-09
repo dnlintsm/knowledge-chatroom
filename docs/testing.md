@@ -15,8 +15,8 @@ The default test command runs only fast units; integration and E2E are explicit.
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
 browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
-are listed one by one: service-free ones in `agent/package.json` (`test:unit`), ones
-that need PostgreSQL and S3 in `agent/scripts/test-integration.mjs`. Add a new
+are listed one by one: service-free ones in `apps/agent/package.json` (`test:unit`), ones
+that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a new
 `*.test.ts` to the matching list, or it never runs.
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):

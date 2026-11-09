@@ -2,10 +2,10 @@ import { test, expect } from "@playwright/test";
 import { firstValueFrom, toArray, type Observable } from "rxjs";
 import { HttpAgent, type AbstractAgent, type BaseEvent, type Message, type RunAgentInput } from "@ag-ui/client";
 
-import { IDENTITY_HEADER, identityHeader } from "../../src/lib/auth";
-import { handleChatRoute } from "../../src/lib/chat-routes";
-import { ChatRunner, chatName } from "../../src/lib/chat-runner";
-import { AutoChatStore, ChatTakenError, MemoryChatStore, type ChatStore } from "../../src/lib/chat-store";
+import { IDENTITY_HEADER, identityHeader } from "../../apps/web/src/lib/auth";
+import { handleChatRoute } from "../../apps/web/src/lib/chat-routes";
+import { ChatRunner, chatName } from "../../apps/web/src/lib/chat-runner";
+import { AutoChatStore, ChatTakenError, MemoryChatStore, type ChatStore } from "../../apps/web/src/lib/chat-store";
 
 /** An agent that answers every run with `reply`, as the runtime's per-request clone would. */
 function fakeAgent(reply: string, headers: Record<string, string> = {}, agentId = "default") {

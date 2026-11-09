@@ -1,7 +1,7 @@
 # One pnpm workspace for the TypeScript side (issue #164). Python lives in its own
 # uv workspace.
 packages:
-  - agent
+  - apps/*
   - packages/*
 
 # Install scripts run only for the packages listed true. onnxruntime-node's script

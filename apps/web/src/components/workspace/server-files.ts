@@ -268,7 +268,7 @@ export interface Experiment {
   forkedAt: string;
   updatedAt: string;
   fileCount: number;
-  /** Where a run came from, when Claude started it (agent/src/storage/run-report.ts); else {}. */
+  /** Where a run came from, when Claude started it (apps/agent/src/storage/run-report.ts); else {}. */
   provenance?: RunProvenance;
   /** writer: you are its author and it isn't archived. */
   access: "writer" | "reader";
@@ -337,7 +337,7 @@ export type ProposalStatus = "open" | "accepted" | "rejected" | "withdrawn";
 
 /**
  * A proposed version of a file in a node (or at the root), waiting for someone
- * who can edit there to accept or reject it (agent/src/storage/proposals.ts).
+ * who can edit there to accept or reject it (apps/agent/src/storage/proposals.ts).
  */
 export interface Proposal {
   id: string;
@@ -421,7 +421,7 @@ export const listPromotable = (experimentId: string) =>
     `/promotable?experiment=${encodeURIComponent(experimentId)}`,
   ).then((r) => r.files);
 
-/** A file whose text or path matched a search (agent/src/storage/search.ts). */
+/** A file whose text or path matched a search (apps/agent/src/storage/search.ts). */
 export interface SearchHit {
   path: string;
   kind: FileKind;

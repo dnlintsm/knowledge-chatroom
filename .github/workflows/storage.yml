@@ -1,11 +1,11 @@
-# Runs the storage integration tests (agent/src/storage) against real Postgres
+# Runs the storage integration tests (apps/agent/src/storage) against real Postgres
 # and SeaweedFS whenever the storage code changes.
 name: Storage tests
 
 on:
   pull_request:
     paths:
-      - "agent/**"
+      - "apps/agent/**"
       - "packages/**"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -76,13 +76,13 @@ jobs:
           key: embedding-model-multilingual-e5-small-q8
 
       - name: Install agent dependencies
-        run: pnpm install --frozen-lockfile --filter ./agent...
+        run: pnpm install --frozen-lockfile --filter ./apps/agent...
 
       - name: Typecheck
-        run: pnpm -C agent typecheck
+        run: pnpm -C apps/agent typecheck
 
       - name: Test
-        run: node scripts/ci-tests.mjs run "Storage integration" tap -- pnpm -C agent test:integration
+        run: node scripts/ci-tests.mjs run "Storage integration" tap -- pnpm -C apps/agent test:integration
       - name: Summarize test suites
         if: always()
         run: node scripts/ci-tests.mjs summary "Storage integration"

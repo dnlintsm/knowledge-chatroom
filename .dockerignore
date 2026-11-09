@@ -1,5 +1,5 @@
 **/node_modules
-.next
+**/.next
 .git
 .env*
 !.env.example
@@ -7,7 +7,7 @@ test-results*
 playwright-report
 blob-report
 preview
-*.tsbuildinfo
+**/*.tsbuildinfo
 **/.venv
 **/__pycache__
 **/.pytest_cache

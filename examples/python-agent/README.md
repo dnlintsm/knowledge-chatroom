@@ -1,7 +1,7 @@
 # Sample Python agent
 
 This sample shows how to bring a Python Claude agent into Knowledge Chatroom
-(issue #60). The chatroom runs **one** agent, the TypeScript one in `agent/`, which
+(issue #60). The chatroom runs **one** agent, the TypeScript one in `apps/agent/`, which
 already has the workspace, storage, skills and permissions. A Python agent doesn't
 run beside it. Its parts move into that agent instead:
 

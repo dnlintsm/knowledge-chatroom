@@ -48,14 +48,14 @@ if (withLogin) {
 }
 
 const agentServers = useRealAgent
-  ? [{ command: "pnpm -C agent start", url: `http://localhost:${AGENT_PORT}/health` }]
+  ? [{ command: "pnpm -C apps/agent start", url: `http://localhost:${AGENT_PORT}/health` }]
   : [
       ...(withStorage
         ? [
             {
               // Scripts on only shows them as runnable, and memory only shows its API:
               // chat goes to the mock agent.
-              command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C agent start`,
+              command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
               url: `http://localhost:${STORAGE_PORT}/health`,
             },
           ]
@@ -112,7 +112,7 @@ export default defineConfig({
     })),
     {
       // CI builds first and serves the production build; locally, dev mode.
-      command: process.env.CI ? `pnpm exec next start -p ${UI_PORT}` : `pnpm dev:ui --port ${UI_PORT}`,
+      command: process.env.CI ? `pnpm -C apps/web exec next start -p ${UI_PORT}` : `pnpm -C apps/web dev --port ${UI_PORT}`,
       url: baseURL,
       reuseExistingServer: false,
       timeout: 180_000,

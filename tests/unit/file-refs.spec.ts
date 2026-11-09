@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { parseCsv } from "../../src/components/workspace/csv";
+import { parseCsv } from "../../apps/web/src/components/workspace/csv";
 import {
   blocksForLines,
   lineOffsets,
@@ -7,10 +7,10 @@ import {
   parseFileRef,
   rootRelativeLinks,
   sourceLines,
-} from "../../src/components/workspace/file-refs";
+} from "../../apps/web/src/components/workspace/file-refs";
 
 /**
- * The file reference contract (src/components/workspace/file-refs.ts) as plain
+ * The file reference contract (apps/web/src/components/workspace/file-refs.ts) as plain
  * functions, no browser needed. preview.spec.ts clicks references in the app.
  */
 

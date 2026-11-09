@@ -4,10 +4,10 @@ import {
   findReport,
   runsUnder,
   searchWithExperiment,
-} from "../../src/components/workspace/runs";
-import type { Experiment, KnowledgeNode } from "../../src/components/workspace/server-files";
+} from "../../apps/web/src/components/workspace/runs";
+import type { Experiment, KnowledgeNode } from "../../apps/web/src/components/workspace/server-files";
 
-/** Runs are experiments (src/components/workspace/runs.ts), no browser needed. */
+/** Runs are experiments (apps/web/src/components/workspace/runs.ts), no browser needed. */
 
 test("a run's report is its report.md at the top of the run", () => {
   expect(findReport(["data.csv", "report.md"])).toBe("report.md");

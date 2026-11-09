@@ -4,8 +4,8 @@ import {
   localAgentUrl,
   localSuggester,
   remoteAgentUrl,
-} from "../../src/lib/agent-target";
-import { identityHeader, readIdentityHeader, storageHeader } from "../../src/lib/auth";
+} from "../../apps/web/src/lib/agent-target";
+import { identityHeader, readIdentityHeader, storageHeader } from "../../apps/web/src/lib/auth";
 import { readIdentityToken } from "@knowledge-chatroom/contracts/identity-token";
 import {
   CHATROOM_PROPS,
@@ -13,11 +13,11 @@ import {
   chatroomPlace,
   withChatroomUser,
   type ChatroomProps,
-} from "../../src/lib/chatroom-props";
+} from "../../apps/web/src/lib/chatroom-props";
 
 /**
- * Which agent the chat talks to (src/lib/agent-target.ts) and what each run
- * tells it (src/lib/chatroom-props.ts); docs/remote-agent.md is the contract.
+ * Which agent the chat talks to (apps/web/src/lib/agent-target.ts) and what each run
+ * tells it (apps/web/src/lib/chatroom-props.ts); docs/remote-agent.md is the contract.
  */
 
 test("without AGENT_URL the chat uses this repo's agent server", () => {

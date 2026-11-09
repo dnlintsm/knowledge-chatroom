@@ -4,7 +4,7 @@ import { localAgentUrl } from "./agent-target";
 import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth";
 
 /**
- * Forwards a route group to this repo's agent server (agent/src/storage/http.ts)
+ * Forwards a route group to this repo's agent server (apps/agent/src/storage/http.ts)
  * at LOCAL_AGENT_URL, also when the chat goes to a remote backend (AGENT_URL),
  * so the browser talks to one origin and the agent port stays private.
  * Responses stream through, which carries the /files?watch change stream too.
@@ -26,7 +26,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "content-disposition",
   // Binary downloads may redirect to a signed object-store link.
   "location",
-  // Stored files opened as pages stay sandboxed (agent/src/storage/http.ts).
+  // Stored files opened as pages stay sandboxed (apps/agent/src/storage/http.ts).
   "content-security-policy",
   "x-content-type-options",
 ];

@@ -3,7 +3,7 @@ import {
   FOLLOW_UP_INSTRUCTIONS,
   firstRoundSuggestions,
   type SuggestionPlace,
-} from "../../src/components/workspace/chat-suggestions";
+} from "../../apps/web/src/components/workspace/chat-suggestions";
 
 const nowhere: SuggestionPlace = {
   openFile: null,

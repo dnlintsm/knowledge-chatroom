@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { INITIAL_FILE_FOCUS, reduceFileFocus } from "../../src/components/workspace/file-focus";
+import { INITIAL_FILE_FOCUS, reduceFileFocus } from "../../apps/web/src/components/workspace/file-focus";
 
 test("initial file focus defaults have empty selection, zero openCount, and null reveal", () => {
   expect(INITIAL_FILE_FOCUS).toEqual({ selection: "", openCount: 0, reveal: null });

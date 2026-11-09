@@ -163,17 +163,126 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  katex: 0.18.11
+  adm-zip: 0.6.1
   body-parser: 2.4.0
   follow-redirects: 1.16.2
   graphql-scalars: 2.0.1
-  undici: 6.29.1
+  katex: 0.18.11
   sharp: 0.35.5
-  adm-zip: 0.6.1
+  undici: 6.29.1
 
 importers:
 
   .:
+    devDependencies:
+      '@ag-ui/client':
+        specifier: 1.0.2
+        version: 1.0.2
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
+      '@knowledge-chatroom/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
+      '@playwright/test':
+        specifier: ^1.63.0
+        version: 1.64.1
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      concurrently:
+        specifier: ^9.1.2
+        version: 9.2.5
+      eslint:
+        specifier: ^10.12.0
+        version: 10.13.0(jiti@2.7.0)(supports-color@8.1.1)
+      eslint-plugin-react-hooks:
+        specifier: ^7.1.1
+        version: 7.1.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)
+      globals:
+        specifier: ^17.13.0
+        version: 17.13.0
+      next:
+        specifier: 16.4.2
+        version: 16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@20.19.43)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.15
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.71.1
+        version: 8.72.0(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
+
+  apps/agent:
+    dependencies:
+      '@ag-ui/claude-agent-sdk':
+        specifier: 0.0.8
+        version: 0.0.8(@ag-ui/client@1.0.4(zod@4.6.7))(@ag-ui/core@1.0.4(zod@4.6.7))(@anthropic-ai/claude-agent-sdk@0.3.296(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7))(zod@4.6.7))(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7)
+      '@ag-ui/core':
+        specifier: 1.0.4
+        version: 1.0.4(zod@4.6.7)
+      '@ag-ui/encoder':
+        specifier: 1.0.4
+        version: 1.0.4(zod@4.6.7)
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.296
+        version: 0.3.296(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7))(zod@4.6.7)
+      '@anthropic-ai/sdk':
+        specifier: 0.135.0
+        version: 0.135.0(zod@4.6.7)
+      '@aws-sdk/client-s3':
+        specifier: ^3.1146.0
+        version: 3.1164.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1146.0
+        version: 3.1164.0
+      '@huggingface/transformers':
+        specifier: 4.3.1
+        version: 4.3.1(@types/node@22.20.5)
+      '@knowledge-chatroom/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.1
+        version: 1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7)
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      zod:
+        specifier: ^4.3.6
+        version: 4.6.7
+    devDependencies:
+      '@ag-ui/client':
+        specifier: 1.0.4
+        version: 1.0.4(zod@4.6.7)
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.5
+      rxjs:
+        specifier: 7.8.1
+        version: 7.8.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  apps/web:
     dependencies:
       '@ag-ui/client':
         specifier: 1.0.2
@@ -195,7 +304,7 @@ importers:
         version: 1.79.1(@ag-ui/core@1.0.2(zod@3.25.76))
       '@knowledge-chatroom/contracts':
         specifier: workspace:*
-        version: link:packages/contracts
+        version: link:../../packages/contracts
       '@radix-ui/react-checkbox':
         specifier: ^1.3.3
         version: 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -260,12 +369,6 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
-      '@eslint/js':
-        specifier: ^10.0.1
-        version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
-      '@playwright/test':
-        specifier: ^1.63.0
-        version: 1.64.1
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.3.3
@@ -278,93 +381,11 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.3.0(@types/react@19.3.0)
-      concurrently:
-        specifier: ^9.1.2
-        version: 9.2.5
-      eslint:
-        specifier: ^10.12.0
-        version: 10.13.0(jiti@2.7.0)(supports-color@8.1.1)
-      eslint-plugin-react-hooks:
-        specifier: ^7.1.1
-        version: 7.1.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)
-      globals:
-        specifier: ^17.13.0
-        version: 17.13.0
-      postgres:
-        specifier: ^3.4.9
-        version: 3.4.9
       tailwindcss:
         specifier: ^4
         version: 4.3.3
-      tsx:
-        specifier: ^4.19.2
-        version: 4.23.15
       typescript:
         specifier: ^5
-        version: 5.9.3
-      typescript-eslint:
-        specifier: ^8.71.1
-        version: 8.72.0(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
-
-  agent:
-    dependencies:
-      '@ag-ui/claude-agent-sdk':
-        specifier: 0.0.8
-        version: 0.0.8(@ag-ui/client@1.0.4(zod@4.6.7))(@ag-ui/core@1.0.4(zod@4.6.7))(@anthropic-ai/claude-agent-sdk@0.3.296(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7))(zod@4.6.7))(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7)
-      '@ag-ui/core':
-        specifier: 1.0.4
-        version: 1.0.4(zod@4.6.7)
-      '@ag-ui/encoder':
-        specifier: 1.0.4
-        version: 1.0.4(zod@4.6.7)
-      '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.296
-        version: 0.3.296(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7))(zod@4.6.7)
-      '@anthropic-ai/sdk':
-        specifier: 0.135.0
-        version: 0.135.0(zod@4.6.7)
-      '@aws-sdk/client-s3':
-        specifier: ^3.1146.0
-        version: 3.1164.0
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1146.0
-        version: 3.1164.0
-      '@huggingface/transformers':
-        specifier: 4.3.1
-        version: 4.3.1(@types/node@22.20.5)
-      '@knowledge-chatroom/contracts':
-        specifier: workspace:*
-        version: link:../packages/contracts
-      '@modelcontextprotocol/sdk':
-        specifier: 1.32.1
-        version: 1.32.1(@cfworker/json-schema@4.1.1)(supports-color@8.1.1)(zod@4.6.7)
-      dotenv:
-        specifier: ^16.4.0
-        version: 16.6.1
-      fflate:
-        specifier: 0.8.3
-        version: 0.8.3
-      postgres:
-        specifier: ^3.4.9
-        version: 3.4.9
-      zod:
-        specifier: ^4.3.6
-        version: 4.6.7
-    devDependencies:
-      '@ag-ui/client':
-        specifier: 1.0.4
-        version: 1.0.4(zod@4.6.7)
-      '@types/node':
-        specifier: ^22.9.0
-        version: 22.20.5
-      rxjs:
-        specifier: 7.8.1
-        version: 7.8.1
-      tsx:
-        specifier: ^4.19.0
-        version: 4.23.15
-      typescript:
-        specifier: ^5.7.0
         version: 5.9.3
 
   packages/contracts: {}
@@ -8075,8 +8096,8 @@ snapshots:
       '@babel/parser': 7.29.9
       eslint: 10.13.0(jiti@2.7.0)(supports-color@8.1.1)
       hermes-parser: 0.25.1
-      zod: 3.25.76
-      zod-validation-error: 4.0.2(zod@3.25.76)
+      zod: 4.6.7
+      zod-validation-error: 4.0.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -10740,9 +10761,9 @@ snapshots:
     dependencies:
       zod: 4.6.7
 
-  zod-validation-error@4.0.2(zod@3.25.76):
+  zod-validation-error@4.0.2(zod@4.6.7):
     dependencies:
-      zod: 3.25.76
+      zod: 4.6.7
 
   zod@3.25.76: {}
 

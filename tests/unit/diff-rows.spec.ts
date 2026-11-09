@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { diffRows } from "../../src/components/workspace/diff-rows";
+import { diffRows } from "../../apps/web/src/components/workspace/diff-rows";
 
-/** The review panel's diffs (src/components/workspace/diff-rows.ts). */
+/** The review panel's diffs (apps/web/src/components/workspace/diff-rows.ts). */
 
 test("marks added and removed lines with both line numbers", () => {
   expect(diffRows("a\nb\nc\n", "a\nB\nc\n")).toEqual([

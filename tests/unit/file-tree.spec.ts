@@ -6,8 +6,8 @@ import {
   folderOf,
   folderPaths,
   newFilePath,
-} from "../../src/components/workspace/file-tree";
-import type { WorkspaceFile } from "../../src/components/workspace/types";
+} from "../../apps/web/src/components/workspace/file-tree";
+import type { WorkspaceFile } from "../../apps/web/src/components/workspace/types";
 
 const file = (path: string): WorkspaceFile => ({
   path,

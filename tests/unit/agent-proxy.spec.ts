@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { NextRequest } from "next/server";
-import { agentProxy } from "../../src/lib/agent-proxy";
-import { IDENTITY_HEADER, SESSION_COOKIE, sessionCookie } from "../../src/lib/auth";
+import { agentProxy } from "../../apps/web/src/lib/agent-proxy";
+import { IDENTITY_HEADER, SESSION_COOKIE, sessionCookie } from "../../apps/web/src/lib/auth";
 
 test.describe("agentProxy", () => {
   const originalFetch = globalThis.fetch;

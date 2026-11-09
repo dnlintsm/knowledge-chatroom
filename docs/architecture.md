@@ -1,14 +1,14 @@
 # Architecture
 
 The browser renders a Next.js workspace. CopilotKit's runtime route connects to
-an AG-UI agent on port 8000; `agent/src/server.ts` streams the Claude SDK adapter.
+an AG-UI agent on port 8000; `apps/agent/src/server.ts` streams the Claude SDK adapter.
 With `AGENT_URL` set, the chat goes to a remote backend's `/agent/report` instead
 ([Remote agent backend](remote-agent.md)), and each run carries the user and their
 place in `forwardedProps.knowledge_chatroom`.
 The agent also hosts storage HTTP routes and per-user file/node/experiment tools.
-`src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
+`apps/web/src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
 when login is enabled. Browser state and authenticated storage access meet in
-`src/components/workspace/store.tsx`; pane commands live in `workbench.tsx`.
+`apps/web/src/components/workspace/store.tsx`; pane commands live in `workbench.tsx`.
 
 ```mermaid
 flowchart LR
@@ -23,11 +23,11 @@ flowchart LR
   Events --> Browser
 ```
 
-The frontend (root), the agent (`agent/`) and `packages/contracts` form one pnpm
+The UI (`apps/web`), the agent (`apps/agent`) and `packages/contracts` form one pnpm
 workspace with one lockfile; `pnpm install` at the root installs all three. Each keeps
 its own dependency versions: the UI is on Zod 3 and `@ag-ui/*` 1.0.2 for CopilotKit,
 the agent on Zod 4 and `@ag-ui/*` 1.0.4. The starter's charts, meeting picker and A2UI examples remain
-under `src/app/declarative-generative-ui` and `src/hooks`; they are separate from
+under `apps/web/src/app/declarative-generative-ui` and `apps/web/src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
 This page first describes the workspace features (skills, runs, actions, the chat),
@@ -39,7 +39,7 @@ then [file storage](#file-storage) and its access rules, and finally the
 ### Skills
 
 Skills are `SKILL.md` folders in the [Claude Code / Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
-layout. Claude gets the built-in ones (`agent/skills/`), skills installed from the
+layout. Claude gets the built-in ones (`apps/agent/skills/`), skills installed from the
 [skill hub](#skill-hub), and the workspace's own `skills/<name>/` at the root (with
 [file storage](#file-storage)); a workspace skill hides a hub or built-in one of the same name.
 In the **Skills** view each one is set to:
@@ -64,7 +64,7 @@ folder), and only `/name` for one of those skills reaches the SDK as a command.
 #### Skill scripts
 
 A deployment can let skills run the scripts they ship (`scripts/`, `*.py`, `*.sh`, ...) with
-`SKILL_SCRIPTS=on` (`agent/src/skills/run.ts`). A run whose skills include one with scripts then
+`SKILL_SCRIPTS=on` (`apps/agent/src/skills/run.ts`). A run whose skills include one with scripts then
 gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, which the agent
 host must have; the run fails rather than run a command unsandboxed):
 
@@ -79,7 +79,7 @@ host must have; the run fails rather than run a command unsandboxed):
 - **No secrets**: the run's environment keeps only basics such as `PATH`, `HOME`, the locale and
   the model, so no `DATABASE_URL`, `AUTH_SECRET`, S3 or proxy settings. The SDK itself needs an
   API key, and its commands would inherit it, so the run gets a stand-in key that only a proxy
-  inside the agent accepts (`agent/src/skills/keyproxy.ts`, on 127.0.0.1); the proxy sends
+  inside the agent accepts (`apps/agent/src/skills/keyproxy.ts`, on 127.0.0.1); the proxy sends
   requests on to Anthropic with the real key.
 
 Commands run without a permission prompt because they're sandboxed; `!` commands in a SKILL.md
@@ -90,7 +90,7 @@ agent host.
 #### Working folder
 
 With file storage, each user's run folder also holds `workspace/`, a read-only copy of every
-file that user can read (`agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
+file that user can read (`apps/agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
 the workspace like on a local project:
 
 - **Layout**: `workspace/root/` is the workspace root, `workspace/nodes/<tech>/<module>/...`
@@ -133,7 +133,7 @@ With file storage, a deployment has one skill hub (`011_skill_hub.sql`), opened 
 
 Trust (`012_hub_trust.sql`) helps people decide what to install:
 
-- **Publish check**: each version is scanned as it's published (`agent/src/skills/scan.ts`) for
+- **Publish check**: each version is scanned as it's published (`apps/agent/src/skills/scan.ts`) for
   scripts, links and network commands, large or binary files, hidden text (invisible characters,
   HTML comments, long encoded runs) and instructions such as "ignore previous instructions" or
   "don't tell the user". Flags show on the hub and before an update; they warn, they don't block,
@@ -176,7 +176,7 @@ is no separate run folder or mode (issue #82):
   back/forward move between runs. A link to one that isn't there, or isn't shared with you,
   drops out of the URL with a notice. Old `?run=` links are dropped the same way.
 
-- **Runs Claude starts** (`create_experiment`, `agent/src/storage/session.ts` `startRun`)
+- **Runs Claude starts** (`create_experiment`, `apps/agent/src/storage/session.ts` `startRun`)
   begin in state running. The files the run works from are its **inputs**: each is linked
   in read only under `inputs/`, at the version it had then and sharing its stored bytes, so
   later changes to the original don't change what the run read, and promoting the run never
@@ -188,7 +188,7 @@ is no separate run folder or mode (issue #82):
   agent and Claude Agent SDK versions, and each input's original place, version and
   SHA-256 (`experiments.provenance`, migration `016_run_provenance.sql`; set by the agent
   only, never by the API). The run's `report.md` carries the same record in its front
-  matter, refreshed when the results are set (`agent/src/storage/run-report.ts`), and the
+  matter, refreshed when the results are set (`apps/agent/src/storage/run-report.ts`), and the
   run panel shows it under **Provenance**, with the inputs to open.
 - **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
   place with the old run's parameters, hypothesis and the very input versions it read (from
@@ -196,7 +196,7 @@ is no separate run folder or mode (issue #82):
   finished again with other results. The new run's provenance and front matter name the old
   one (`rerun_of`) by id only, since the old run may be a draft its viewers can't see; the
   panel links back to it for those who can see it.
-- **Analysis** is the built-in `analysis` skill (`agent/skills/analysis/`, Auto by default):
+- **Analysis** is the built-in `analysis` skill (`apps/agent/skills/analysis/`, Auto by default):
   Claude starts a run with the user's files as inputs, reads them from the run, writes the
   report from `reference/report-template.md` and records the results. With
   `SKILL_SCRIPTS=on` it can also profile the run's copy of CSV inputs with its
@@ -217,7 +217,7 @@ and Timeline sections), whose buttons act on the current run:
 | **New Chat** | viewer | starts an empty conversation, still about the same run |
 | **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
 
-Actions are entries in one registry (`src/components/workspace/actions.tsx`), each with an
+Actions are entries in one registry (`apps/web/src/components/workspace/actions.tsx`), each with an
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
 and state for the current run, and a `run(ctx)` that acts only through the workbench
 contract and the file API. One runner serves the block and Claude: it refuses disabled,
@@ -233,7 +233,7 @@ read-only file included, needs editor.
 Generate Rules gets JSON from `GET /api/rules?run=<title>&experiment=<id>` (the run's title
 and experiment id). The Next.js server forwards that to `RULES_API_URL` (`GET
 <url>?run=<title>&experiment=<id>`), so the API's address stays off the browser. Without
-`RULES_API_URL` it answers with a built-in mock (`src/lib/rules-mock.ts`), which is also served
+`RULES_API_URL` it answers with a built-in mock (`apps/web/src/lib/rules-mock.ts`), which is also served
 at `/api/mock/rules`. The answer looks like this:
 
 ```json
@@ -241,7 +241,7 @@ at `/api/mock/rules`. The answer looks like this:
   "rules": [{ "id": "R1", "title": "…", "condition": "…", "action": "…", "confidence": 0.93 }] }
 ```
 
-A fixed transform (`src/components/workspace/rules.ts`, unit tested) turns it into a markdown
+A fixed transform (`apps/web/src/components/workspace/rules.ts`, unit tested) turns it into a markdown
 table. The file is written once and is read-only for everyone, Claude included: the editor
 only previews it, and the file API refuses to change or delete it.
 
@@ -253,7 +253,7 @@ browsers can't overwrite the file.
 ### Workbench contract
 
 Everything that moves panes goes through one typed API, `useWorkbench()`
-(`src/components/workspace/workbench.tsx`): title bar buttons, the icon rail, the phone pane
+(`apps/web/src/components/workspace/workbench.tsx`): title bar buttons, the icon rail, the phone pane
 switcher, file references in answers, and Claude's open-file tools.
 
 | Part | Does |
@@ -280,11 +280,11 @@ keeping its own pane state.
 ### Chat suggestions
 
 The chips under the chat come in two rounds. Before the first message they follow what is
-open (`src/components/workspace/chat-suggestions.ts`): summarize the open file, draft a note,
+open (`apps/web/src/components/workspace/chat-suggestions.ts`): summarize the open file, draft a note,
 analyze the open run's report, and, with server storage, search for similar experiments.
 After each reply CopilotKit asks a separate `suggester` agent for follow-ups. The chat agent
 can't serve that request, because CopilotKit forces a single tool call and the Claude Agent SDK
-would run a whole turn with file tools, so the agent's `POST /suggest` (`agent/src/suggest.ts`)
+would run a whole turn with file tools, so the agent's `POST /suggest` (`apps/agent/src/suggest.ts`)
 makes one Messages API call on a small model with the conversation and the workspace context,
 and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
 the first-round chips once the chat starts, since any change would reload the follow-ups.
@@ -295,18 +295,18 @@ the first-round chips once the chat starts, since any change would reload the fo
 Each turn's thinking, tool calls and narration ("Let me read the file") fold into one block
 above the answer (issue #154): "Worked for 14s · 5 steps", with a live status line ("Reading
 notes/x.md…") and a timer while the run lasts. `groupSteps()` in
-`src/components/workspace/agent-steps.ts` makes the rows that CopilotKit's `groupMessages`
+`apps/web/src/components/workspace/agent-steps.ts` makes the rows that CopilotKit's `groupMessages`
 renders: a turn's answer is its last assistant message with text, and the steps before it go
 into the block (while the turn runs, text that came with tool calls is narration). The block
 (`agent-steps-view.tsx`) always renders its messages, inside a context the step renderers read:
-the thinking row, narration and the generic tool row (`src/components/tool-rendering.tsx`) hide
+the thinking row, narration and the generic tool row (`apps/web/src/components/tool-rendering.tsx`) hide
 while the block is closed, so paper cards, charts, A2UI and a tool waiting for the user still
 show. Follow-up chips sit under the message list and are not affected.
 
 The chat header's steps button switches between Compact (closed blocks) and Detailed (open
 blocks with every tool's arguments and result), per user in `localStorage`; `CHAT_STEPS=detailed`
 on the UI makes Detailed the default. Durations come from the events' `timestamp`, which the chat
-runner (`src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
+runner (`apps/web/src/lib/chat-runner.ts`) sets on every event it streams and saves, so a chat reopened
 from the history still says how long its steps took.
 
 ### Tool chips and paper search
@@ -314,16 +314,16 @@ from the history still says how long its steps took.
 Outside MCP servers whose `MCP_SERVERS` entry has a `ui` block show up in the chat's
 "+" menu (issue #151). The agent lists them at `GET /tools` and
 runs single calls for the app's buttons at `POST /tools/<server>/<tool>`
-(`agent/src/tools-api.ts`, proxied as `/api/tools`), only for tools the block lists.
+(`apps/agent/src/tools-api.ts`, proxied as `/api/tools`), only for tools the block lists.
 Picking one puts a chip above the message box; the chips each chat has on are kept in the
-browser (`src/components/workspace/tool-chips.ts`, `tool-menu.tsx`) and sent with every run
+browser (`apps/web/src/components/workspace/tool-chips.ts`, `tool-menu.tsx`) and sent with every run
 as `forwardedProps.knowledge_chatroom.tools`, and the agent then tells Claude to answer with
 that server's tools. The configuration is in
 [Development](development.md#outside-mcp-servers).
 
 Paper search (`services/papers-mcp`) is the first such server. Results of its
 `search_papers`, `related_papers` and `get_paper` tools render as paper cards
-(`src/components/workspace/paper-cards.tsx`) with **Save to workspace** (a `save_paper`
+(`apps/web/src/components/workspace/paper-cards.tsx`) with **Save to workspace** (a `save_paper`
 call through `/api/tools`, a proposal inside a knowledge node), **Ask about this**, **PDF**
 and **Page**. The built-in `paper-search` skill gives Claude the same steps without the chip.
 
@@ -333,15 +333,15 @@ Each user's chats are kept on the server, so they come back after a reload or a 
 (issue #91). The chat pane's history button lists them, newest first, named after the first
 question; each can be opened again, renamed, archived or deleted.
 
-- `src/lib/chat-runner.ts` is the CopilotKit runtime's runner. A live run streams from memory
+- `apps/web/src/lib/chat-runner.ts` is the CopilotKit runtime's runner. A live run streams from memory
   (so reconnecting mid-run works); when it finishes, its compacted AG-UI events and the
   messages after it are saved. Opening a chat replays its saved runs.
-- `src/lib/chat-store.ts` saves them through the agent server's `/chats` API
-  (`agent/src/storage/chats.ts`, tables `chats` and `chat_runs` from `017_chats.sql`) when
+- `apps/web/src/lib/chat-store.ts` saves them through the agent server's `/chats` API
+  (`apps/agent/src/storage/chats.ts`, tables `chats` and `chat_runs` from `017_chats.sql`) when
   it has storage, else in this process's memory (lost on restart, still one history per
   user).
-- `src/lib/chat-routes.ts` answers the runtime's thread routes (`/api/copilotkit/threads…`)
-  for the signed-in user; `src/components/workspace/chat-history.tsx` is the list.
+- `apps/web/src/lib/chat-routes.ts` answers the runtime's thread routes (`/api/copilotkit/threads…`)
+  for the signed-in user; `apps/web/src/components/workspace/chat-history.tsx` is the list.
 - A chat belongs to the user who started it. Nobody else lists, opens, continues or stops it,
   workspace owners included; with row-level security Postgres enforces this too. Storage
   tokens (MCP servers, remote backends) can't reach chats. The follow-up chips' `suggester`
@@ -355,20 +355,20 @@ With `MEMORY=on` and server storage, Claude keeps short notes about each user ac
 type (`profile`, `preference`, `project`, `feedback`, `reference`), the same shape as Claude
 Code's memory files and `SKILL.md`.
 
-- `agent/src/storage/memory.ts` keeps them (tables from `018_memory.sql`). Each note belongs
+- `apps/agent/src/storage/memory.ts` keeps them (tables from `018_memory.sql`). Each note belongs
   to one user; nobody else reads it, workspace owners included, and with row-level security
   Postgres enforces this too. Every change is a version. Claude's changes and reads are also
   `memory_events`, which is what Undo works from. When Claude deletes a note, it is only
   archived; when the user deletes one, it is gone for good, with its versions.
-- `agent/src/memory/run.ts` gives a chat run the user's memory, unless memory is off for them
+- `apps/agent/src/memory/run.ts` gives a chat run the user's memory, unless memory is off for them
   or the chat is incognito. The system prompt gets an index of the notes (one line each,
   the most recently used first, within 6,000 characters). Claude gets `memory_view`,
   `memory_search`, `memory_save`, `memory_edit` and `memory_delete`. Each read or change
   goes to the browser as an AG-UI custom event `memory`.
-- `agent/src/memory/http.ts` serves `/memory`, the user's own notes, settings, undo and
+- `apps/agent/src/memory/http.ts` serves `/memory`, the user's own notes, settings, undo and
   `.zip` export. The app forwards `/api/memory` to it. Without `MEMORY=on` or storage it
   answers 404, and the app hides memory.
-- `src/components/workspace/memory.tsx` has the Memory view (list, on/off, export), the note
+- `apps/web/src/components/workspace/memory.tsx` has the Memory view (list, on/off, export), the note
   editor in the middle pane (versions, restore, archive, delete) and the line under the
   chat input. That line shows what Claude used and changed this turn, with Undo, and the
   incognito toggle.
@@ -378,7 +378,7 @@ Code's memory files and `SKILL.md`.
   Claude's saves, edits and deletes become proposals in `memory_inbox` instead. The user
   accepts or rejects them in the Memory view; accepting applies the change against the
   version it was made on, or reports a conflict.
-- `agent/src/memory/learn.ts` is the background learner. Every minute it picks chats idle
+- `apps/agent/src/memory/learn.ts` is the background learner. Every minute it picks chats idle
   for `MEMORY_IDLE_MINUTES` (default 10) and at most 3 days old, not incognito, whose
   owner has memory on or ask, and asks a small model (`MEMORY_MODEL`, else the follow-up
   chips' model) for at most 5 changes to the notes, covering new facts, duplicates,
@@ -386,7 +386,7 @@ Code's memory files and `SKILL.md`.
   under "Recent changes by Claude") or go to the inbox in `ask` mode.
   `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
   it off.
-- Shared memory (`020_shared_memory.sql`, `agent/src/storage/shared-memory.ts`): notes for
+- Shared memory (`020_shared_memory.sql`, `apps/agent/src/storage/shared-memory.ts`): notes for
   the workspace, a knowledge node (and everything below it) or a group (and its
   sub-groups). `shared_memory_rank` decides who reads and edits each place from the
   grants: anyone with a grant in the workspace reads its notes and editors of the
@@ -401,7 +401,7 @@ Code's memory files and `SKILL.md`.
   someone who edits the place accepts or rejects it in the Memory view, and accepting
   credits the author. A person shares one of their own notes by copying it (a
   snapshot, checked before it goes): directly where they edit, else as a proposal.
-- Memory packs (`021_memory_packs.sql`, `agent/src/storage/memory-packs.ts`): a place's
+- Memory packs (`021_memory_packs.sql`, `apps/agent/src/storage/memory-packs.ts`): a place's
   own shared notes published to the hub (one per deployment, like skills) as immutable,
   numbered versions. Whoever publishes a name first owns it; unchanged notes add no
   version, and each version is scanned like a skill (`skills/scan.ts`). A place's editors
@@ -412,25 +412,25 @@ Code's memory files and `SKILL.md`.
   `pack_install_id` so they become the place's own. Hub admins (`HUB_ADMINS`) verify
   versions; the publisher or an admin yanks one, which keeps existing installs but blocks
   new ones. The Memory view lists installs, and the hub opens in the middle pane.
-- Import (`agent/src/memory/import.ts`, `POST /memory/import`): notes with front matter
+- Import (`apps/agent/src/memory/import.ts`, `POST /memory/import`): notes with front matter
   (this app's `.zip` export, Claude Code memory files) are read as they are; other text,
   such as ChatGPT's or Claude's memory pasted in, goes to `MEMORY_MODEL`, which sorts it
   into notes and merges it with the user's own (at most 30). Every note goes to the
   inbox (`source = 'import'`), never straight into memory. Without a model the text
   becomes one note.
-- Outside MCP servers (`memoryAccess`, `/memory/agent` in `agent/src/memory/http.ts`):
+- Outside MCP servers (`memoryAccess`, `/memory/agent` in `apps/agent/src/memory/http.ts`):
   a run with memory sends such servers an `X-Knowledge-Memory` token naming the user,
   the chat and its node. With it, a server gets the chat's memory prompt and runs the
   same `memory_*` tools as Claude, with the run marked as having read outside
   content, so every change waits in the inbox. Events reach the browser through the
   live run of that chat (`trackLiveRun`).
-- Search by meaning (`agent/src/memory/recall.ts`): when the agent runs an embedding
+- Search by meaning (`apps/agent/src/memory/recall.ts`): when the agent runs an embedding
   model for file search (`storage.semantic` is ready), `memory_search` also lists notes
   close in meaning that the words missed, under "Close in meaning". Note vectors are
   kept in the agent's memory only (an LRU of 5,000, keyed by the model and the note's
   text), so nothing derived from private notes is stored and a changed note is simply
   embedded again.
-- Past chats (`ChatService.search` and `lines` in `agent/src/storage/chats.ts`): runs with
+- Past chats (`ChatService.search` and `lines` in `apps/agent/src/storage/chats.ts`): runs with
   memory and chat history get `chats_search` (the user's own chats with the query's
   words in their name or in what the user and Claude said, tool output left out) and
   `chats_read` (a chat in parts of 12,000 characters). Incognito chats and the chat
@@ -457,9 +457,9 @@ highlights the paragraphs, list items, table rows or code blocks the lines belon
 editor selects the lines themselves. Links to files that aren't in the workspace show greyed
 out, and web links work as before.
 
-Claude learns the format from the system prompt (`agent/src/agent.ts`), and file content
+Claude learns the format from the system prompt (`apps/agent/src/agent.ts`), and file content
 reaches it with numbered lines (the open file in context, and `readWorkspaceFile`), so it can
-cite them. The contract lives in `src/components/workspace/file-refs.ts`, whose parser also
+cite them. The contract lives in `apps/web/src/components/workspace/file-refs.ts`, whose parser also
 accepts `#L12-18` and `notes/welcome.md:12`.
 
 ## File storage
@@ -471,7 +471,7 @@ the browser (see issue #4). It is optional; without
 For local setup, see [Development](development.md).
 
 - **Postgres** (15 or newer) holds the file tree, every version of every file, and who
-  wrote it (`agent/src/storage/migrations`). Migrations run when the agent starts.
+  wrote it (`apps/agent/src/storage/migrations`). Migrations run when the agent starts.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
@@ -544,7 +544,7 @@ For local setup, see [Development](development.md).
   grants. Whoever adds a node becomes its owner, so they can delete or share what they
   made. A grant to a group covers members of its sub-groups too.
   The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
-  check access in one place (`agent/src/storage/session.ts`), and every change is written to
+  check access in one place (`apps/agent/src/storage/session.ts`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is
   one built-in user who owns everything, so nothing changes for a single-user setup.
 - **Login** (optional): set `AUTH_MODE=oidc`, `AUTH_SECRET` (the same value for the app and the agent, at least
@@ -558,14 +558,14 @@ For local setup, see [Development](development.md).
   (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
   person to sign in owns the workspace and shares nodes from the title bar's Share button
   (people show up there once they have signed in). Workspace owners also get an **Admin**
-  panel next to Share (`src/components/workspace/admin.tsx`): everyone who has signed in with
+  panel next to Share (`apps/web/src/components/workspace/admin.tsx`): everyone who has signed in with
   their last activity, their workspace role (set in place), the groups and their members, and
   recent access changes from the audit log. There is no separate admin list: owning the
   workspace is what makes someone an admin. Viewers get the files read only, and
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
-  (`agent/src/storage/migrations/004_row_security.sql`, `005_experiments.sql` for
+  (`apps/agent/src/storage/migrations/004_row_security.sql`, `005_experiments.sql` for
   experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
@@ -583,7 +583,7 @@ For local setup, see [Development](development.md).
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
   `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
   `update_experiment` and `propose_experiment` tools on the agent server
-  (`agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
+  (`apps/agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in
   lines (and `column` for lines longer than one read) and returns at most 50,000 characters

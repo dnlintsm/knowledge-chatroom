@@ -56,7 +56,7 @@ const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
 /** The input of the last chat run, for GET /last-run. */
 let lastRun = null;
 
-/** The "+" menu, as the agent's GET /tools lists a papers server (agent/src/tools-api.ts). */
+/** The "+" menu, as the agent's GET /tools lists a papers server (apps/agent/src/tools-api.ts). */
 const TOOL_MENU = [
   {
     server: "papers", label: "Search papers", chip: "Papers", description: "Academic papers from OpenAlex and arXiv",
@@ -107,7 +107,7 @@ const REPLY =
   "Anthropic API key. With a real key, Claude answers here instead.";
 
 // File references as the system prompt asks Claude to write them
-// (src/components/workspace/file-refs.ts).
+// (apps/web/src/components/workspace/file-refs.ts).
 const CITING_REPLY =
   "Read [The Pragmatic Programmer](notes/reading-list.md#L7) next: it's the one marked Next. " +
   "Meanwhile [sales.csv:3-4](uploads/sales.csv#L3-L4) shows revenue still climbing.";
@@ -144,7 +144,7 @@ const TOOL_REPLIES = {
   openRun: "Switched to the other run.",
 };
 
-// The agent's built-in skills (agent/skills/), as GET /skills lists them.
+// The agent's built-in skills (apps/agent/skills/), as GET /skills lists them.
 const SKILLS = [
   {
     name: "analysis",

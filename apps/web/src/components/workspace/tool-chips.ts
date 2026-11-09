@@ -8,7 +8,7 @@ export const TOOL_CHIPS_KEY = "knowledge-chatroom.chat.tool-chips.v1";
 /** Chats remembered; the oldest are forgotten first. */
 const MAX_CHATS = 100;
 
-/** One server in the "+" menu, as the agent's GET /tools lists it (agent/src/tools-api.ts). */
+/** One server in the "+" menu, as the agent's GET /tools lists it (apps/agent/src/tools-api.ts). */
 export interface ToolMenuItem {
   server: string;
   label: string;

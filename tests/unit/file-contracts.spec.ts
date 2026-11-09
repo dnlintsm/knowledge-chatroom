@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { normalizePath, InvalidPathError } from "@knowledge-chatroom/contracts/files";
 import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
-import * as backend from "../../agent/src/storage/paths";
-import * as browser from "../../src/components/workspace/types";
-import { listServerFiles, loadServerFile, putServerFile } from "../../src/components/workspace/server-files";
-import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
-import { parsePersistedWorkspace } from "../../src/components/workspace/workspace-state";
+import * as backend from "../../apps/agent/src/storage/paths";
+import * as browser from "../../apps/web/src/components/workspace/types";
+import { listServerFiles, loadServerFile, putServerFile } from "../../apps/web/src/components/workspace/server-files";
+import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../apps/web/src/components/workspace/local-persistence";
+import { parsePersistedWorkspace } from "../../apps/web/src/components/workspace/workspace-state";
 
 const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false };
 const state = { files: [{ path: info.path, kind: info.kind, mime: info.mime, content: "kept", updatedAt: 1, author: info.author }], tabs: [info.path], active: info.path };

@@ -8,7 +8,7 @@ import {
   splitToolName,
   writeChips,
   type ToolMenuItem,
-} from "../../src/components/workspace/tool-chips";
+} from "../../apps/web/src/components/workspace/tool-chips";
 
 const item = (server: string): ToolMenuItem => ({
   server, label: server, chip: server, description: null, icon: null, mode: "auto", callable: [],

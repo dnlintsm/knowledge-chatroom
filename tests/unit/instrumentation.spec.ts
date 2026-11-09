@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { register } from "../../src/instrumentation";
+import { register } from "../../apps/web/src/instrumentation";
 
 test.describe("instrumentation register", () => {
   const originalEnv = { ...process.env };

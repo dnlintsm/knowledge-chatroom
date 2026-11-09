@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 test("layout does not use dangerouslySetInnerHTML for theme script", () => {
-  const layoutPath = path.resolve(__dirname, "../../src/app/layout.tsx");
+  const layoutPath = path.resolve(__dirname, "../../apps/web/src/app/layout.tsx");
   const layoutSource = fs.readFileSync(layoutPath, "utf-8");
 
   // Ensure dangerouslySetInnerHTML is not used

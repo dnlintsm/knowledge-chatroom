@@ -17,7 +17,7 @@ import {
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
  * signed cookie. Every request it forwards to the agent server carries a
  * short-lived signed X-Knowledge-User header (packages/contracts/src/identity-token.ts makes
- * it, agent/src/storage/identity.ts checks it), so the agent knows whose
+ * it, apps/agent/src/storage/identity.ts checks it), so the agent knows whose
  * access rules apply.
  *
  * AUTH_MODE=local turns login off and everyone is the local user; see
