@@ -1035,7 +1035,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VersionList"];
+                    "application/json": components["schemas"]["VersionList"] | unknown;
                     "*/*": string;
                 };
             };

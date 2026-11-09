@@ -113,7 +113,13 @@ paths:
               schema: { type: string, enum: ["true"] }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/VersionList" }
+              schema:
+                description: |
+                  With `versions`, a VersionList. Without it, a stored .json file's own content,
+                  which can be any JSON.
+                anyOf:
+                  - $ref: "#/components/schemas/VersionList"
+                  - {}
             "*/*":
               schema: { type: string, format: binary }
         "302":
