@@ -6,7 +6,7 @@ import {
   remoteAgentUrl,
 } from "../../src/lib/agent-target";
 import { identityHeader, readIdentityHeader, storageHeader } from "../../src/lib/auth";
-import { readIdentityToken } from "../../shared/identity-token";
+import { readIdentityToken } from "@knowledge-chatroom/contracts/identity-token";
 import {
   CHATROOM_PROPS,
   LOCAL_USER,

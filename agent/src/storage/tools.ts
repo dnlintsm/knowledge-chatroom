@@ -24,7 +24,7 @@ import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError } from "./proposals";
 import { SearchError } from "./search";
-import { applyEdit } from "../../../shared/text-edit";
+import { applyEdit } from "@knowledge-chatroom/contracts/text-edit";
 import { isInside, writeRunInputs } from "./workdir";
 import type { Skill } from "../skills/catalog";
 

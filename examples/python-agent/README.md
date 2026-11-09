@@ -33,7 +33,7 @@ and `whoami` shows the forwarded user.
    ```
 
 2. Connect the agent to it in the repository's `.env`, then restart the agent
-   (`npm run dev`):
+   (`pnpm dev`):
 
    ```bash
    MCP_SERVERS={"mcpServers":{"lab":{"url":"http://127.0.0.1:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}

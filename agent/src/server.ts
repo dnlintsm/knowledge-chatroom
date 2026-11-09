@@ -54,14 +54,14 @@ import { keyRoute } from "./skills/keyproxy";
 import { materialize, scriptsEnabled, type RunSkills, type SkillUse } from "./skills/run";
 import { SkillService } from "./skills/service";
 import { suggest } from "./suggest";
-import { authSettings } from "../../shared/auth-mode";
+import { authSettings } from "@knowledge-chatroom/contracts/auth-mode";
 import {
   MEMORY_AUDIENCE,
   STORAGE_AUDIENCE,
   checkIdentityFormat,
   identityPublicKey,
   storageTokenSeconds,
-} from "../../shared/identity-token";
+} from "@knowledge-chatroom/contracts/identity-token";
 import type { RunTokens } from "./mcp";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);

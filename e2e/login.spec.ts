@@ -8,7 +8,7 @@ async function showFiles(page: Page) {
 }
 
 /**
- * Login and sharing: npm run test:e2e:login.
+ * Login and sharing: pnpm test:e2e:login.
  * The config supplies the test OIDC provider and public signing key.
  * Use a fresh disposable database: the first sign-in becomes its owner.
  */

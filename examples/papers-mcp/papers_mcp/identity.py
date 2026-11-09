@@ -4,7 +4,7 @@ A copy of examples/python-agent/lab_tools/identity.py, so this server stands alo
 
 With login on, the agent sends each run's user to servers configured with
 "forwardIdentity": true, as a token signed for this server only
-(aud "mcp:<server name>"). Python twin of shared/identity-token.ts:
+(aud "mcp:<server name>"). Python twin of packages/contracts/src/identity-token.ts:
 
     v2.<base64url JSON payload>.<base64url Ed25519 signature of "v2.<payload>">
 

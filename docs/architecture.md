@@ -23,8 +23,10 @@ flowchart LR
   Events --> Browser
 ```
 
-The frontend and agent have separate manifests and lockfiles. `npm ci` at the
-root installs both. The starter's charts, meeting picker and A2UI examples remain
+The frontend (root), the agent (`agent/`) and `packages/contracts` form one pnpm
+workspace with one lockfile; `pnpm install` at the root installs all three. Each keeps
+its own dependency versions: the UI is on Zod 3 and `@ag-ui/*` 1.0.2 for CopilotKit,
+the agent on Zod 4 and `@ag-ui/*` 1.0.4. The starter's charts, meeting picker and A2UI examples remain
 under `src/app/declarative-generative-ui` and `src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
@@ -551,7 +553,7 @@ For local setup, see [Development](development.md).
   Entra ID and others work). Register `<APP_URL>/api/auth/callback` as the redirect URI, and
   set `APP_URL` (required in production; https unless on localhost). `AUTH_MODE=local` runs
   without login; a production server with neither refuses to start rather than guess
-  (`shared/auth-mode.ts`). Users then sign in before the workspace
+  (`packages/contracts/src/auth-mode.ts`). Users then sign in before the workspace
   opens; the app keeps them in a signed cookie and signs each request it forwards to the agent
   (`X-Knowledge-User`, valid for five minutes), so the agent port must stay private. The first
   person to sign in owns the workspace and shares nodes from the title bar's Share button
@@ -599,7 +601,7 @@ For local setup, see [Development](development.md).
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.
-- **Tests**: `npm run test:integration` requires `TEST_DATABASE_URL` and `S3_ENDPOINT`;
+- **Tests**: `pnpm test:integration` requires `TEST_DATABASE_URL` and `S3_ENDPOINT`;
   it resets a disposable test database. See [Testing](testing.md).
 
 
@@ -617,7 +619,7 @@ Coordinate changes with the feature PR stack before introducing new semantics.
 
 ## File contracts and validation
 
-`shared/files.ts` and `shared/storage-contract.ts` have no React, database or SDK
+`packages/contracts/src/files.ts` and `packages/contracts/src/storage-contract.ts` have no React, database or SDK
 imports. File metadata and committed events use one transport definition on both
 sides; the browser validates lists, PUT responses and SSE messages before use.
 Transport timestamps are date strings, with hashes/sizes and a read-only flag.

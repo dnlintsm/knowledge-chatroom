@@ -21,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.1146.0",
     "@aws-sdk/s3-request-presigner": "^3.1146.0",
     "@huggingface/transformers": "4.3.1",
+    "@knowledge-chatroom/contracts": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.1",
     "dotenv": "^16.4.0",
     "fflate": "0.8.3",
@@ -33,11 +34,5 @@
     "rxjs": "7.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
-  },
-  "overrides": {
-    "sharp": "0.35.5",
-    "adm-zip": "0.6.1",
-    "body-parser": "2.4.0",
-    "@ag-ui/client": "$@ag-ui/client"
   }
 }

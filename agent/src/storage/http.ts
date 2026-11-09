@@ -150,7 +150,7 @@ import type { RunInputSource, Session } from "./session";
  * who can view the node, and only its author changes it. Who is asking comes from identity.ts: the
  * local user without AUTH_SECRET, the signed-in user with it.
  *
- * An X-Knowledge-Storage token (shared/identity-token.ts) instead is Claude
+ * An X-Knowledge-Storage token (packages/contracts/src/identity-token.ts) instead is Claude
  * acting for its user through an outside service (an MCP server, a remote
  * backend), with that user's access and the same limits as this agent's own
  * file tools (tools.ts): in a knowledge node, and for skills at the root, it

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { withFrontMatter } from "./run-report";
 import { numberLines, readLines, skillProvenance } from "./tools";
-import { applyEdit } from "../../../shared/text-edit";
+import { applyEdit } from "@knowledge-chatroom/contracts/text-edit";
 
 const file = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
 

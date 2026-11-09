@@ -19,7 +19,7 @@ RAG = json.loads((FIXTURES / "openalex_work_rag.json").read_text())
 NQ = json.loads((FIXTURES / "openalex_work_nq.json").read_text())
 SEARCH = json.loads((FIXTURES / "openalex_search.json").read_text())
 
-# Signs test tokens as the chatroom's agent would (shared/identity-token.ts).
+# Signs test tokens as the chatroom's agent would (packages/contracts/src/identity-token.ts).
 TEST_KEY = Ed25519PrivateKey.generate()
 
 

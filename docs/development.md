@@ -1,18 +1,19 @@
 # Development
 
-Use Node 22 from `.nvmrc`. Install both locked packages with `npm ci` at the root;
-`npm run install:agent` repeats only the agent installation. Use `npm install`
-only when intentionally changing dependencies, and include the relevant lockfile.
+Use Node 22 from `.nvmrc` and pnpm: `corepack enable` once gives you the version in
+`package.json` (`packageManager`). `pnpm install` at the root installs the UI, the agent
+and `packages/contracts` from the one `pnpm-lock.yaml`; CI uses `--frozen-lockfile`.
+Add a dependency to the agent with `pnpm -C agent add <name>`, and commit the lockfile.
 
 Copy `.env.example` to `.env`. For real chat set `ANTHROPIC_API_KEY`;
-`CLAUDE_MODEL` defaults to `claude-sonnet-5`. `npm run dev` starts the UI on 3000
-and the agent on 8000. `npm run dev:ui` and `npm run dev:agent` run them separately.
+`CLAUDE_MODEL` defaults to `claude-sonnet-5`. `pnpm dev` starts the UI on 3000
+and the agent on 8000. `pnpm dev:ui` and `pnpm dev:agent` run them separately.
 Check the agent with `curl http://localhost:8000/health`; storage can still be
 migrating after this health endpoint answers.
 
-After an upgrade, `npm run env:check` compares `.env` with `.env.example`: settings a
+After an upgrade, `pnpm env:check` compares `.env` with `.env.example`: settings a
 release removed or renamed, new settings, and ones `.env.example` doesn't know. Only
-names are printed. `npm run env:upgrade` backs up `.env` to `.env.backup-<time>`,
+names are printed. `pnpm env:upgrade` backs up `.env` to `.env.backup-<time>`,
 comments out removed settings, applies renames, and appends new settings commented out
 with their explanations. `--env` and `--example` point it at other files, e.g.
 `node scripts/env-upgrade.mjs --env /srv/knowledge/.env`. A release that removes or renames a
@@ -205,7 +206,7 @@ mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 The chat can use an agent from a separate backend instead of this repo's own:
 set `AGENT_URL` to its base URL, and every chat run goes to
 `${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage and
-skills at `LOCAL_AGENT_URL` (default `http://localhost:8000`, which `npm run dev`
+skills at `LOCAL_AGENT_URL` (default `http://localhost:8000`, which `pnpm dev`
 starts), and turns its own chat off. Each run tells the backend who the user is and
 where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
 must do is in [Remote agent backend](remote-agent.md).
@@ -232,13 +233,16 @@ production run.
 
 ## Dependency security
 
-The root and agent lockfiles are audited separately (`npm audit` and
-`npm --prefix agent audit`). Both use `overrides` to pin patched transitive versions:
+`pnpm audit` checks the whole workspace. Patched transitive versions are pinned in
+`pnpm-workspace.yaml` (`overrides`, which apply to every package), and the UI's
+`@ag-ui/core` is a direct dependency pinned to 1.0.2, so CopilotKit's peers resolve to the
+same version as the UI's `@ag-ui/client` while the agent keeps 1.0.4:
 
-| Lockfile | Overrides |
+| Where | What |
 | --- | --- |
-| Root (`package.json`) | `body-parser`, `follow-redirects`, `graphql-scalars`, `undici` and `katex`, plus `@ag-ui/core`, `encoder` and `proto` held on 1.0.2, the version of the UI's `@ag-ui/client` |
-| Agent (`agent/package.json`) | `body-parser`, `sharp` and `adm-zip`; its own `@ag-ui/core` and `@ag-ui/encoder` dependencies are on 1.0.4, which use Zod 4 |
+| `pnpm-workspace.yaml` `overrides` | `adm-zip`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
+| Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
+| `agent/package.json` | its own `@ag-ui/core`, `@ag-ui/encoder` and `@ag-ui/client` on 1.0.4, which use Zod 4 |
 
 When updating these dependencies, recheck the overrides and run the build and tests
 before removing any. The `undici` and `graphql-scalars` overrides cross an upstream
@@ -255,7 +259,7 @@ inputs but is not a substitute for upgrading the affected dependency.
 ## Troubleshooting
 
 - Agent connection errors: check port 8000, the health endpoint and the API key.
-- Dependency errors: select Node 22, stop dev/test servers, then run `npm ci`.
+- Dependency errors: select Node 22, stop dev/test servers, then run `pnpm install`.
 - Test port in use: stop your existing server or override the E2E ports listed in
   [Testing](testing.md). The runner intentionally refuses to reuse an unknown server.
 - S3 writes failing after multiple test buckets: SeaweedFS reserves volumes per

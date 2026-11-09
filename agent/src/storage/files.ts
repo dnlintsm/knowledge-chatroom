@@ -9,8 +9,8 @@ import { indexBlob } from "./search";
 
 export type { AuthorType, FileEvent } from "./events";
 
-import type { FileInfo } from "../../../shared/storage-contract";
-export type { FileInfo } from "../../../shared/storage-contract";
+import type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
+export type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 
 /** A write or delete of a read-only file. */
 export class ReadOnlyFileError extends Error {

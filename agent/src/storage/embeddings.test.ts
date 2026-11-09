@@ -3,9 +3,9 @@
  * similarities clear the search bar for related text but not for unrelated
  * text, in English and Chinese. It downloads the model (about 120 MB) the
  * first time, so it runs only with EMBEDDING_TEST=1, which adds it to
- * `npm run test:integration` (CI caches the model):
+ * `pnpm test:integration` (CI caches the model):
  *
- *   cd agent && EMBEDDING_TEST=1 npx tsx --test src/storage/embeddings.test.ts
+ *   cd agent && EMBEDDING_TEST=1 pnpm exec tsx --test src/storage/embeddings.test.ts
  */
 
 import assert from "node:assert/strict";

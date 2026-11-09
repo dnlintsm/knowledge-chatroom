@@ -1,17 +1,17 @@
 # Testing
 
-Run from the repository root with Node 22. Root `npm ci` installs both packages.
+Run from the repository root with Node 22. Root `pnpm install` installs the whole workspace.
 The default test command runs only fast units; integration and E2E are explicit.
 
 | Command | Services/credentials | Coverage |
 | --- | --- | --- |
-| `npm run check` | None | ESLint, both TypeScript projects, all unit tests |
-| `npm test` / `npm run test:unit` | None | Frontend pure tests and agent unit tests |
-| `npm run test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
-| `npm run test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
-| `npm run test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
-| `npm run test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
-| `npm run test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
+| `pnpm check` | None | ESLint, both TypeScript projects, all unit tests |
+| `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
+| `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
+| `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
+| `pnpm test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
+| `pnpm test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
+| `pnpm test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
 browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
@@ -43,7 +43,7 @@ export S3_ACCESS_KEY_ID=knowledge
 export S3_SECRET_ACCESS_KEY=knowledge-secret
 export S3_BUCKET=knowledge-test
 export S3_PUBLIC_URL=http://localhost:8333
-npm run test:integration
+pnpm test:integration
 ```
 
 Create each database once. This bucket name matches the integration fixtures and
@@ -59,10 +59,10 @@ keyword-search coverage without downloading the model.
 ## Browser, storage and login
 
 ```bash
-npx playwright install chromium
-npm run test:e2e
-DATABASE_URL=postgres://knowledge:knowledge@localhost:5432/knowledge_e2e npm run test:e2e:storage
-DATABASE_URL=postgres://knowledge:knowledge@localhost:5432/knowledge_login npm run test:e2e:login
+pnpm exec playwright install chromium
+pnpm test:e2e
+DATABASE_URL=postgres://knowledge:knowledge@localhost:5432/knowledge_e2e pnpm test:e2e:storage
+DATABASE_URL=postgres://knowledge:knowledge@localhost:5432/knowledge_login pnpm test:e2e:login
 ```
 
 Export the S3 values above before storage/login tests. Login uses a local mock
@@ -79,10 +79,10 @@ agent 8000, storage agent 8001, test OIDC 9400. Override `E2E_UI_PORT`,
 
 CI builds first and serves that build. Locally the runner starts development
 mode. Forward Playwright arguments after `--`, for example
-`npm run test:e2e -- --retries=0 --reporter=list`. Reports/videos/traces are
+`pnpm test:e2e -- --retries=0 --reporter=list`. Reports/videos/traces are
 generated artifacts and are ignored by git. Preview screenshots go in `preview/`.
 
-For an intentional live run, export `ANTHROPIC_API_KEY` and use `npm run test:live`.
+For an intentional live run, export `ANTHROPIC_API_KEY` and use `pnpm test:live`.
 Live coverage may cost money and depends on the provider/network. Mock-specific
 answer checks are excluded from live mode; it is not a replacement for required
 mock coverage. It is not run by required CI.

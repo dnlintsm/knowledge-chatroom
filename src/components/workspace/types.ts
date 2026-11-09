@@ -6,8 +6,8 @@
  * (see store.tsx and docs/architecture.md).
  */
 
-import { extension, isTextFile as isTextContent, mimeForPath } from "../../../shared/files";
-import type { LocalFile } from "../../../shared/storage-contract";
+import { extension, isTextFile as isTextContent, mimeForPath } from "@knowledge-chatroom/contracts/files";
+import type { LocalFile } from "@knowledge-chatroom/contracts/storage-contract";
 
 /**
  * A workspace file. With server storage, a text file is only listed until it
@@ -15,7 +15,7 @@ import type { LocalFile } from "../../../shared/storage-contract";
  * the store fetches it (store.tsx).
  */
 export type WorkspaceFile = LocalFile & { unloaded?: true };
-export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "../../../shared/files";
+export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "@knowledge-chatroom/contracts/files";
 
 /** An edit or delete of a read-only file. */
 export class ReadOnlyFileError extends Error {

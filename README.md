@@ -90,12 +90,13 @@ line from the comment above its service in `docker-compose.yml`, copied into `.e
 
 ### Run from source
 
-Use **Node 22** (`.nvmrc`) and npm. Add an Anthropic API key to `.env` for real chat.
+Use **Node 22** (`.nvmrc`) and pnpm (`corepack enable` picks the version in
+`package.json`). Add an Anthropic API key to `.env` for real chat.
 
 ```bash
 cp .env.example .env
-npm ci                         # installs the UI and agent from their lockfiles
-npm run dev                    # UI :3000, agent :8000
+pnpm install                   # the UI, the agent and packages/ from one lockfile
+pnpm dev                       # UI :3000, agent :8000
 ```
 
 Open <http://localhost:3000>. Without server storage, files stay in your browser. Runs,
@@ -109,8 +110,8 @@ After pulling a new version, compare your `.env` with `.env.example`, then follo
 "Upgrading" steps for each version in the [CHANGELOG](CHANGELOG.md):
 
 ```bash
-npm run env:check              # removed, renamed and new settings; prints no values
-npm run env:upgrade            # applies it, after backing up .env
+pnpm env:check              # removed, renamed and new settings; prints no values
+pnpm env:upgrade            # applies it, after backing up .env
 ```
 
 ## Documentation
@@ -136,11 +137,11 @@ Two examples show how to bring outside tools in as MCP servers:
 Before opening a PR, run:
 
 ```bash
-npm run check                  # lint, UI/agent types, and service-free units
-npm run build                  # production compile with TypeScript checks
+pnpm check                  # lint, UI/agent types, and service-free units
+pnpm build                  # production compile with TypeScript checks
 ```
 
-Use `npm run test:e2e` for browser changes. Storage changes also need integration
+Use `pnpm test:e2e` for browser changes. Storage changes also need integration
 and storage/login E2E coverage; [Testing](docs/testing.md) explains prerequisites.
 A PR that changes the UI adds a `shot()` step to `e2e/preview.spec.ts` (or the storage
 specs), so the preview comment shows it. Keep PRs small and describe the behavior
@@ -154,8 +155,8 @@ changed and how you validated it.
 | `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `agent/src/storage/migrations` | Database schema and access policies |
 | `agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
-| `shared` | Contracts used by both the UI and the agent: files, identity tokens, text edits |
-| `scripts` | Dev launchers, the E2E runner, CI summaries, and `env:check`/`env:upgrade` |
+| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits) |
+| `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
 | `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
 | `examples/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `tests/unit` | Pure frontend tests without an application server or browser |

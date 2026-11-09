@@ -87,7 +87,7 @@ test("--write backs up .env first and leaves it alone when nothing changes", () 
     writeFileSync(env, old);
     const check = run();
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("npm run env:upgrade");
+    expect(check.stdout).toContain("pnpm env:upgrade");
     expect(check.stdout).not.toContain("sk-secret-value");
     expect(readFileSync(env, "utf8")).toBe(old);
     expect(run("--write").status).toBe(0);

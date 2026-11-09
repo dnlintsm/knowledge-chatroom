@@ -1,4 +1,4 @@
-import { parseLocalFile } from "../../../shared/storage-contract";
+import { parseLocalFile } from "@knowledge-chatroom/contracts/storage-contract";
 import type { TabId, WorkspaceFile } from "./types";
 
 export interface PersistedWorkspace {

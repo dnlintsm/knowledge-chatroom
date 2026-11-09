@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npm run env:check / env:upgrade: compares .env with .env.example (see
+// pnpm env:check / env:upgrade: compares .env with .env.example (see
 // env-upgrade-plan.mjs). --write backs up .env and applies the plan.
 // Options: --env <path> (default .env), --example <path> (default .env.example).
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";

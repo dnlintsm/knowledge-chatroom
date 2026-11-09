@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["@copilotkit/runtime"],
+  // Workspace package shipped as TypeScript source (packages/contracts).
+  transpilePackages: ["@knowledge-chatroom/contracts"],
   env: {
     // NEXT_PUBLIC_* resolves at build time while the Runtime reads the project key
     // per request. Provide CPK_INTELLIGENCE_API_KEY during the host build so the

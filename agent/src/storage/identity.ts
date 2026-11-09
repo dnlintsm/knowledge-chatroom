@@ -7,7 +7,7 @@ import {
   STORAGE_HEADER,
   readIdentityToken,
   signIdentityToken,
-} from "../../../shared/identity-token";
+} from "@knowledge-chatroom/contracts/identity-token";
 
 import type { Principal } from "./access";
 import type { Storage } from "./index";
@@ -18,7 +18,7 @@ import type { Storage } from "./index";
  * (which handles login) signs the user into an X-Knowledge-User header, and
  * requests without a valid one are refused. The agent port must stay private
  * either way; the header is only as trustworthy as the network in front of it.
- * Tokens are made and checked by shared/identity-token.ts (v2: Ed25519, so
+ * Tokens are made and checked by packages/contracts/src/identity-token.ts (v2: Ed25519, so
  * outside services verify them with the public key alone).
  */
 

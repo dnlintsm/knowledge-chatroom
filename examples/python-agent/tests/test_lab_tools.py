@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from lab_tools import identity, memory, server, stats, workspace
 
 # The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",
-# and tokens its agent signed with it (shared/identity-token.ts, the same values
+# and tokens its agent signed with it (packages/contracts/src/identity-token.ts, the same values
 # as tests/unit/identity-token.spec.ts), so these tests break if the two sides
 # stop agreeing on the format.
 PUBLIC_KEY = identity.public_key("Z1iN8KqPV0u2Dk95GsXXFlHQE05RT15l2-1TzD3XDI8")
