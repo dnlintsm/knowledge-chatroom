@@ -5,7 +5,7 @@ import globals from "globals";
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", ".next/**", "next-env.d.ts", "preview/**", "test-results*/**", "playwright-report/**", "coverage/**"],
+    ignores: ["**/node_modules/**", "**/.next/**", "**/next-env.d.ts", "**/.venv/**", "preview/**", "test-results*/**", "playwright-report/**", "coverage/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -16,7 +16,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/**/*.{ts,tsx}"],
+    files: ["apps/web/src/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
@@ -26,7 +26,7 @@ export default tseslint.config(
   {
     // The starter's dynamic A2UI renderer accepts an SDK-defined property bag.
     // Keep this exception local; workspace and backend code must use typed values.
-    files: ["src/app/declarative-generative-ui/renderers.tsx"],
+    files: ["apps/web/src/app/declarative-generative-ui/renderers.tsx"],
     rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
 );

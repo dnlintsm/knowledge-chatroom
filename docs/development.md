@@ -3,7 +3,8 @@
 Use Node 22 from `.nvmrc` and pnpm: `corepack enable` once gives you the version in
 `package.json` (`packageManager`). `pnpm install` at the root installs the UI, the agent
 and `packages/contracts` from the one `pnpm-lock.yaml`; CI uses `--frozen-lockfile`.
-Add a dependency to the agent with `pnpm -C agent add <name>`, and commit the lockfile.
+Add a dependency with `pnpm -C apps/agent add <name>` (or `apps/web`), and commit the
+lockfile. `.env` stays at the repository root; the UI and the agent both read it.
 
 Copy `.env.example` to `.env`. For real chat set `ANTHROPIC_API_KEY`;
 `CLAUDE_MODEL` defaults to `claude-sonnet-5`. `pnpm dev` starts the UI on 3000
@@ -87,7 +88,7 @@ arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. S
 
 ## Skills
 
-Built-in skills live in `agent/skills/`; with server storage, the agent also loads
+Built-in skills live in `apps/agent/skills/`; with server storage, the agent also loads
 workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
@@ -245,7 +246,7 @@ same version as the UI's `@ag-ui/client` while the agent keeps 1.0.4:
 | --- | --- |
 | `pnpm-workspace.yaml` `overrides` | `adm-zip`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
 | Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
-| `agent/package.json` | its own `@ag-ui/core`, `@ag-ui/encoder` and `@ag-ui/client` on 1.0.4, which use Zod 4 |
+| `apps/agent/package.json` | its own `@ag-ui/core`, `@ag-ui/encoder` and `@ag-ui/client` on 1.0.4, which use Zod 4 |
 
 When updating these dependencies, recheck the overrides and run the build and tests
 before removing any. The `undici` and `graphql-scalars` overrides cross an upstream

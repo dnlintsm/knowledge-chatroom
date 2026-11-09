@@ -4,7 +4,7 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
 /**
  * Where each user's chat history is kept (issue #91). With server storage
  * (DATABASE_URL on the agent server) that is the agent's `/chats` API
- * (agent/src/storage/chats.ts), in Postgres, so chats survive restarts.
+ * (apps/agent/src/storage/chats.ts), in Postgres, so chats survive restarts.
  * Without it, this process's memory: lost on restart, but still one history
  * per user. src/lib/chat-runner.ts saves runs here and replays them.
  */

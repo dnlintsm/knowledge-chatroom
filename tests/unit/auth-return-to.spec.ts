@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { safeReturnTo } from "../../src/lib/auth";
+import { safeReturnTo } from "../../apps/web/src/lib/auth";
 
-/** Where the app sends users after sign-in (src/lib/auth.ts, issue #64). */
+/** Where the app sends users after sign-in (apps/web/src/lib/auth.ts, issue #64). */
 
 const APP = "https://app.example";
 const landsOn = (value: string | null) => new URL(safeReturnTo(value), APP);

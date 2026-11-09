@@ -12,7 +12,7 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png` });
 }
 
-// A sample run folder from the seed files (src/components/workspace/seed.ts).
+// A sample run folder from the seed files (apps/web/src/components/workspace/seed.ts).
 // Without server storage it is only a folder: runs are experiments, which
 // live on the server (runs.spec.ts shows them).
 const RUN = "runs/etch-2026-10-01";

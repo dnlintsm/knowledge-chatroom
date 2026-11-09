@@ -14,7 +14,7 @@ import {
   stepsSummary,
   writeStepsMode,
   STEPS_MODE_KEY,
-} from "../../src/components/workspace/agent-steps";
+} from "../../apps/web/src/components/workspace/agent-steps";
 
 const user = (id: string, content = "hi"): Message => ({ id, role: "user", content });
 const text = (id: string, content: string): Message => ({ id, role: "assistant", content });

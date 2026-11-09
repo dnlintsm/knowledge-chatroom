@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { parsePersistedWorkspace, reduceWorkspace, type PersistedWorkspace } from "../../src/components/workspace/workspace-state";
-import { COLLAPSED_FOLDERS_KEY, NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistCollapsedFolders, persistWorkspace, readCollapsedFolders, readPlaceUi, restoreWorkspace } from "../../src/components/workspace/local-persistence";
-import type { WorkspaceFile } from "../../src/components/workspace/types";
+import { parsePersistedWorkspace, reduceWorkspace, type PersistedWorkspace } from "../../apps/web/src/components/workspace/workspace-state";
+import { COLLAPSED_FOLDERS_KEY, NODE_KEY, PLACE_UI_KEY, STORAGE_KEY, persistCollapsedFolders, persistWorkspace, readCollapsedFolders, readPlaceUi, restoreWorkspace } from "../../apps/web/src/components/workspace/local-persistence";
+import type { WorkspaceFile } from "../../apps/web/src/components/workspace/types";
 
 const file: WorkspaceFile = { path: "notes/a.md", kind: "note", content: "first", mime: "text/markdown", updatedAt: 1, author: "user" };
 const state: PersistedWorkspace = { files: [file], tabs: [file.path, "notes/b.md", "::tasks"], active: file.path };

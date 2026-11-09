@@ -14,7 +14,7 @@
  * and `via` naming the outside service they were made for ("mcp:<name>",
  * "remote"). Only the storage API accepts them, and it treats their requests
  * as Claude acting for the user: node writes must be proposals, and nothing
- * is deleted or shared (agent/src/storage/http.ts).
+ * is deleted or shared (apps/agent/src/storage/http.ts).
  *
  * Memory tokens (X-Knowledge-Memory) have aud "memory", `via`, and the run's
  * `thread` and `node`: an outside MCP server uses the user's memory for that

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 /**
  * Skills Claude can use (issue #7): SKILL.md folders in the Claude Code /
  * Agent Skills layout, from three sources: built-in ones shipped with the
- * agent (agent/skills/), skills installed from the hub (hub.ts), and the
+ * agent (apps/agent/skills/), skills installed from the hub (hub.ts), and the
  * workspace's own skills/<name>/ files.
  * Each has a mode the user picks (settings.ts):
  *
@@ -175,7 +175,7 @@ function readTree(dir: string, prefix = ""): SkillFile[] {
 
 let builtins: Skill[] | null = null;
 
-/** The skills shipped in agent/skills/, read once. */
+/** The skills shipped in apps/agent/skills/, read once. */
 export function builtinSkills(dir = BUILTIN_DIR): Skill[] {
   if (dir !== BUILTIN_DIR) return loadBuiltins(dir);
   builtins ??= loadBuiltins(dir);

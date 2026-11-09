@@ -248,7 +248,7 @@ export function serverConfigs(
 
 /**
  * The chips the user has on in this chat: forwardedProps.knowledge_chatroom.tools
- * (src/lib/chatroom-props.ts), kept to servers that are in the "+" menu. The
+ * (apps/web/src/lib/chatroom-props.ts), kept to servers that are in the "+" menu. The
  * browser says it; a chip only steers Claude toward tools the run may use anyway.
  */
 export function chipsFrom(forwardedProps: unknown, servers: ExternalServers): string[] {

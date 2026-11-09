@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { parseRulesResponse, RULES_FILE, rulesToMarkdown } from "../../src/components/workspace/rules";
-import { mockRules } from "../../src/lib/rules-mock";
+import { parseRulesResponse, RULES_FILE, rulesToMarkdown } from "../../apps/web/src/components/workspace/rules";
+import { mockRules } from "../../apps/web/src/lib/rules-mock";
 
-/** The rules API answer and its fixed markdown transform (src/components/workspace/rules.ts). */
+/** The rules API answer and its fixed markdown transform (apps/web/src/components/workspace/rules.ts). */
 
 test("the rules file lives in the run's models folder", () => {
   expect(RULES_FILE).toBe("models/general_rules.md");

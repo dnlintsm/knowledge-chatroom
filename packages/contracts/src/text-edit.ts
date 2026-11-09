@@ -1,5 +1,5 @@
 /**
- * Exact-text edits for the agent's edit tools (agent/src/storage/tools.ts
+ * Exact-text edits for the agent's edit tools (apps/agent/src/storage/tools.ts
  * edit_file and the browser's editWorkspaceFile), with no Node, React or
  * package dependencies.
  *

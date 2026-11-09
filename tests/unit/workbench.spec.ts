@@ -8,10 +8,10 @@ import {
   reduceLayout,
   type Layout,
   type LayoutCommand,
-} from "../../src/components/workspace/layout";
+} from "../../apps/web/src/components/workspace/layout";
 
 /**
- * The workbench contract's layout rules (src/components/workspace/layout.ts)
+ * The workbench contract's layout rules (apps/web/src/components/workspace/layout.ts)
  * as plain functions, no browser needed. preview.spec.ts drives the real UI.
  */
 
@@ -180,7 +180,7 @@ test("persistedLayout extracts only the persisted keys", () => {
 });
 
 test("only the workbench changes pane layout", () => {
-  const dir = path.join(__dirname, "../../src");
+  const dir = path.join(__dirname, "../../apps/web/src");
   const sources = readdirSync(dir, { recursive: true, encoding: "utf8" })
     .filter((f) => /\.tsx?$/.test(f));
   const owners = sources

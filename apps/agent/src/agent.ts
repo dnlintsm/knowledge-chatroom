@@ -30,10 +30,11 @@ import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
 import { CHAT_TOOLS, chatTools, MEMORY_TOOLS, memoryPrompt, memoryTools, taintHook, type RunMemory } from "./memory/run";
 
-// Load .env from the starter root before building the adapter (which reads the
-// model from the environment); fall back to the current working directory.
+// Load .env from the repository root (apps/agent/src -> ../../..) before building
+// the adapter (which reads the model from the environment); fall back to the
+// current working directory.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = path.resolve(__dirname, "../..");
+const APP_ROOT = path.resolve(__dirname, "../../..");
 dotenv.config({ path: path.join(APP_ROOT, ".env") });
 dotenv.config();
 
@@ -134,7 +135,7 @@ interface RunContext {
 
 const runContext = new AsyncLocalStorage<RunContext>();
 
-/** forwardedProps key of the app's run payload (src/lib/chatroom-props.ts). */
+/** forwardedProps key of the app's run payload (apps/web/src/lib/chatroom-props.ts). */
 const CHATROOM_PROPS = "knowledge_chatroom";
 
 /**

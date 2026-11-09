@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import type { Role, ServerEvent, ServerFile } from "../src/components/workspace/server-files";
+import type { Role, ServerEvent, ServerFile } from "../apps/web/src/components/workspace/server-files";
 
 /** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
 async function showFiles(page: Page) {

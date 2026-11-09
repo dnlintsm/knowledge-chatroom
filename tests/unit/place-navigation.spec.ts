@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { createPlaceNavigator } from "../../src/components/workspace/place-navigation";
-import type { ServerFile } from "../../src/components/workspace/server-files";
+import { createPlaceNavigator } from "../../apps/web/src/components/workspace/place-navigation";
+import type { ServerFile } from "../../apps/web/src/components/workspace/server-files";
 
 function deferred() {
   let resolve!: (files: ServerFile[]) => void;

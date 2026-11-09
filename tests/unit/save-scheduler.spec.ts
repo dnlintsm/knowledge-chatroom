@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { SaveScheduler, type StorageMode } from "../../src/components/workspace/save-scheduler";
-import type { WorkspaceFile } from "../../src/components/workspace/types";
+import { SaveScheduler, type StorageMode } from "../../apps/web/src/components/workspace/save-scheduler";
+import type { WorkspaceFile } from "../../apps/web/src/components/workspace/types";
 
 function file(content: string, path = "notes/a.md"): WorkspaceFile {
   return { path, content, kind: "note", mime: "text/markdown", author: "user", updatedAt: 1 };

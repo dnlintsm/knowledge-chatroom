@@ -1,4 +1,6 @@
 {
+  // Root-level TypeScript: the E2E specs, the pure unit tests (which import the UI
+  // from apps/web/src), and the Playwright configs. Each app has its own tsconfig.
   "compilerOptions": {
     "target": "ES2017",
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -12,22 +14,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./apps/web/src/*"]
     }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
-  ],
+  "include": ["e2e/**/*.ts", "tests/**/*.ts", "*.ts"],
   "exclude": ["node_modules"]
 }

@@ -8,9 +8,9 @@ import {
   sessionFrom,
   sessionFromRequest,
   type SessionUser,
-} from "../../src/lib/auth";
+} from "../../apps/web/src/lib/auth";
 
-/** Reading and verifying signed session cookies (src/lib/auth.ts). */
+/** Reading and verifying signed session cookies (apps/web/src/lib/auth.ts). */
 
 const SECRET = "unit-test-secret-0123456789abcdef0123456789";
 const LOGIN_ENV = {

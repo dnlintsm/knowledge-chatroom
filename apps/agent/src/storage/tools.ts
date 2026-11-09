@@ -89,7 +89,7 @@ const text = (value: unknown): ToolResult => ({
 });
 const error = (message: string): ToolResult => ({ ...text(message), isError: true });
 
-/** Same format as the UI's numberLines() (src/components/workspace/file-refs.ts). */
+/** Same format as the UI's numberLines() (apps/web/src/components/workspace/file-refs.ts). */
 export function numberLines(content: string): string {
   const lines = content.split(/\r\n|\r|\n/);
   const width = String(lines.length).length;

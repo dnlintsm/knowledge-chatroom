@@ -3,7 +3,7 @@ import { asUser, inTransaction, type Sql, type Tx } from "./db";
 /**
  * Chat history (issue #91, migrations/017_chats.sql): each AG-UI thread the
  * app's chat runs is a chat owned by the user who started it. The app's
- * CopilotKit runner (src/lib/chat-runner.ts) saves every finished run here
+ * CopilotKit runner (apps/web/src/lib/chat-runner.ts) saves every finished run here
  * and replays a chat's runs when it is opened again, e.g. after a restart.
  *
  * Every query names its user, and with row-level security it also runs as

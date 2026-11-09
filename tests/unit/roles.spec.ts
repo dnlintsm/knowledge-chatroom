@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { hasRole, roleName } from "../../src/components/workspace/roles";
+import { hasRole, roleName } from "../../apps/web/src/components/workspace/roles";
 
-/** The role check actions run through (src/components/workspace/roles.ts). */
+/** The role check actions run through (apps/web/src/components/workspace/roles.ts). */
 
 test("roles include the ones below them", () => {
   expect(hasRole("owner", "editor")).toBe(true);

@@ -2,7 +2,7 @@
 
 The chat pane can talk to an agent that runs in a separate backend (for example
 Python with `ag_ui_claude_sdk`) instead of this repository's own Claude agent
-(`agent/`). This page is the contract between the two: what the app sends, and what the
+(`apps/agent/`). This page is the contract between the two: what the app sends, and what the
 backend has to do.
 
 ## Turning it on
@@ -14,7 +14,7 @@ backend has to do.
 
 With `AGENT_URL` set:
 
-- **Chat**: runs go to the backend (`src/lib/agent-target.ts`, `src/agent.ts`).
+- **Chat**: runs go to the backend (`apps/web/src/lib/agent-target.ts`, `apps/web/src/agent.ts`).
 - **Follow-up chips**: off. This repo's `/suggest` isn't used, so the chat keeps its
   first-round chips.
 - **This repo's agent server**: when it sees `AGENT_URL` too (in development both read the
@@ -24,7 +24,7 @@ With `AGENT_URL` set:
   don't reach the backend. A message such as `/tldr RF power` arrives as plain text.
 - **The browser**: works the same. It still talks only to the Next.js app (`/api/copilotkit`).
 
-The variable names come from the code (`src/lib/agent-target.ts`). The backend is called only
+The variable names come from the code (`apps/web/src/lib/agent-target.ts`). The backend is called only
 by the Next.js server, never by the browser. Keep it on a private network like the agent port.
 
 ## The request
@@ -55,9 +55,9 @@ path="/agent/report")` does both. The fields of the body:
 ### `forwardedProps.knowledge_chatroom`
 
 Sent with every run, the first one of a chat included. The browser fills in the place
-(`src/components/workspace/use-chatroom-props.ts`). The Next.js server then sets `user`
-from the signed-in session (`src/agent.ts`), replacing anything the browser sent. Types:
-`src/lib/chatroom-props.ts`.
+(`apps/web/src/components/workspace/use-chatroom-props.ts`). The Next.js server then sets `user`
+from the signed-in session (`apps/web/src/agent.ts`), replacing anything the browser sent. Types:
+`apps/web/src/lib/chatroom-props.ts`.
 
 ```json
 {
@@ -177,11 +177,11 @@ to it.
    - **Read-only files can't be written.**
    - **Experiments**: inside one, write only there, never to its node.
 
-   `agent/src/storage/tools.ts` is this repo's version, to copy from.
+   `apps/agent/src/storage/tools.ts` is this repo's version, to copy from.
 6. **Cite files the way the chat can open them.** A Markdown link to the file's path in the
    place, with GitHub-style lines: `[report.md:12-18](report.md#L12-L18)`.
-   The chat opens it in the middle pane (`src/components/workspace/file-refs.ts`). Teach it in
-   the system prompt, as `agent/src/agent.ts` does, and number lines in file content your
+   The chat opens it in the middle pane (`apps/web/src/components/workspace/file-refs.ts`). Teach it in
+   the system prompt, as `apps/agent/src/agent.ts` does, and number lines in file content your
    tools return, the same way. Links to working-folder copies or other places show greyed out.
 7. **Optional**: report each skill a run uses as an AG-UI `CUSTOM` event named `skill_used`
    (`{skill, source, trigger}`), as this repo's agent does, to show it under the chat input.
@@ -266,12 +266,12 @@ Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 - **Tool chips change in the middle of a chat**, like the place: read
   `knowledge_chatroom.tools` on every run (in `run()`, next to the "the user now has … open"
   note), not only in `build_options`.
-- **Tools should take the place as a parameter**, as `agent/src/storage/tools.ts` does with
+- **Tools should take the place as a parameter**, as `apps/agent/src/storage/tools.ts` does with
   `node`/`experiment`, rather than fix it when the session starts: the user can move to
   another node, experiment or run in the middle of a chat.
 - **The tool names change.** Your tools arrive as `mcp__<server>__<tool>`. The chat shows
   each call as a card with its name and arguments, through `useDefaultRenderTool` in
-  `src/hooks/use-generative-ui-examples.tsx`. A tool can get its own card with
+  `apps/web/src/hooks/use-generative-ui-examples.tsx`. A tool can get its own card with
   `useRenderTool` and its full name.
 
 ## Checking a backend

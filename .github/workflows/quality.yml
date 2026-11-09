@@ -38,7 +38,7 @@ jobs:
         run: node scripts/ci-tests.mjs run "Frontend units" playwright -- pnpm exec playwright test --config playwright.unit.config.ts --reporter=list,json
       - name: Agent unit tests
         if: always()
-        run: node scripts/ci-tests.mjs run "Agent units" tap -- pnpm -C agent test:unit
+        run: node scripts/ci-tests.mjs run "Agent units" tap -- pnpm -C apps/agent test:unit
       - name: Summarize test suites
         if: always()
         run: node scripts/ci-tests.mjs summary "Frontend units" "Agent units"

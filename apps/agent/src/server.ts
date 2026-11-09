@@ -41,7 +41,7 @@ import { prepareMemory, trackLiveRun } from "./memory/run";
 
 /**
  * The knowledge node the user is in, from the app's run payload
- * (src/lib/chatroom-props.ts): its shared memory applies to the run. The
+ * (apps/web/src/lib/chatroom-props.ts): its shared memory applies to the run. The
  * browser says it; reading it as the user decides whether it counts.
  */
 function placeNode(props: unknown): string | null {

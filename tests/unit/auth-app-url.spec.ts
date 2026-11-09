@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { NextRequest } from "next/server";
-import { appUrl } from "../../src/lib/auth";
+import { appUrl } from "../../apps/web/src/lib/auth";
 
 test.describe("appUrl", () => {
   const originalAppUrl = process.env.APP_URL;

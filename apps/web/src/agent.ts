@@ -33,7 +33,7 @@ export function createDefaultAgent(): HttpAgent {
 
 /**
  * The chat's follow-up chips after a reply: this repo's agent server's
- * `/suggest` answers with one small-model call (agent/src/suggest.ts).
+ * `/suggest` answers with one small-model call (apps/agent/src/suggest.ts).
  */
 export function createSuggesterAgent(): HttpAgent {
   return new ChatroomAgent({ url: `${localAgentUrl()}/suggest` });

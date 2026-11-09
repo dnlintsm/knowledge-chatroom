@@ -149,12 +149,14 @@ changed and how you validated it.
 
 | Directory | Responsibility |
 | --- | --- |
-| `src/app` | Next.js routes, providers, authentication, and storage proxies |
-| `src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
-| `src/app/declarative-generative-ui`, `src/hooks` | Starter examples and A2UI renderers |
-| `agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
-| `agent/src/storage/migrations` | Database schema and access policies |
-| `agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
+| `apps/web` | The Next.js UI (`@knowledge-chatroom/web`) |
+| `apps/agent` | The TypeScript agent: Claude Agent SDK over AG-UI, plus the storage, skills and memory APIs |
+| `apps/web/src/app` | Next.js routes, providers, authentication, and storage proxies |
+| `apps/web/src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
+| `apps/web/src/app/declarative-generative-ui`, `apps/web/src/hooks` | Starter examples and A2UI renderers |
+| `apps/agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
+| `apps/agent/src/storage/migrations` | Database schema and access policies |
+| `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
 | `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
