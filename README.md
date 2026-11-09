@@ -163,6 +163,7 @@ changed and how you validated it.
 | `services/lab-tools` | The Python agent sample's tools as an MCP server |
 | `packages/knowledge-py` | `knowledge_chatroom`: identity, storage and memory clients shared by the Python services |
 | `examples/python-agent` | Guide: bringing a Python agent in (its prompt as a skill, its tools as `services/lab-tools`) |
+| `infra/seaweedfs` | The S3 store's local credentials (`s3.json`) used by compose and CI |
 | `tests/unit` | Pure frontend tests without an application server or browser |
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |
