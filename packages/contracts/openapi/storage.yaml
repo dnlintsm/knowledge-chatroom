@@ -1,0 +1,1631 @@
+openapi: 3.1.0
+info:
+  title: knowledge-chatroom storage API
+  version: 0.2.3
+  description: |
+    The storage API served by the agent server (apps/agent/src/storage/http.ts):
+    workspace files, the knowledge tree, experiments, search, proposals, chat
+    history and access. It is the contract a Python service has to match before it
+    can take over a route group (issue #169).
+
+    This file is the source of truth. `pnpm -C packages/contracts openapi` turns it
+    into src/generated/storage-api.ts; CI fails when that file is out of date.
+
+    Who is asking:
+    - Without login (no AUTH_SECRET): every request is the local user, and no header is needed.
+    - With login: the Next.js server sends `X-Knowledge-User`, a signed identity token
+      (packages/contracts/src/identity-token.ts).
+    - An outside service (an MCP server, a remote agent backend) sends `X-Knowledge-Storage`
+      instead: Claude acting for that user. It can't reach /chats or manage access, writes
+      in a knowledge node only with `?propose`, and doesn't rename, delete, review proposals,
+      or share or archive experiments. Such requests answer 403 with the reason.
+
+    Errors are JSON `{error}` with a 4xx or 5xx status. When storage isn't ready:
+    503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
+servers:
+  - url: http://localhost:8000
+    description: The agent server (LOCAL_AGENT_URL); the browser reaches it through /api/files on the Next.js app.
+security:
+  - {}
+  - user: []
+  - storage: []
+tags:
+  - name: files
+  - name: nodes
+  - name: experiments
+  - name: search
+  - name: proposals
+  - name: chats
+  - name: access
+
+paths:
+  /files:
+    get:
+      tags: [files]
+      operationId: listFiles
+      summary: List live files, or watch changes
+      description: |
+        Without `watch`: the live files of one place (the workspace root, a node or an
+        experiment). With `watch`: a Server-Sent Events stream with one `data: <WorkspaceEvent>`
+        line per committed change the user may see, a `: watching` comment first and a
+        `: ping` comment every 25 seconds. `node` and `experiment` don't narrow the stream.
+      parameters:
+        - $ref: "#/components/parameters/Node"
+        - $ref: "#/components/parameters/Experiment"
+        - name: watch
+          in: query
+          description: Present (any value) for the change stream.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The files, or the change stream.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileList" }
+            text/event-stream:
+              schema:
+                type: string
+                description: "Lines of `data: <WorkspaceEvent JSON>` separated by blank lines."
+              x-event-schema: { $ref: "#/components/schemas/WorkspaceEvent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /files/{path}:
+    parameters:
+      - $ref: "#/components/parameters/FilePath"
+      - $ref: "#/components/parameters/Node"
+      - $ref: "#/components/parameters/Experiment"
+    get:
+      tags: [files]
+      operationId: readFile
+      summary: Read a file's bytes, or its version history
+      description: |
+        Without `versions`: the file's bytes, typed by its mime, served with
+        `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`. A binary file
+        answers 302 to a short-lived store link when S3_PUBLIC_URL is set. With `versions`: the
+        version history, newest first.
+      parameters:
+        - name: versions
+          in: query
+          description: Present (any value) for the version history.
+          schema: { type: string }
+        - name: If-None-Match
+          in: header
+          description: The ETag from an earlier read; a match answers 304.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The bytes, or the history.
+          headers:
+            ETag:
+              description: The file's sha256 in quotes.
+              schema: { type: string }
+            Last-Modified:
+              schema: { type: string }
+            X-File-Author:
+              schema: { $ref: "#/components/schemas/AuthorType" }
+            X-File-Read-Only:
+              description: "`true` for a read-only file; absent otherwise."
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionList" }
+            "*/*":
+              schema: { type: string, format: binary }
+        "302":
+          description: A binary file, from the object store.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        "304":
+          description: Unchanged since the ETag sent.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    put:
+      tags: [files]
+      operationId: writeFile
+      summary: Create or replace a file, or propose new content for it
+      description: |
+        The body is the file's bytes; Content-Type is its mime (optional; leave it out or send
+        application/octet-stream to have it guessed). With `propose`, the content becomes a
+        proposal for an editor to accept (see /proposals) and the answer is 201; a viewer may
+        propose too. An experiment's files can't be proposed this way (400): promote the
+        experiment instead. Bodies over MAX_UPLOAD_BYTES answer 413.
+      parameters:
+        - name: propose
+          in: query
+          description: Present (any value) to propose the content instead of writing it.
+          schema: { type: string }
+        - name: note
+          in: query
+          description: With `propose`, why.
+          schema: { type: string }
+        - name: If-None-Match
+          in: header
+          description: "`*` only creates: 412 when the file exists."
+          schema: { type: string, enum: ["*"] }
+        - name: X-Read-Only
+          in: header
+          description: "`true` makes a newly created file read-only. No effect on an existing file."
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          "*/*":
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileInfo" }
+        "201":
+          description: Proposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Proposal" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/Exists" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [files]
+      operationId: renameFile
+      summary: Rename (move) a file within the same place
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string, description: The new path. }
+      responses:
+        "200":
+          description: Renamed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/Exists" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [files]
+      operationId: deleteFile
+      summary: Delete a file (soft delete; its history stays)
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: string, description: The path. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /nodes:
+    get:
+      tags: [nodes]
+      operationId: getTree
+      summary: The knowledge tree as the user sees it
+      responses:
+        "200":
+          description: The levels, the user's role at the root, and the nodes they can see.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tree" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [nodes]
+      operationId: createNode
+      summary: Add a node one level below its parent
+      description: Needs editor on the parent (the workspace root for a top-level node). Whoever adds a node owns it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parentId, name]
+              properties:
+                parentId: { type: [string, "null"], description: null for a top-level node. }
+                name: { type: string }
+      responses:
+        "201":
+          description: The new node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeNode" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /nodes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [nodes]
+      operationId: getNode
+      summary: One node and the path to it
+      responses:
+        "200":
+          description: The node, and its lineage from the top level down to it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node, lineage]
+                properties:
+                  node: { $ref: "#/components/schemas/KnowledgeNode" }
+                  lineage:
+                    type: array
+                    items: { $ref: "#/components/schemas/KnowledgeNode" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [nodes]
+      operationId: renameNode
+      summary: Rename a node (editor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: The renamed node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeNode" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [nodes]
+      operationId: deleteNode
+      summary: Delete a node with everything below it (owner; soft delete)
+      responses:
+        "200": { $ref: "#/components/responses/DeletedId" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments:
+    get:
+      tags: [experiments]
+      operationId: listExperiments
+      summary: Experiments the user can see
+      parameters:
+        - name: node
+          in: query
+          description: A node id for that node's, `root` for those at the workspace root; leave it out for all.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiments]
+                properties:
+                  experiments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Experiment" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [experiments]
+      operationId: createExperiment
+      summary: Start a draft experiment
+      description: On a node it starts with a copy of the node's files; at the root (nodeId null) it starts empty. A run is an experiment with a report.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [nodeId, title]
+                  properties:
+                    nodeId: { type: [string, "null"] }
+                - $ref: "#/components/schemas/ExperimentInput"
+      responses:
+        "201":
+          description: The new experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [experiments]
+      operationId: getExperiment
+      summary: One experiment
+      responses:
+        "200":
+          description: The experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [experiments]
+      operationId: updateExperiment
+      summary: Change an experiment (its author)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExperimentInput" }
+      responses:
+        "200":
+          description: The changed experiment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [experiments]
+      operationId: deleteExperiment
+      summary: Delete an experiment with its files (soft delete)
+      responses:
+        "200": { $ref: "#/components/responses/DeletedId" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}/inputs:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [experiments]
+      operationId: addRunInputs
+      summary: Link files into an experiment as read-only inputs
+      description: Each file is linked read-only under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inputs]
+              properties:
+                inputs:
+                  type: array
+                  items: { $ref: "#/components/schemas/RunInputSource" }
+      responses:
+        "200":
+          description: The experiment, with the inputs added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /search:
+    get:
+      tags: [search]
+      operationId: search
+      summary: Files the user can read whose text or path matches, best first
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: scope
+          in: query
+          description: A node id; only that node, the nodes below it and their experiments.
+          schema: { type: string }
+        - name: near
+          in: query
+          description: A node id; files near it rank first.
+          schema: { type: string }
+        - name: experiment
+          in: query
+          description: An experiment id; its files rank first.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, maximum: 50 }
+      responses:
+        "200":
+          description: The results.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/SearchHit" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /proposals:
+    get:
+      tags: [proposals]
+      operationId: listProposals
+      summary: Proposed versions the user can see, newest first
+      description: Open proposals on files the user can read, and their own.
+      parameters:
+        - name: node
+          in: query
+          description: A node id for one node's, `root` (or empty) for the workspace root's.
+          schema: { type: string }
+        - name: experiment
+          in: query
+          description: Those promoted from this experiment.
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, accepted, rejected, withdrawn, all]
+            default: open
+      responses:
+        "200":
+          description: The proposals.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProposalList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [proposals]
+      operationId: promoteExperiment
+      summary: Propose an experiment's changed files to its node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [experimentId]
+              properties:
+                experimentId: { type: string }
+                paths:
+                  description: Only these files; all changed files when left out.
+                  type: array
+                  items: { type: string }
+                note: { type: string }
+      responses:
+        "201":
+          description: The proposals made.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProposalList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /proposals/promotable:
+    get:
+      tags: [proposals]
+      operationId: listPromotable
+      summary: What promoting an experiment would propose
+      parameters:
+        - name: experiment
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The files.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files]
+                properties:
+                  files:
+                    type: array
+                    items: { $ref: "#/components/schemas/Promotable" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /proposals/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [proposals]
+      operationId: getProposal
+      summary: One proposal
+      responses:
+        "200":
+          description: The proposal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Proposal" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /proposals/{id}/content:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [proposals]
+      operationId: getProposalContent
+      summary: The proposed bytes
+      description: Typed by the proposal's mime, with the same sandbox headers as a file read.
+      responses:
+        "200":
+          description: The bytes.
+          content:
+            "*/*":
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /proposals/{id}/{decision}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: decision
+        in: path
+        required: true
+        description: accept and reject need editor on the proposal's place; withdraw is for its proposer.
+        schema: { type: string, enum: [accept, reject, withdraw] }
+    post:
+      tags: [proposals]
+      operationId: decideProposal
+      summary: Accept, reject or withdraw a proposal
+      description: Accepting writes it as the file's next version, credited to its proposer.
+      responses:
+        "200":
+          description: The proposal, decided.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Proposal" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /chats:
+    get:
+      tags: [chats]
+      operationId: listChats
+      summary: The user's chats, most recently active first
+      description: Chats are their user's alone; workspace owners don't see them, and storage tokens can't reach them.
+      parameters:
+        - name: agent
+          in: query
+          schema: { type: string }
+        - name: archived
+          in: query
+          description: Present (any value) to include archived chats.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          description: A previous page's nextCursor.
+          schema: { type: string }
+      responses:
+        "200":
+          description: One page of chats.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [threads, nextCursor]
+                properties:
+                  threads:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChatSummary" }
+                  nextCursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /chats/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [chats]
+      operationId: getChat
+      summary: One of the user's chats, with its messages as of its latest run
+      responses:
+        "200":
+          description: The chat.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chat, messages]
+                properties:
+                  chat: { $ref: "#/components/schemas/ChatSummary" }
+                  messages:
+                    description: AG-UI messages.
+                    type: array
+                    items: {}
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [chats]
+      operationId: updateChat
+      summary: Rename or archive a chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: [string, "null"] }
+                archived: { type: boolean }
+      responses:
+        "200":
+          description: The chat.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [chats]
+      operationId: deleteChat
+      summary: Delete a chat for good, with its runs
+      responses:
+        "200": { $ref: "#/components/responses/DeletedId" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /chats/{id}/runs:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [chats]
+      operationId: listChatRuns
+      summary: A chat's runs, in order
+      responses:
+        "200":
+          description: The runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChatRun" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [chats]
+      operationId: saveChatRun
+      summary: Save a finished run, starting the chat on its first
+      description: 403 when the id is someone else's chat. Bodies over 32 MiB answer 413.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, runId, events, messages]
+              properties:
+                agentId: { type: string }
+                runId: { type: string }
+                parentRunId: { type: [string, "null"] }
+                events:
+                  description: The run's AG-UI events.
+                  type: array
+                  items: {}
+                messages:
+                  description: The whole conversation after the run (AG-UI messages).
+                  type: array
+                  items: {}
+                name:
+                  description: The chat's name if it has none yet.
+                  type: [string, "null"]
+      responses:
+        "201":
+          description: The chat.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access:
+    get:
+      tags: [access]
+      operationId: getMyAccess
+      summary: Who the user is and their role at the workspace root
+      responses:
+        "200":
+          description: The user and their root role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [me, rootRole]
+                properties:
+                  me:
+                    oneOf:
+                      - $ref: "#/components/schemas/User"
+                      - type: "null"
+                  rootRole: { $ref: "#/components/schemas/RoleOrNull" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/users:
+    get:
+      tags: [access]
+      operationId: listUsers
+      summary: Everyone who has signed in
+      responses:
+        "200":
+          description: The users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/people:
+    get:
+      tags: [access]
+      operationId: listPeople
+      summary: Everyone who has signed in, for the admin panel (workspace owners)
+      responses:
+        "200":
+          description: The people.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [people]
+                properties:
+                  people:
+                    type: array
+                    items: { $ref: "#/components/schemas/Person" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/groups:
+    get:
+      tags: [access]
+      operationId: listGroups
+      summary: The org tree, with direct members
+      responses:
+        "200":
+          description: The groups.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items: { $ref: "#/components/schemas/Group" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [access]
+      operationId: createGroup
+      summary: Add a group (workspace owners)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parentId, name]
+              properties:
+                parentId: { type: [string, "null"] }
+                name: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/CreatedId" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [access]
+      operationId: renameGroup
+      summary: Rename a group (workspace owners)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [access]
+      operationId: deleteGroup
+      summary: Delete a group with its sub-groups (workspace owners)
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/groups/{id}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [access]
+      operationId: addGroupMember
+      summary: Add a member (workspace owners)
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [access]
+      operationId: removeGroupMember
+      summary: Remove a member (workspace owners)
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/grants:
+    get:
+      tags: [access]
+      operationId: listGrants
+      summary: Grants on a node, or on the workspace (owners of that place)
+      parameters:
+        - name: node
+          in: query
+          description: A node id; leave it out for the workspace's grants.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The grants.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                properties:
+                  grants:
+                    type: array
+                    items: { $ref: "#/components/schemas/Grant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [access]
+      operationId: setGrant
+      summary: Give a user or group a role on a node or the workspace (owners of that place)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node, principalType, principalId, role]
+              properties:
+                node: { type: [string, "null"], description: null for the whole workspace. }
+                principalType: { type: string, enum: [user, group] }
+                principalId: { type: string }
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "200":
+          description: The grant's id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdOnly" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/grants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [access]
+      operationId: revokeGrant
+      summary: Remove a grant (owners of its place)
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /access/audit:
+    get:
+      tags: [access]
+      operationId: getAuditLog
+      summary: Recent changes, newest first (workspace owners)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+        - name: kind
+          in: query
+          description: Keep only these kinds of action, such as `group` or `grant` (repeatable).
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: The entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+components:
+  securitySchemes:
+    user:
+      type: apiKey
+      in: header
+      name: X-Knowledge-User
+      description: A signed identity token for the signed-in user, sent by the Next.js server when login is on.
+    storage:
+      type: apiKey
+      in: header
+      name: X-Knowledge-Storage
+      description: "A storage token (aud \"storage\"): Claude acting for its user through an outside service, with the limits listed above."
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    FilePath:
+      name: path
+      in: path
+      required: true
+      description: The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept.
+      schema: { type: string }
+      x-path-rest: true
+    Node:
+      name: node
+      in: query
+      description: A knowledge node's files; leave out both node and experiment for the workspace root.
+      schema: { type: string }
+    Experiment:
+      name: experiment
+      in: query
+      description: An experiment's files, instead of a node's.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: The request is malformed or names something invalid.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    SignIn:
+      description: Nobody signed in, or the identity or storage token is invalid.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Signed in, but not allowed to do this (or a storage token may not).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ForbiddenOrReadOnly:
+      description: Not allowed, or the file is read-only (then `readOnly` is true).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found, not visible to the user, or storage isn't configured.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Exists:
+      description: A create-only write, or a rename, to a path that already has a file (`exists` is true).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooLarge:
+      description: The body is over the size limit.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    StorageError:
+      description: Storage failed (or failed to start).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Starting:
+      description: Storage is still starting; try again shortly.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    DeletedId:
+      description: Deleted.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [deleted]
+            properties:
+              deleted: { type: string, description: The id. }
+    CreatedId:
+      description: Created.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/IdOnly" }
+    Ok:
+      description: Done.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ok]
+            properties:
+              ok: { type: boolean, const: true }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        readOnly: { type: boolean, const: true, description: The file is read-only. }
+        exists: { type: boolean, const: true, description: The path already has a file. }
+
+    IdOnly:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601, UTC.
+
+    AuthorType:
+      type: string
+      enum: [user, agent]
+
+    FileKind:
+      type: string
+      enum: [note, skill, upload, artifact]
+      description: From the path's top folder (packages/contracts/src/files.ts KIND_FOLDERS).
+
+    Role:
+      type: string
+      enum: [viewer, editor, owner]
+
+    RoleOrNull:
+      oneOf:
+        - $ref: "#/components/schemas/Role"
+        - type: "null"
+
+    FileInfo:
+      type: object
+      required: [path, kind, mime, size, sha256, updatedAt, author, readOnly]
+      properties:
+        path: { type: string }
+        kind: { $ref: "#/components/schemas/FileKind" }
+        mime: { type: string }
+        size: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        author: { $ref: "#/components/schemas/AuthorType" }
+        readOnly: { type: boolean }
+
+    FileList:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/FileInfo" }
+
+    FileVersion:
+      type: object
+      required: [id, sha256, size, mime, author, authorId, createdAt]
+      properties:
+        id: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        size: { type: integer, minimum: 0 }
+        mime: { type: string }
+        author: { $ref: "#/components/schemas/AuthorType" }
+        authorId: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    VersionList:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items: { $ref: "#/components/schemas/FileVersion" }
+
+    FileEvent:
+      type: object
+      required: [op, node, path]
+      properties:
+        op: { type: string, enum: [write, delete] }
+        node: { type: [string, "null"] }
+        experiment: { type: [string, "null"] }
+        path: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        author: { $ref: "#/components/schemas/AuthorType" }
+
+    NodeEvent:
+      type: object
+      required: [op, change, id]
+      properties:
+        op: { type: string, const: node }
+        change: { type: string, enum: [create, rename, delete] }
+        id: { type: string }
+
+    ExperimentEvent:
+      type: object
+      required: [op, change, id, node]
+      properties:
+        op: { type: string, const: experiment }
+        change: { type: string, enum: [create, update, status, delete] }
+        id: { type: string }
+        node: { type: [string, "null"], description: null for an experiment at the workspace root. }
+
+    ProposalEvent:
+      type: object
+      required: [op, change, id, node, path, author, authorId]
+      properties:
+        op: { type: string, const: proposal }
+        change: { type: string, enum: [create, update, accepted, rejected, withdrawn] }
+        id: { type: string }
+        node: { type: [string, "null"] }
+        path: { type: string }
+        author: { $ref: "#/components/schemas/AuthorType" }
+        authorId: { type: string }
+
+    WorkspaceEvent:
+      description: One change on the /files?watch stream.
+      oneOf:
+        - $ref: "#/components/schemas/FileEvent"
+        - $ref: "#/components/schemas/NodeEvent"
+        - $ref: "#/components/schemas/ExperimentEvent"
+        - $ref: "#/components/schemas/ProposalEvent"
+
+    NodeType:
+      type: object
+      required: [name, depth]
+      properties:
+        name: { type: string, description: "A level of the tree, such as tech (depth 1) or process (depth 4)." }
+        depth: { type: integer, minimum: 1 }
+
+    KnowledgeNode:
+      type: object
+      required: [id, parentId, type, depth, name, fileCount, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        parentId: { type: [string, "null"] }
+        type: { type: string }
+        depth: { type: integer, minimum: 1 }
+        name: { type: string }
+        fileCount: { type: integer, minimum: 0, description: Live files attached directly to this node. }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    VisibleNode:
+      allOf:
+        - $ref: "#/components/schemas/KnowledgeNode"
+        - type: object
+          required: [role]
+          properties:
+            role:
+              description: The user's role; null for a node shown only because something below it is visible (its fileCount is then 0).
+              $ref: "#/components/schemas/RoleOrNull"
+
+    Tree:
+      type: object
+      required: [types, rootRole, nodes]
+      properties:
+        types:
+          type: array
+          items: { $ref: "#/components/schemas/NodeType" }
+        rootRole: { $ref: "#/components/schemas/RoleOrNull" }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/VisibleNode" }
+
+    ExperimentStatus:
+      type: string
+      enum: [draft, shared, archived]
+      description: Who sees it. A draft only its author; shared or archived everyone who can view its node.
+
+    ExperimentState:
+      type: string
+      enum: [ready, running, done, failed]
+      description: How far a run got.
+
+    ExperimentInput:
+      type: object
+      properties:
+        title: { type: string, maxLength: 200 }
+        hypothesis: { type: string }
+        params: { type: object, additionalProperties: true }
+        results: { type: object, additionalProperties: true }
+        status: { $ref: "#/components/schemas/ExperimentStatus" }
+        state: { $ref: "#/components/schemas/ExperimentState" }
+
+    Experiment:
+      type: object
+      required:
+        [id, nodeId, authorId, authorName, title, hypothesis, params, results, status, state,
+         forkedAt, updatedAt, fileCount, provenance, access, mine]
+      properties:
+        id: { type: string }
+        nodeId: { type: [string, "null"], description: null at the workspace root. }
+        authorId: { type: string }
+        authorName: { type: [string, "null"] }
+        title: { type: string }
+        hypothesis: { type: string }
+        params: { type: object, additionalProperties: true }
+        results: { type: object, additionalProperties: true }
+        status: { $ref: "#/components/schemas/ExperimentStatus" }
+        state: { $ref: "#/components/schemas/ExperimentState" }
+        forkedAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        fileCount: { type: integer, minimum: 0 }
+        provenance:
+          description: Where a run came from; {} when nobody recorded it.
+          type: object
+          additionalProperties: true
+        access:
+          type: string
+          enum: [writer, reader]
+          description: "writer: its author, while it isn't archived. reader: may look."
+        mine: { type: boolean, description: Whether the asking user is its author. }
+
+    RunInputSource:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        node: { type: [string, "null"], description: Its knowledge node; null or left out for the workspace root. }
+        experiment: { type: [string, "null"], description: Its experiment, instead of a node. }
+        as: { type: string, description: Its name under inputs/; its own file name by default. }
+
+    SearchHit:
+      type: object
+      required: [path, kind, mime, node, experiment, where, experimentTitle, snippet, match, updatedAt, author]
+      properties:
+        path: { type: string }
+        kind: { $ref: "#/components/schemas/FileKind" }
+        mime: { type: string }
+        node: { type: [string, "null"], description: null at the root or in an experiment. }
+        experiment: { type: [string, "null"] }
+        where:
+          description: Node names from the top down to the file's node.
+          type: array
+          items: { type: string }
+        experimentTitle: { type: [string, "null"] }
+        snippet: { type: string, description: The passage that matched; "" when only the path did. }
+        match:
+          type: string
+          enum: [words, meaning]
+          description: "words: its text or path has the words; meaning: only a passage close in meaning."
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        author: { $ref: "#/components/schemas/AuthorType" }
+
+    ProposalStatus:
+      type: string
+      enum: [open, accepted, rejected, withdrawn]
+
+    Proposal:
+      type: object
+      required:
+        [id, node, path, sha256, size, mime, author, authorId, authorName, experiment, experimentTitle,
+         note, status, decidedByName, decidedAt, createdAt, updatedAt, isNew, fileChanged, mine, canDecide]
+      properties:
+        id: { type: string }
+        node: { type: [string, "null"], description: The node whose file it changes; null for the workspace root. }
+        path: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        size: { type: integer, minimum: 0 }
+        mime: { type: string }
+        author: { $ref: "#/components/schemas/AuthorType" }
+        authorId: { type: string, description: The user, or the user Claude was acting for. }
+        authorName: { type: [string, "null"] }
+        experiment: { type: [string, "null"], description: The experiment it was promoted from. }
+        experimentTitle: { type: [string, "null"] }
+        note: { type: string }
+        status: { $ref: "#/components/schemas/ProposalStatus" }
+        decidedByName: { type: [string, "null"] }
+        decidedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        isNew: { type: boolean, description: No live file at the path yet; accepting creates it. }
+        fileChanged: { type: boolean, description: The file changed after this was proposed. }
+        mine: { type: boolean, description: Whether the asking user proposed it (and may withdraw it). }
+        canDecide: { type: boolean, description: Whether the asking user may accept or reject it. }
+
+    ProposalList:
+      type: object
+      required: [proposals]
+      properties:
+        proposals:
+          type: array
+          items: { $ref: "#/components/schemas/Proposal" }
+
+    Promotable:
+      type: object
+      required: [path, change, size, mime, proposal]
+      properties:
+        path: { type: string }
+        change:
+          type: string
+          enum: [new, changed]
+          description: "new: the node has no file there; changed: the node's differs."
+        size: { type: integer, minimum: 0 }
+        mime: { type: string }
+        proposal: { type: [string, "null"], description: This experiment's open proposal with exactly these bytes. }
+
+    ChatSummary:
+      type: object
+      required: [id, name, agentId, archived, createdAt, updatedAt, lastRunAt]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+        agentId: { type: string }
+        archived: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        lastRunAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
+    ChatRun:
+      type: object
+      required: [runId, parentRunId, events, createdAt]
+      properties:
+        runId: { type: string }
+        parentRunId: { type: [string, "null"] }
+        events:
+          description: The run's AG-UI events, compacted.
+          type: array
+          items: {}
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    User:
+      type: object
+      required: [id, subject, email, name]
+      properties:
+        id: { type: string }
+        subject: { type: string }
+        email: { type: [string, "null"] }
+        name: { type: [string, "null"] }
+
+    Person:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [createdAt, lastSeenAt, role, grantId, effectiveRole, groupIds]
+          properties:
+            createdAt: { $ref: "#/components/schemas/Timestamp" }
+            lastSeenAt:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            role:
+              description: Their own grant on the whole workspace, if any.
+              $ref: "#/components/schemas/RoleOrNull"
+            grantId: { type: [string, "null"] }
+            effectiveRole:
+              description: Their best workspace role, groups included.
+              $ref: "#/components/schemas/RoleOrNull"
+            groupIds:
+              type: array
+              items: { type: string }
+
+    Group:
+      type: object
+      required: [id, parentId, name, memberIds]
+      properties:
+        id: { type: string }
+        parentId: { type: [string, "null"] }
+        name: { type: string }
+        memberIds:
+          description: Direct members; members of sub-groups are listed on those groups.
+          type: array
+          items: { type: string }
+
+    Grant:
+      type: object
+      required: [id, nodeId, principalType, principalId, role, createdAt]
+      properties:
+        id: { type: string }
+        nodeId: { type: [string, "null"], description: null for the whole workspace. }
+        principalType: { type: string, enum: [user, group] }
+        principalId: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    AuditEntry:
+      type: object
+      required: [id, actorType, actorId, action, target, at]
+      properties:
+        id: { type: string }
+        actorType: { type: string, enum: [user, agent] }
+        actorId: { type: [string, "null"] }
+        action: { type: string, description: "Such as node.create, group.add_member or grant.set." }
+        target: { type: object, additionalProperties: true }
+        at: { $ref: "#/components/schemas/Timestamp" }
