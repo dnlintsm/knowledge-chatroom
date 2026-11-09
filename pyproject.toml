@@ -1,0 +1,9 @@
+# The Python side of the monorepo: one uv workspace with one uv.lock (issue #164).
+# The TypeScript side is the pnpm workspace (pnpm-workspace.yaml).
+#
+#   uv sync --all-packages                 # every service and package, with dev tools
+#   uv run --package papers-mcp pytest services/papers-mcp
+#
+# A new Python service goes in services/<name>/ with its own pyproject.toml.
+[tool.uv.workspace]
+members = ["services/*", "packages/knowledge-py"]

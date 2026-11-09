@@ -151,7 +151,7 @@ const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
   propose_experiment: () => ["Proposing a run", "Proposed a run"],
   update_experiment: () => ["Updating the run", "Updated the run"],
   set_experiment_results: () => ["Recording the run's results", "Recorded the run's results"],
-  // Paper search (examples/papers-mcp).
+  // Paper search (services/papers-mcp).
   search_papers: (a) => [`Searching papers${quoted(a.query)}`, `Searched papers${quoted(a.query)}`],
   related_papers: () => ["Finding related papers", "Found related papers"],
   get_paper: () => ["Looking up a paper", "Looked up a paper"],

@@ -31,7 +31,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from . import arxiv, fulltext, identity, net, openalex, workspace
+from knowledge_chatroom import identity, storage
+
+from . import arxiv, fulltext, net, openalex
 from .models import PaperDetails, PaperSearchResult, PaperText, SavedPaper, parse_id, slug
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
@@ -73,7 +75,7 @@ async def _run(fn, *args, **kwargs):
     """Runs a blocking lookup off the event loop; source failures become tool errors for Claude."""
     try:
         return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
-    except (net.SourceError, workspace.WorkspaceError, ValueError) as err:
+    except (net.SourceError, storage.WorkspaceError, ValueError) as err:
         raise ToolError(str(err)) from err
 
 
@@ -245,11 +247,11 @@ def _save(
         if not data.startswith(b"%PDF"):
             raise ToolError(f"{paper.pdf_url} isn't a PDF; save it without include_pdf.")
         pdf_path = target.removesuffix(".md") + ".pdf"
-        proposed = workspace.write(
+        proposed = storage.write(
             STORAGE_URL, pdf_path, data, "application/pdf", token, node=node, experiment=experiment, note=note
         )
     proposed = (
-        workspace.write(
+        storage.write(
             STORAGE_URL,
             target,
             note_markdown(paper, pdf_path).encode("utf-8"),
@@ -286,7 +288,7 @@ async def save_paper(
     at the workspace root, in a knowledge node (as a proposal an editor accepts) or in an experiment.
     Saving the same paper again updates its note."""
     require_user(ctx)
-    token = (ctx.headers or {}).get(workspace.STORAGE_HEADER)
+    token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
     if PUBLIC_KEY and not token:
         raise ToolError('Saving needs "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.')
     return await _run(_save, id, path, node, experiment, include_pdf, token)

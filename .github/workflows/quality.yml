@@ -45,34 +45,27 @@ jobs:
       - name: Verify the lockfile is unchanged
         run: git diff --exit-code -- pnpm-lock.yaml
 
-  python-sample:
+  python:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: examples/python-agent
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the sample's dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Sample Python agent tests
-        run: python -m pytest -q
-
-  papers-mcp:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: examples/papers-mcp
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - name: Install the server's dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Paper search server tests
-        run: python -m pytest -q
+          version: "0.11.32"
+          enable-cache: true
+      # --locked also fails when uv.lock is out of date with the pyproject files.
+      - name: Install the uv workspace (services/, packages/knowledge-py)
+        run: uv sync --all-packages --locked
+      - name: Python tests
+        run: |
+          status=0
+          for project in packages/knowledge-py services/*/; do
+            echo "::group::$project"
+            (cd "$project" && uv run --locked pytest -q) || status=1
+            echo "::endgroup::"
+          done
+          exit $status

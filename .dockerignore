@@ -8,3 +8,6 @@ playwright-report
 blob-report
 preview
 *.tsbuildinfo
+**/.venv
+**/__pycache__
+**/.pytest_cache

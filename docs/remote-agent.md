@@ -118,7 +118,7 @@ v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.
   `GET ${LOCAL_AGENT_URL}/identity/public-key` (`{"alg": "Ed25519", "key": "<base64url>"}`)
   and logs it at startup; pin it in the backend's config as `KNOWLEDGE_PUBLIC_KEY`. Don't
   give the backend `AUTH_SECRET`: whoever holds it can sign for any user.
-  `examples/python-agent/lab_tools/identity.py` is a Python verifier. Call
+  `packages/knowledge-py/src/knowledge_chatroom/identity.py` is a Python verifier. Call
   `verify(token, public_key(KNOWLEDGE_PUBLIC_KEY), audience=None)`: the app's header has no
   `aud`. `sub` is the same value as `user.id`.
 - **Older backends** that verify `v1` tokens (HMAC with `AUTH_SECRET`) no longer work:
@@ -189,10 +189,10 @@ to it.
    `MCP_SERVERS` that have a `ui` block (`GET /tools` on `LOCAL_AGENT_URL`), and
    `knowledge_chatroom.tools` names the ones whose chip is on. For each server you run:
    - **Connect to the same MCP server, under the same name.** For paper search that is
-     `papers` (`examples/papers-mcp`), so its tools reach the chat as
+     `papers` (`services/papers-mcp`), so its tools reach the chat as
      `mcp__papers__search_papers` and friends. The chat shows paper cards for any
      `mcp__<server>__search_papers`, `related_papers` and `get_paper` result in the paper
-     tool format (`examples/papers-mcp/papers_mcp/models.py`).
+     tool format (`services/papers-mcp/papers_mcp/models.py`).
    - **When its chip is on, tell the model to use it** for this message, as this repo's
      agent does: one line such as `The user turned on "Papers" for this chat: answer with
      the mcp__papers__ tools.` A server with `"mode": "manual"` should only be offered
@@ -216,7 +216,7 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
 
-from identity import HEADER, public_key, verify  # examples/python-agent/lab_tools/identity.py
+from knowledge_chatroom.identity import HEADER, public_key, verify  # packages/knowledge-py
 
 PROPS = "knowledge_chatroom"
 # The agent server's GET /identity/public-key; unset without login.

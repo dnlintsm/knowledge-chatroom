@@ -19,12 +19,14 @@ are listed one by one: service-free ones in `agent/package.json` (`test:unit`), 
 that need PostgreSQL and S3 in `agent/scripts/test-integration.mjs`. Add a new
 `*.test.ts` to the matching list, or it never runs.
 
-The two Python examples have their own pytest suites (Python 3.10+), which CI runs too:
+The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
+`services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.10+),
+which CI runs too:
 
 ```bash
-cd examples/papers-mcp        # or examples/python-agent
-pip install -r requirements-dev.txt
-python -m pytest -q
+uv sync --all-packages
+cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
+uv run pytest -q
 ```
 
 ## Disposable integration databases
@@ -93,8 +95,8 @@ See [CI merge gates](ci.md) for the repository ruleset settings that enforce
 successful checks before merging and for preview-step limits.
 
 - `quality.yml`: the `checks` job (locked root/agent install, lint/types/units,
-  unchanged lockfiles) plus the pytest suites of `examples/python-agent` and
-  `examples/papers-mcp`.
+  unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
+  suites of `packages/knowledge-py` and every `services/*` project.
 - `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
   including the cached real embedding-model test (`EMBEDDING_TEST=1`).
 - `ui-preview.yml`: the `preview` job: production build, explicit browser/storage/login

@@ -14,7 +14,7 @@ import { useWorkbench } from "./workbench";
 /**
  * Paper search results in the chat (issue #151): what search_papers,
  * related_papers and get_paper return, from any server that follows the paper
- * tool contract (examples/papers-mcp). Each card can save the paper into the
+ * tool contract (services/papers-mcp). Each card can save the paper into the
  * workspace, put a question about it in the message box, or open it.
  */
 

@@ -18,7 +18,7 @@ work easier to find, understand, and reuse.
   "Worked for 14s · 5 steps" line, which opens to show every step.
 - **Search papers** — pick **Search papers** in the chat's "+" menu to search OpenAlex
   and arXiv, then save a paper to the workspace or ask about it from its card
-  ([paper search server](examples/papers-mcp/README.md)).
+  ([paper search server](services/papers-mcp/README.md)).
 - **Bring your own tools and models** — connect the agent to outside MCP servers,
   for example the Python tools of an existing agent
   ([example](examples/python-agent/README.md)), and run any model behind an
@@ -129,7 +129,7 @@ Start with the guide that matches what you want to do:
 
 Two examples show how to bring outside tools in as MCP servers:
 [Python agent](examples/python-agent/README.md) (an existing agent's tools and prompt) and
-[paper search](examples/papers-mcp/README.md) (OpenAlex and arXiv, with the chat's "+" menu).
+[paper search](services/papers-mcp/README.md) (OpenAlex and arXiv, with the chat's "+" menu).
 
 <details>
 <summary><strong>Contributor commands and project map</strong></summary>
@@ -157,8 +157,10 @@ changed and how you validated it.
 | `agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
 | `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
-| `examples/python-agent` | Sample: a Python agent's tools as an MCP server and its prompt as a skill |
-| `examples/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
+| `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
+| `services/lab-tools` | The Python agent sample's tools as an MCP server |
+| `packages/knowledge-py` | `knowledge_chatroom`: identity, storage and memory clients shared by the Python services |
+| `examples/python-agent` | Guide: bringing a Python agent in (its prompt as a skill, its tools as `services/lab-tools`) |
 | `tests/unit` | Pure frontend tests without an application server or browser |
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |

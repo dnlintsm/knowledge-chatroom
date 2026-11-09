@@ -30,7 +30,7 @@
  *
  * With the "Papers" chip on (forwardedProps.knowledge_chatroom.tools has
  * "papers"), a run calls mcp__papers__search_papers as Claude would through the
- * papers MCP server (examples/papers-mcp) and answers citing the results, so the
+ * papers MCP server (services/papers-mcp) and answers citing the results, so the
  * preview shows the paper cards. `GET /tools` lists that server for the "+"
  * menu, and `POST /tools/papers/save_paper` saves like the agent's tool API.
  *
@@ -64,7 +64,7 @@ const TOOL_MENU = [
   },
 ];
 
-/** What the papers server's search_papers returns (examples/papers-mcp/papers_mcp/models.py). */
+/** What the papers server's search_papers returns (services/papers-mcp/papers_mcp/models.py). */
 const PAPERS = {
   query: "retrieval augmented generation",
   total: 18342,

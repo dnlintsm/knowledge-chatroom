@@ -21,7 +21,9 @@ import os
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import identity, memory, stats, workspace
+from knowledge_chatroom import identity, memory, storage
+
+from . import stats
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
@@ -84,12 +86,12 @@ def describe_column(
     or an experiment (`experiment` id). Reads only files the user may read.
     """
     require_user(ctx)
-    token = (ctx.headers or {}).get(workspace.STORAGE_HEADER)
+    token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
     if PUBLIC_KEY and not token:
         raise ToolError('Workspace files need "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.')
     try:
-        content = workspace.read_text(STORAGE_URL, path, token, node=node, experiment=experiment)
-    except workspace.WorkspaceError as err:
+        content = storage.read_text(STORAGE_URL, path, token, node=node, experiment=experiment)
+    except storage.WorkspaceError as err:
         raise ToolError(str(err)) from err
     rows = list(csv.DictReader(io.StringIO(content)))
     if rows and column not in rows[0]:
