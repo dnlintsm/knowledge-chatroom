@@ -124,13 +124,13 @@ paths:
               schema: { type: string, enum: ["true"] }
           content:
             application/json:
+              # Any JSON, not anyOf [VersionList, {}]: a stored document that happens to have
+              # a `versions` array would otherwise parse as a VersionList and lose its other fields.
               schema:
                 description: |
-                  With `versions`, a VersionList. Without it, a stored .json file's own content,
-                  which can be any JSON.
-                anyOf:
-                  - $ref: "#/components/schemas/VersionList"
-                  - {}
+                  With `versions`, a VersionList (#/components/schemas/VersionList): parse it as
+                  one when you asked for the history. Without it, a stored .json file's own
+                  content, which can be any JSON.
             "*/*":
               schema: { type: string, format: binary }
         "302":

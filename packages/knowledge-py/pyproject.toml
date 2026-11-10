@@ -9,12 +9,48 @@ dependencies = [
     "cryptography>=42",
 ]
 
+[project.optional-dependencies]
+# The storage API's request and answer models (knowledge_chatroom.api).
+api = ["pydantic>=2.11"]
+
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pydantic>=2.11",
+    "pyyaml>=6",
+    # Writes src/knowledge_chatroom/api.py from the OpenAPI spec (settings below).
+    "datamodel-code-generator==0.91.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"
+
+# uv run datamodel-codegen          regenerates src/knowledge_chatroom/api.py
+# uv run datamodel-codegen --check  fails if it is out of date with the spec (CI)
+[tool.datamodel-codegen]
+input = "../contracts/openapi/storage.yaml"
+input-file-type = "openapi"
+# Every components schema, and the inline bodies of each operation named after it
+# (ListChatsResponse, SetSkillModeRequest, ...).
+openapi-scopes = ["schemas", "paths"]
+use-operation-id-as-name = true
+output = "src/knowledge_chatroom/api.py"
+output-model-type = "pydantic_v2.BaseModel"
+target-python-version = "3.10"
+use-standard-collections = true
+use-union-operator = true
+use-annotated = true
+field-constraints = true
+use-schema-description = true
+use-field-description = true
+use-type-alias = true
+enum-field-as-literal = "all"
+use-double-quotes = true
+formatters = ["builtin"]
+disable-timestamp = true
+custom-file-header = """# Generated from packages/contracts/openapi/storage.yaml by datamodel-codegen.
+# Don't edit: change the spec, then run `uv run datamodel-codegen` in packages/knowledge-py."""
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

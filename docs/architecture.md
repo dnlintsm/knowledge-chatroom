@@ -636,8 +636,13 @@ is out of date. The chat run itself (`POST /`) is AG-UI's contract, not this one
 `apps/agent/src/storage/api-contract.ts` ties the agent's own types to
 the spec's schemas, so `pnpm typecheck` fails when a route's answer and the spec drift
 apart in either direction. `pnpm test:conformance` then checks the running agent's real
-answers against the spec, operation by operation ([Testing](testing.md)). When a route
-changes, change the spec and the conformance suite in the same PR.
+answers against the spec, operation by operation ([Testing](testing.md)). Python gets
+pydantic models from the same spec: `knowledge_chatroom.api` in `packages/knowledge-py`,
+written by `uv run datamodel-codegen` there, one model per schema and one per operation's
+inline request or answer (`ListChatsResponse`, `SetSkillModeRequest`). The Quality workflow
+fails when they are out of date, and the Storage tests workflow parses every request and
+answer of the conformance run into them. When a route changes, change the spec, regenerate
+both sides and change the conformance suite in the same PR.
 
 Path normalization, kinds and MIME inference are shared. SVG is intentionally
 readable as text by agent tools, while browser previews/uploads retain image URLs.
