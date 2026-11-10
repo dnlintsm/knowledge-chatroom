@@ -205,6 +205,9 @@ to it.
 
 ## With `ag_ui_claude_sdk` (Python)
 
+`services/agent-py` is this repo's own Python backend, built this way (issue #176); its
+`agent_py/adapter.py` and `agent_py/app.py` do what this section describes.
+
 `ClaudeAgentAdapter` keeps one Claude session per `threadId`. It builds that session's
 options once, with `build_options(input_data)`, on the thread's first run (and again only
 if the session is restarted). So that first run, which already carries
@@ -251,6 +254,11 @@ add_claude_fastapi_endpoint(
 
 Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 
+- **Drop `forwardedProps` before the adapter sees them.** They come from the browser, and
+  the adapter turns whitelisted keys (`ALLOWED_FORWARDED_PROPS`: `model`, `resume`,
+  `max_budget_usd`, ...) into SDK options, so a browser could pick the model or resume
+  another chat's Claude session. Read `knowledge_chatroom` yourself, then pass the run on
+  with `forwarded_props={}`, as `services/agent-py` does.
 - **The warning is expected.** The adapter applies only whitelisted `forwarded_props` keys
   (`ALLOWED_FORWARDED_PROPS`) as SDK options. It logs "Ignoring non-whitelisted
   forwarded_prop" for `knowledge_chatroom` (and `a2uiCatalogAvailable`) and otherwise leaves

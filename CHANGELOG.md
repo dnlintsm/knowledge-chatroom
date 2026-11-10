@@ -4,6 +4,11 @@
 
 ### Added
 
+- `services/agent-py`: the chat agent in Python (FastAPI and `ag_ui_claude_sdk`), for
+  `AGENT_URL` (issue #176, step 1 of phase 2 of #169). It chats with the app's own tools,
+  checks the run's user, and gives the model the user's open file and place on every run.
+  Storage file tools, skills, memory and tool chips follow in later steps. The uv workspace
+  now needs Python 3.11 or later (the AG-UI adapter does).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
   with TypeScript types generated from it and checks that keep the spec, the generated types
   and the agent's own types in step (issue #169). No change to how the API behaves.
