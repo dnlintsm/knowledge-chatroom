@@ -4,8 +4,12 @@ import * as oidc from "openid-client";
 
 import { authSettings, checkOidcSettings, httpAllowed } from "@knowledge-chatroom/contracts/auth-mode";
 import {
+  MEMORY_AUDIENCE,
+  MEMORY_HEADER,
+  REMOTE_VIA,
   STORAGE_AUDIENCE,
   STORAGE_HEADER,
+  localMemoryToken,
   readIdentityToken,
   signIdentityToken,
   storageTokenSeconds,
@@ -27,7 +31,7 @@ import {
 export const SESSION_COOKIE = "kc_session";
 export const LOGIN_COOKIE = "kc_login";
 export const IDENTITY_HEADER = "x-knowledge-user";
-export { STORAGE_HEADER };
+export { MEMORY_HEADER, STORAGE_HEADER };
 
 const SESSION_SECONDS = 7 * 24 * 3600;
 const LOGIN_SECONDS = 10 * 60;
@@ -115,6 +119,24 @@ export function storageHeader(user: SessionUser, via: string): string {
   return signIdentityToken(
     { ...user, aud: STORAGE_AUDIENCE, via, exp: now() + storageTokenSeconds() },
     authSecret()!,
+  );
+}
+
+/**
+ * An X-Knowledge-Memory token for one run of a remote backend's chat agent
+ * (`via` "remote"): the user's memory in chat `thread`, through the agent
+ * server's /memory/agent, as Claude has it there. The agent server checks on
+ * each call that memory is on and the chat isn't incognito. Without login
+ * (`user` null) it is the unsigned local form. docs/remote-agent.md.
+ */
+export function memoryHeader(user: SessionUser | null, thread: string, node: string | null): string {
+  const claims = { via: REMOTE_VIA, thread, node };
+  const secret = authSecret();
+  if (!secret) return localMemoryToken(claims);
+  if (!user) throw new Error("A memory token with login on needs the signed-in user");
+  return signIdentityToken(
+    { ...user, aud: MEMORY_AUDIENCE, ...claims, exp: now() + storageTokenSeconds() },
+    secret,
   );
 }
 

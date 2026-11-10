@@ -19,6 +19,8 @@
  * Memory tokens (X-Knowledge-Memory) have aud "memory", `via`, and the run's
  * `thread` and `node`: an outside MCP server uses the user's memory for that
  * chat through the agent's /memory/agent API, as Claude does in it (issue #93).
+ * The app signs one `via` "remote" for each run of a remote backend's chat
+ * agent (issue #176), which is Claude in that chat.
  */
 
 import {
@@ -47,6 +49,17 @@ export const STORAGE_HEADER = "x-knowledge-storage";
 export const STORAGE_AUDIENCE = "storage";
 export const MEMORY_HEADER = "x-knowledge-memory";
 export const MEMORY_AUDIENCE = "memory";
+/** `via` of the tokens the app makes for a remote backend's chat agent (AGENT_URL). */
+export const REMOTE_VIA = "remote";
+
+/**
+ * Without login there is nothing to sign with, and every request is the local
+ * user's anyway: the memory "token" is `local.<base64url JSON>` with the same
+ * claims, and only accepted then.
+ */
+export function localMemoryToken(claims: { via: string; thread: string; node: string | null }): string {
+  return `local.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
+}
 
 /** How long a storage token lasts: STORAGE_TOKEN_SECONDS, default an hour (a long run). */
 export function storageTokenSeconds(env: Env = process.env): number {

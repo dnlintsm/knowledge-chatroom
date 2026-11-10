@@ -122,8 +122,8 @@ const now = () => Math.floor(Date.now() / 1000);
 const user = (sub: string, name: string) => ({
   "X-Knowledge-User": signIdentityToken({ sub, name, email: `${name}@example.com`, exp: now() + 600 }, SECRET!),
 });
-const memoryToken = (sub: string, thread: string) => ({
-  "X-Knowledge-Memory": signIdentityToken({ sub, exp: now() + 600, aud: "memory", via: "mcp:conformance", thread }, SECRET!),
+const memoryToken = (sub: string, thread: string, via = "mcp:conformance") => ({
+  "X-Knowledge-Memory": signIdentityToken({ sub, exp: now() + 600, aud: "memory", via, thread }, SECRET!),
 });
 const storageToken = (sub: string) => ({
   "X-Knowledge-Storage": signIdentityToken({ sub, exp: now() + 600, aud: "storage", via: "mcp:conformance" }, SECRET!),
@@ -457,6 +457,26 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/memory/agent/tools/memory_save", { headers: agent, json: { name: "conformance-agent", description: "From a server", type: "project", body: "A note." }, expect: 200 });
     await call("POST", "/memory/agent/tools/memory_save", { headers: agent, json: { name: "conformance-agent" }, expect: 400 });
     await call("POST", "/memory/agent/tools/memory_view", { headers: agent, json: { name: "conformance-kept" }, expect: 200 });
+    await call("POST", "/memory/agent/tools/chats_search", { headers: agent, json: { query: "anything" }, expect: 404 });
+
+    // A remote backend's chat agent (via "remote", made by the app): Claude in the chat.
+    type ToolAnswer = { text: string; isError: boolean; events: Schema["MemoryEvent"][]; tainted: boolean };
+    const remote = memoryToken("conformance|alice", thread, "remote");
+    await call("PUT", "/memory/settings", { headers: alice, json: { mode: "on" }, expect: 200 });
+    const view = await call<{ prompt: string; tools: { name: string }[] }>("GET", "/memory/agent", { headers: remote, expect: 200 });
+    assert.ok(view.data.tools.some((t) => t.name === "chats_search"), "a remote chat agent gets the past-chat tools");
+    const remoteNote = { name: "conformance-remote", description: "From the chat", type: "project", body: "A note." };
+    const made = await call<ToolAnswer>("POST", "/memory/agent/tools/memory_save?run=r1", { headers: remote, json: remoteNote, expect: 200 });
+    assert.deepEqual([made.data.events.map((e) => e.kind), made.data.tainted], [["create"], false]);
+    const waits = await call<ToolAnswer>("POST", "/memory/agent/tools/memory_delete?tainted=1", { headers: remote, json: { name: "conformance-remote" }, expect: 200 });
+    assert.deepEqual([waits.data.events.map((e) => e.kind), waits.data.tainted], [["propose"], true]);
+    const searched = await call<ToolAnswer>("POST", "/memory/agent/tools/chats_search", { headers: remote, json: { query: "anything" }, expect: 200 });
+    assert.equal(searched.data.tainted, true);
+    // An outside server's changes still wait, whatever it asks.
+    const outside = await call<ToolAnswer>("POST", "/memory/agent/tools/memory_delete?tainted=0", { headers: agent, json: { name: "conformance-remote" }, expect: 200 });
+    assert.deepEqual([outside.data.events.map((e) => e.kind), outside.data.tainted], [["propose"], true]);
+    await call("DELETE", "/memory/notes/conformance-remote", { headers: alice, expect: 200 });
+    await call("PUT", "/memory/settings", { headers: alice, json: { mode: "ask" }, expect: 200 });
 
     await call("DELETE", "/memory/notes/conformance-style", { headers: alice, expect: 200 });
     await call("DELETE", "/memory/notes/conformance-style", { headers: alice, expect: 404 });

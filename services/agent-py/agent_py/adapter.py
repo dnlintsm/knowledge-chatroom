@@ -20,6 +20,10 @@ the thread's first run. Three things change that for this app:
   this chat, starts in the user's own folder holding them, and only /name for
   one of them stays a command. Each skill used goes to the chat as a
   `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
+- Memory (memory.py): with the run's memory token, the system prompt gets the
+  memory section and Claude the memory_* and chats_* tools, run by the agent
+  server's /memory/agent. Each note they read or change goes to the chat as a
+  `memory` event.
 """
 
 from __future__ import annotations
@@ -44,8 +48,16 @@ from ag_ui.core import (
 )
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
+from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
 from .place import workspace_note
-from .skills import RunSkill, Trigger, fetch_skills, materialize, skill_options, slash_command
+from .skills import (
+    RunSkill,
+    Trigger,
+    fetch_skills,
+    materialize,
+    skill_options,
+    slash_command,
+)
 from .workspace import Storage, WorkspaceError, file_tools, server, tool_names
 
 logger = logging.getLogger("agent_py")
@@ -53,11 +65,13 @@ logger = logging.getLogger("agent_py")
 
 @dataclass
 class Run:
-    """What a thread's latest run has: its folder, its skills, and skill uses not yet sent."""
+    """What a thread's latest run has: its folder, skills and memory, and events not yet sent."""
 
     cwd: Path | None = None
     skills: Sequence[RunSkill] = ()
-    pending: list[dict[str, str]] = field(default_factory=list)
+    memory: RunMemory | None = None
+    # (name, value) of CUSTOM events for the chat: skill_used, memory.
+    pending: list[tuple[str, Any]] = field(default_factory=list)
 
 
 class ChatroomAdapter(ClaudeAgentAdapter):
@@ -89,15 +103,27 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self, input_data: RunAgentInput | None = None, thread_id: str | None = None, *args: Any, **kwargs: Any
     ):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
-        options.system_prompt = self._system_prompt
+        run = self._runs.get(thread_id or "")
+        memory = run.memory if run else None
+        options.system_prompt = f"{self._system_prompt}\n{memory.prompt}" if memory else self._system_prompt
         if self._storage_url and thread_id:
             tools = file_tools(
                 lambda: self._storage(thread_id or ""),
                 {"chat": thread_id, "model": options.model},
             )
+            if memory:
+                tools += memory_tools(
+                    memory,
+                    lambda: self._memory(thread_id or ""),
+                    lambda: self._storage(thread_id or ""),
+                    lambda event: self._event(thread_id or "", "memory", event),
+                )
             options.mcp_servers = {**(options.mcp_servers or {}), "copilotkit": server(tools)}
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
-        run = self._runs.get(thread_id or "")
+        if memory:
+            hooks = dict(options.hooks or {})
+            hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), taint_hook(lambda: self._memory(thread_id or ""))]
+            options.hooks = hooks
         if run and run.cwd:
             options.cwd = str(run.cwd)
         if run and run.skills:
@@ -112,9 +138,16 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         return options
 
     async def run(
-        self, input_data: RunAgentInput, storage_token: str | None = None, user: str = "local"
+        self,
+        input_data: RunAgentInput,
+        storage_token: str | None = None,
+        user: str = "local",
+        memory_token: str | None = None,
     ) -> AsyncIterator[BaseEvent]:
-        """Runs `input_data` for `user` (their id); `storage_token` is its X-Knowledge-Storage header (with login)."""
+        """Runs `input_data` for `user` (their id).
+
+        `storage_token` is its X-Knowledge-Storage header (with login), `memory_token` its X-Knowledge-Memory.
+        """
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
         run = Run()
@@ -126,6 +159,15 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 logger.warning("couldn't write the run's skills; running without them: %s", err)
                 run.skills = ()
                 run.cwd = materialize(self._skills_root, user, ())
+        if memory_token and self._storage_url:
+            try:
+                run.memory = await fetch_memory(self._storage(thread_id), memory_token, input_data.run_id)
+            except (WorkspaceError, ValueError) as err:
+                logger.warning("couldn't load memory; running without it: %s", err)
+            # After a browser tool (its result is the last message) the turn has
+            # used another tool already: changes wait in the inbox from the start.
+            if run.memory and input_data.messages and isinstance(input_data.messages[-1], ToolMessage):
+                run.memory.tainted = True
         remember(self._runs, thread_id, run, self._max_workers)
         prepared, slash = self.prepare(input_data, run.skills)
         if slash:
@@ -135,11 +177,23 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             yield event
             started = started or event.type == EventType.RUN_STARTED
             while started and run.pending:
-                yield CustomEvent(type=EventType.CUSTOM, name="skill_used", value=run.pending.pop(0))
+                name, value = run.pending.pop(0)
+                yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
 
     def _storage(self, thread_id: str) -> Storage:
         """The storage API with the thread's latest token: tools read it when called, not when the chat began."""
         return Storage(self._storage_url or "", self._tokens.get(thread_id), self._transport)
+
+    def _memory(self, thread_id: str) -> RunMemory | None:
+        """The memory of the thread's latest run: its tools use that run's token and state."""
+        run = self._runs.get(thread_id)
+        return run.memory if run else None
+
+    def _event(self, thread_id: str, name: str, value: Any) -> None:
+        """Queues a CUSTOM event for the thread's run, sent after the adapter's next event."""
+        run = self._runs.get(thread_id)
+        if run:
+            run.pending.append((name, value))
 
     async def _skills_for(self, thread_id: str) -> list[RunSkill]:
         if not self._storage_url:
@@ -156,7 +210,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         skill = next((s for s in run.skills if s.name == name), None) if run else None
         if not run or not skill:
             return
-        run.pending.append({"skill": skill.name, "source": skill.source, "trigger": trigger})
+        run.pending.append(("skill_used", {"skill": skill.name, "source": skill.source, "trigger": trigger}))
         if self._storage_url:
             storage = self._storage(thread_id)
             body = {"thread": thread_id, "skill": skill.name, "trigger": trigger}

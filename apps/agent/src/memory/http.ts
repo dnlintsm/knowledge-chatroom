@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { z } from "zod";
 
-import { identify, identifyMemory } from "../storage/identity";
+import { identify, identifyMemory, REMOTE_VIA } from "../storage/identity";
 import type { Storage, StorageState } from "../storage";
 import {
   INDEX_CHARS,
@@ -13,9 +13,10 @@ import {
   MemoryConflictError,
   MemoryError,
   MemoryNotFoundError,
+  type MemoryEvent,
 } from "../storage/memory";
 import { importMemory } from "./import";
-import { liveRunEvents, memoryEnabled, memoryPrompt, memoryTools, prepareMemory } from "./run";
+import { chatTools, liveRunEvents, memoryEnabled, memoryPrompt, memoryTools, prepareMemory } from "./run";
 
 /**
  * Memory API (issue #93), mounted on the agent server. Needs MEMORY=on and
@@ -295,26 +296,41 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     return send(res, 404, { error: "Not found" });
   }
 
-  /** /memory/agent: an outside MCP server using the memory of one chat. */
-  async function agentRoute(req: IncomingMessage, res: ServerResponse, s: Storage, parts: string[]) {
+  /**
+   * /memory/agent: an outside MCP server using the memory of one chat, or the
+   * chat's own agent on a remote backend (a token `via` "remote", which only
+   * the app signs: docs/remote-agent.md). That agent is Claude in the chat, so
+   * it gets what Claude gets here: the past-chat tools too, and changes made
+   * with Undo until the run has used another tool. It keeps that state across
+   * the run's calls (`?tainted=1`, and `tainted` in each answer); a server's
+   * changes always wait in the inbox. Each answer lists the notes the call
+   * read or changed (`events`), for the chat's "Used / Updated" line.
+   */
+  async function agentRoute(req: IncomingMessage, res: ServerResponse, url: URL, s: Storage, parts: string[]) {
     const grant = await identifyMemory(req, s);
     if (!grant) return send(res, 401, { error: "This needs the X-Knowledge-Memory token of a run (memoryAccess)" });
+    const chat = grant.via === REMOTE_VIA;
     const live = liveRunEvents(grant.thread);
+    const events: MemoryEvent[] = [];
+    const run = url.searchParams.get("run")?.slice(0, 200);
     const memory = await prepareMemory(
       s,
       grant.userId,
-      { threadId: grant.thread, runId: grant.via },
-      (event) => live?.(event),
+      { threadId: grant.thread, runId: (chat && run) || grant.via },
+      (event) => {
+        events.push(event);
+        live?.(event);
+      },
       grant.node,
     );
     if (!memory) return send(res, 403, { error: "Memory is off in this chat (incognito, or turned off)" });
     // Outside the chat: every change waits for the user.
-    memory.tainted = true;
-    const tools = memoryTools(memory);
+    memory.tainted = chat ? /^(1|true)$/i.test(url.searchParams.get("tainted") ?? "") : true;
+    const tools = chat ? [...memoryTools(memory), ...chatTools(memory)] : memoryTools(memory);
     const [, action, name] = parts;
     if (req.method === "GET" && !action) {
       return send(res, 200, {
-        prompt: memoryPrompt(memory),
+        prompt: chat ? memoryPrompt(memory, memory.chats !== null) : memoryPrompt(memory),
         tools: tools.map((t) => ({
           name: t.name,
           description: t.description,
@@ -332,7 +348,12 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
         args.data,
         {},
       );
-      return send(res, 200, { text: result.content.map((c) => c.text).join("\n"), isError: result.isError === true });
+      return send(res, 200, {
+        text: result.content.map((c) => c.text).join("\n"),
+        isError: result.isError === true,
+        events,
+        tainted: memory.tainted,
+      });
     }
     return send(res, req.method === "GET" ? 404 : 405, { error: req.method === "GET" ? "Not found" : "Method not allowed" });
   }
@@ -346,7 +367,7 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
     }
     try {
       if (/^\/memory\/agent(\/|$)/.test(url.pathname)) {
-        return await agentRoute(req, res, s, url.pathname.slice("/memory".length).split("/").filter(Boolean));
+        return await agentRoute(req, res, url, s, url.pathname.slice("/memory".length).split("/").filter(Boolean));
       }
       const principal = await identify(req, s);
       if (!principal) return send(res, 401, { error: "Sign in first" });

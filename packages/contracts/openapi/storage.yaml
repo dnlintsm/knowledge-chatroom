@@ -2752,6 +2752,11 @@ paths:
         user's memory in the chat the token was made for, through the same memory_* tools
         Claude has. Its changes always wait in the user's inbox (or go to a shared note's
         editors).
+
+        A token `via` "remote", which the app makes for each run of a remote backend's chat
+        agent (AGENT_URL), is Claude in that chat: it also gets chats_search and chats_read,
+        and the prompt and changes Claude gets there (made with Undo while memory is on,
+        until the run has used another tool; see `tainted` on the tool calls).
       security:
         - memory: []
       responses:
@@ -2784,11 +2789,23 @@ paths:
       - name: name
         in: path
         required: true
-        schema: { type: string, enum: [memory_view, memory_search, memory_save, memory_edit, memory_delete] }
+        schema: { type: string, enum: [memory_view, memory_search, memory_save, memory_edit, memory_delete, chats_search, chats_read] }
+      - name: tainted
+        in: query
+        description: |
+          Remote chat agents only (via "remote"): the run has used a tool other than memory's,
+          so changes wait in the inbox. Pass on what the last call answered in `tainted`.
+          Ignored for an outside server, whose changes always wait.
+        schema: { type: string, enum: ["0", "1", "true", "false"] }
+      - name: run
+        in: query
+        description: Remote chat agents only, the AG-UI run id, kept with the notes the call reads and changes.
+        schema: { type: string, maxLength: 200 }
     post:
       tags: [memory]
       operationId: callMemoryTool
-      summary: Call one memory tool for an outside MCP server
+      summary: Call one memory tool for an outside MCP server or a remote chat agent
+      description: chats_search and chats_read are for remote chat agents only (404 for an outside server).
       security:
         - memory: []
       requestBody:
@@ -2803,10 +2820,17 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [text, isError]
+                required: [text, isError, events, tainted]
                 properties:
                   text: { type: string }
                   isError: { type: boolean }
+                  events:
+                    type: array
+                    description: The notes this call read or changed, for the chat's "Used / Updated" line.
+                    items: { $ref: "#/components/schemas/MemoryEvent" }
+                  tainted:
+                    type: boolean
+                    description: Whether the run's later changes wait in the inbox (reading a shared note or a past chat sets it).
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/MemoryOffInChat" }

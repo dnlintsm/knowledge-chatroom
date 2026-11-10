@@ -3,8 +3,10 @@ import type { IncomingMessage } from "node:http";
 import {
   MEMORY_AUDIENCE,
   MEMORY_HEADER,
+  REMOTE_VIA,
   STORAGE_AUDIENCE,
   STORAGE_HEADER,
+  localMemoryToken,
   readIdentityToken,
   signIdentityToken,
 } from "@knowledge-chatroom/contracts/identity-token";
@@ -23,7 +25,7 @@ import type { Storage } from "./index";
  */
 
 export const IDENTITY_HEADER = "x-knowledge-user";
-export { MEMORY_AUDIENCE, MEMORY_HEADER, STORAGE_HEADER };
+export { localMemoryToken, MEMORY_AUDIENCE, MEMORY_HEADER, REMOTE_VIA, STORAGE_HEADER };
 
 export interface Identity {
   /** Stable id from the login provider, e.g. "<issuer>|<sub>". */
@@ -104,15 +106,6 @@ export interface MemoryGrant {
 }
 
 const UUID = /^[0-9a-f-]{36}$/i;
-
-/**
- * Without login there is nothing to sign with, and every request is the local
- * user's anyway: the memory "token" is `local.<base64url JSON>` with the same
- * claims, and only accepted then.
- */
-export function localMemoryToken(claims: { via: string; thread: string; node: string | null }): string {
-  return `local.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
-}
 
 /** The memory grant an X-Knowledge-Memory header carries, or null when it carries none. */
 export async function identifyMemory(req: Pick<IncomingMessage, "headers">, storage: Storage): Promise<MemoryGrant | null> {

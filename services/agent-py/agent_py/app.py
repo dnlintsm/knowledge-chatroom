@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from knowledge_chatroom.identity import User, caller, public_key
 
 from .adapter import ChatroomAdapter
+from .memory import MEMORY_HEADER
 from .model import resolve_model
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
@@ -105,7 +106,10 @@ def create_app(env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | 
                 yield encoder.encode(run_error(input_data, reason))
                 return
             async for event in adapter.run(
-                input_data, storage_token=request.headers.get(STORAGE_HEADER), user=user.sub
+                input_data,
+                storage_token=request.headers.get(STORAGE_HEADER),
+                user=user.sub,
+                memory_token=request.headers.get(MEMORY_HEADER),
             ):
                 yield encoder.encode(event)
 

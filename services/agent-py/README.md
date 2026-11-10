@@ -12,8 +12,8 @@ issue #176. So far it chats with the app's own tools (task board, workbench pane
 and the browser's file tools while files live only in the browser), tells the model
 where the user is on every run, and works on the workspace's files on the server
 through the storage API (step 2), including starting and finishing runs, with the
-user's skills (step 3). Memory, tool chips and follow-up chips come in the next steps;
-until then, use the TypeScript agent for those.
+user's skills (step 3) and their memory (step 4). Tool chips and follow-up chips come
+in the next steps; until then, use the TypeScript agent for those.
 
 ## Run it
 
@@ -79,6 +79,14 @@ for a gateway) in this server's environment.
   used goes to the chat as a `skill_used` event and to the usage history
   (`POST /skills/used`). `!` commands in a SKILL.md never run and there is no shell,
   so skills' scripts don't run here (on the agent server they need `SKILL_SCRIPTS=on`).
+- `agent_py/memory.py`: the user's memory in the chat, as the TypeScript agent gives it
+  (`apps/agent/src/memory/run.ts`). With the run's `X-Knowledge-Memory` token (the app
+  sends one per run; memory needs `MEMORY=on` on the agent server), each run asks
+  `/memory/agent` for the memory section of the system prompt and the `memory_*` and
+  `chats_*` tools, which run there. Changes are made with Undo until the run uses any
+  other tool, then wait in the user's inbox (a `PreToolUse` hook marks the run). Each
+  note read or changed goes to the chat as a `memory` event. Incognito chats and memory
+  turned off get none of it.
 - `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
   backend tools.
 
