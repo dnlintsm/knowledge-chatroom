@@ -37,10 +37,11 @@ test("AGENT_URL sends the chat to the backend's /agent/report", () => {
   expect(localAgentUrl({ AGENT_URL: "http://host" })).toBe("http://localhost:8000");
 });
 
-test("follow-up chips come from this repo's agent only without a remote backend", () => {
+test("follow-up chips come from this repo's agent, also with a remote backend", () => {
   expect(localSuggester({})).toBe(true);
+  expect(localSuggester({ AGENT_URL: "http://backend" })).toBe(true);
   expect(localSuggester({ CHAT_SUGGESTIONS: "Static" })).toBe(false);
-  expect(localSuggester({ AGENT_URL: "http://backend" })).toBe(false);
+  expect(localSuggester({ AGENT_URL: "http://backend", CHAT_SUGGESTIONS: "static" })).toBe(false);
 });
 
 const etch = { id: "n1", name: "Etch", type: "tech" };

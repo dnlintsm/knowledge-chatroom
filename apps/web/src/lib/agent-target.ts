@@ -2,7 +2,8 @@
  * Which agent the chat talks to (docs/remote-agent.md):
  *
  * - AGENT_URL set: a remote backend's agent at `${AGENT_URL}/agent/report`.
- *   This repo's own Claude agent is not used for chat or follow-up chips.
+ *   This repo's own Claude agent is not used for chat; its `/suggest` still
+ *   writes the follow-up chips, since that needs only the messages.
  * - AGENT_URL unset: this repo's agent server (agent/) at LOCAL_AGENT_URL.
  *
  * Storage, skills and the skill hub are always this repo's agent server, at
@@ -36,10 +37,10 @@ export function chatAgentUrl(env: Env = process.env): string {
 }
 
 /**
- * Whether the follow-up chips come from this repo's `/suggest`: not with a
- * remote backend, and not with CHAT_SUGGESTIONS=static. Without it the browser
- * keeps the first-round chips (src/components/workspace/use-chat-suggestions.ts).
+ * Whether the follow-up chips come from this repo's `/suggest`, with or
+ * without a remote backend: not with CHAT_SUGGESTIONS=static. Without it the
+ * browser keeps the first-round chips (src/components/workspace/use-chat-suggestions.ts).
  */
 export function localSuggester(env: Env = process.env): boolean {
-  return !remoteAgentUrl(env) && env.CHAT_SUGGESTIONS?.trim().toLowerCase() !== "static";
+  return env.CHAT_SUGGESTIONS?.trim().toLowerCase() !== "static";
 }

@@ -38,9 +38,9 @@ const chats = new AutoChatStore();
 const chatRunner = new ChatRunner(chats);
 const BASE_PATH = "/api/copilotkit";
 
-// "suggester" writes the chat's follow-up chips; without it (a remote backend,
-// or CHAT_SUGGESTIONS=static) the browser keeps the first-round chips
-// (src/components/workspace/use-chat-suggestions.ts).
+// "suggester" writes the chat's follow-up chips on this repo's agent server,
+// whichever agent serves the chat; without it (CHAT_SUGGESTIONS=static) the
+// browser keeps the first-round chips (src/components/workspace/use-chat-suggestions.ts).
 const runtime = new CopilotRuntime({
   agents: dynamicSuggestions()
     ? { default: defaultAgent, suggester: createSuggesterAgent() }

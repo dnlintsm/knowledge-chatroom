@@ -13,8 +13,8 @@ and the browser's file tools while files live only in the browser), tells the mo
 where the user is on every run, and works on the workspace's files on the server
 through the storage API (step 2), including starting and finishing runs, with the
 user's skills (step 3), their memory (step 4), and the outside MCP servers and tool
-chips (step 5). Follow-up chips come in the next step; until then, use the TypeScript
-agent for those.
+chips (step 5). The follow-up chips after each reply come from the agent server's
+`/suggest` (step 6), so this agent doesn't write them.
 
 ## Run it
 

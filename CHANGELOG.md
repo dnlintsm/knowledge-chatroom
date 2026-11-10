@@ -68,6 +68,10 @@
 
 ### Changed
 
+- Follow-up chips work with a remote backend (`AGENT_URL`): the app keeps asking this
+  repo's agent server's `POST /suggest`, which needs only the messages, instead of
+  keeping the first-round chips. The agent server no longer answers 404 there when it
+  sees `AGENT_URL` (issue #176).
 - Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
   file (a node's or the root's editors, an experiment's author while it isn't archived), the
   same as for everything else. A run's generated `models/general_rules.md` is now an ordinary
