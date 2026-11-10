@@ -12,8 +12,9 @@ the user's notes) and the memory_* and chats_* tools, which run there.
   the next one.
 - Claude's changes are made with Undo while memory is on, and wait in the
   user's inbox once the run has used any other tool (`tainted`): the server
-  says when a call itself taints the run (a shared note, a past chat), and
-  this agent's PreToolUse hook marks every other tool.
+  says when a call itself taints the run (a shared note, a past chat), this
+  agent's PreToolUse hook marks every other tool, and a run that continues
+  after a browser tool (its result last) starts marked.
 - Each note a call reads or changes comes back as an event, which goes to the
   chat as a `memory` event for its "Used / Updated" line, as the TypeScript
   agent sends it.

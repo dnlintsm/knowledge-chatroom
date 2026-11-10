@@ -164,6 +164,10 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 run.memory = await fetch_memory(self._storage(thread_id), memory_token, input_data.run_id)
             except (WorkspaceError, ValueError) as err:
                 logger.warning("couldn't load memory; running without it: %s", err)
+            # After a browser tool (its result is the last message) the turn has
+            # used another tool already: changes wait in the inbox from the start.
+            if run.memory and input_data.messages and isinstance(input_data.messages[-1], ToolMessage):
+                run.memory.tainted = True
         remember(self._runs, thread_id, run, self._max_workers)
         prepared, slash = self.prepare(input_data, run.skills)
         if slash:

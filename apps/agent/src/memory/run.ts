@@ -250,6 +250,16 @@ const attemptFor = (memory: RunMemory) => (fn: () => Promise<ToolResult>) =>
     return fn();
   });
 
+/**
+ * Whether a run continues after one of the browser's tools (openWorkspaceFile,
+ * readWorkspaceFile, ...): the browser ran it between runs and sends its
+ * result as the last message. That run has used another tool already, so its
+ * memory changes wait in the inbox from the start.
+ */
+export function continuesAfterTool(messages: readonly { role?: string }[] | undefined): boolean {
+  return messages?.at(-1)?.role === "tool";
+}
+
 /** The memory_* tools for one run. */
 export function memoryTools(memory: RunMemory) {
   const { service, sharedService, userId, run, onEvent } = memory;

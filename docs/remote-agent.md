@@ -173,7 +173,8 @@ claims, accepted only by an agent server without login. Pass it on unchanged:
   user's Memory inbox once the run has used any tool but memory's (a file, a skill, an outside
   server), so content from those can't steer later chats. Mark the run yourself before each
   such tool (`agent_py/memory.py` does it in a `PreToolUse` hook), pass `tainted=1` from then
-  on, and keep `tainted` from each answer: reading a shared note or a past chat sets it.
+  on, and keep `tainted` from each answer: reading a shared note or a past chat sets it. A run
+  that continues after a browser tool (its result is the last message) starts tainted.
 - **Events**: send each of `events` to the chat as an AG-UI `CUSTOM` event named `memory`, for
   the "Used / Updated" line under the reply, where the user can undo a change.
 

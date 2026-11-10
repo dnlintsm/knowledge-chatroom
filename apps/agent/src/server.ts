@@ -37,7 +37,7 @@ import { IDENTITY_HEADER, identify, localMemoryToken, signIdentity, verifyIdenti
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
-import { prepareMemory, trackLiveRun } from "./memory/run";
+import { continuesAfterTool, prepareMemory, trackLiveRun } from "./memory/run";
 
 /**
  * The knowledge node the user is in, from the app's run payload
@@ -319,6 +319,8 @@ const server = http.createServer(async (req, res) => {
       return null;
     });
     if (runMemory) {
+      // A browser tool's result: the turn has used another tool already.
+      if (continuesAfterTool(input.messages)) runMemory.tainted = true;
       // Outside MCP servers with memoryAccess report here too, while the run goes.
       const untrack = trackLiveRun(runMemory.run.threadId, runMemory.onEvent);
       res.on("close", untrack);
