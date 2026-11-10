@@ -18,7 +18,7 @@ info:
     - An outside service (an MCP server, a remote agent backend) sends `X-Knowledge-Storage`
       instead: Claude acting for that user. It can't reach /chats or manage access, writes
       in a knowledge node only with `?propose`, and doesn't rename, delete, review proposals,
-      or share or archive experiments. Such requests answer 403 with the reason.
+      share or archive experiments, or upload them. Such requests answer 403 with the reason.
 
     Errors are JSON `{error}` with a 4xx or 5xx status. When storage isn't ready:
     503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
@@ -391,6 +391,67 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/upload:
+    post:
+      tags: [experiments]
+      operationId: uploadExperiment
+      summary: Upload a new experiment with its files
+      description: |
+        A new draft experiment and its files in one request, all or nothing: the nodes it adds,
+        the experiment and its files are written in one transaction.
+
+        - `meta.id` is the experiment's id, chosen by the caller; 409 when any experiment, deleted
+          or not, has had it.
+        - `meta.path` names a knowledge node at every level, top level first (tech › module › loop ›
+          process). An empty name, or null in the list form, means a node called `None`
+          (`"Etch/Module 3//"`). Names match ignoring case. Nodes that don't exist yet are added,
+          which needs editor access where the first one goes; an existing path needs viewer access.
+        - Every part but `meta` is a file, its field name the file's path in the experiment. The
+          experiment holds only these files, not a copy of its node's.
+
+        Each file may be at most MAX_UPLOAD_BYTES (413 as soon as one is over, while the body
+        streams in) and `meta` at most 256 KiB; there is no limit on the number of files or
+        their total size. A new experiment is a draft: `status` is ignored. Storage tokens get 403.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [meta]
+              properties:
+                meta: { $ref: "#/components/schemas/ExperimentUploadMeta" }
+              additionalProperties:
+                type: string
+                format: binary
+                description: One file; its field name is its path in the experiment, e.g. `data/metrics.csv`.
+            encoding:
+              meta: { contentType: "application/json, text/plain" }
+      responses:
+        "201":
+          description: The new experiment, where it sits, the nodes added for it and its files.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperimentUpload" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "405":
+          description: Only POST.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/ExperimentExists" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415":
+          description: The body isn't multipart/form-data.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -1201,6 +1262,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ExperimentExists:
+      description: An experiment already has this id, even a deleted one (`exists` is true).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     TooLarge:
       description: The body is over the size limit.
       content:
@@ -1456,6 +1522,38 @@ components:
           enum: [writer, reader]
           description: "writer: its author, while it isn't archived. reader: may look."
         mine: { type: boolean, description: Whether the asking user is its author. }
+
+    ExperimentUploadMeta:
+      description: The `meta` part of an experiment upload, as JSON.
+      allOf:
+        - type: object
+          required: [id, path, title]
+          properties:
+            id: { type: string, format: uuid, description: The new experiment's id. }
+            path:
+              description: A node name for every level, top level first; empty (or null) for `None`.
+              oneOf:
+                - { type: string, description: 'Names joined with "/", e.g. "Etch/Module 3//".' }
+                - type: array
+                  items: { type: [string, "null"] }
+        - $ref: "#/components/schemas/ExperimentInput"
+
+    ExperimentUpload:
+      type: object
+      required: [experiment, lineage, created, files]
+      properties:
+        experiment: { $ref: "#/components/schemas/Experiment" }
+        lineage:
+          description: The node it sits on and that node's ancestors, top level first.
+          type: array
+          items: { $ref: "#/components/schemas/KnowledgeNode" }
+        created:
+          description: The nodes of the path that didn't exist and were added for it, top level first.
+          type: array
+          items: { $ref: "#/components/schemas/KnowledgeNode" }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/FileInfo" }
 
     RunInputSource:
       type: object

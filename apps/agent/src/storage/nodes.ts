@@ -107,6 +107,24 @@ export class NodeService {
     return row ? toNode(row) : null;
   }
 
+  /**
+   * The live node named `rawName` (ignoring case, as names are unique that
+   * way) right below `parentId`, or at the top level for null.
+   */
+  async findChild(parentId: string | null, rawName: string): Promise<KnowledgeNode | null> {
+    const name = cleanName(rawName);
+    if (parentId !== null && !isNodeId(parentId)) return null;
+    const [row] = await this.sql<NodeRow[]>`
+      SELECT n.id, n.parent_id, t.name AS type, t.depth, n.name, n.updated_at,
+             (SELECT count(*) FROM files f
+              WHERE f.node_id = n.id AND f.deleted_at IS NULL) AS file_count
+      FROM nodes n JOIN node_types t ON t.id = n.type_id
+      WHERE n.workspace_id = ${this.workspaceId} AND n.deleted_at IS NULL
+        AND n.parent_id IS NOT DISTINCT FROM ${parentId}::uuid
+        AND lower(n.name) = lower(${name})`;
+    return row ? toNode(row) : null;
+  }
+
   /** The node and its ancestors, top level first; null if the node is missing. */
   async lineage(id: string): Promise<KnowledgeNode[] | null> {
     if (!isNodeId(id)) return null;

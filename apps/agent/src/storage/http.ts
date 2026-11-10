@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import busboy from "busboy";
+
 import { AccessError, ForbiddenError, ROLES, type Principal, type Role } from "./access";
 import { ChatError, ChatTakenError } from "./chats";
 import type { EventHub, WorkspaceEvent } from "./events";
-import { ExperimentError, type ExperimentInput } from "./experiments";
+import { ExperimentError, ExperimentExistsError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
 import { FileExistsError, ReadOnlyFileError } from "./files";
@@ -11,7 +13,7 @@ import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
 import { SearchError } from "./search";
-import type { RunInputSource, Session } from "./session";
+import type { RunInputSource, Session, UploadedFile } from "./session";
 
 /**
  * REST API for workspace files, the knowledge tree, experiments, search and
@@ -74,6 +76,21 @@ import type { RunInputSource, Session } from "./session";
  *                                   read only under inputs/ and recorded in its
  *                                   provenance (its author, not archived, not
  *                                   a finished run)
+ *   POST   /experiments/upload      multipart/form-data → 201 {experiment,
+ *                                   lineage, created, files}: a new experiment
+ *                                   with its files, all or nothing. A "meta"
+ *                                   part (JSON) holds {id: uuid, path, title,
+ *                                   hypothesis?, params?, results?, state?};
+ *                                   every other part is a file, its field name
+ *                                   the file's path in the experiment (at most
+ *                                   MAX_UPLOAD_BYTES each, meta 256 KiB; 413
+ *                                   as soon as one is over). path names a node
+ *                                   at every level, as "Tech/Module/Loop/Process"
+ *                                   or a list of names; an empty name means a
+ *                                   node called "None", and missing nodes are
+ *                                   added (editor where they go). Starts with
+ *                                   only the uploaded files; 409 when the id is
+ *                                   taken. Not for storage tokens.
  *   Changes arrive on the /files change stream as
  *   {"op":"experiment","change","id","node"}.
  *
@@ -183,6 +200,9 @@ export function agentRefusal(method: string, url: URL): string | null {
     case "nodes":
       return method === "POST" && sub === "" ? null : "Claude doesn't rename or delete nodes";
     case "experiments":
+      if (method === "POST" && sub === "upload") {
+        return "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload";
+      }
       if (method === "POST" && sub === "") return null;
       if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
       if (method === "POST" && /^[^/]+\/inputs$/.test(sub)) return null;
@@ -352,7 +372,154 @@ function runInputs(value: unknown): RunInputSource[] | null {
   return out;
 }
 
-async function handleExperiments(req: IncomingMessage, res: ServerResponse, url: URL, session: Session) {
+const UPLOAD_META =
+  'Expected a "meta" part with {id: uuid, path: "Tech/Module/Loop/Process" | string[], title: string, ' +
+  "hypothesis?: string, params?, results?: object, state?: ready|running|done|failed}";
+
+/** Why an upload request can't be read, with the status to answer. */
+export class UploadError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The "meta" part is small JSON: a title, a hypothesis (≤ 20000 characters)
+ * and params and results (≤ 64 KiB of JSON each), with room to spare.
+ */
+export const MAX_UPLOAD_META_BYTES = 256 * 1024;
+
+/**
+ * Reads a multipart body part by part, refusing it as soon as a file grows
+ * past `maxFileBytes` or the "meta" part past MAX_UPLOAD_META_BYTES, so an
+ * oversized part is never held in memory. The rest of a refused body is
+ * left unread (the HTTP server discards it once the answer is sent).
+ */
+function readParts(req: IncomingMessage, maxFileBytes: number): Promise<{ meta: string | undefined; files: UploadedFile[] }> {
+  return new Promise((resolve, reject) => {
+    let parser: busboy.Busboy;
+    try {
+      // One more byte than allowed, as busboy calls a part that reaches its limit too large.
+      parser = busboy({
+        headers: req.headers,
+        limits: { fileSize: maxFileBytes + 1, fieldSize: MAX_UPLOAD_META_BYTES + 1 },
+      });
+    } catch {
+      return reject(new UploadError(400, "The multipart body could not be read"));
+    }
+    let meta: string | undefined;
+    const files: UploadedFile[] = [];
+    const pending: Promise<void>[] = [];
+    let failed = false;
+    const fail = (err: UploadError) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(parser);
+      parser.removeAllListeners();
+      parser.on("error", () => {}); // late parse errors of the abandoned body
+      reject(err);
+    };
+    const setMeta = (text: string) => {
+      if (meta !== undefined) return fail(new UploadError(400, 'Send one "meta" part'));
+      meta = text;
+    };
+    const tooLarge = (name: string) =>
+      name === "meta"
+        ? new UploadError(413, `The "meta" part exceeds ${MAX_UPLOAD_META_BYTES} bytes`)
+        : new UploadError(413, `${name} exceeds ${maxFileBytes} bytes`);
+
+    parser.on("field", (name, value, info) => {
+      if (failed) return;
+      if (name !== "meta") {
+        return fail(new UploadError(400, `"${name}" isn't a file: put everything but files in the "meta" part`));
+      }
+      if (info.valueTruncated) return fail(tooLarge(name));
+      setMeta(value);
+    });
+    parser.on("file", (name, stream, info) => {
+      if (failed) return void stream.resume();
+      const limit = name === "meta" ? MAX_UPLOAD_META_BYTES : maxFileBytes;
+      const chunks: Buffer[] = [];
+      let size = 0;
+      pending.push(
+        new Promise<void>((done) => {
+          stream.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size > limit) return fail(tooLarge(name));
+            if (!failed) chunks.push(chunk);
+          });
+          stream.on("limit", () => fail(tooLarge(name)));
+          stream.on("close", () => done());
+          stream.on("end", () => {
+            if (failed) return;
+            const bytes = new Uint8Array(Buffer.concat(chunks, size));
+            if (name === "meta") return setMeta(new TextDecoder().decode(bytes));
+            const mime = info.mimeType.split(";")[0].trim();
+            files.push({
+              path: name,
+              bytes,
+              ...(mime && mime !== "application/octet-stream" && { mime }),
+            });
+          });
+        }),
+      );
+    });
+    parser.on("error", () => fail(new UploadError(400, "The multipart body could not be read")));
+    parser.on("close", () => {
+      void Promise.all(pending).then(() => {
+        if (!failed) resolve({ meta, files });
+      });
+    });
+    req.pipe(parser);
+  });
+}
+
+/**
+ * The parts of a POST /experiments/upload: its "meta" JSON and its files,
+ * each named by its field. The form is read whole before anything is
+ * written, so a broken upload changes nothing.
+ */
+export async function readUpload(req: IncomingMessage, maxFileBytes: number) {
+  const type = req.headers["content-type"] ?? "";
+  if (!/^multipart\/form-data\s*;/i.test(type)) {
+    throw new UploadError(415, "Send the experiment as multipart/form-data: a \"meta\" part and one part per file");
+  }
+  const { meta: text, files } = await readParts(req, maxFileBytes);
+  let meta: unknown;
+  if (text !== undefined) {
+    try {
+      meta = JSON.parse(text);
+    } catch {
+      throw new UploadError(400, `The "meta" part isn't JSON. ${UPLOAD_META}`);
+    }
+  }
+
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new UploadError(400, UPLOAD_META);
+  const body = meta as Record<string, unknown>;
+  const { id, path } = body;
+  const input = experimentInput(body);
+  const names =
+    typeof path === "string"
+      ? path.split("/")
+      : Array.isArray(path) && path.every((p) => p === null || typeof p === "string")
+        ? path.map((p: string | null) => p ?? "")
+        : null;
+  if (typeof id !== "string" || !names || !input || typeof body.title !== "string") {
+    throw new UploadError(400, UPLOAD_META);
+  }
+  return { id, path: names, input, files };
+}
+
+async function handleExperiments(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  session: Session,
+  maxUploadBytes: number,
+) {
   const id = decodeURIComponent(url.pathname.replace(/^\/experiments\/?/, ""));
   const expected =
     "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived, state?: ready|running|done|failed}";
@@ -374,6 +541,19 @@ async function handleExperiments(req: IncomingMessage, res: ServerResponse, url:
       json(res, 405, { error: "Method not allowed" });
     }
     return;
+  }
+
+  if (id === "upload") {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    let upload: Awaited<ReturnType<typeof readUpload>>;
+    try {
+      upload = await readUpload(req, maxUploadBytes);
+    } catch (err) {
+      if (err instanceof UploadError) return json(res, err.status, { error: err.message });
+      throw err;
+    }
+    // Like POST /experiments: a new experiment is a draft whatever status says.
+    return json(res, 201, await session.uploadExperiment(upload.id, upload.path, upload.input, upload.files));
   }
 
   const inputsOf = /^([^/]+)\/inputs$/.exec(id)?.[1];
@@ -716,7 +896,7 @@ export function createStorageHandler(
       const session = current.session(principal);
       if (/^\/nodes(\/|$)/.test(url.pathname)) await handleNodes(req, res, url, session);
       else if (/^\/access(\/|$)/.test(url.pathname)) await handleAccess(req, res, url, session);
-      else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session);
+      else if (/^\/experiments(\/|$)/.test(url.pathname)) await handleExperiments(req, res, url, session, maxUploadBytes);
       else if (/^\/search(\/|$)/.test(url.pathname)) await handleSearch(req, res, url, session);
       else if (/^\/proposals(\/|$)/.test(url.pathname)) await handleProposals(req, res, url, session);
       else await handleFiles(req, res, url, current, session);
@@ -731,6 +911,10 @@ export function createStorageHandler(
       }
       if (err instanceof ReadOnlyFileError) {
         json(res, 403, { error: err.message, readOnly: true });
+        return;
+      }
+      if (err instanceof ExperimentExistsError) {
+        json(res, 409, { error: err.message, exists: true });
         return;
       }
       if (err instanceof FileExistsError) {

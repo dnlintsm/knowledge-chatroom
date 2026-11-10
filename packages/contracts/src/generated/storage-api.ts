@@ -131,6 +131,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/experiments/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a new experiment with its files
+         * @description A new draft experiment and its files in one request, all or nothing: the nodes it adds,
+         *     the experiment and its files are written in one transaction.
+         *
+         *     - `meta.id` is the experiment's id, chosen by the caller; 409 when any experiment, deleted
+         *       or not, has had it.
+         *     - `meta.path` names a knowledge node at every level, top level first (tech › module › loop ›
+         *       process). An empty name, or null in the list form, means a node called `None`
+         *       (`"Etch/Module 3//"`). Names match ignoring case. Nodes that don't exist yet are added,
+         *       which needs editor access where the first one goes; an existing path needs viewer access.
+         *     - Every part but `meta` is a file, its field name the file's path in the experiment. The
+         *       experiment holds only these files, not a copy of its node's.
+         *
+         *     Each file may be at most MAX_UPLOAD_BYTES (413 as soon as one is over, while the body
+         *     streams in) and `meta` at most 256 KiB; there is no limit on the number of files or
+         *     their total size. A new experiment is a draft: `status` is ignored. Storage tokens get 403.
+         */
+        post: operations["uploadExperiment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/experiments/{id}": {
         parameters: {
             query?: never;
@@ -698,6 +732,24 @@ export interface components {
             /** @description Whether the asking user is its author. */
             mine: boolean;
         };
+        /** @description The `meta` part of an experiment upload, as JSON. */
+        ExperimentUploadMeta: {
+            /**
+             * Format: uuid
+             * @description The new experiment's id.
+             */
+            id: string;
+            /** @description A node name for every level, top level first; empty (or null) for `None`. */
+            path: string | (string | null)[];
+        } & components["schemas"]["ExperimentInput"];
+        ExperimentUpload: {
+            experiment: components["schemas"]["Experiment"];
+            /** @description The node it sits on and that node's ancestors, top level first. */
+            lineage: components["schemas"]["KnowledgeNode"][];
+            /** @description The nodes of the path that didn't exist and were added for it, top level first. */
+            created: components["schemas"]["KnowledgeNode"][];
+            files: components["schemas"]["FileInfo"][];
+        };
         RunInputSource: {
             path: string;
             /** @description Its knowledge node; null or left out for the workspace root. */
@@ -884,6 +936,15 @@ export interface components {
         };
         /** @description A create-only write, or a rename, to a path that already has a file (`exists` is true). */
         Exists: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description An experiment already has this id, even a deleted one (`exists` is true). */
+        ExperimentExists: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1398,6 +1459,60 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    uploadExperiment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    meta: components["schemas"]["ExperimentUploadMeta"];
+                } & {
+                    [key: string]: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new experiment, where it sits, the nodes added for it and its files. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentUpload"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Only POST. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: components["responses"]["ExperimentExists"];
+            413: components["responses"]["TooLarge"];
+            /** @description The body isn't multipart/form-data. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

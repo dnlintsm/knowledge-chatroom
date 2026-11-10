@@ -10,6 +10,24 @@
 - A storage API conformance suite (`pnpm test:conformance`) that calls every operation in the
   spec against a running backend and checks each answer against it; CI runs it against the
   agent in the Storage tests workflow (issue #169).
+- Upload an experiment with its files in one request: `POST /experiments/upload`
+  (`/api/experiments/upload` through the UI) takes `multipart/form-data` with a `meta`
+  part, `{id, path, title, hypothesis?, params?, results?, state?}`, and one part per file,
+  named by its path in the experiment. `id` is the experiment's id, chosen by the caller (a
+  UUID; 409 when any experiment ever had it). `path` names a knowledge node at every level,
+  as `"Tech/Module/Loop/Process"` or a list; an empty name means a node called `None`
+  (`"Etch/Module 3//"`), and nodes that don't exist yet are added, which needs editor access
+  where they go. The experiment holds only the uploaded files, not a copy of its node's, and
+  everything is written in one transaction, so a failed upload leaves nothing behind. Each
+  file is limited by `MAX_UPLOAD_BYTES`, as for `PUT /files`, and `meta` to 256 KiB; the body
+  is read as it streams in, so an oversized part is refused without being held in memory.
+  Storage tokens can't use it.
+
+  ```bash
+  curl -X POST http://localhost:8000/experiments/upload \
+    -F 'meta={"id":"0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b","path":"Etch/Module 3/Endpoint/Recipe tuning","title":"Higher RF"}' \
+    -F 'report.md=@./report.md' -F 'data/metrics.csv=@./metrics.csv'
+  ```
 
 ## 0.2.3
 

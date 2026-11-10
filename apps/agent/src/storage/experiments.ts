@@ -65,6 +65,14 @@ export interface LinkedInput {
 /** The request can't be done as asked (no title, params not an object, …). */
 export class ExperimentError extends Error {}
 
+/** A new experiment was given an id that is already taken (even by a deleted one). */
+export class ExperimentExistsError extends Error {
+  constructor(readonly id: string) {
+    super(`An experiment with id ${id} already exists`);
+    this.name = "ExperimentExistsError";
+  }
+}
+
 const MAX_JSON_CHARS = 64 * 1024;
 
 /** Checks and tidies the fields a create or update sets. */
@@ -206,27 +214,40 @@ export class ExperimentService {
   /**
    * A new draft for `userId` on `nodeId`, or at the workspace root (null).
    * On a node it is a fork: the node's live files are copied in at their
-   * current versions. At the root it starts empty, since the root's files are
-   * the whole workspace's, not one subject's.
+   * current versions, unless `opts.fork` is false. At the root it starts
+   * empty, since the root's files are the whole workspace's, not one
+   * subject's. `opts.id` picks its id (ExperimentExistsError when taken);
+   * by default a new one is made.
    */
   async create(
     userId: string,
     nodeId: string | null,
     input: ExperimentInput,
     inTx?: (tx: Tx, id: string) => Promise<unknown>,
-    run: { inputs?: LinkedInput[]; provenance?: Record<string, unknown> } = {},
+    opts: { inputs?: LinkedInput[]; provenance?: Record<string, unknown>; id?: string; fork?: boolean } = {},
   ): Promise<Experiment> {
     return this.add(
       userId,
       nodeId,
       input,
       async (tx, id) => {
-        if (nodeId !== null) await this.copyNodeFiles(tx, nodeId, id);
-        if (run.inputs?.length) await this.linkInputs(tx, id, run.inputs);
+        if (nodeId !== null && opts.fork !== false) await this.copyNodeFiles(tx, nodeId, id);
+        if (opts.inputs?.length) await this.linkInputs(tx, id, opts.inputs);
         await inTx?.(tx, id);
       },
-      run.provenance,
+      opts.provenance,
+      opts.id,
     );
+  }
+
+  /**
+   * Whether any experiment, in any workspace and deleted or not, has this id.
+   * Asked as the server: someone else's draft still holds its id.
+   */
+  async idTaken(id: string): Promise<boolean> {
+    if (!isNodeId(id)) return false;
+    const [row] = await this.sql`SELECT 1 FROM experiments WHERE id = ${id}`;
+    return Boolean(row);
   }
 
   /**
@@ -302,13 +323,17 @@ export class ExperimentService {
     input: ExperimentInput,
     inTx: (tx: Tx, id: string) => Promise<unknown>,
     provenance: Record<string, unknown> = {},
+    chosenId?: string,
   ): Promise<Experiment> {
     const fields = cleanInput(input);
     if (!fields.title) throw new ExperimentError("An experiment needs a title");
     if (nodeId !== null && !isNodeId(nodeId)) throw new NodeNotFoundError("Node not found");
+    if (chosenId !== undefined && !isNodeId(chosenId)) {
+      throw new ExperimentError("An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b");
+    }
     // Chosen here, not by the database: with row-level security the new row
     // can't be read back in the statement that adds it.
-    const id = randomUUID();
+    const id = chosenId?.toLowerCase() ?? randomUUID();
     await this.sql.begin(async (tx) => {
       // The insert also checks and holds the node (experiments_place in
       // 005_experiments.sql), so a delete of it can't slip in between.
@@ -321,8 +346,9 @@ export class ExperimentService {
                 ${tx.json(provenance as never)})`;
       await inTx(tx, id);
       await this.events.notify(tx, { op: "experiment", change: "create", id, node: nodeId });
-    }).catch((err: { code?: string; message?: string }) => {
+    }).catch((err: { code?: string; message?: string; constraint_name?: string }) => {
       if (err.code === "P0001" && err.message === "Node not found") throw new NodeNotFoundError("Node not found");
+      if (err.code === "23505" && err.constraint_name === "experiments_pkey") throw new ExperimentExistsError(id);
       throw err;
     });
     const created = await this.get(userId, id);

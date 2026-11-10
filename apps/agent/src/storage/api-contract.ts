@@ -16,7 +16,7 @@ import type { FileVersion } from "./files";
 import type { KnowledgeNode, NodeType } from "./nodes";
 import type { Promotable, Proposal } from "./proposals";
 import type { SearchHit } from "./search";
-import type { RunInputSource, Tree } from "./session";
+import type { ExperimentUpload, RunInputSource, Tree } from "./session";
 
 type Schema = components["schemas"];
 
@@ -34,6 +34,7 @@ export type StorageApiContract = [
   Check<Same<Experiment, Schema["Experiment"]>>,
   Check<Same<ExperimentInput, Schema["ExperimentInput"]>>,
   Check<Same<RunInputSource, Schema["RunInputSource"]>>,
+  Check<Same<ExperimentUpload, Schema["ExperimentUpload"]>>,
   Check<Same<SearchHit, Schema["SearchHit"]>>,
   Check<Same<Proposal, Schema["Proposal"]>>,
   Check<Same<Promotable, Schema["Promotable"]>>,

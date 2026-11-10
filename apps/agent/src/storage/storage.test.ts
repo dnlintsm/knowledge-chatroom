@@ -23,7 +23,7 @@ import type { WorkspaceEvent } from "./events";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { createStorageHandler } from "./http";
 import { IDENTITY_HEADER, STORAGE_HEADER, signIdentity, verifyIdentity } from "./identity";
-import { ExperimentError } from "./experiments";
+import { ExperimentError, ExperimentExistsError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
 import { FileExistsError, ReadOnlyFileError } from "./files";
 import { ProposalError } from "./proposals";
@@ -1065,6 +1065,124 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(created.target.node, leveling);
       assert.ok(log.some((e) => e.action === "file.write" && e.target.experiment && e.target.path === "notes/run-1.md"));
     });
+
+    describe("upload", () => {
+      const ids = () => crypto.randomUUID();
+      const names = (nodes: { name: string }[]) => nodes.map((n) => n.name);
+
+      test("uploads to an existing path with only its own files, under the id it was given", async () => {
+        const id = ids().toUpperCase();
+        const up = await as(carol).uploadExperiment(id, ["Lithography", "scanner", "FOCUS", "Leveling"], {
+          title: "Uploaded run",
+          params: { dose_mJ: 31 },
+        }, [
+          { path: "report.md", bytes: text("# Uploaded run") },
+          { path: "/data//metrics.csv", bytes: text("a,b\n1,2"), mime: "text/csv" },
+        ]);
+        assert.equal(up.experiment.id, id.toLowerCase());
+        assert.deepEqual(
+          [up.experiment.nodeId, up.experiment.authorId, up.experiment.status, up.experiment.fileCount, up.experiment.params],
+          [leveling, carol, "draft", 2, { dose_mJ: 31 }],
+        );
+        assert.deepEqual(up.created, []);
+        assert.deepEqual(names(up.lineage), ["Lithography", "Scanner", "Focus", "Leveling"]);
+        assert.deepEqual(up.files.map((f) => [f.path, f.mime]), [["report.md", "text/markdown"], ["data/metrics.csv", "text/csv"]]);
+        // Not a fork: the node's files stay out.
+        const files = await as(carol).experimentFiles(id.toLowerCase());
+        assert.deepEqual((await files.list()).map((f) => f.path), ["data/metrics.csv", "report.md"]);
+        assert.equal(await read(files, "data/metrics.csv"), "a,b\n1,2");
+      });
+
+      test("adds missing nodes, naming empty levels None, and reuses them next time", async () => {
+        const first = await as(alice).uploadExperiment(ids(), ["Upload tech", "Upload module", "", " "], { title: "One" }, []);
+        assert.deepEqual(names(first.created), ["Upload tech", "Upload module", "None", "None"]);
+        assert.deepEqual(first.created.map((n) => n.type), ["tech", "module", "loop", "process"]);
+        assert.equal(first.experiment.nodeId, first.created[3].id);
+        assert.equal(await as(alice).role(first.created[0].id), "owner");
+
+        const again = await as(alice).uploadExperiment(ids(), ["upload TECH", "Upload module", "none", ""], { title: "Two" }, []);
+        assert.deepEqual(again.created, []);
+        assert.equal(again.experiment.nodeId, first.experiment.nodeId);
+
+        // A new process under the existing loop.
+        const third = await as(alice).uploadExperiment(ids(), ["Upload tech", "Upload module", "", "Bake"], { title: "Three" }, []);
+        assert.deepEqual(names(third.created), ["Bake"]);
+        assert.deepEqual(names(third.lineage), ["Upload tech", "Upload module", "None", "Bake"]);
+      });
+
+      test("an id is used once: taken, even by a deleted experiment, is a conflict", async () => {
+        const id = ids();
+        await as(alice).uploadExperiment(id, ["Lithography", "Scanner", "Focus", "Leveling"], { title: "First" }, []);
+        await assert.rejects(
+          as(alice).uploadExperiment(id, ["Lithography", "Scanner", "Focus", "Leveling"], { title: "Again" }, []),
+          ExperimentExistsError,
+        );
+        await as(alice).deleteExperiment(id);
+        await assert.rejects(
+          as(alice).uploadExperiment(id.toUpperCase(), ["Lithography", "Scanner", "Focus", "Leveling"], { title: "Again" }, []),
+          ExperimentExistsError,
+        );
+      });
+
+      test("refuses a bad id, a short path, a missing title and two files at one path", async () => {
+        const path = ["Lithography", "Scanner", "Focus", "Leveling"];
+        await assert.rejects(as(alice).uploadExperiment("exp-1", path, { title: "x" }, []), /must be a UUID/);
+        await assert.rejects(
+          as(alice).uploadExperiment(ids(), ["Lithography", "Scanner"], { title: "x" }, []),
+          /4 levels \(tech\/module\/loop\/process\), got 2/,
+        );
+        await assert.rejects(as(alice).uploadExperiment(ids(), path, {}, []), /needs a title/);
+        await assert.rejects(
+          as(alice).uploadExperiment(ids(), path, { title: "x" }, [
+            { path: "a.txt", bytes: text("1") },
+            { path: "/a.txt", bytes: text("2") },
+          ]),
+          /Two files would both be a.txt/,
+        );
+        await assert.rejects(
+          as(alice).uploadExperiment(ids(), path, { title: "x" }, [{ path: "../a.txt", bytes: text("1") }]),
+        );
+      });
+
+      test("adding nodes needs editor where they go; an existing path needs viewer", async () => {
+        // Carol only views the leveling: she can't add a process beside it, nor a tech.
+        await assert.rejects(
+          as(carol).uploadExperiment(ids(), ["Lithography", "Scanner", "Focus", "Carol's"], { title: "x" }, []),
+          NodeNotFoundError,
+        );
+        await assert.rejects(
+          as(carol).uploadExperiment(ids(), ["Carol tech", "", "", ""], { title: "x" }, []),
+          ForbiddenError,
+        );
+        // Bob edits Lithography, so he adds below it.
+        const bobs = await as(bob).uploadExperiment(ids(), ["Lithography", "Scanner", "Overlay", ""], { title: "Bob's" }, []);
+        assert.deepEqual(names(bobs.created), ["Overlay", "None"]);
+      });
+
+      test("all or nothing: a failure part way leaves no nodes, experiment or files", async () => {
+        const id = ids();
+        await assert.rejects(
+          as(alice).uploadExperiment(id, ["Rolled back", "", "", ""], { title: "Half" }, [
+            { path: "a.txt", bytes: text("fine") },
+            { path: "b.txt", bytes: undefined as unknown as Uint8Array },
+          ]),
+        );
+        assert.equal(await storage.experiments.idTaken(id), false);
+        assert.equal(await storage.nodes.findChild(null, "Rolled back"), null);
+        // And the id is still free.
+        const ok = await as(alice).uploadExperiment(id, ["Rolled back", "", "", ""], { title: "Whole" }, [
+          { path: "a.txt", bytes: text("fine") },
+        ]);
+        assert.equal(ok.created.length, 4);
+      });
+
+      test("uploads are audited", async () => {
+        const log = await as(alice).auditLog(1000);
+        const created = log.find((e) => e.action === "experiment.create" && e.target.title === "Uploaded run")!;
+        assert.deepEqual([created.actorId, created.target.upload, created.target.files], [carol, true, ["report.md", "data/metrics.csv"]]);
+        assert.ok(log.some((e) => e.action === "node.create" && e.target.name === "Upload tech"));
+      });
+    });
   });
 
   describe("search", () => {
@@ -2099,6 +2217,68 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const event = JSON.parse(received.split("data: ")[1]);
       assert.equal(event.op, "write");
       assert.equal(event.author, "user");
+    });
+
+    test("POST /experiments/upload takes a meta part and one part per file", async () => {
+      const id = crypto.randomUUID();
+      const form = (meta: unknown) => {
+        const body = new FormData();
+        body.append("meta", JSON.stringify(meta));
+        return body;
+      };
+      const upload = (body: FormData | string, headers?: Record<string, string>) =>
+        fetch(`${base}/experiments/upload`, { method: "POST", body, headers });
+
+      const body = form({ id, path: "HTTP tech/HTTP module//", title: "Over HTTP", params: { rpm: 1200 } });
+      body.append("report.md", new Blob(["# Over HTTP"], { type: "text/markdown" }), "report.md");
+      body.append("data/metrics.csv", new Blob(["a,b\n1,2"], { type: "text/csv" }), "metrics.csv");
+      body.append("raw/trace.bin", new Blob([new Uint8Array([0, 1, 2, 255])]), "trace.bin");
+      const res = await upload(body);
+      assert.equal(res.status, 201);
+      const created = (await res.json()) as {
+        experiment: { id: string; title: string; params: unknown; fileCount: number };
+        lineage: { name: string; type: string }[];
+        created: { name: string }[];
+        files: { path: string; mime: string }[];
+      };
+      assert.deepEqual(
+        [created.experiment.id, created.experiment.title, created.experiment.params, created.experiment.fileCount],
+        [id, "Over HTTP", { rpm: 1200 }, 3],
+      );
+      assert.deepEqual(created.lineage.map((n) => [n.name, n.type]), [
+        ["HTTP tech", "tech"], ["HTTP module", "module"], ["None", "loop"], ["None", "process"],
+      ]);
+      assert.equal(created.created.length, 4);
+      assert.deepEqual(created.files.map((f) => [f.path, f.mime]), [
+        ["report.md", "text/markdown"], ["data/metrics.csv", "text/csv"], ["raw/trace.bin", "application/octet-stream"],
+      ]);
+      const trace = await fetch(`${base}/files/raw/trace.bin?experiment=${id}`);
+      assert.deepEqual(new Uint8Array(await trace.arrayBuffer()), new Uint8Array([0, 1, 2, 255]));
+
+      // The same id again; the path as a list (null for an empty level) is fine too.
+      const again = await upload(form({ id, path: ["HTTP tech", "HTTP module", null, ""], title: "Again" }));
+      assert.equal(again.status, 409);
+      assert.match(((await again.json()) as { error: string }).error, /already exists/);
+      const other = await upload(form({ id: crypto.randomUUID(), path: ["HTTP tech", "HTTP module", null, ""], title: "Other" }));
+      assert.equal(other.status, 201);
+      assert.deepEqual(((await other.json()) as { created: unknown[] }).created, []);
+
+      // Files over MAX_UPLOAD_BYTES (1024 here), fields that aren't files, and bad meta.
+      const big = form({ id: crypto.randomUUID(), path: "HTTP tech/HTTP module//", title: "Big" });
+      big.append("big.bin", new Blob([new Uint8Array(2048)]), "big.bin");
+      assert.equal((await upload(big)).status, 413);
+      const field = form({ id: crypto.randomUUID(), path: "HTTP tech/HTTP module//", title: "Field" });
+      field.append("notes.txt", "not a file");
+      assert.equal((await upload(field)).status, 400);
+      assert.equal((await upload(form({ path: "HTTP tech/HTTP module//", title: "No id" }))).status, 400);
+      assert.equal((await upload(form({ id: crypto.randomUUID(), path: "HTTP tech", title: "Short" }))).status, 400);
+      assert.equal((await upload(new FormData())).status, 400);
+      const notMultipart = await upload(JSON.stringify({ id, path: "a/b/c/d", title: "x" }), { "Content-Type": "application/json" });
+      assert.equal(notMultipart.status, 415);
+      assert.equal((await fetch(`${base}/experiments/upload`)).status, 405);
+      // None of the refused uploads left an experiment behind.
+      const { experiments } = (await (await fetch(`${base}/experiments`)).json()) as { experiments: { title: string }[] };
+      assert.deepEqual(experiments.filter((e) => ["Big", "Field", "Short"].includes(e.title)), []);
     });
 
     test("search API", async () => {
