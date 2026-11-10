@@ -82,7 +82,6 @@ def test_models_parse_and_keep_fields():
         "sha256": "a" * 64,
         "updatedAt": "2026-11-10T08:00:00.000Z",
         "author": "user",
-        "readOnly": False,
     }
     files = api.FileList.model_validate({"files": [info]})
     assert files.files[0].updatedAt.tzinfo is not None
