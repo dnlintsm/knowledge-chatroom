@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { StateBadge, StatusBadge } from "./experiment-panel";
 import type { Experiment, KnowledgeNode, NodeId, Role } from "./server-files";
 import { FileTree } from "./sidebar";
+import { useListScope } from "./list-scope";
+import { ALL_EXPERIMENTS } from "./runs";
 import { useWorkspace } from "./store";
 
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
@@ -28,6 +30,7 @@ export function KnowledgeTree() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Editing>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listScope, setListScope] = useListScope();
 
   const children = useMemo(() => {
     const map = new Map<string | null, KnowledgeNode[]>();
@@ -66,8 +69,11 @@ export function KnowledgeTree() {
       else next.add(id);
       return next;
     });
+  // Going to a node in the tree on purpose also points the experiment list
+  // there (#186); opening an experiment doesn't.
   const enter = (id: NodeId) => {
     setError(null);
+    setListScope(id === null ? ALL_EXPERIMENTS : { node: id, descendants: listScope.descendants });
     void ws.enterNode(id);
   };
 

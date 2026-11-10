@@ -115,6 +115,80 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
   await shot(page, "02b-compare-runs");
 });
 
+test("the experiment list keeps its scope when an experiment opens (#186)", async ({ page, request }) => {
+  const add = async (parentId: string | null, name: string) =>
+    ((await (await request.post("/api/nodes", { data: { parentId, name } })).json()) as { id: string }).id;
+  const etch = await add(null, "Scope etch");
+  const chamber = await add(etch, "Scope chamber");
+  const at = async (nodeId: string | null, title: string) =>
+    expect((await request.post("/api/experiments", { data: { nodeId, title } })).ok()).toBe(true);
+  await at(null, "Root scope check");
+  await at(etch, "Etch scope check");
+  await at(chamber, "Chamber scope check");
+  try {
+    await page.goto("/");
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await showView(page, "Experiments");
+    const list = page.getByTestId("run-list");
+    const scope = page.getByTestId("list-scope");
+    const rows = list.getByRole("button");
+    await expect(scope).toHaveText("All experiments");
+    await expect(rows).toHaveCount(3);
+
+    // Opening one on a node from All leaves the list on All.
+    await rows.filter({ hasText: "Chamber scope check" }).click();
+    await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Chamber scope check");
+    await expect(scope).toHaveText("All experiments");
+    await expect(rows).toHaveCount(3);
+
+    // Going to a node in the tree points the list there, sub-levels included.
+    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    const tree = page.getByRole("tree", { name: "Knowledge tree" });
+    await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
+    await showView(page, "Experiments");
+    await expect(scope).toContainText("In Scope etch · including sub-levels");
+    await expect(rows).toHaveCount(2);
+    await expect(page).toHaveURL(new RegExp(`[?&]list=${etch}`));
+
+    // Opening one from outside the list (a link) keeps the node scope.
+    const { experiments } = await (await request.get("/api/experiments")).json();
+    const root = (experiments as Experiment[]).find((e) => e.title === "Root scope check")!;
+    await page.goto(`/?list=${etch}&experiment=${root.id}`);
+    await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Root scope check");
+    await showView(page, "Experiments");
+    await expect(scope).toContainText("In Scope etch");
+    await expect(rows).toHaveCount(2);
+    // The compare tab shows the same experiments.
+    await page.getByRole("button", { name: "Compare experiments" }).click();
+    await expect(page.getByTestId("runs-panel").locator("tbody tr")).toHaveCount(2);
+
+    // Direct only: just the node's own; the choice survives a reload.
+    await page.getByRole("checkbox", { name: "Include sub-levels" }).uncheck();
+    await expect(scope).toHaveText("In Scope etch");
+    await expect(rows).toHaveCount(1);
+    await page.reload();
+    await showView(page, "Experiments");
+    await expect(scope).toHaveText("In Scope etch");
+    await expect(rows).toHaveCount(1);
+
+    // Back and forward move between experiments without resetting the scope.
+    await rows.filter({ hasText: "Etch scope check" }).click();
+    await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Etch scope check");
+    await page.goBack();
+    await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Root scope check");
+    await expect(scope).toHaveText("In Scope etch");
+
+    // ✕ shows every experiment again.
+    await page.getByRole("button", { name: "Show all experiments" }).click();
+    await expect(scope).toHaveText("All experiments");
+    await expect(rows).toHaveCount(3);
+    await expect(page).not.toHaveURL(/[?&]list=/);
+  } finally {
+    await request.delete(`/api/nodes/${chamber}`);
+    await request.delete(`/api/nodes/${etch}`);
+  }
+});
+
 test("runs: a new run at the root starts empty and tracks its state", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();

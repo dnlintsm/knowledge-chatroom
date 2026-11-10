@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { runsUnder } from "./runs";
+import { useListScope } from "./list-scope";
+import { experimentsIn, shownScope } from "./runs";
 import {
   listPromotable,
   type Experiment,
@@ -750,14 +751,19 @@ function Compare({ current, nodeName }: { current: Experiment; nodeName: string 
 }
 
 /**
- * The Experiments tab: every experiment you can see here and below (all of
- * them at the workspace root), one row each, with every param and result as a
- * column.
+ * The Experiments tab: the experiments in the list's scope (all of them, or a
+ * node's), one row each, with every param and result as a column.
  */
 export function RunsPanel() {
   const ws = useWorkspace();
-  const runs = runsUnder(ws.experiments, ws.nodes, ws.node);
-  const here = ws.node === null ? "the workspace" : placeName(ws.nodes, ws.node);
+  // The same scope as the sidebar's list (#186).
+  const [listScope] = useListScope();
+  const scope = shownScope(listScope, ws.nodes);
+  const runs = experimentsIn(ws.experiments, ws.nodes, scope);
+  const here =
+    scope.node === null
+      ? "the workspace"
+      : `${placeName(ws.nodes, scope.node)}${scope.descendants ? "" : " (not its sub-levels)"}`;
   return (
     <div data-testid="runs-panel" className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-6 text-sm">
       <header className="flex items-center gap-2">

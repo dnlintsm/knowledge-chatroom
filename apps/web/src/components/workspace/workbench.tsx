@@ -25,6 +25,7 @@ import {
   type ResizablePane,
   type SidebarView,
 } from "./layout";
+import { hasListScope, writeListScope } from "./list-scope";
 import { experimentFromSearch, findReport, searchWithExperiment } from "./runs";
 import { useHydrated, useWorkspace } from "./store";
 import { EXPERIMENT_TAB, type TabId } from "./types";
@@ -165,6 +166,16 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }
     if (linked !== experimentId) go("push");
   }, [storageMode, experimentId, notify]);
+  // The experiment list's scope (#186) is in the URL too. A page opened on a
+  // node without one starts the list there, as before; otherwise it shows
+  // every experiment. Only on load: later moves set it on purpose.
+  const node = ws.node;
+  const scopeChecked = useRef(false);
+  useEffect(() => {
+    if (storageMode !== "server" || scopeChecked.current) return;
+    scopeChecked.current = true;
+    if (!hasListScope() && !experimentId && node !== null) writeListScope({ node, descendants: true });
+  }, [storageMode, experimentId, node]);
   const followUrl = useRef(() => {});
   useEffect(() => {
     const onPop = () => {

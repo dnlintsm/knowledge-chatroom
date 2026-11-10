@@ -30,6 +30,8 @@ import { MemoryProvider } from "./memory";
 import { SkillsProvider } from "./skills";
 import { ToolMenuProvider } from "./tool-menu";
 import { Splitter } from "./splitter";
+import { useListScope } from "./list-scope";
+import { ALL_EXPERIMENTS } from "./runs";
 import { useWorkspace, WorkspaceProvider } from "./store";
 import { EXPERIMENT_TAB, REVIEW_TAB } from "./types";
 import { useWorkbench, WorkbenchProvider } from "./workbench";
@@ -195,6 +197,7 @@ function TitleBar() {
 function HomeLink() {
   const { sidebar } = useWorkbench();
   const { enterNode } = useWorkspace();
+  const [, setListScope] = useListScope();
   return (
     <a
       href="/"
@@ -202,6 +205,7 @@ function HomeLink() {
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
+        setListScope(ALL_EXPERIMENTS);
         void enterNode(null);
         sidebar.show("runs");
       }}
@@ -248,11 +252,17 @@ function StorageStatus() {
 function PlaceBreadcrumb() {
   const { storageMode, lineage, experiment, enterNode, proposals, node } = useWorkspace();
   const { editor } = useWorkbench();
+  const [listScope, setListScope] = useListScope();
   if (storageMode !== "server") return null;
+  // A step back to a node also points the experiment list there (#186).
+  const goTo = (id: string | null) => {
+    setListScope(id === null ? ALL_EXPERIMENTS : { node: id, descendants: listScope.descendants });
+    void enterNode(id);
+  };
   const toReview = experiment ? 0 : proposals.filter((p) => p.node === node && p.canDecide).length;
   const steps = [
-    { id: null as string | null, name: "Workspace", go: () => void enterNode(null) },
-    ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => void enterNode(n.id) })),
+    { id: null as string | null, name: "Workspace", go: () => goTo(null) },
+    ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => goTo(n.id) })),
     ...(experiment
       ? [{ id: `x:${experiment.id}`, name: experiment.title, go: () => editor.open(EXPERIMENT_TAB) }]
       : []),
