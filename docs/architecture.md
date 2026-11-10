@@ -627,7 +627,7 @@ Local files hold numeric timestamps and text or binary data/HTTP URLs instead.
 
 The storage API's HTTP contract (`/files`, `/nodes`, `/experiments`, `/search`,
 `/proposals`, `/chats`, `/access`), and that of the agent server's other routes
-(`/skills`, `/hub`, `/tools`, `/suggest`, `/identity/public-key`, `/health`), is written
+(`/memory`, `/skills`, `/hub`, `/tools`, `/suggest`, `/identity/public-key`, `/health`), is written
 down in
 `packages/contracts/openapi/storage.yaml`, the source of truth that a Python storage
 service has to match (issue #169). `pnpm -C packages/contracts openapi` generates

@@ -908,6 +908,480 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your memory, its inbox, the shared notes you read and where you can share
+         * @description Memory needs MEMORY=on and server storage; otherwise every /memory route answers 404
+         *     and the app hides memory. Everything under /memory but /memory/agent is the signed-in
+         *     user's own: nobody reads another's notes. Errors: 400 for a bad request (including a
+         *     change not allowed in that place), 404 for no such note, 409 for a change made since.
+         */
+        get: operations["getMemory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn memory on, ask-first or off for you, or make a chat incognito */
+        put: operations["setMemorySettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Claude's recent changes to your notes, newest first */
+        get: operations["getMemoryActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/inbox/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a change waiting in your inbox */
+        post: operations["acceptMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/inbox/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drop a change waiting in your inbox */
+        post: operations["rejectMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every note as memory/<name>.md, zipped */
+        get: operations["exportMemory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import notes into your inbox, from pasted text, a .md file or an export .zip
+         * @description Notes with front matter (name, description, type) are read as they are; other text is
+         *     sorted into notes by the model, or becomes one note when the model isn't available.
+         *     Everything waits in the inbox. At most 2 MB.
+         */
+        post: operations["importMemory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        /** A note and its versions */
+        get: operations["getMemoryNote"];
+        /** Create or replace a note, as yours */
+        put: operations["saveMemoryNote"];
+        post?: never;
+        /** Delete a note for good, with its versions */
+        delete: operations["deleteMemoryNote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make an earlier version current (as a new version) */
+        post: operations["restoreMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive a note, or bring it back */
+        post: operations["archiveMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/events/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo one of Claude's changes, while it is the note's latest */
+        post: operations["undoMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Share a note to the workspace, a knowledge node or a group
+         * @description Where you edit shared memory it becomes a note there; elsewhere a proposal for its editors.
+         */
+        post: operations["shareMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/proposals/{id}/{decision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description accept or reject (its place's editors), withdraw (its author). */
+                decision: "accept" | "reject" | "withdraw";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept, reject or withdraw a proposed change to shared memory */
+        post: operations["decideSharedMemoryProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /** A shared note you read, and its versions */
+        get: operations["getSharedMemoryNote"];
+        /** Change a shared note (its place's editors) */
+        put: operations["updateSharedMemoryNote"];
+        post?: never;
+        /** Delete a shared note for good (its place's editors) */
+        delete: operations["deleteSharedMemoryNote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/{id}/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a shared note's mode for you, or for everyone (its place's editors) */
+        put: operations["setSharedMemoryMode"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The hub's memory packs */
+        get: operations["listMemoryPacks"];
+        put?: never;
+        /** Publish a place's own shared notes as a pack (its editors) */
+        post: operations["publishMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        /** A pack's versions, and one version's notes */
+        get: operations["getMemoryPack"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install a pack in a place, or move its install to a version (its editors) */
+        post: operations["installMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a version checked, or not (hub admins) */
+        post: operations["verifyMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/yank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw a version, or bring it back (its publisher, hub admins) */
+        post: operations["yankMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/installs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uninstall a pack, with its notes (its place's editors) */
+        delete: operations["uninstallMemoryPack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/installs/{id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make an installed pack's notes the place's own */
+        post: operations["forkMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An outside MCP server's view of one chat's memory: the prompt and the tools
+         * @description With an `X-Knowledge-Memory` token (memoryAccess in MCP_SERVERS), a server uses the
+         *     user's memory in the chat the token was made for, through the same memory_* tools
+         *     Claude has. Its changes always wait in the user's inbox (or go to a shared note's
+         *     editors).
+         */
+        get: operations["getMemoryAgent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/agent/tools/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Call one memory tool for an outside MCP server */
+        post: operations["callMemoryTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1403,8 +1877,288 @@ export interface components {
             /** @description What the scan found in `to`. */
             flags: components["schemas"]["ScanFlag"][];
         };
+        /** @enum {string} */
+        MemoryType: "preference" | "profile" | "project" | "reference" | "feedback";
+        /** @enum {string} */
+        MemoryMode: "on" | "ask" | "off";
+        /** @enum {string} */
+        MemoryAuthor: "user" | "agent";
+        MemoryInput: {
+            /** @description One line; it goes in the index. */
+            description: string;
+            /** @description One of MemoryType. */
+            type: string;
+            /** @description The note */
+            body: string;
+        };
+        MemorySummary: {
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            version: number;
+            createdBy: components["schemas"]["MemoryAuthor"];
+            updatedBy: components["schemas"]["MemoryAuthor"];
+            archived: boolean;
+            createdAt: components["schemas"]["Timestamp"];
+            updatedAt: components["schemas"]["Timestamp"];
+            lastUsedAt: components["schemas"]["Timestamp"] | null;
+        };
+        MemoryNote: components["schemas"]["MemorySummary"] & {
+            body: string;
+        };
+        MemoryVersion: {
+            version: number;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+            changedBy: components["schemas"]["MemoryAuthor"];
+            threadId: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        /** @description What Claude did with a note in a run, as the chat shows it. */
+        MemoryEvent: {
+            id: string;
+            name: string;
+            description: string;
+            /** @enum {string} */
+            kind: "read" | "create" | "update" | "archive" | "propose";
+            version: number;
+            /** @description For a shared note, which one and where it lives. */
+            shared?: {
+                id: string;
+                label: string;
+            };
+        };
+        MemoryActivity: components["schemas"]["MemoryEvent"] & {
+            threadId: string;
+            /** @enum {string} */
+            source: "chat" | "learn" | "inbox";
+            at: components["schemas"]["Timestamp"];
+            undone: boolean;
+            /** @description Still the note's latest change, so Undo can take it back. */
+            undoable: boolean;
+        };
+        /** @description A change Claude proposed, waiting for the user. */
+        InboxItem: {
+            id: string;
+            /** @enum {string} */
+            op: "add" | "update" | "delete";
+            name: string;
+            description: string | null;
+            type: components["schemas"]["MemoryType"] | null;
+            body: string | null;
+            /** @description The note's version the change was made against. */
+            baseVersion: number | null;
+            /** @enum {string} */
+            source: "chat" | "learn" | "import";
+            threadId: string | null;
+            reason: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        MemorySettings: {
+            mode: components["schemas"]["MemoryMode"];
+            incognito: boolean;
+        };
+        MemoryImport: {
+            /** @description Notes now waiting in the inbox. */
+            proposed: number;
+            /** @description Notes left out: invalid, or the inbox was full. */
+            skipped: number;
+            /**
+             * @description files: front matter read as is; text: the model sorted plain text; whole: the model wasn't available, so the text is one note.
+             * @enum {string}
+             */
+            how: "files" | "text" | "whole";
+        };
+        /** @enum {string} */
+        SharedScope: "workspace" | "node" | "group";
+        /** @enum {string} */
+        SharedMode: "auto" | "manual" | "off";
+        /** @description A place for shared memory: the workspace, a knowledge node (`nodeId`) or a group (`groupId`). */
+        SharedTarget: {
+            scope: components["schemas"]["SharedScope"];
+            nodeId?: string | null;
+            groupId?: string | null;
+        };
+        SharedPlace: {
+            scope: components["schemas"]["SharedScope"];
+            nodeId: string | null;
+            groupId: string | null;
+            /** @description "Workspace", the node's or the group's name. */
+            label: string;
+        };
+        SharedSummary: {
+            id: string;
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            version: number;
+            place: components["schemas"]["SharedPlace"];
+            /** @description You can edit it, set it for everyone, and decide its proposals. */
+            canEdit: boolean;
+            mode: components["schemas"]["SharedMode"];
+            myMode: components["schemas"]["SharedMode"] | null;
+            everyoneMode: components["schemas"]["SharedMode"];
+            updatedAt: components["schemas"]["Timestamp"];
+            /** @description Installed from a memory pack, read-only until the pack is forked. */
+            pack: {
+                installId: string;
+                name: string;
+                version: number;
+            } | null;
+        };
+        SharedNote: components["schemas"]["SharedSummary"] & {
+            body: string;
+        };
+        SharedVersion: {
+            version: number;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+            changedBy: string | null;
+            changedAs: components["schemas"]["MemoryAuthor"];
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        SharedProposal: {
+            id: string;
+            /** @enum {string} */
+            op: "add" | "update" | "delete";
+            place: components["schemas"]["SharedPlace"];
+            memoryId: string | null;
+            name: string;
+            description: string | null;
+            type: components["schemas"]["MemoryType"] | null;
+            body: string | null;
+            baseVersion: number | null;
+            /** @description The person, or the person Claude was working for. */
+            author: string | null;
+            authorType: components["schemas"]["MemoryAuthor"];
+            mine: boolean;
+            canDecide: boolean;
+            threadId: string | null;
+            reason: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        SharedTargetPlace: components["schemas"]["SharedPlace"] & {
+            canEdit: boolean;
+        };
+        PackNote: {
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+        };
+        PackVersion: {
+            version: number;
+            description: string;
+            notes: number;
+            flags: components["schemas"]["ScanFlag"][];
+            publishedBy: string | null;
+            publishedAt: components["schemas"]["Timestamp"];
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+        };
+        PackListing: {
+            name: string;
+            owner: string | null;
+            mine: boolean;
+            /** @description The newest version that isn't yanked; null when all are. */
+            latest: components["schemas"]["PackVersion"] | null;
+            updatedAt: components["schemas"]["Timestamp"];
+        };
+        PackDetail: components["schemas"]["PackListing"] & {
+            versions: components["schemas"]["PackVersion"][];
+            version: components["schemas"]["PackVersion"];
+            notes: components["schemas"]["PackNote"][];
+            isAdmin: boolean;
+        };
+        PackInstall: {
+            id: string;
+            name: string;
+            version: number;
+            /** @description A newer version that isn't yanked, if any. */
+            latest: number | null;
+            place: components["schemas"]["SharedPlace"];
+            canEdit: boolean;
+            notes: number;
+            installedAt: components["schemas"]["Timestamp"];
+        };
+        MemoryOverview: components["schemas"]["MemorySettings"] & {
+            /** @description Your notes, archived ones last. */
+            notes: components["schemas"]["MemorySummary"][];
+            inbox: components["schemas"]["InboxItem"][];
+            shared: components["schemas"]["SharedSummary"][];
+            /** @description Open proposals you decide or made. */
+            sharedProposals: components["schemas"]["SharedProposal"][];
+            /** @description The places you can share to. */
+            targets: components["schemas"]["SharedTargetPlace"][];
+            /** @description Packs installed in places you read. */
+            installs: components["schemas"]["PackInstall"][];
+            types: components["schemas"]["MemoryType"][];
+            limits: {
+                notes: number;
+                body: number;
+                description: number;
+                index: number;
+            };
+        };
+        DeletedFlag: {
+            id: string;
+            /** @constant */
+            deleted: true;
+        };
     };
     responses: {
+        /** @description No such note (or proposal, pack, install), or memory is off on this server (MEMORY=on) or has no storage. */
+        MemoryNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The note changed since (or the name is in use, or the change was already undone). */
+        MemoryChanged: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Memory is off in that chat (incognito, or turned off). */
+        MemoryOffInChat: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The note now. */
+        MemoryNoteAnswer: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    note: components["schemas"]["MemoryNote"];
+                };
+            };
+        };
+        /** @description The pack, at that version. */
+        PackAnswer: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    pack: components["schemas"]["PackDetail"];
+                };
+            };
+        };
         /** @description Something is in the way, such as a skill folder of that name or a read-only file in it. */
         Conflict: {
             headers: {
@@ -1546,6 +2300,8 @@ export interface components {
         Node: string;
         /** @description A skill's name (lowercase letters, digits and dashes). */
         SkillName: string;
+        /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+        MemoryName: string;
         /** @description A version number; leave out for the newest. */
         HubVersion: number;
         /** @description An experiment's files, instead of a node's. */
@@ -3651,6 +4407,912 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemory: {
+        parameters: {
+            query?: {
+                /** @description Say whether this chat is incognito (`incognito`). */
+                thread?: string;
+                /** @description Add this knowledge node to `targets`. */
+                node?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The overview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryOverview"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setMemorySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    mode?: components["schemas"]["MemoryMode"];
+                    /** @description The chat */
+                    thread?: string;
+                    incognito?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings now (`incognito` for `thread`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryActivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        activity: components["schemas"]["MemoryActivity"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    acceptMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        status: "accepted";
+                        /** @description The note now; null when the change deleted it. */
+                        note: components["schemas"]["MemoryNote"] | null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    rejectMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dropped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        status: "rejected";
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    exportMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The .zip. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    importMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text?: string;
+                    /** @description Where it came from */
+                    label?: string;
+                };
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description What went to the inbox. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryImport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["MemoryNote"];
+                        versions: components["schemas"]["MemoryVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    saveMemoryNote: {
+        parameters: {
+            query?: {
+                /** @description `1` or `true` refuses a name already in use (409). */
+                create?: string;
+            };
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["MemoryNote"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @constant */
+                        deleted: true;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    restoreMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MemoryNoteAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    archiveMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default true */
+                    archived?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MemoryNoteAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    undoMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Undone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description The note now; null when undoing removed it. */
+                        note: components["schemas"]["MemoryNote"] | null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    shareMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & components["schemas"]["MemoryInput"] & {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new note, or the proposal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"] | null;
+                        proposal: components["schemas"]["SharedProposal"] | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    decideSharedMemoryProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description accept or reject (its place's editors), withdraw (its author). */
+                decision: "accept" | "reject" | "withdraw";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {string} */
+                        status: "accept" | "reject" | "withdraw";
+                        /** @description The note after an accepted change; otherwise null. */
+                        note: components["schemas"]["SharedNote"] | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"];
+                        versions: components["schemas"]["SharedVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    updateSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"] & {
+                    /** @description Refuse (409) if the note is past this version. */
+                    version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedFlag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setSharedMemoryMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description null clears your own choice. */
+                    mode?: components["schemas"]["SharedMode"] | null;
+                    /** @default false */
+                    everyone?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The note as you now see it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedSummary"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listMemoryPacks: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The packs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        packs: components["schemas"]["PackListing"][];
+                        isAdmin: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    publishMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & {
+                    name: string;
+                    description: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Published (or `unchanged`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        unchanged: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryPack: {
+        parameters: {
+            query?: {
+                /** @description A version number; leave out for the newest. */
+                version?: components["parameters"]["HubVersion"];
+            };
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    installMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & {
+                    version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Installed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        install: components["schemas"]["PackInstall"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    verifyMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    verified?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    yankMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    yanked?: boolean;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    uninstallMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstalled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedFlag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    forkMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        notes: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The memory section for the server's own model, and the tools. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        prompt: string;
+                        tools: {
+                            name: string;
+                            description: string;
+                            /** @description A JSON Schema. */
+                            inputSchema: {
+                                [key: string]: unknown;
+                            };
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["MemoryOffInChat"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    callMemoryTool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description What the tool answered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        text: string;
+                        isError: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["MemoryOffInChat"];
+            404: components["responses"]["MemoryNotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

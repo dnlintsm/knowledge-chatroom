@@ -23,6 +23,10 @@ import type { HubDetail, HubDiff, HubDiffFile, HubList, HubListing, HubReport, H
 import type { ScanFlag } from "../skills/scan";
 import type { SkillList } from "../skills/service";
 import type { ToolMenuItem } from "../tools-api";
+import type { ImportResult } from "../memory/import";
+import type { InboxItem, MemoryActivity, MemoryEvent, MemoryInput, MemoryNote, MemorySummary, MemoryVersion } from "./memory";
+import type { PackDetail, PackInstall, PackListing, PackNote, PackVersion } from "./memory-packs";
+import type { SharedNote, SharedPlace, SharedProposal, SharedSummary, SharedVersion } from "./shared-memory";
 
 type Schema = components["schemas"];
 
@@ -66,4 +70,22 @@ export type AgentApiContract = [
   Check<Same<HubDiffFile, Schema["HubDiffFile"]>>,
   Check<Same<HubDiff, Schema["HubDiff"]>>,
   Check<Same<ToolMenuItem, Schema["ToolMenuItem"]>>,
+  Check<Same<MemoryInput, Schema["MemoryInput"]>>,
+  Check<Same<MemorySummary, Schema["MemorySummary"]>>,
+  Check<Same<MemoryNote, Schema["MemoryNote"]>>,
+  Check<Same<MemoryVersion, Schema["MemoryVersion"]>>,
+  Check<Same<MemoryEvent, Schema["MemoryEvent"]>>,
+  Check<Same<MemoryActivity, Schema["MemoryActivity"]>>,
+  Check<Same<InboxItem, Schema["InboxItem"]>>,
+  Check<Same<ImportResult, Schema["MemoryImport"]>>,
+  Check<Same<SharedPlace, Schema["SharedPlace"]>>,
+  Check<Same<SharedSummary, Schema["SharedSummary"]>>,
+  Check<Same<SharedNote, Schema["SharedNote"]>>,
+  Check<Same<SharedVersion, Schema["SharedVersion"]>>,
+  Check<Same<SharedProposal, Schema["SharedProposal"]>>,
+  Check<Same<PackNote, Schema["PackNote"]>>,
+  Check<Same<PackVersion, Schema["PackVersion"]>>,
+  Check<Same<PackListing, Schema["PackListing"]>>,
+  Check<Same<PackDetail, Schema["PackDetail"]>>,
+  Check<Same<PackInstall, Schema["PackInstall"]>>,
 ];

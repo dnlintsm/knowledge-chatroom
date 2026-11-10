@@ -114,6 +114,9 @@ const now = () => Math.floor(Date.now() / 1000);
 const user = (sub: string, name: string) => ({
   "X-Knowledge-User": signIdentityToken({ sub, name, email: `${name}@example.com`, exp: now() + 600 }, SECRET!),
 });
+const memoryToken = (sub: string, thread: string) => ({
+  "X-Knowledge-Memory": signIdentityToken({ sub, exp: now() + 600, aud: "memory", via: "mcp:conformance", thread }, SECRET!),
+});
 const storageToken = (sub: string) => ({
   "X-Knowledge-Storage": signIdentityToken({ sub, exp: now() + 600, aud: "storage", via: "mcp:conformance" }, SECRET!),
 });
@@ -348,6 +351,108 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     ctrl.abort();
     if (!events.length) problems.push("watch: no event arrived within 5 s of a write");
     for (const line of events) validates("WorkspaceEvent", JSON.parse(line), `watch event ${line}`);
+  });
+
+  step("memory: your own notes, the inbox and import", async () => {
+    const thread = `conformance-memory-${stamp}`;
+    await call("GET", "/memory", { expect: 401 });
+    await call("GET", "/memory", { headers: alice, expect: 200 });
+    await call("GET", `/memory?thread=${thread}&node=${mod.id}`, { headers: alice, expect: 200 });
+    await call("PUT", "/memory/settings", { headers: alice, json: { mode: "ask" }, expect: 200 });
+    await call("PUT", "/memory/settings", { headers: alice, json: { mode: "on", thread: `${thread}-incognito`, incognito: true }, expect: 200 });
+    await call("PUT", "/memory/settings", { headers: alice, json: { mode: "sometimes" }, expect: 400 });
+
+    const note = { description: "How alice likes answers", type: "preference", body: "Short sentences." };
+    await call("PUT", "/memory/notes/conformance-style?create=1", { headers: alice, json: note, expect: 200 });
+    await call("PUT", "/memory/notes/conformance-style?create=1", { headers: alice, json: note, expect: 409 });
+    await call("PUT", "/memory/notes/conformance-style", { headers: alice, json: { ...note, body: "Very short sentences." }, expect: 200 });
+    await call("PUT", "/memory/notes/conformance-style", { headers: alice, json: { ...note, type: "mood" }, expect: 400 });
+    await call("GET", "/memory/notes/conformance-style", { headers: alice, expect: 200 });
+    await call("GET", "/memory/notes/no-such-note", { headers: alice, expect: 404 });
+    await call("POST", "/memory/notes/conformance-style/restore", { headers: alice, json: { version: 1 }, expect: 200 });
+    await call("POST", "/memory/notes/conformance-style/restore", { headers: alice, json: {}, expect: 400 });
+    await call("POST", "/memory/notes/conformance-style/archive", { headers: alice, json: { archived: true }, expect: 200 });
+    await call("POST", "/memory/notes/conformance-style/archive", { headers: alice, json: { archived: false }, expect: 200 });
+
+    const exported = await call("GET", "/memory/export", { headers: alice, expect: 200 });
+    assert.equal(exported.res.headers.get("content-type"), "application/zip");
+    const zip = new Uint8Array(await (await fetch(`${BASE}/memory/export`, { headers: alice })).arrayBuffer());
+    await call("POST", "/memory/import", { headers: { ...alice, "Content-Type": "application/zip" }, body: zip, expect: 200 });
+    const text = (name: string) => `---\nname: ${name}\ndescription: Imported for the conformance suite\ntype: reference\n---\nA note.\n`;
+    const imported = await call<Schema["MemoryImport"]>("POST", "/memory/import", { headers: alice, json: { text: text("conformance-kept") + text("conformance-dropped"), label: "suite" }, expect: 200 });
+    assert.equal(imported.data.how, "files");
+    await call("POST", "/memory/import", { headers: { ...alice, "Content-Type": "application/json" }, body: "{", expect: 400 });
+
+    const overview = await call<Schema["MemoryOverview"]>("GET", "/memory", { headers: alice, expect: 200 });
+    const waiting = (name: string) => overview.data.inbox.find((i) => i.name === name)!.id;
+    await call("POST", `/memory/inbox/${waiting("conformance-kept")}/accept`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/inbox/${waiting("conformance-dropped")}/reject`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/inbox/${crypto.randomUUID()}/accept`, { headers: alice, expect: 404 });
+
+    const activity = await call<{ activity: Schema["MemoryActivity"][] }>("GET", "/memory/activity", { headers: alice, expect: 200 });
+    const change = activity.data.activity.find((a) => a.undoable)!;
+    await call("POST", `/memory/events/${change.id}/undo`, { headers: alice, expect: 200 });
+    // Undoing the accepted add removed the note, and its history with it.
+    await call("POST", `/memory/events/${change.id}/undo`, { headers: alice, expect: 404 });
+    await call("POST", `/memory/events/${crypto.randomUUID()}/undo`, { headers: alice, expect: 404 });
+
+    // An outside MCP server with a memory token for one chat: its changes wait in the inbox.
+    await call("GET", "/memory/agent", { expect: 401 });
+    await call("GET", "/memory/agent", { headers: memoryToken("conformance|alice", thread), expect: 200 });
+    await call("GET", "/memory/agent", { headers: memoryToken("conformance|alice", `${thread}-incognito`), expect: 403 });
+    const agent = memoryToken("conformance|alice", thread);
+    await call("POST", "/memory/agent/tools/memory_save", { headers: agent, json: { name: "conformance-agent", description: "From a server", type: "project", body: "A note." }, expect: 200 });
+    await call("POST", "/memory/agent/tools/memory_save", { headers: agent, json: { name: "conformance-agent" }, expect: 400 });
+    await call("POST", "/memory/agent/tools/memory_view", { headers: agent, json: { name: "conformance-kept" }, expect: 200 });
+
+    await call("DELETE", "/memory/notes/conformance-style", { headers: alice, expect: 200 });
+    await call("DELETE", "/memory/notes/conformance-style", { headers: alice, expect: 404 });
+  });
+
+  step("memory: shared notes and proposals", async () => {
+    const input = { description: "How the team names runs", type: "project", body: "Date first." };
+    const shared = await call<{ note: Schema["SharedNote"] }>("POST", "/memory/shared", { headers: alice, json: { scope: "workspace", name: "conformance-shared", ...input }, expect: 200 });
+    const id = shared.data.note.id;
+    await call("POST", "/memory/shared", { headers: alice, json: { scope: "workspace", name: "Not A Name", ...input }, expect: 400 });
+    await call("GET", `/memory/shared/${id}`, { headers: alice, expect: 200 });
+    await call("GET", `/memory/shared/${crypto.randomUUID()}`, { headers: alice, expect: 404 });
+    await call("PUT", `/memory/shared/${id}`, { headers: alice, json: { ...input, body: "Date first, then the tool.", version: 1 }, expect: 200 });
+    await call("PUT", `/memory/shared/${id}`, { headers: alice, json: { ...input, version: 1 }, expect: 409 });
+    await call("PUT", `/memory/shared/${id}/mode`, { headers: alice, json: { mode: "manual" }, expect: 200 });
+    await call("PUT", `/memory/shared/${id}/mode`, { headers: alice, json: { mode: "off", everyone: true }, expect: 200 });
+    await call("PUT", `/memory/shared/${id}/mode`, { headers: alice, json: { mode: "loud" }, expect: 400 });
+
+    // Bob views the tech node: what he shares there is a proposal for its editors.
+    const propose = async (name: string) =>
+      (await call<{ proposal: Schema["SharedProposal"] }>("POST", "/memory/shared", { headers: bob, json: { scope: "node", nodeId: tech.id, name, ...input }, expect: 200 })).data.proposal.id;
+    await call("POST", `/memory/shared/proposals/${await propose("conformance-accepted")}/accept`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/shared/proposals/${await propose("conformance-rejected")}/reject`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/shared/proposals/${await propose("conformance-withdrawn")}/withdraw`, { headers: bob, expect: 200 });
+    await call("POST", `/memory/shared/proposals/${crypto.randomUUID()}/accept`, { headers: alice, expect: 400 });
+  });
+
+  step("memory: packs", async () => {
+    const pack = `conformance-pack-${stamp}`;
+    await call("POST", "/memory/packs", { headers: alice, json: { scope: "workspace", name: pack, description: "The suite's notes" }, expect: 200 });
+    await call("POST", "/memory/packs", { headers: alice, json: { scope: "workspace", description: "No name" }, expect: 400 });
+    await call("GET", "/memory/packs", { headers: alice, expect: 200 });
+    await call("GET", `/memory/packs?q=${pack}`, { headers: alice, expect: 200 });
+    await call("GET", `/memory/packs/${pack}`, { headers: alice, expect: 200 });
+    await call("GET", `/memory/packs/${pack}?version=one`, { headers: alice, expect: 400 });
+    await call("GET", "/memory/packs/no-such-pack", { headers: alice, expect: 404 });
+    await call("POST", `/memory/packs/${pack}/verify`, { headers: alice, json: { version: 1 }, expect: 200 });
+    await call("POST", `/memory/packs/${pack}/verify`, { headers: alice, json: {}, expect: 400 });
+    await call("POST", `/memory/packs/${pack}/yank`, { headers: alice, json: { version: 1, reason: "Checking" }, expect: 200 });
+    await call("POST", `/memory/packs/${pack}/yank`, { headers: alice, json: { version: 1, yanked: false }, expect: 200 });
+    const target = { scope: "node", nodeId: mod.id };
+    const install = async () =>
+      (await call<{ install: Schema["PackInstall"] }>("POST", `/memory/packs/${pack}/install`, { headers: alice, json: target, expect: 200 })).data.install.id;
+    await call("DELETE", `/memory/installs/${await install()}`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/installs/${await install()}/fork`, { headers: alice, expect: 200 });
+    await call("POST", `/memory/packs/${pack}/install`, { headers: bob, json: target, expect: 400 });
+    const shared = await call<Schema["MemoryOverview"]>("GET", "/memory", { headers: alice, expect: 200 });
+    const own = shared.data.shared.find((n) => n.name === "conformance-shared" && n.place.scope === "workspace")!;
+    await call("DELETE", `/memory/shared/${own.id}`, { headers: alice, expect: 200 });
   });
 
   step("chats", async () => {

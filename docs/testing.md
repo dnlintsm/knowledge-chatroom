@@ -8,7 +8,7 @@ The default test command runs only fast units; integration and E2E are explicit.
 | `pnpm check` | None | ESLint, all TypeScript projects (root, web, agent, contracts), all unit tests |
 | `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
 | `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
-| `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every agent server operation (storage, skills, hub, tools, ...) against `openapi/storage.yaml` |
+| `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every agent server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
 | `pnpm test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `pnpm test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
@@ -63,8 +63,8 @@ operation was never called. It only speaks HTTP, so it can check any backend tha
 serves the storage API (a Python one later, issue #169):
 `STORAGE_URL=http://localhost:8010 AUTH_SECRET=... pnpm -C packages/contracts test:conformance`,
 with the backend on a fresh database, since the suite's first user must become the
-workspace owner, and with `HUB_ADMINS=conformance|alice`, since that user also moderates
-the skill hub. When you add or change a route, add its calls there too.
+workspace owner, with `HUB_ADMINS=conformance|alice`, since that user also moderates
+the skill hub and memory packs, and with `MEMORY=on` (and `MEMORY_LEARN=off`). When you add or change a route, add its calls there too.
 
 The normal integration suite tests vector search using a deterministic embedder.
 Set `EMBEDDING_TEST=1` to also run the real model-download test; it needs network

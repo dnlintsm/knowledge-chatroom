@@ -28,7 +28,7 @@
     -F 'meta={"id":"0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b","path":"Etch/Module 3/Endpoint/Recipe tuning","title":"Higher RF"}' \
     -F 'report.md=@./report.md' -F 'data/metrics.csv=@./metrics.csv'
   ```
-- The spec and the conformance suite also cover skills, the skill hub, the "+" menu's tools,
+- The spec and the conformance suite also cover memory, skills, the skill hub, the "+" menu's tools,
   follow-up suggestions, the identity public key and the health check (issue #169).
 
 ## 0.2.3
