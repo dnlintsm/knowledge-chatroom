@@ -510,6 +510,105 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /experiments/runs:
+    post:
+      tags: [experiments]
+      operationId: startRun
+      summary: Start a run, or run an earlier one again
+      description: >-
+        A new run: a draft experiment in state running, on a node with a copy of its files or at the
+        root (nodeId null or left out) empty, with each of `inputs` linked read-only under inputs/ at
+        its current version, and a report.md whose front matter records where it came from.
+        `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of
+        these has another shape); who started it, when, the input versions, rerunOf and finishedAt
+        are the server's. With `rerunOf`, that run again as a
+        new one: its place, title, hypothesis, params and the exact input versions it read, unless
+        given here. Finish it with /finish.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nodeId:
+                  type: [string, "null"]
+                  description: The node to fork; null or left out for the workspace root (with rerunOf, the old run's place).
+                title: { type: string, maxLength: 200, description: "Required unless rerunOf." }
+                hypothesis: { type: string }
+                params: { type: object, additionalProperties: true }
+                inputs:
+                  type: array
+                  items: { $ref: "#/components/schemas/RunInputSource" }
+                rerunOf: { type: string, description: The run to run again. }
+                provenance:
+                  type: object
+                  additionalProperties: true
+                  description: >-
+                    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are
+                    the server's and are dropped; other keys are kept as given.
+                  properties:
+                    chat: { type: [string, "null"] }
+                    model: { type: [string, "null"] }
+                    skill:
+                      type: [object, "null"]
+                      required: [name]
+                      properties:
+                        name: { type: string }
+                        source: { type: string }
+                        version: { type: number }
+                        sha256: { type: string }
+                    tools:
+                      type: [object, "null"]
+                      additionalProperties: { type: string }
+                      description: Each tool's version, by name.
+      responses:
+        "201":
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}/finish:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [experiments]
+      operationId: finishRun
+      summary: Record a run's results and how it ended
+      description: >-
+        Sets results (replacing the old ones whole) and state done or failed, and refreshes the
+        record in its report.md front matter. Only its author, while it isn't archived. A finished
+        run stays as it ended: the same call again answers it unchanged, a different one is refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [results]
+              properties:
+                results: { type: object, additionalProperties: true }
+                state: { type: string, enum: [done, failed], default: done }
+      responses:
+        "200":
+          description: The run, finished.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /experiments/{id}/inputs:
     parameters:
       - $ref: "#/components/parameters/Id"

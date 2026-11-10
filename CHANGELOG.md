@@ -4,12 +4,18 @@
 
 ### Added
 
+- Start, rerun and finish runs over the storage API, as the agent's own run tools do:
+  `POST /experiments/runs` (`{nodeId?, title?, hypothesis?, params?, inputs?, rerunOf?,
+  provenance?}`) starts a run in state running with its inputs linked read-only and a
+  report.md whose front matter records where it came from, and
+  `POST /experiments/{id}/finish` (`{results, state?: done|failed}`) finishes it. Storage
+  tokens may use both, so a remote backend can run analyses (issue #176).
 - `services/agent-py`: the chat agent in Python (FastAPI and `ag_ui_claude_sdk`), for
   `AGENT_URL` (issue #176, step 1 of phase 2 of #169). It chats with the app's own tools,
   checks the run's user, and gives the model the user's open file and place on every run.
   It works on the workspace's files through the storage API with the run's storage token,
-  with the TypeScript agent's file tools (step 2). Starting runs, skills, memory and tool
-  chips follow in later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
+  with the TypeScript agent's file and run tools (step 2). Skills, memory and tool chips
+  follow in later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
   adapter does).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
   with TypeScript types generated from it and checks that keep the spec, the generated types

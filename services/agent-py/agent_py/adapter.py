@@ -57,7 +57,10 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         if self._storage_url and thread_id:
             # The tools ask for the storage API when called, so they use the
             # token of the run they're called in, not the chat's first.
-            tools = file_tools(lambda: Storage(self._storage_url or "", self._tokens.get(thread_id)))
+            tools = file_tools(
+                lambda: Storage(self._storage_url or "", self._tokens.get(thread_id)),
+                {"chat": thread_id, "model": options.model},
+            )
             options.mcp_servers = {**(options.mcp_servers or {}), "copilotkit": server(tools)}
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
         return options

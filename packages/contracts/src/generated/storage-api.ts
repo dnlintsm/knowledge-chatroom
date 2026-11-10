@@ -186,6 +186,48 @@ export interface paths {
         patch: operations["updateExperiment"];
         trace?: never;
     };
+    "/experiments/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a run, or run an earlier one again
+         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` linked read-only under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis, params and the exact input versions it read, unless given here. Finish it with /finish.
+         */
+        post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/experiments/{id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a run's results and how it ended
+         * @description Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Only its author, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
+         */
+        post: operations["finishRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/experiments/{id}/inputs": {
         parameters: {
             query?: never;
@@ -2845,6 +2887,106 @@ export interface operations {
         };
         responses: {
             /** @description The changed experiment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Experiment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    startRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The node to fork; null or left out for the workspace root (with rerunOf, the old run's place). */
+                    nodeId?: string | null;
+                    /** @description Required unless rerunOf. */
+                    title?: string;
+                    hypothesis?: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                    inputs?: components["schemas"]["RunInputSource"][];
+                    /** @description The run to run again. */
+                    rerunOf?: string;
+                    /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given. */
+                    provenance?: {
+                        chat?: string | null;
+                        model?: string | null;
+                        skill?: {
+                            name: string;
+                            source?: string;
+                            version?: number;
+                            sha256?: string;
+                        } | null;
+                        /** @description Each tool's version, by name. */
+                        tools?: {
+                            [key: string]: string;
+                        } | null;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The run. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Experiment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    finishRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    results: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @default done
+                     * @enum {string}
+                     */
+                    state?: "done" | "failed";
+                };
+            };
+        };
+        responses: {
+            /** @description The run, finished. */
             200: {
                 headers: {
                     [name: string]: unknown;

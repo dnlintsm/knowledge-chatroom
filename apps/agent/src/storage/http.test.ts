@@ -38,6 +38,10 @@ test("nothing is renamed, deleted, reviewed or shared", () => {
   assert.ok(!may("POST", "/experiments/upload"));
   assert.ok(may("PATCH", "/experiments/e1"));
   assert.ok(!may("DELETE", "/experiments/e1"));
+  // Claude starts and finishes runs as the TypeScript agent's run tools do.
+  assert.ok(may("POST", "/experiments/runs"));
+  assert.ok(may("POST", "/experiments/e1/finish"));
+  assert.ok(!may("POST", "/experiments/e1/finish/x"));
   assert.ok(may("POST", "/proposals"));
   for (const action of ["accept", "reject", "withdraw"]) assert.ok(!may("POST", `/proposals/p1/${action}`), action);
   assert.ok(!may("POST", "/access/grants"));

@@ -15,10 +15,13 @@ it when the chat starts: the user moves around during a chat.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
+import tomllib
 import urllib.parse
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -172,8 +175,30 @@ def schema(properties: dict[str, Any], *required: str) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "required": list(required)}
 
 
-def file_tools(storage: Callable[[], Storage]) -> list[SdkMcpTool[Any]]:
-    """The workspace tools; `storage` gives the current run's storage API."""
+def tool_versions() -> dict[str, str]:
+    """This agent's version and its SDKs', for the provenance of runs it starts."""
+    versions = {}
+    try:  # A server run from its folder, not an installed package: its version is in pyproject.toml.
+        project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
+        versions["agentPy"] = project["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        pass
+    for key, package in (("claudeAgentSdk", "claude-agent-sdk"), ("agUiClaudeSdk", "ag-ui-claude-sdk")):
+        try:
+            versions[key] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            pass
+    return versions
+
+
+def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = None) -> list[SdkMcpTool[Any]]:
+    """The workspace tools; `storage` gives the current run's storage API.
+
+    `meta` is about the chat, for the provenance of runs Claude starts: its
+    `chat` (the AG-UI thread) and `model`.
+    """
+    meta = meta or {}
+    versions = tool_versions()
 
     def guarded(fn: Callable[[Storage, dict[str, Any]], Awaitable[ToolResult]]):
         async def handler(args: dict[str, Any]) -> ToolResult:
@@ -521,7 +546,8 @@ def file_tools(storage: Callable[[], Storage]) -> list[SdkMcpTool[Any]]:
     @tool(
         "update_experiment",
         "Change an experiment the user authored: title, hypothesis or params (each replaces the old value whole, "
-        "so send the complete object). Sharing and archiving are the user's to do in the app.",
+        "so send the complete object). Record results and finish a run with set_experiment_results instead. "
+        "Sharing and archiving are the user's to do in the app.",
         schema(
             {
                 "id": {"type": "string", "description": "Experiment id"},
@@ -570,6 +596,106 @@ def file_tools(storage: Callable[[], Storage]) -> list[SdkMcpTool[Any]]:
             }
         )
 
+    @tool(
+        "create_experiment",
+        "Start a run (an experiment) for the user: a private draft on a knowledge node (usually a process) with "
+        "a copy of the node's files, where changes don't touch the node; or, without node, at the workspace root, "
+        "starting empty. Only when the user asks to try, explore, analyze or run something. List the files it "
+        "works from as `inputs`: each is linked in read only under inputs/ at its current version, so the run "
+        "keeps exactly what it read. The run starts in state running with a report.md whose front matter records "
+        "where it came from (who, this chat, model, skill, input versions); write the report below the front "
+        "matter. Work in it by passing its id as `experiment` to the file tools, and finish with "
+        "set_experiment_results. To run an earlier run again, pass rerunOf instead of changing it.",
+        schema(
+            {
+                "node": {"type": "string", "description": "Knowledge node id to fork; omit for the workspace root."},
+                "title": {
+                    "type": "string",
+                    "description": "Short name, e.g. 'Lower RF power, 40 W'; required unless rerunOf.",
+                },
+                "hypothesis": {"type": "string", "description": "What the user expects and why."},
+                "params": {"type": "object", "description": 'What is varied, e.g. {"rfPower_W": 40}'},
+                "inputs": {
+                    "type": "array",
+                    "description": "Files the run reads (uploads, data, earlier results); the user must be able "
+                    "to read each.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "The file's path, e.g. uploads/wafer-map.csv"},
+                            "node": {"type": "string", "description": "Its knowledge node; omit for the workspace root."},
+                            "experiment": {"type": "string", "description": "Its experiment, if it is in one."},
+                            "as": {"type": "string", "description": "Name under inputs/; defaults to its file name."},
+                        },
+                        "required": ["path"],
+                    },
+                },
+                "skill": {"type": "string", "description": "The skill this run follows, if any, e.g. analysis."},
+                "rerunOf": {
+                    "type": "string",
+                    "description": "Run this earlier run (experiment id) again as a new run: its place (node), "
+                    "params, hypothesis and the exact input versions it read are reused unless given here. The old "
+                    "run is left as it is.",
+                },
+            }
+        ),
+    )
+    @guarded
+    async def create_experiment(s: Storage, args: dict[str, Any]) -> ToolResult:
+        if not args.get("title") and not args.get("rerunOf"):
+            return error("A new run needs a title (or rerunOf).")
+        provenance = {
+            "chat": meta.get("chat"),
+            "model": meta.get("model"),
+            **({"skill": {"name": args["skill"]}} if args.get("skill") else {}),
+            "tools": versions,
+        }
+        body: dict[str, Any] = {"provenance": provenance}
+        body.update({k: args[k] for k in ("title", "hypothesis", "params", "inputs", "rerunOf") if k in args})
+        if "node" in args:
+            body["nodeId"] = args["node"] or None
+        elif not args.get("rerunOf"):
+            body["nodeId"] = None
+        run = await s.json("POST", "/experiments/runs", json_body=body)
+        return text(
+            {
+                "ok": True,
+                "id": run["id"],
+                "title": run["title"],
+                "state": run["state"],
+                "files": run["fileCount"],
+                "inputs": [i["path"] for i in run["provenance"].get("inputs", [])],
+                "report": "report.md",
+            }
+        )
+
+    @tool(
+        "set_experiment_results",
+        "Record a run's results and finish it: state done, or failed when it couldn't be completed (say why in "
+        "its report). Results replace the old ones whole, as numbers with units in the key where you can, e.g. "
+        '{"yield_pct": 92.5}. Also refreshes the record in its report.md front matter. Only for runs the user '
+        "authored.",
+        schema(
+            {
+                "id": {"type": "string", "description": "Experiment id"},
+                "results": {
+                    "type": "object",
+                    "description": 'e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}',
+                },
+                "state": {"type": "string", "enum": ["done", "failed"], "description": "Defaults to done."},
+            },
+            "id",
+            "results",
+        ),
+    )
+    @guarded
+    async def set_experiment_results(s: Storage, args: dict[str, Any]) -> ToolResult:
+        route = f"/experiments/{urllib.parse.quote(args['id'], safe='')}/finish"
+        finished = await s.json(
+            "POST", route, json_body={"results": args["results"], "state": args.get("state") or "done"}
+        )
+        return text({"ok": True, "id": finished["id"], "state": finished["state"], "results": finished["results"]})
+
     return [
         list_nodes,
         create_node,
@@ -579,6 +705,8 @@ def file_tools(storage: Callable[[], Storage]) -> list[SdkMcpTool[Any]]:
         write_file,
         edit_file,
         list_experiments,
+        create_experiment,
+        set_experiment_results,
         update_experiment,
         propose_experiment,
     ]
