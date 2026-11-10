@@ -1,6 +1,6 @@
 """The system prompt: apps/agent/src/agent.ts's, without the starter demo's
 backend tools (flights, dashboards, chart data), which this agent doesn't have,
-and with its lines for files on the server (workspace.py's tools).
+and with its lines for files on the server (workspace.py's tools) and skills (skills.py).
 
 The workspace and where the user is don't go here: they change between runs of
 one chat, so each run brings them itself (place.py).
@@ -13,7 +13,8 @@ SYSTEM_PROMPT = "\n".join(
         "- Todos: the todo board is shared state under `todos`; call openTaskBoard, then",
         "  ag_ui_update_state with the COMPLETE list to add or change todos.",
         "- Workspace: the user works on files beside the chat. A user message starts with a",
-        "  <workspace> note whenever that changed: the open file (each line starting with",
+        "  <workspace> note (after a /<skill> command, ends with one) whenever that changed:",
+        "  the open file (each line starting with",
         "  its line number and a tab), the selection, the files where the user is, and the",
         "  current node and experiment. The latest note is current; older ones are out of",
         "  date. Use the workspace file tools you have to look around (list, read), to create files",
@@ -53,6 +54,10 @@ SYSTEM_PROMPT = "\n".join(
         "  in the editor. Say so, with a one-line summary of the change. When the user",
         "  asks to bring an experiment's results to its node, propose_experiment does",
         "  that for its changed files.",
+        "- Skills: when one of your skills fits the request, use it. When the user's",
+        "  message starts with /<skill>, that skill was loaded for this turn: follow it.",
+        "  Writing a skill (skills/<name>/...) proposes it for review; it is not added",
+        "  until someone accepts it, and only the user turns skills on or off.",
         "- Search: search_files finds files by their text or path across every place the",
         "  user can read. Search before saying the workspace has nothing on a topic, and",
         "  pass the user's place (node / experiment) so nearby results come first.",

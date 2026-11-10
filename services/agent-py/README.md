@@ -11,9 +11,9 @@ It is phase 2 of moving the backend to Python (issue #169), built in steps under
 issue #176. So far it chats with the app's own tools (task board, workbench panes,
 and the browser's file tools while files live only in the browser), tells the model
 where the user is on every run, and works on the workspace's files on the server
-through the storage API (step 2), including starting and finishing runs. Skills,
-memory, tool chips and follow-up chips come in the next steps; until then, use the
-TypeScript agent for those.
+through the storage API (step 2), including starting and finishing runs, with the
+user's skills (step 3). Memory, tool chips and follow-up chips come in the next steps;
+until then, use the TypeScript agent for those.
 
 ## Run it
 
@@ -40,7 +40,7 @@ for a gateway) in this server's environment.
 | `KNOWLEDGE_PUBLIC_KEY` | With login on: the agent server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
 | `LOCAL_AGENT_URL` | The agent server with the storage API, as for the app (default `http://localhost:8000`). |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
-| `AGENT_PY_WORKDIR` | Claude Code's working folder (default: a new empty temp folder). |
+| `AGENT_PY_WORKDIR` | Where each user's working folder goes, holding their skills (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |
 
 ## How it works
@@ -68,6 +68,17 @@ for a gateway) in this server's environment.
   as proposals, no renaming, deleting or sharing. Without login there is no token and
   the API answers as the local user, so files Claude writes show as the user's.
   `agent_py/text.py` numbers lines and applies exact edits as the TypeScript agent does.
+- `agent_py/skills.py`: the run's skills, as the TypeScript agent gives them
+  (`apps/agent/src/skills/run.ts`). Each run asks the agent server which skills the
+  user has in this chat (`GET /skills/run`, with the run's token: built-in, hub and
+  workspace skills that aren't off, with their files), writes them to the user's own
+  folder under `AGENT_PY_WORKDIR` (`.claude/skills/`, only when the set changed) and
+  starts there with just those skills: auto ones Claude may pick, manual ones only by
+  `/name`. Only `/name` for one of them stays a command (`/clear` and the like go as
+  text), and a run with `/name` gets its workspace note after the command. Each skill
+  used goes to the chat as a `skill_used` event and to the usage history
+  (`POST /skills/used`). `!` commands in a SKILL.md never run and there is no shell,
+  so skills' scripts don't run here (on the agent server they need `SKILL_SCRIPTS=on`).
 - `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
   backend tools.
 

@@ -16,16 +16,27 @@ the thread's first run. Three things change that for this app:
 - No built-in Claude Code tools (Bash, Read, Write, ...): the model works on
   the workspace through the browser's tools and this agent's workspace tools
   (workspace.py), which call the storage API with the run's storage token.
+- Skills (skills.py): each run asks the agent server for the user's skills in
+  this chat, starts in the user's own folder holding them, and only /name for
+  one of them stays a command. Each skill used goes to the chat as a
+  `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections import OrderedDict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import httpx
 from ag_ui.core import (
     BaseEvent,
+    CustomEvent,
+    EventType,
     RunAgentInput,
     TextInputContent,
     ToolMessage,
@@ -34,16 +45,41 @@ from ag_ui.core import (
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
 from .place import workspace_note
-from .workspace import Storage, file_tools, server, tool_names
+from .skills import RunSkill, Trigger, fetch_skills, materialize, skill_options, slash_command
+from .workspace import Storage, WorkspaceError, file_tools, server, tool_names
+
+logger = logging.getLogger("agent_py")
+
+
+@dataclass
+class Run:
+    """What a thread's latest run has: its folder, its skills, and skill uses not yet sent."""
+
+    cwd: Path | None = None
+    skills: Sequence[RunSkill] = ()
+    pending: list[dict[str, str]] = field(default_factory=list)
 
 
 class ChatroomAdapter(ClaudeAgentAdapter):
     def __init__(
-        self, *args: Any, system_prompt: str = "", storage_url: str | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        system_prompt: str = "",
+        storage_url: str | None = None,
+        skills_root: Path | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._system_prompt = system_prompt
         self._storage_url = storage_url
+        self._transport = transport  # for tests
+        # Each user's run folder (with their skills) is a folder in here.
+        self._skills_root = skills_root
+        # thread_id -> its latest run.
+        self._runs: OrderedDict[str, Run] = OrderedDict()
+        # Usage records on their way to the agent server.
+        self._recording: set[asyncio.Task[Any]] = set()
         # thread_id -> the last <workspace> note the thread's session was given.
         self._notes: OrderedDict[str, str] = OrderedDict()
         # thread_id -> the storage token of the thread's latest run.
@@ -55,30 +91,89 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
         options.system_prompt = self._system_prompt
         if self._storage_url and thread_id:
-            # The tools ask for the storage API when called, so they use the
-            # token of the run they're called in, not the chat's first.
             tools = file_tools(
-                lambda: Storage(self._storage_url or "", self._tokens.get(thread_id)),
+                lambda: self._storage(thread_id or ""),
                 {"chat": thread_id, "model": options.model},
             )
             options.mcp_servers = {**(options.mcp_servers or {}), "copilotkit": server(tools)}
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
+        run = self._runs.get(thread_id or "")
+        if run and run.cwd:
+            options.cwd = str(run.cwd)
+        if run and run.skills:
+            extra = skill_options(run.skills, lambda name, trigger: self._used(thread_id or "", name, trigger))
+            hook = extra.pop("pre_tool_use")
+            for key, value in extra.items():
+                setattr(options, key, value)
+            options.tools = [*(options.tools or []), "Skill"]
+            hooks = dict(options.hooks or {})
+            hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), hook]
+            options.hooks = hooks
         return options
 
     async def run(
-        self, input_data: RunAgentInput, storage_token: str | None = None
+        self, input_data: RunAgentInput, storage_token: str | None = None, user: str = "local"
     ) -> AsyncIterator[BaseEvent]:
-        """Runs `input_data`; `storage_token` is its X-Knowledge-Storage header (with login)."""
-        remember(self._tokens, input_data.thread_id, storage_token, self._max_workers)
-        async for event in super().run(self.prepare(input_data)):
+        """Runs `input_data` for `user` (their id); `storage_token` is its X-Knowledge-Storage header (with login)."""
+        thread_id = input_data.thread_id
+        remember(self._tokens, thread_id, storage_token, self._max_workers)
+        run = Run()
+        if self._skills_root is not None:
+            run.skills = await self._skills_for(thread_id)
+            try:
+                run.cwd = materialize(self._skills_root, user, run.skills)
+            except OSError as err:
+                logger.warning("couldn't write the run's skills; running without them: %s", err)
+                run.skills = ()
+                run.cwd = materialize(self._skills_root, user, ())
+        remember(self._runs, thread_id, run, self._max_workers)
+        prepared, slash = self.prepare(input_data, run.skills)
+        if slash:
+            self._used(thread_id, slash.name, "slash")
+        started = False
+        async for event in super().run(prepared):
             yield event
+            started = started or event.type == EventType.RUN_STARTED
+            while started and run.pending:
+                yield CustomEvent(type=EventType.CUSTOM, name="skill_used", value=run.pending.pop(0))
 
-    def prepare(self, input_data: RunAgentInput) -> RunAgentInput:
-        """This run's input as the session should see it."""
+    def _storage(self, thread_id: str) -> Storage:
+        """The storage API with the thread's latest token: tools read it when called, not when the chat began."""
+        return Storage(self._storage_url or "", self._tokens.get(thread_id), self._transport)
+
+    async def _skills_for(self, thread_id: str) -> list[RunSkill]:
+        if not self._storage_url:
+            return []
+        try:
+            return await fetch_skills(self._storage(thread_id), thread_id)
+        except (WorkspaceError, KeyError, ValueError) as err:
+            logger.warning("couldn't load skills; running without them: %s", err)
+            return []
+
+    def _used(self, thread_id: str, name: str, trigger: Trigger) -> None:
+        """Notes that the thread's run used skill `name`: for the chat, and the usage history."""
+        run = self._runs.get(thread_id)
+        skill = next((s for s in run.skills if s.name == name), None) if run else None
+        if not run or not skill:
+            return
+        run.pending.append({"skill": skill.name, "source": skill.source, "trigger": trigger})
+        if self._storage_url:
+            storage = self._storage(thread_id)
+            body = {"thread": thread_id, "skill": skill.name, "trigger": trigger}
+            task = asyncio.ensure_future(_record(storage, body))
+            self._recording.add(task)
+            task.add_done_callback(self._recording.discard)
+
+    def prepare(self, input_data: RunAgentInput, skills: Sequence[RunSkill] = ()) -> tuple[RunAgentInput, RunSkill | None]:
+        """This run's input as the session should see it, and the skill its /name runs, if any."""
         messages = list(input_data.messages or [])
         thread_id = input_data.thread_id
         note = workspace_note(input_data)
         last = messages[-1] if messages else None
+        slash = None
+        if isinstance(last, UserMessage):
+            last, slash = guard_slash(last, skills)
+            messages[-1] = last
         # A session that's new (first run, evicted or restarted) has seen no note.
         fresh = thread_id not in self._workers
         # After a browser tool, only the result it answers with: earlier ones
@@ -87,9 +182,34 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             isinstance(last, ToolMessage) and not (len(messages) > 1 and isinstance(messages[-2], ToolMessage))
         )
         if note and carrier and (fresh or self._notes.get(thread_id) != note):
-            messages[-1] = with_note(last, note)
+            # A /name command must stay at the start of the prompt: its note goes after it.
+            messages[-1] = with_note(last, note, after=slash is not None)
             remember(self._notes, thread_id, note, self._max_workers)
-        return input_data.model_copy(update={"messages": messages, "forwarded_props": {}})
+        return input_data.model_copy(update={"messages": messages, "forwarded_props": {}}), slash
+
+
+async def _record(storage: Storage, body: dict[str, str]) -> None:
+    """Best effort: a usage record never fails a run."""
+    try:
+        await storage.call("POST", "/skills/used", json_body=body)
+    except WorkspaceError as err:
+        logger.warning("couldn't record a skill use: %s", err)
+
+
+def guard_slash(message: UserMessage, skills: Sequence[RunSkill]) -> tuple[UserMessage, RunSkill | None]:
+    """The message with its first text guarded (skills.slash_command), and the skill it runs."""
+    content = message.content
+    if isinstance(content, str):
+        text, skill = slash_command(content, skills)
+        return (message if text == content else message.model_copy(update={"content": text})), skill
+    for i, part in enumerate(content):
+        if isinstance(part, TextInputContent):
+            text, skill = slash_command(part.text, skills)
+            if text == part.text:
+                return message, skill
+            parts = [*content[:i], part.model_copy(update={"text": text}), *content[i + 1 :]]
+            return message.model_copy(update={"content": parts}), skill
+    return message, None
 
 
 
@@ -101,10 +221,10 @@ def remember(cache: OrderedDict[str, Any], key: str, value: Any, size: int) -> N
         cache.popitem(last=False)
 
 
-def with_note(message: UserMessage | ToolMessage, note: str) -> UserMessage | ToolMessage:
-    """The user's message with `note` in front of it, or a tool's result with `note` after it."""
+def with_note(message: UserMessage | ToolMessage, note: str, after: bool = False) -> UserMessage | ToolMessage:
+    """The user's message with `note` in front of it (or after it), or a tool's result with `note` after it."""
     content = message.content
-    after = isinstance(message, ToolMessage)
+    after = after or isinstance(message, ToolMessage)
     if isinstance(content, str):
         text = f"{content}\n\n{note}" if after else f"{note}\n\n{content}"
         return message.model_copy(update={"content": text})

@@ -11,7 +11,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
 
-from agent_py.app import create_app
+import httpx
+from agent_py.app import create_app, make_adapter
 from agent_py.prompt import SYSTEM_PROMPT
 
 KEY = Ed25519PrivateKey.generate()
@@ -63,9 +64,17 @@ def types(evts: list[dict[str, Any]]) -> list[str]:
     return [e["type"] for e in evts]
 
 
+def no_skills(request: httpx.Request) -> httpx.Response:
+    """The agent server, as far as a run without skills sees it."""
+    if request.url.path == "/skills/run":
+        return httpx.Response(200, json={"skills": []})
+    return httpx.Response(500, json={"error": f"unexpected {request.method} {request.url.path}"})
+
+
 @pytest.fixture
 def client(claude):
-    with TestClient(create_app(env={})) as c:
+    adapter = make_adapter({}, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env={}, adapter=adapter)) as c:
         yield c
 
 
@@ -90,7 +99,9 @@ def test_the_session_has_the_chatrooms_options(client, claude):
     assert options.model == "claude-sonnet-5"
     assert options.tools == []
     assert options.resume is None
-    assert os.listdir(options.cwd) == []
+    # The user's own folder, holding only their skills (none here).
+    assert os.listdir(options.cwd) == [".claude"]
+    assert os.listdir(os.path.join(options.cwd, ".claude", "skills")) == [".fingerprint"]
     # The run's context goes in the user's message, not the system prompt.
     assert options.system_prompt == SYSTEM_PROMPT
 
@@ -133,7 +144,8 @@ def test_a_header_without_a_key_is_refused(client):
 
 @pytest.fixture
 def login_client(claude):
-    with TestClient(create_app(env={"KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY})) as c:
+    env = {"KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
+    with TestClient(create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))) as c:
         yield c
 
 
@@ -168,7 +180,8 @@ def test_the_note_also_goes_in_front_of_a_message_with_parts(client, claude):
 
 
 def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
-    with TestClient(create_app(env={"LOCAL_AGENT_URL": "http://storage.test/"})) as c:
+    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    with TestClient(create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))) as c:
         response = c.post("/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-Storage": "tok-1"})
         events(response)
         adapter_tokens = c.app.state.adapter._tokens

@@ -1532,6 +1532,73 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /skills/run:
+    get:
+      tags: [skills]
+      operationId: runSkills
+      summary: The skills a run gets, with their files (for agents outside this server)
+      security: [{}, {user: []}, {storage: []}]
+      description: |
+        Each skill that isn't off for you (in `thread`, that chat's modes apply), with its files, so an
+        agent outside this server (services/agent-py) can give its run the same skills as this one's.
+        Unlike the other /skills routes it takes the run's storage token.
+      parameters:
+        - name: thread
+          in: query
+          description: The chat; its modes apply.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The run's skills.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [skills]
+                properties:
+                  skills:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunSkill" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/used:
+    post:
+      tags: [skills]
+      operationId: recordSkillUse
+      summary: Note that a run used one of its skills (usage history)
+      security: [{}, {user: []}, {storage: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [thread, skill, trigger]
+              properties:
+                thread: { type: string, maxLength: 200 }
+                run: { type: string, maxLength: 200 }
+                skill: { type: string }
+                trigger: { type: string, enum: [slash, model], description: "`/name` in the message, or Claude chose it." }
+      responses:
+        "200":
+          description: Recorded (best effort); the use as the chat's skill_used event carries it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [skill, source, trigger]
+                properties:
+                  skill: { type: string }
+                  source: { $ref: "#/components/schemas/SkillSource" }
+                  trigger: { type: string, enum: [slash, model] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /skills/{name}:
     parameters:
       - $ref: "#/components/parameters/SkillName"
@@ -3438,6 +3505,24 @@ components:
             - $ref: "#/components/schemas/HubPin"
             - type: "null"
 
+    RunSkill:
+      type: object
+      required: [name, mode, source, userInvocable, needsExecution, files]
+      properties:
+        name: { type: string }
+        mode: { type: string, enum: [auto, manual], description: "auto: Claude may use it and /name runs it; manual: only /name." }
+        source: { $ref: "#/components/schemas/SkillSource" }
+        userInvocable: { type: boolean, description: "False: no /name for it." }
+        needsExecution: { type: boolean, description: "It ships scripts, which run only with SKILL_SCRIPTS=on on this server." }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/RunSkillFile" }
+    RunSkillFile:
+      type: object
+      required: [path, content]
+      properties:
+        path: { type: string, description: "Inside the skill's folder, e.g. SKILL.md." }
+        content: { type: string, description: "The file's bytes in base64." }
     SkillList:
       type: object
       required: [skills, canSetDefaults, canPublish, hub, scripts]
