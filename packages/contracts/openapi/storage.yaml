@@ -23,6 +23,8 @@ info:
       instead: Claude acting for that user. It can't reach /chats or manage access, writes
       in a knowledge node only with `?propose`, and doesn't rename, delete, review proposals,
       share or archive experiments, or upload them. Such requests answer 403 with the reason.
+      Storage tokens only reach the storage routes: the skills, hub, tools, memory and
+      follow-up routes take `X-Knowledge-User` alone (or nothing without login).
 
     Errors are JSON `{error}` with a 4xx or 5xx status. When storage isn't ready:
     503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
@@ -1253,6 +1255,7 @@ paths:
       tags: [server]
       operationId: suggestFollowUps
       summary: Follow-up chips for the chat
+      security: [{}, {user: []}]
       description: |
         One Messages API call on a small model that answers CopilotKit's forced
         `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
@@ -1290,6 +1293,7 @@ paths:
       tags: [tools]
       operationId: listTools
       summary: The chat's "+" menu of outside tools
+      security: [{}, {user: []}]
       description: The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
       responses:
         "200":
@@ -1319,6 +1323,7 @@ paths:
       tags: [tools]
       operationId: callTool
       summary: Call one of a menu server's tools as the signed-in user
+      security: [{}, {user: []}]
       description: Only the tools in that server's `ui.tools` (its `callable` list in the menu).
       requestBody:
         required: true
@@ -1369,6 +1374,7 @@ paths:
       tags: [skills]
       operationId: listSkills
       summary: Every skill you can use, with the mode that applies
+      security: [{}, {user: []}]
       description: |
         Works without storage too: then only the built-in skills, for the local user, with
         modes kept until the server restarts.
@@ -1392,6 +1398,7 @@ paths:
       tags: [skills]
       operationId: importSkill
       summary: Add a skill from a .zip to the workspace's skills/ (editors)
+      security: [{}, {user: []}]
       parameters:
         - name: filename
           in: query
@@ -1433,6 +1440,7 @@ paths:
       tags: [skills]
       operationId: setSkillMode
       summary: Set (or clear, with null) a skill's mode for you, everyone, or one chat
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -1464,6 +1472,7 @@ paths:
       tags: [skills]
       operationId: deleteSkill
       summary: Delete a workspace skill's whole folder under skills/ (editors)
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Deleted.
@@ -1490,6 +1499,7 @@ paths:
       tags: [skills]
       operationId: exportSkill
       summary: The skill as a .zip (<name>/SKILL.md, ...)
+      security: [{}, {user: []}]
       responses:
         "200":
           description: The .zip.
@@ -1508,6 +1518,7 @@ paths:
       tags: [hub]
       operationId: listHubSkills
       summary: The skill hub (needs storage; 404 without it)
+      security: [{}, {user: []}]
       description: Every /hub route needs access to the workspace root (403 without it).
       parameters:
         - name: q
@@ -1530,6 +1541,7 @@ paths:
       tags: [hub]
       operationId: publishHubSkill
       summary: Publish a workspace skill to the hub, as a new version when it changed (owners)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -1566,6 +1578,7 @@ paths:
       tags: [hub]
       operationId: getHubSkill
       summary: A hub skill's versions, and one version's SKILL.md
+      security: [{}, {user: []}]
       parameters:
         - $ref: "#/components/parameters/HubVersion"
       responses:
@@ -1588,6 +1601,7 @@ paths:
       tags: [hub]
       operationId: installHubSkill
       summary: Install a hub skill, or move its pin to another version (editors)
+      security: [{}, {user: []}]
       requestBody:
         content:
           application/json:
@@ -1617,6 +1631,7 @@ paths:
       tags: [hub]
       operationId: uninstallHubSkill
       summary: Uninstall a hub skill (editors)
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Uninstalled.
@@ -1641,6 +1656,7 @@ paths:
       tags: [hub]
       operationId: forkHubSkill
       summary: Copy a hub skill into the workspace's skills/ to change it (editors)
+      security: [{}, {user: []}]
       responses:
         "201":
           description: Copied.
@@ -1667,6 +1683,7 @@ paths:
       tags: [hub]
       operationId: diffHubSkill
       summary: What changed between two versions
+      security: [{}, {user: []}]
       parameters:
         - name: from
           in: query
@@ -1696,6 +1713,7 @@ paths:
       tags: [hub]
       operationId: verifyHubSkill
       summary: Mark a version checked, or not (hub admins, HUB_ADMINS)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -1732,6 +1750,7 @@ paths:
       tags: [hub]
       operationId: yankHubSkill
       summary: Withdraw a version, or bring it back (its publisher, hub admins)
+      security: [{}, {user: []}]
       description: A yanked version still works where it is installed; new installs skip it.
       requestBody:
         required: true
@@ -1770,6 +1789,7 @@ paths:
       tags: [hub]
       operationId: reportHubSkill
       summary: Report a hub skill to its publisher and the hub admins (anyone who reads the workspace)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -1796,6 +1816,7 @@ paths:
       tags: [hub]
       operationId: dismissHubReport
       summary: Dismiss a report (hub admins)
+      security: [{}, {user: []}]
       parameters:
         - name: id
           in: query
@@ -1824,6 +1845,7 @@ paths:
       tags: [memory]
       operationId: getMemory
       summary: Your memory, its inbox, the shared notes you read and where you can share
+      security: [{}, {user: []}]
       description: |
         Memory needs MEMORY=on and server storage; otherwise every /memory route answers 404
         and the app hides memory. Everything under /memory but /memory/agent is the signed-in
@@ -1854,6 +1876,7 @@ paths:
       tags: [memory]
       operationId: setMemorySettings
       summary: Turn memory on, ask-first or off for you, or make a chat incognito
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -1881,6 +1904,7 @@ paths:
       tags: [memory]
       operationId: getMemoryActivity
       summary: "Claude's recent changes to your notes, newest first"
+      security: [{}, {user: []}]
       responses:
         "200":
           description: The changes.
@@ -1905,6 +1929,7 @@ paths:
       tags: [memory]
       operationId: acceptMemoryChange
       summary: Make a change waiting in your inbox
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Made.
@@ -1934,6 +1959,7 @@ paths:
       tags: [memory]
       operationId: rejectMemoryChange
       summary: Drop a change waiting in your inbox
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Dropped.
@@ -1955,6 +1981,7 @@ paths:
       tags: [memory]
       operationId: exportMemory
       summary: Every note as memory/<name>.md, zipped
+      security: [{}, {user: []}]
       responses:
         "200":
           description: The .zip.
@@ -1971,6 +1998,7 @@ paths:
       tags: [memory]
       operationId: importMemory
       summary: Import notes into your inbox, from pasted text, a .md file or an export .zip
+      security: [{}, {user: []}]
       description: |
         Notes with front matter (name, description, type) are read as they are; other text is
         sorted into notes by the model, or becomes one note when the model isn't available.
@@ -2006,6 +2034,7 @@ paths:
       tags: [memory]
       operationId: getMemoryNote
       summary: A note and its versions
+      security: [{}, {user: []}]
       responses:
         "200":
           description: The note.
@@ -2027,6 +2056,7 @@ paths:
       tags: [memory]
       operationId: saveMemoryNote
       summary: Create or replace a note, as yours
+      security: [{}, {user: []}]
       parameters:
         - name: create
           in: query
@@ -2057,6 +2087,7 @@ paths:
       tags: [memory]
       operationId: deleteMemoryNote
       summary: Delete a note for good, with its versions
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Deleted.
@@ -2080,6 +2111,7 @@ paths:
       tags: [memory]
       operationId: restoreMemoryNote
       summary: Make an earlier version current (as a new version)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2104,6 +2136,7 @@ paths:
       tags: [memory]
       operationId: archiveMemoryNote
       summary: Archive a note, or bring it back
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2127,6 +2160,7 @@ paths:
       tags: [memory]
       operationId: undoMemoryChange
       summary: "Undo one of Claude's changes, while it is the note's latest"
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Undone.
@@ -2153,6 +2187,7 @@ paths:
       tags: [memory]
       operationId: shareMemoryNote
       summary: Share a note to the workspace, a knowledge node or a group
+      security: [{}, {user: []}]
       description: Where you edit shared memory it becomes a note there; elsewhere a proposal for its editors.
       requestBody:
         required: true
@@ -2201,6 +2236,7 @@ paths:
       tags: [memory]
       operationId: decideSharedMemoryProposal
       summary: Accept, reject or withdraw a proposed change to shared memory
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Decided.
@@ -2231,6 +2267,7 @@ paths:
       tags: [memory]
       operationId: getSharedMemoryNote
       summary: A shared note you read, and its versions
+      security: [{}, {user: []}]
       responses:
         "200":
           description: The note.
@@ -2252,6 +2289,7 @@ paths:
       tags: [memory]
       operationId: updateSharedMemoryNote
       summary: Change a shared note (its place's editors)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2282,6 +2320,7 @@ paths:
       tags: [memory]
       operationId: deleteSharedMemoryNote
       summary: Delete a shared note for good (its place's editors)
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Deleted.
@@ -2301,6 +2340,7 @@ paths:
       tags: [memory]
       operationId: setSharedMemoryMode
       summary: Set a shared note's mode for you, or for everyone (its place's editors)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2335,6 +2375,7 @@ paths:
       tags: [memory]
       operationId: listMemoryPacks
       summary: The hub's memory packs
+      security: [{}, {user: []}]
       parameters:
         - name: q
           in: query
@@ -2360,6 +2401,7 @@ paths:
       tags: [memory]
       operationId: publishMemoryPack
       summary: "Publish a place's own shared notes as a pack (its editors)"
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2397,6 +2439,7 @@ paths:
       tags: [memory]
       operationId: getMemoryPack
       summary: "A pack's versions, and one version's notes"
+      security: [{}, {user: []}]
       parameters:
         - $ref: "#/components/parameters/HubVersion"
       responses:
@@ -2414,6 +2457,7 @@ paths:
       tags: [memory]
       operationId: installMemoryPack
       summary: Install a pack in a place, or move its install to a version (its editors)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2448,6 +2492,7 @@ paths:
       tags: [memory]
       operationId: verifyMemoryPack
       summary: Mark a version checked, or not (hub admins)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2473,6 +2518,7 @@ paths:
       tags: [memory]
       operationId: yankMemoryPack
       summary: Withdraw a version, or bring it back (its publisher, hub admins)
+      security: [{}, {user: []}]
       requestBody:
         required: true
         content:
@@ -2499,6 +2545,7 @@ paths:
       tags: [memory]
       operationId: uninstallMemoryPack
       summary: Uninstall a pack, with its notes (its place's editors)
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Uninstalled.
@@ -2518,6 +2565,7 @@ paths:
       tags: [memory]
       operationId: forkMemoryPack
       summary: "Make an installed pack's notes the place's own"
+      security: [{}, {user: []}]
       responses:
         "200":
           description: Forked.

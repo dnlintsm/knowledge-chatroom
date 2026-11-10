@@ -356,6 +356,8 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
   step("memory: your own notes, the inbox and import", async () => {
     const thread = `conformance-memory-${stamp}`;
     await call("GET", "/memory", { expect: 401 });
+    // Storage tokens reach only the storage routes.
+    await call("GET", "/memory", { headers: storageToken("conformance|alice"), expect: 401 });
     await call("GET", "/memory", { headers: alice, expect: 200 });
     await call("GET", `/memory?thread=${thread}&node=${mod.id}`, { headers: alice, expect: 200 });
     await call("PUT", "/memory/settings", { headers: alice, json: { mode: "ask" }, expect: 200 });
@@ -499,6 +501,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
 
   step("tools menu", async () => {
     await call("GET", "/tools", { expect: 401 });
+    await call("GET", "/tools", { headers: storageToken("conformance|alice"), expect: 401 });
     await call("GET", "/tools", { headers: alice, expect: 200 });
     await call("POST", "/tools/no-such-server/search", { headers: alice, json: { arguments: {} }, expect: 404 });
   });
@@ -509,6 +512,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
   step("skills", async () => {
     await call("PUT", `/files/skills/${skill}/SKILL.md`, { headers: alice, body: skillMd("First version."), expect: 200 });
     await call("GET", "/skills", { expect: 401 });
+    await call("GET", "/skills", { headers: storageToken("conformance|alice"), expect: 401 });
     const list = await call<Schema["SkillList"]>("GET", "/skills", { headers: alice, expect: 200 });
     assert.equal(list.data.skills.find((s) => s.name === skill)?.source, "workspace");
     const builtin = list.data.skills.find((s) => s.source === "builtin")!.name;
