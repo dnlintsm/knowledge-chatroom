@@ -225,14 +225,16 @@ def file_tools(storage: Callable[[], Storage]) -> list[SdkMcpTool[Any]]:
             # With a storage token Claude's writes are the agent's; without
             # login there is none, and the API records them as the user's.
             author = "agent" if s.token else "user"
-            proposals = (await s.json("GET", "/proposals", params={"node": place.get("node"), "status": "open"}))[
+            # node=root for the root's own: without node the API lists every node's.
+            node = place.get("node")
+            proposals = (await s.json("GET", "/proposals", params={"node": node or "root", "status": "open"}))[
                 "proposals"
             ]
             mine = next(
                 (
                     p
                     for p in proposals
-                    if me and p["path"] == wanted and p["author"] == author and p["authorId"] == me
+                    if me and p["path"] == wanted and p["node"] == node and p["author"] == author and p["authorId"] == me
                 ),
                 None,
             )

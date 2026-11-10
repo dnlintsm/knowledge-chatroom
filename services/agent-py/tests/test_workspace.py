@@ -130,12 +130,23 @@ def test_edit_file_changes_part_of_a_file(api):
 
 def test_edit_file_builds_on_claudes_own_open_proposal(api):
     api.proposals = [
-        {"id": "p1", "path": "notes/r.md", "author": "agent", "authorId": "u1", "status": "open"},
+        {"id": "p1", "node": NODE, "path": "notes/r.md", "author": "agent", "authorId": "u1", "status": "open"},
     ]
     out, failed = call(api, "edit_file", path="notes/r.md", oldText="40 W", newText="45 W", node=NODE)
     assert not failed and "RF 45 W" in out
     assert api.requests[-1].content == b"RF 45 W\n"
     assert "propose" in api.requests[-1].url.params
+
+
+def test_a_root_skill_edit_builds_only_on_a_root_proposal(api):
+    # The same skill path proposed in a node is another proposal, not this one's base.
+    api.proposals = [
+        {"id": "p1", "node": NODE, "path": "skills/s/SKILL.md", "author": "agent", "authorId": "u1", "status": "open"},
+    ]
+    out, failed = call(api, "edit_file", path="skills/s/SKILL.md", oldText="40 W", newText="45 W")
+    assert failed and "No file at skills/s/SKILL.md" in out
+    listing = next(r for r in api.requests if r.url.path == "/proposals")
+    assert dict(listing.url.params) == {"node": "root", "status": "open"}
 
 
 def test_edit_file_errors_reach_claude(api):
