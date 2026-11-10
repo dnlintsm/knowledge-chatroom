@@ -237,7 +237,14 @@ An outside MCP server's memory token (`memoryAccess`, `via` `mcp:<name>`) gets o
      the mcp__papers__ tools.` A server with `"mode": "manual"` should only be offered
      while its chip is on.
    - **Forward the user** to it as this repo's agent does (`forwardIdentity`,
-     `storageAccess`), so the server knows who is asking and can save to the workspace.
+     `storageAccess`, `memoryAccess`), so the server knows who is asking and can save to
+     the workspace. Without `AUTH_SECRET`, get those tokens from
+     `POST ${LOCAL_AGENT_URL}/identity/mcp-tokens` with the run's `X-Knowledge-Storage` and
+     `X-Knowledge-Memory` headers and `{"servers": {"<name>": ["identity", "storage",
+     "memory"]}}`: it answers `{"tokens": {"<name>": {"identity": ..., ...}}}`, for the same
+     user and chat, expiring no later. Send them as `X-Knowledge-User`,
+     `X-Knowledge-Storage` and `X-Knowledge-Memory`. `services/agent-py` does this in
+     `agent_py/mcp.py`, reading the same `MCP_SERVERS`.
 
    The "+" menu and the paper cards' buttons (`POST /tools/<server>/<tool>`) always go
    through this repo's agent server, so they work the same with a remote backend.

@@ -636,6 +636,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/identity/mcp-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A remote backend's tokens for its outside MCP servers
+         * @description A remote backend's chat agent (AGENT_URL) connects to the servers in its own MCP_SERVERS
+         *     and forwards the user to them as this agent does, but holds no AUTH_SECRET. With the
+         *     run's `X-Knowledge-Storage` token (and `X-Knowledge-Memory`, for memory tokens), both
+         *     `via` "remote", it gets per server: an identity token with `aud` "mcp:<name>"
+         *     (forwardIdentity), a storage token and a memory token `via` "mcp:<name>"
+         *     (storageAccess, memoryAccess). They are for the same user and chat and expire no later
+         *     than the tokens they came from; tokens made for an outside service can't be traded.
+         *     Without login it needs no storage token and gives only memory tokens, in the unsigned
+         *     local form.
+         */
+        post: operations["tradeMcpTokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/suggest": {
         parameters: {
             query?: never;
@@ -3913,6 +3941,45 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    tradeMcpTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The tokens wanted, by server name. */
+                    servers: {
+                        [key: string]: ("identity" | "storage" | "memory")[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The tokens made, by server name: a kind is missing when the run has none (no login, or no memory in this chat). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tokens: {
+                            [key: string]: {
+                                identity?: string;
+                                storage?: string;
+                                memory?: string;
+                            };
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
         };
     };
     suggestFollowUps: {

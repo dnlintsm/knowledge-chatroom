@@ -12,8 +12,9 @@ issue #176. So far it chats with the app's own tools (task board, workbench pane
 and the browser's file tools while files live only in the browser), tells the model
 where the user is on every run, and works on the workspace's files on the server
 through the storage API (step 2), including starting and finishing runs, with the
-user's skills (step 3) and their memory (step 4). Tool chips and follow-up chips come
-in the next steps; until then, use the TypeScript agent for those.
+user's skills (step 3), their memory (step 4), and the outside MCP servers and tool
+chips (step 5). Follow-up chips come in the next step; until then, use the TypeScript
+agent for those.
 
 ## Run it
 
@@ -39,6 +40,7 @@ for a gateway) in this server's environment.
 | `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model, chosen as the TypeScript agent does (default `claude-sonnet-5`). |
 | `KNOWLEDGE_PUBLIC_KEY` | With login on: the agent server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
 | `LOCAL_AGENT_URL` | The agent server with the storage API, as for the app (default `http://localhost:8000`). |
+| `MCP_SERVERS` | Outside MCP servers and tool chips: give it the agent server's value, so the chat's "+" menu (from the agent server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
 | `AGENT_PY_WORKDIR` | Where each user's working folder goes, holding their skills (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |
@@ -87,6 +89,12 @@ for a gateway) in this server's environment.
   other tool, then wait in the user's inbox (a `PreToolUse` hook marks the run). Each
   note read or changed goes to the chat as a `memory` event. Incognito chats and memory
   turned off get none of it.
+- `agent_py/mcp.py`: the servers in `MCP_SERVERS`, read as the TypeScript agent reads
+  them (`apps/agent/src/mcp.ts`). Each run connects to them with every tool allowed,
+  leaves out a `"mode": "manual"` server unless its chip is on, and tells Claude to use
+  the servers whose chips are on. For `forwardIdentity`, `storageAccess` and
+  `memoryAccess` it trades the run's storage and memory tokens for the server's own at
+  the agent server (`POST /identity/mcp-tokens`), since it holds no `AUTH_SECRET`.
 - `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
   backend tools.
 

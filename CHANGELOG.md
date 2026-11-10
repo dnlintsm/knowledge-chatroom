@@ -14,6 +14,11 @@
   `GET /skills/run?thread=<id>` lists the skills a run gets in that chat (mode, source,
   files in base64) and `POST /skills/used` (`{thread, run?, skill, trigger}`) records a
   use. Both take the run's storage token (issue #176).
+- `POST /identity/mcp-tokens` on the agent server: a remote backend trades its run's
+  `X-Knowledge-Storage` (and `X-Knowledge-Memory`) tokens for its outside MCP servers'
+  tokens, as the agent signs them for its own servers (`forwardIdentity`, `storageAccess`,
+  `memoryAccess`): same user and chat, expiring no later. A remote backend needs no
+  `AUTH_SECRET` for them (issue #176).
 - Memory for a remote backend's chat agent: for each run with `AGENT_URL` the app also sends
   an `X-Knowledge-Memory` token for that chat (`via` `remote`; unsigned `local.` form without
   login). With it, `/memory/agent` treats the backend as Claude in the chat: the past-chat
@@ -27,8 +32,9 @@
   with the TypeScript agent's file and run tools (step 2), and has the user's skills, as
   on the agent server: auto and manual modes, `/name`, `skill_used` events and usage
   history, without scripts (step 3), and the user's memory in the chat: the memory prompt,
-  the `memory_*` and `chats_*` tools and `memory` events (step 4). Tool chips follow in
-  later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
+  the `memory_*` and `chats_*` tools and `memory` events (step 4), and the outside MCP
+  servers in `MCP_SERVERS` with the chat's tool chips (step 5). Follow-up chips follow in
+  a later step. The uv workspace now needs Python 3.11 or later (the AG-UI
   adapter does).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
   with TypeScript types generated from it and checks that keep the spec, the generated types
