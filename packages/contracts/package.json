@@ -8,9 +8,17 @@
   },
   "scripts": {
     "openapi": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts",
-    "openapi:check": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts --check"
+    "openapi:check": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts --check",
+    "typecheck": "tsc --noEmit",
+    "test:conformance": "tsx --test conformance/storage.test.ts"
   },
   "devDependencies": {
-    "openapi-typescript": "7.13.0"
+    "@types/node": "^22.9.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openapi-typescript": "7.13.0",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "yaml": "2.8.1"
   }
 }
