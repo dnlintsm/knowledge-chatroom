@@ -961,14 +961,6 @@ class DeletedFlag(BaseModel):
     deleted: Literal[True]
 
 
-ReadFileResponse = TypeAliasType("ReadFileResponse", VersionList | Any)
-"""
-With `versions`, a VersionList. Without it, a stored .json file's own content,
-which can be any JSON.
-
-"""
-
-
 class RenameFileRequest(BaseModel):
     path: str
     """

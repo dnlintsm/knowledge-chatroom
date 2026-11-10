@@ -2381,7 +2381,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VersionList"] | unknown;
+                    "application/json": unknown;
                     "*/*": string;
                 };
             };

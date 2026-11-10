@@ -46,13 +46,14 @@ def _json_schema(part: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def model_name(operation_id: str, status: int | None = None) -> str | None:
-    """The api name for an operation's JSON request (no status) or answer."""
+    """The api name for an operation's JSON request (no status) or answer; None
+    when there is no JSON body or it can be any JSON (a stored .json file)."""
     op = OPERATIONS[operation_id]
     if status is None:
         schema, suffix = _json_schema(op.get("requestBody")), "Request"
     else:
         schema, suffix = _json_schema(op["responses"].get(str(status))), "Response"
-    if schema is None:
+    if schema is None or not set(schema) - {"description"}:
         return None
     # A named schema keeps its name; an inline one is named after the operation.
     return _ref_name(schema) or operation_id[0].upper() + operation_id[1:] + suffix
@@ -90,6 +91,12 @@ def test_models_parse_and_keep_fields():
         api.FileInfo.model_validate({**info, "kind": "spreadsheet"})
 
 
+def test_a_stored_json_file_is_any_json():
+    # Not a VersionList just because it has a `versions` array: that would drop "document".
+    assert model_name("readFile", 200) is None
+    assert model_name("readFile", 304) is None
+
+
 SAMPLES = os.environ.get("API_SAMPLES")
 
 
@@ -103,6 +110,8 @@ def test_real_traffic_parses():
         is_request = "request" in line
         data = line["request"] if is_request else line["response"]
         name = model_name(operation_id, None if is_request else line["status"])
+        if name is None:  # any JSON
+            continue
         label = f"{operation_id} {'request' if is_request else line['status']} ({name})"
         adapter = TypeAdapter(getattr(api, name))
         try:
