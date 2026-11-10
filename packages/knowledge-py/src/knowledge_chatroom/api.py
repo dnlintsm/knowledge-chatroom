@@ -1025,6 +1025,57 @@ class DeleteExperimentResponse(BaseModel):
     """
 
 
+class Skill(BaseModel):
+    name: str
+    source: str | None = None
+    version: float | None = None
+    sha256: str | None = None
+
+
+class Provenance(BaseModel):
+    """
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    chat: str | None = None
+    model: str | None = None
+    skill: Skill | None = None
+    tools: dict[str, Any] | None = None
+    """
+    Each tool's version, by name.
+    """
+
+
+class StartRunRequest(BaseModel):
+    nodeId: str | None = None
+    """
+    The node to fork; null or left out for the workspace root (with rerunOf, the old run's place).
+    """
+    title: Annotated[str | None, Field(max_length=200)] = None
+    """
+    Required unless rerunOf.
+    """
+    hypothesis: str | None = None
+    params: dict[str, Any] | None = None
+    inputs: list[RunInputSource] | None = None
+    rerunOf: str | None = None
+    """
+    The run to run again.
+    """
+    provenance: Provenance | None = None
+    """
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
+    """
+
+
+class FinishRunRequest(BaseModel):
+    results: dict[str, Any]
+    state: Literal["done", "failed"] | None = "done"
+
+
 class AddRunInputsRequest(BaseModel):
     inputs: list[RunInputSource]
 

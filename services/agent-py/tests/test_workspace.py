@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
+
 from agent_py.text import EditError, apply_edit, read_lines
 from agent_py.workspace import Storage, file_route, file_tools, format_tree
 
@@ -48,6 +49,14 @@ class FakeStorage:
             if mime == "image/png":
                 return httpx.Response(302, headers={"location": "https://s3.example/x.png"})
             return httpx.Response(200, content=data, headers={"content-type": mime})
+        if path == "/experiments/runs":
+            body = json.loads(request.content)
+            inputs = [{"path": f"inputs/{i['path'].rsplit('/', 1)[-1]}"} for i in body.get("inputs", [])]
+            run = {"id": "r1", "title": body.get("title", "x (rerun)"), "state": "running", "fileCount": 2}
+            return httpx.Response(201, json={**run, "provenance": {**body["provenance"], "inputs": inputs}})
+        if path.endswith("/finish"):
+            body = json.loads(request.content)
+            return httpx.Response(200, json={"id": path.split("/")[2], "state": body["state"], "results": body["results"]})
         return httpx.Response(500, json={"error": f"unexpected {request.method} {path}"})
 
 
@@ -58,7 +67,7 @@ def api() -> FakeStorage:
 
 def tools_for(api: FakeStorage, token: str | None = "tok") -> dict[str, Any]:
     storage = Storage("http://storage.test", token, transport=httpx.MockTransport(api.handle))
-    return {t.name: t for t in file_tools(lambda: storage)}
+    return {t.name: t for t in file_tools(lambda: storage, {"chat": "chat-1", "model": "claude-x"})}
 
 
 def call(api: FakeStorage, name: str, token: str | None = "tok", **args: Any) -> tuple[str, bool]:
@@ -77,6 +86,8 @@ def test_the_tools_have_the_typescript_agents_names(api):
             "write_file",
             "edit_file",
             "list_experiments",
+            "create_experiment",
+            "set_experiment_results",
             "update_experiment",
             "propose_experiment",
         ]
@@ -166,6 +177,36 @@ def test_storage_refusals_and_outages_reach_claude():
         tool = {t.name: t for t in file_tools(lambda s=storage: s)}["list_nodes"]
         result = asyncio.run(tool.handler({}))
         assert result["is_error"] and expected in result["content"][0]["text"]
+
+
+def test_create_experiment_starts_a_run_with_its_provenance(api):
+    out, failed = call(
+        api, "create_experiment", title="Try 40 W", node=NODE, inputs=[{"path": "uploads/a.csv"}], skill="analysis"
+    )
+    assert not failed
+    assert json.loads(out) == {
+        "ok": True, "id": "r1", "title": "Try 40 W", "state": "running", "files": 2,
+        "inputs": ["inputs/a.csv"], "report": "report.md",
+    }
+    body = json.loads(api.requests[-1].content)
+    assert body["nodeId"] == NODE and body["inputs"] == [{"path": "uploads/a.csv"}]
+    assert body["provenance"]["chat"] == "chat-1" and body["provenance"]["model"] == "claude-x"
+    assert body["provenance"]["skill"] == {"name": "analysis"}
+    assert "claudeAgentSdk" in body["provenance"]["tools"]
+
+
+def test_a_rerun_keeps_the_old_runs_place_unless_told(api):
+    call(api, "create_experiment", rerunOf="r0")
+    assert "nodeId" not in json.loads(api.requests[-1].content)
+    call(api, "create_experiment", title="At the root")
+    assert json.loads(api.requests[-1].content)["nodeId"] is None
+    assert call(api, "create_experiment") == ("A new run needs a title (or rerunOf).", True)
+
+
+def test_set_experiment_results_finishes_the_run(api):
+    out, failed = call(api, "set_experiment_results", id="r1", results={"yield_pct": 92.5})
+    assert not failed and json.loads(out)["state"] == "done"
+    assert api.requests[-1].url.path == "/experiments/r1/finish"
 
 
 def test_file_routes_encode_each_segment():
