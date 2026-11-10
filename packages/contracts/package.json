@@ -2,8 +2,15 @@
   "name": "@knowledge-chatroom/contracts",
   "version": "0.2.3",
   "private": true,
-  "description": "Contracts shared by the UI and the agent: files, storage API shapes, identity tokens, text edits, auth mode. TypeScript source, no build step.",
+  "description": "Contracts shared by the UI and the agent: files, storage API shapes (openapi/storage.yaml, the source of truth), identity tokens, text edits, auth mode. TypeScript source, no build step.",
   "exports": {
     "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "openapi": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts",
+    "openapi:check": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts --check"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
   }
 }
