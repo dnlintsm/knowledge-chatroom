@@ -157,7 +157,7 @@ changed and how you validated it.
 | `apps/agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
 | `apps/agent/src/storage/migrations` | Database schema and access policies |
 | `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
-| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits) |
+| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `services/lab-tools` | The Python agent sample's tools as an MCP server |

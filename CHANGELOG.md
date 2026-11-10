@@ -4,6 +4,9 @@
 
 ### Added
 
+- The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
+  with TypeScript types generated from it and checks that keep the spec, the generated types
+  and the agent's own types in step (issue #169). No change to how the API behaves.
 - Upload an experiment with its files in one request: `POST /experiments/upload`
   (`/api/experiments/upload` through the UI) takes `multipart/form-data` with a `meta`
   part, `{id, path, title, hypothesis?, params?, results?, state?}`, and one part per file,
