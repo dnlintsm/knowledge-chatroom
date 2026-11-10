@@ -1,5 +1,6 @@
 /**
- * Ties the storage API's TypeScript types to its OpenAPI spec
+ * Ties the agent server's TypeScript types (the storage API, skills, the hub
+ * and the tools menu) to its OpenAPI spec
  * (packages/contracts/openapi/storage.yaml, issue #169). Each line fails
  * `pnpm typecheck` when a type here and the spec's schema stop matching in
  * either direction: change both, then run `pnpm -C packages/contracts openapi`.
@@ -17,6 +18,15 @@ import type { KnowledgeNode, NodeType } from "./nodes";
 import type { Promotable, Proposal } from "./proposals";
 import type { SearchHit } from "./search";
 import type { ExperimentUpload, RunInputSource, Tree } from "./session";
+import type { HubPin, SkillInfo } from "../skills/catalog";
+import type { HubDetail, HubDiff, HubDiffFile, HubList, HubListing, HubReport, HubVersion } from "../skills/hub";
+import type { ScanFlag } from "../skills/scan";
+import type { SkillList } from "../skills/service";
+import type { ToolMenuItem } from "../tools-api";
+import type { ImportResult } from "../memory/import";
+import type { InboxItem, MemoryActivity, MemoryEvent, MemoryInput, MemoryNote, MemorySummary, MemoryVersion } from "./memory";
+import type { PackDetail, PackInstall, PackListing, PackNote, PackVersion } from "./memory-packs";
+import type { SharedNote, SharedPlace, SharedProposal, SharedSummary, SharedVersion } from "./shared-memory";
 
 type Schema = components["schemas"];
 
@@ -45,4 +55,37 @@ export type StorageApiContract = [
   Check<Same<Group, Schema["Group"]>>,
   Check<Same<Grant, Schema["Grant"]>>,
   Check<Same<AuditEntry, Schema["AuditEntry"]>>,
+];
+
+export type AgentApiContract = [
+  Check<Same<SkillInfo, Schema["SkillInfo"]>>,
+  Check<Same<SkillList, Schema["SkillList"]>>,
+  Check<Same<HubPin, Schema["HubPin"]>>,
+  Check<Same<ScanFlag, Schema["ScanFlag"]>>,
+  Check<Same<HubListing, Schema["HubListing"]>>,
+  Check<Same<HubVersion, Schema["HubVersion"]>>,
+  Check<Same<HubReport, Schema["HubReport"]>>,
+  Check<Same<HubDetail, Schema["HubDetail"]>>,
+  Check<Same<HubList, Schema["HubList"]>>,
+  Check<Same<HubDiffFile, Schema["HubDiffFile"]>>,
+  Check<Same<HubDiff, Schema["HubDiff"]>>,
+  Check<Same<ToolMenuItem, Schema["ToolMenuItem"]>>,
+  Check<Same<MemoryInput, Schema["MemoryInput"]>>,
+  Check<Same<MemorySummary, Schema["MemorySummary"]>>,
+  Check<Same<MemoryNote, Schema["MemoryNote"]>>,
+  Check<Same<MemoryVersion, Schema["MemoryVersion"]>>,
+  Check<Same<MemoryEvent, Schema["MemoryEvent"]>>,
+  Check<Same<MemoryActivity, Schema["MemoryActivity"]>>,
+  Check<Same<InboxItem, Schema["InboxItem"]>>,
+  Check<Same<ImportResult, Schema["MemoryImport"]>>,
+  Check<Same<SharedPlace, Schema["SharedPlace"]>>,
+  Check<Same<SharedSummary, Schema["SharedSummary"]>>,
+  Check<Same<SharedNote, Schema["SharedNote"]>>,
+  Check<Same<SharedVersion, Schema["SharedVersion"]>>,
+  Check<Same<SharedProposal, Schema["SharedProposal"]>>,
+  Check<Same<PackNote, Schema["PackNote"]>>,
+  Check<Same<PackVersion, Schema["PackVersion"]>>,
+  Check<Same<PackListing, Schema["PackListing"]>>,
+  Check<Same<PackDetail, Schema["PackDetail"]>>,
+  Check<Same<PackInstall, Schema["PackInstall"]>>,
 ];

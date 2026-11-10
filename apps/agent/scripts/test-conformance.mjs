@@ -44,6 +44,11 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     // Signed-in users, whatever AUTH_MODE the shell or the repository .env sets.
     AUTH_MODE: "oidc",
     AUTH_SECRET: authSecret,
+    // The suite's owner moderates the skill hub (verify, dismiss reports).
+    HUB_ADMINS: "conformance|alice",
+    // Memory routes answer 404 unless memory is on; nothing learns in the background.
+    MEMORY: "on",
+    MEMORY_LEARN: "off",
     AGENT_PORT: String(port),
     // Full-text search is enough here; search by meaning has its own tests.
     EMBEDDING_MODEL: "off",

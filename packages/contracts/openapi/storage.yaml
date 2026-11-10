@@ -5,8 +5,12 @@ info:
   description: |
     The storage API served by the agent server (apps/agent/src/storage/http.ts):
     workspace files, the knowledge tree, experiments, search, proposals, chat
-    history and access. It is the contract a Python service has to match before it
-    can take over a route group (issue #169).
+    history and access; and the rest of that server's HTTP routes: memory
+    (apps/agent/src/memory/http.ts), skills and the skill hub (apps/agent/src/skills/http.ts), the "+" menu's tools
+    (apps/agent/src/tools-api.ts), follow-up suggestions, the identity public key
+    and the health check. It is the contract a Python service has to match before
+    it can take over a route group (issue #169). The chat run itself (`POST /`) is
+    an AG-UI endpoint, specified by AG-UI rather than here.
 
     This file is the source of truth. `pnpm -C packages/contracts openapi` turns it
     into src/generated/storage-api.ts; CI fails when that file is out of date.
@@ -19,6 +23,8 @@ info:
       instead: Claude acting for that user. It can't reach /chats or manage access, writes
       in a knowledge node only with `?propose`, and doesn't rename, delete, review proposals,
       share or archive experiments, or upload them. Such requests answer 403 with the reason.
+      Storage tokens only reach the storage routes: the skills, hub, tools, memory and
+      follow-up routes take `X-Knowledge-User` alone (or nothing without login).
 
     Errors are JSON `{error}` with a 4xx or 5xx status. When storage isn't ready:
     503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
@@ -37,6 +43,11 @@ tags:
   - name: proposals
   - name: chats
   - name: access
+  - name: skills
+  - name: hub
+  - name: memory
+  - name: tools
+  - name: server
 
 paths:
   /files:
@@ -1194,6 +1205,1456 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  # --- The rest of the agent server (issue #169, step 3) ---
+
+  /health:
+    get:
+      tags: [server]
+      operationId: getHealth
+      summary: The server is up
+      security: [{}]
+      responses:
+        "200":
+          description: Up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /identity/public-key:
+    get:
+      tags: [server]
+      operationId: getIdentityPublicKey
+      summary: The Ed25519 key that verifies identity and storage tokens
+      description: |
+        Outside services (MCP servers, a remote agent backend) verify `X-Knowledge-User` and
+        `X-Knowledge-Storage` tokens with this key instead of AUTH_SECRET (docs/remote-agent.md).
+      security: [{}]
+      responses:
+        "200":
+          description: The public key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alg, key]
+                properties:
+                  alg: { type: string, const: Ed25519 }
+                  key: { type: string, description: The raw public key, base64url. }
+        "404":
+          description: Login is off, so there are no identity tokens.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /suggest:
+    post:
+      tags: [server]
+      operationId: suggestFollowUps
+      summary: Follow-up chips for the chat
+      security: [{}, {user: []}]
+      description: |
+        One Messages API call on a small model that answers CopilotKit's forced
+        `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+        RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
+        stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
+        TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
+        The events come as Server-Sent Events for `Accept: text/event-stream` (what the app
+        sends), and as AG-UI protobuf otherwise, as the AG-UI encoder picks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunAgentInput" }
+      responses:
+        "200":
+          description: AG-UI events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Lines of `data: <AG-UI event JSON>` separated by blank lines."
+              x-event-schema: { $ref: "#/components/schemas/AgUiEvent" }
+            application/vnd.ag-ui.event+proto:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404":
+          description: Chat is served by a remote backend (AGENT_URL), which answers this instead.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /tools:
+    get:
+      tags: [tools]
+      operationId: listTools
+      summary: The chat's "+" menu of outside tools
+      security: [{}, {user: []}]
+      description: The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+      responses:
+        "200":
+          description: The menu.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tools]
+                properties:
+                  tools:
+                    type: array
+                    items: { $ref: "#/components/schemas/ToolMenuItem" }
+        "401": { $ref: "#/components/responses/SignIn" }
+
+  /tools/{server}/{tool}:
+    parameters:
+      - name: server
+        in: path
+        required: true
+        schema: { type: string }
+      - name: tool
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [tools]
+      operationId: callTool
+      summary: Call one of a menu server's tools as the signed-in user
+      security: [{}, {user: []}]
+      description: Only the tools in that server's `ui.tools` (its `callable` list in the menu).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arguments]
+              properties:
+                arguments: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: What the tool answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text]
+                properties:
+                  result:
+                    description: Its structured content, or the JSON in its text, or null.
+                  text: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403":
+          description: The tool isn't one the app may call.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such server in the menu.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The tool ran and reported an error (the reason is in `error`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The server couldn't be reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /skills:
+    get:
+      tags: [skills]
+      operationId: listSkills
+      summary: Every skill you can use, with the mode that applies
+      security: [{}, {user: []}]
+      description: |
+        Works without storage too: then only the built-in skills, for the local user, with
+        modes kept until the server restarts.
+      parameters:
+        - name: thread
+          in: query
+          description: Include this chat's modes (`chatMode`).
+          schema: { type: string }
+      responses:
+        "200":
+          description: The skills.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillList" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/import:
+    post:
+      tags: [skills]
+      operationId: importSkill
+      summary: Add a skill from a .zip to the workspace's skills/ (editors)
+      security: [{}, {user: []}]
+      parameters:
+        - name: filename
+          in: query
+          description: The .zip's file name, to name the skill when the .zip has no folder.
+          schema: { type: string }
+        - name: replace
+          in: query
+          description: "`1` or `true` replaces a skill folder of that name."
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, path, files]
+                properties:
+                  name: { type: string }
+                  path: { type: string, description: Its SKILL.md in the workspace. }
+                  files: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/{name}:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    put:
+      tags: [skills]
+      operationId: setSkillMode
+      summary: Set (or clear, with null) a skill's mode for you, everyone, or one chat
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { $ref: "#/components/schemas/SkillModeOrNull" }
+                scope:
+                  type: string
+                  enum: [user, workspace, chat]
+                  default: user
+                  description: "`workspace` needs editor access at the root."
+                thread: { type: string, description: The chat, for scope `chat`. }
+      responses:
+        "200":
+          description: The skill as you now see it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [skills]
+      operationId: deleteSkill
+      summary: Delete a workspace skill's whole folder under skills/ (editors)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, deleted]
+                properties:
+                  name: { type: string }
+                  deleted: { type: integer, description: How many files. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/{name}/export:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [skills]
+      operationId: exportSkill
+      summary: The skill as a .zip (<name>/SKILL.md, ...)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The .zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub:
+    get:
+      tags: [hub]
+      operationId: listHubSkills
+      summary: The skill hub (needs storage; 404 without it)
+      security: [{}, {user: []}]
+      description: Every /hub route needs access to the workspace root (403 without it).
+      parameters:
+        - name: q
+          in: query
+          description: Words to look for in names and descriptions.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The hub's skills.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [hub]
+      operationId: publishHubSkill
+      summary: Publish a workspace skill to the hub, as a new version when it changed (owners)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skill]
+              properties:
+                skill: { type: string, description: The workspace skill's name. }
+      responses:
+        "201":
+          description: Published (or `unchanged`, when the newest version has the same files).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, unchanged]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  unchanged: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [hub]
+      operationId: getHubSkill
+      summary: A hub skill's versions, and one version's SKILL.md
+      security: [{}, {user: []}]
+      parameters:
+        - $ref: "#/components/parameters/HubVersion"
+      responses:
+        "200":
+          description: The skill.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/install:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    put:
+      tags: [hub]
+      operationId: installHubSkill
+      summary: Install a hub skill, or move its pin to another version (editors)
+      security: [{}, {user: []}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: [integer, "null"], minimum: 1, description: Leave out for the newest. }
+      responses:
+        "200":
+          description: Installed at that version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [hub]
+      operationId: uninstallHubSkill
+      summary: Uninstall a hub skill (editors)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Uninstalled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, installed]
+                properties:
+                  name: { type: string }
+                  installed: { type: "null" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/fork:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: forkHubSkill
+      summary: Copy a hub skill into the workspace's skills/ to change it (editors)
+      security: [{}, {user: []}]
+      responses:
+        "201":
+          description: Copied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, path]
+                properties:
+                  name: { type: string }
+                  path: { type: string, description: Its SKILL.md in the workspace. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/diff:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [hub]
+      operationId: diffHubSkill
+      summary: What changed between two versions
+      security: [{}, {user: []}]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The changed files.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/verify:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: verifyHubSkill
+      summary: Mark a version checked, or not (hub admins, HUB_ADMINS)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                verified: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, verified]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  verified: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/yank:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: yankHubSkill
+      summary: Withdraw a version, or bring it back (its publisher, hub admins)
+      security: [{}, {user: []}]
+      description: A yanked version still works where it is installed; new installs skip it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                yanked: { type: boolean, default: true }
+                reason: { type: [string, "null"] }
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, yanked]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  yanked: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/reports:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: reportHubSkill
+      summary: Report a hub skill to its publisher and the hub admins (anyone who reads the workspace)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                version: { type: [integer, "null"], minimum: 1 }
+      responses:
+        "201":
+          description: Reported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdOnly" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [hub]
+      operationId: dismissHubReport
+      summary: Dismiss a report (hub admins)
+      security: [{}, {user: []}]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Dismissed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, dismissed]
+                properties:
+                  id: { type: string }
+                  dismissed: { type: boolean, const: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory:
+    get:
+      tags: [memory]
+      operationId: getMemory
+      summary: Your memory, its inbox, the shared notes you read and where you can share
+      security: [{}, {user: []}]
+      description: |
+        Memory needs MEMORY=on and server storage; otherwise every /memory route answers 404
+        and the app hides memory. Everything under /memory but /memory/agent is the signed-in
+        user's own: nobody reads another's notes. Errors: 400 for a bad request (including a
+        change not allowed in that place), 404 for no such note, 409 for a change made since.
+      parameters:
+        - name: thread
+          in: query
+          description: Say whether this chat is incognito (`incognito`).
+          schema: { type: string }
+        - name: node
+          in: query
+          description: Add this knowledge node to `targets`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The overview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemoryOverview" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/settings:
+    put:
+      tags: [memory]
+      operationId: setMemorySettings
+      summary: Turn memory on, ask-first or off for you, or make a chat incognito
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { $ref: "#/components/schemas/MemoryMode" }
+                thread: { type: string, description: The chat, for `incognito`. }
+                incognito: { type: boolean }
+      responses:
+        "200":
+          description: The settings now (`incognito` for `thread`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemorySettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/activity:
+    get:
+      tags: [memory]
+      operationId: getMemoryActivity
+      summary: "Claude's recent changes to your notes, newest first"
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The changes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [activity]
+                properties:
+                  activity:
+                    type: array
+                    items: { $ref: "#/components/schemas/MemoryActivity" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/inbox/{id}/accept:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [memory]
+      operationId: acceptMemoryChange
+      summary: Make a change waiting in your inbox
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Made.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, note]
+                properties:
+                  id: { type: string }
+                  status: { type: string, const: accepted }
+                  note:
+                    description: The note now; null when the change deleted it.
+                    oneOf:
+                      - $ref: "#/components/schemas/MemoryNote"
+                      - type: "null"
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/inbox/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [memory]
+      operationId: rejectMemoryChange
+      summary: Drop a change waiting in your inbox
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Dropped.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string }
+                  status: { type: string, const: rejected }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/export:
+    get:
+      tags: [memory]
+      operationId: exportMemory
+      summary: Every note as memory/<name>.md, zipped
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The .zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/import:
+    post:
+      tags: [memory]
+      operationId: importMemory
+      summary: Import notes into your inbox, from pasted text, a .md file or an export .zip
+      security: [{}, {user: []}]
+      description: |
+        Notes with front matter (name, description, type) are read as they are; other text is
+        sorted into notes by the model, or becomes one note when the model isn't available.
+        Everything waits in the inbox. At most 2 MB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string }
+                label: { type: string, description: Where it came from, for the inbox. }
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: What went to the inbox.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemoryImport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/notes/{name}:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    get:
+      tags: [memory]
+      operationId: getMemoryNote
+      summary: A note and its versions
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note, versions]
+                properties:
+                  note: { $ref: "#/components/schemas/MemoryNote" }
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/MemoryVersion" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    put:
+      tags: [memory]
+      operationId: saveMemoryNote
+      summary: Create or replace a note, as yours
+      security: [{}, {user: []}]
+      parameters:
+        - name: create
+          in: query
+          description: "`1` or `true` refuses a name already in use (409)."
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemoryInput" }
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/MemoryNote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [memory]
+      operationId: deleteMemoryNote
+      summary: Delete a note for good, with its versions
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, deleted]
+                properties:
+                  name: { type: string }
+                  deleted: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/notes/{name}/restore:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    post:
+      tags: [memory]
+      operationId: restoreMemoryNote
+      summary: Make an earlier version current (as a new version)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/MemoryNoteAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/notes/{name}/archive:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    post:
+      tags: [memory]
+      operationId: archiveMemoryNote
+      summary: Archive a note, or bring it back
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                archived: { type: boolean, default: true }
+      responses:
+        "200": { $ref: "#/components/responses/MemoryNoteAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/events/{id}/undo:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [memory]
+      operationId: undoMemoryChange
+      summary: "Undo one of Claude's changes, while it is the note's latest"
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Undone.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, note]
+                properties:
+                  name: { type: string }
+                  note:
+                    description: The note now; null when undoing removed it.
+                    oneOf:
+                      - $ref: "#/components/schemas/MemoryNote"
+                      - type: "null"
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/shared:
+    post:
+      tags: [memory]
+      operationId: shareMemoryNote
+      summary: Share a note to the workspace, a knowledge node or a group
+      security: [{}, {user: []}]
+      description: Where you edit shared memory it becomes a note there; elsewhere a proposal for its editors.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SharedTarget"
+                - $ref: "#/components/schemas/MemoryInput"
+                - type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+      responses:
+        "200":
+          description: The new note, or the proposal.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note, proposal]
+                properties:
+                  note:
+                    oneOf:
+                      - $ref: "#/components/schemas/SharedNote"
+                      - type: "null"
+                  proposal:
+                    oneOf:
+                      - $ref: "#/components/schemas/SharedProposal"
+                      - type: "null"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/shared/proposals/{id}/{decision}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: decision
+        in: path
+        required: true
+        description: "accept or reject (its place's editors), withdraw (its author)."
+        schema: { type: string, enum: [accept, reject, withdraw] }
+    post:
+      tags: [memory]
+      operationId: decideSharedMemoryProposal
+      summary: Accept, reject or withdraw a proposed change to shared memory
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Decided.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, note]
+                properties:
+                  id: { type: string }
+                  status: { type: string, enum: [accept, reject, withdraw] }
+                  note:
+                    description: The note after an accepted change; otherwise null.
+                    oneOf:
+                      - $ref: "#/components/schemas/SharedNote"
+                      - type: "null"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/shared/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [memory]
+      operationId: getSharedMemoryNote
+      summary: A shared note you read, and its versions
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note, versions]
+                properties:
+                  note: { $ref: "#/components/schemas/SharedNote" }
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/SharedVersion" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    put:
+      tags: [memory]
+      operationId: updateSharedMemoryNote
+      summary: Change a shared note (its place's editors)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/MemoryInput"
+                - type: object
+                  properties:
+                    version: { type: integer, description: Refuse (409) if the note is past this version. }
+      responses:
+        "200":
+          description: Changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/SharedNote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [memory]
+      operationId: deleteSharedMemoryNote
+      summary: Delete a shared note for good (its place's editors)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeletedFlag" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/shared/{id}/mode:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    put:
+      tags: [memory]
+      operationId: setSharedMemoryMode
+      summary: Set a shared note's mode for you, or for everyone (its place's editors)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  description: null clears your own choice.
+                  oneOf:
+                    - $ref: "#/components/schemas/SharedMode"
+                    - type: "null"
+                everyone: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The note as you now see it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/SharedSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/packs:
+    get:
+      tags: [memory]
+      operationId: listMemoryPacks
+      summary: The hub's memory packs
+      security: [{}, {user: []}]
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: The packs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [packs, isAdmin]
+                properties:
+                  packs:
+                    type: array
+                    items: { $ref: "#/components/schemas/PackListing" }
+                  isAdmin: { type: boolean }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [memory]
+      operationId: publishMemoryPack
+      summary: "Publish a place's own shared notes as a pack (its editors)"
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SharedTarget"
+                - type: object
+                  required: [name, description]
+                  properties:
+                    name: { type: string }
+                    description: { type: string }
+      responses:
+        "200":
+          description: Published (or `unchanged`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, unchanged]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  unchanged: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/packs/{name}:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    get:
+      tags: [memory]
+      operationId: getMemoryPack
+      summary: "A pack's versions, and one version's notes"
+      security: [{}, {user: []}]
+      parameters:
+        - $ref: "#/components/parameters/HubVersion"
+      responses:
+        "200": { $ref: "#/components/responses/PackAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/packs/{name}/install:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    post:
+      tags: [memory]
+      operationId: installMemoryPack
+      summary: Install a pack in a place, or move its install to a version (its editors)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SharedTarget"
+                - type: object
+                  properties:
+                    version: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Installed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [install]
+                properties:
+                  install: { $ref: "#/components/schemas/PackInstall" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "409": { $ref: "#/components/responses/MemoryChanged" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/packs/{name}/verify:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    post:
+      tags: [memory]
+      operationId: verifyMemoryPack
+      summary: Mark a version checked, or not (hub admins)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                verified: { type: boolean, default: true }
+      responses:
+        "200": { $ref: "#/components/responses/PackAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/packs/{name}/yank:
+    parameters:
+      - $ref: "#/components/parameters/MemoryName"
+    post:
+      tags: [memory]
+      operationId: yankMemoryPack
+      summary: Withdraw a version, or bring it back (its publisher, hub admins)
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                yanked: { type: boolean, default: true }
+                reason: { type: [string, "null"] }
+      responses:
+        "200": { $ref: "#/components/responses/PackAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/installs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [memory]
+      operationId: uninstallMemoryPack
+      summary: Uninstall a pack, with its notes (its place's editors)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Uninstalled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeletedFlag" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/installs/{id}/fork:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [memory]
+      operationId: forkMemoryPack
+      summary: "Make an installed pack's notes the place's own"
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Forked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, notes]
+                properties:
+                  id: { type: string }
+                  notes: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/agent:
+    get:
+      tags: [memory]
+      operationId: getMemoryAgent
+      summary: "An outside MCP server's view of one chat's memory: the prompt and the tools"
+      description: |
+        With an `X-Knowledge-Memory` token (memoryAccess in MCP_SERVERS), a server uses the
+        user's memory in the chat the token was made for, through the same memory_* tools
+        Claude has. Its changes always wait in the user's inbox (or go to a shared note's
+        editors).
+      security:
+        - memory: []
+      responses:
+        "200":
+          description: The memory section for the server's own model, and the tools.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prompt, tools]
+                properties:
+                  prompt: { type: string }
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, description, inputSchema]
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+                        inputSchema: { type: object, additionalProperties: true, description: A JSON Schema. }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/MemoryOffInChat" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /memory/agent/tools/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, enum: [memory_view, memory_search, memory_save, memory_edit, memory_delete] }
+    post:
+      tags: [memory]
+      operationId: callMemoryTool
+      summary: Call one memory tool for an outside MCP server
+      security:
+        - memory: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true, description: "The tool's arguments, as its inputSchema says." }
+      responses:
+        "200":
+          description: What the tool answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text, isError]
+                properties:
+                  text: { type: string }
+                  isError: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/MemoryOffInChat" }
+        "404": { $ref: "#/components/responses/MemoryNotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
 components:
   securitySchemes:
     user:
@@ -1206,6 +2667,11 @@ components:
       in: header
       name: X-Knowledge-Storage
       description: "A storage token (aud \"storage\"): Claude acting for its user through an outside service, with the limits listed above."
+    memory:
+      type: apiKey
+      in: header
+      name: X-Knowledge-Memory
+      description: "A memory token (aud \"memory\") for one chat run, for /memory/agent only: an outside MCP server using that chat's memory."
 
   parameters:
     Id:
@@ -1225,6 +2691,23 @@ components:
       in: query
       description: A knowledge node's files; leave out both node and experiment for the workspace root.
       schema: { type: string }
+    SkillName:
+      name: name
+      in: path
+      required: true
+      description: A skill's name (lowercase letters, digits and dashes).
+      schema: { type: string }
+    MemoryName:
+      name: name
+      in: path
+      required: true
+      description: "A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style)."
+      schema: { type: string }
+    HubVersion:
+      name: version
+      in: query
+      description: A version number; leave out for the newest.
+      schema: { type: integer, minimum: 1 }
     Experiment:
       name: experiment
       in: query
@@ -1232,6 +2715,44 @@ components:
       schema: { type: string }
 
   responses:
+    MemoryNotFound:
+      description: No such note (or proposal, pack, install), or memory is off on this server (MEMORY=on) or has no storage.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MemoryChanged:
+      description: The note changed since (or the name is in use, or the change was already undone).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MemoryOffInChat:
+      description: Memory is off in that chat (incognito, or turned off).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MemoryNoteAnswer:
+      description: The note now.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [note]
+            properties:
+              note: { $ref: "#/components/schemas/MemoryNote" }
+    PackAnswer:
+      description: The pack, at that version.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [pack]
+            properties:
+              pack: { $ref: "#/components/schemas/PackDetail" }
+    Conflict:
+      description: Something is in the way, such as a skill folder of that name or a read-only file in it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: The request is malformed or names something invalid.
       content:
@@ -1733,3 +3254,558 @@ components:
         action: { type: string, description: "Such as node.create, group.add_member or grant.set." }
         target: { type: object, additionalProperties: true }
         at: { $ref: "#/components/schemas/Timestamp" }
+
+    # --- Server, tools and suggestions ---
+
+    RunAgentInput:
+      type: object
+      description: An AG-UI run request (https://docs.ag-ui.com); only the fields /suggest reads are listed.
+      additionalProperties: true
+      required: [threadId, runId, messages]
+      properties:
+        threadId: { type: string }
+        runId: { type: string }
+        messages: { type: array, items: { type: object, additionalProperties: true } }
+        tools: { type: array, items: { type: object, additionalProperties: true } }
+        context: { type: array, items: { type: object, additionalProperties: true } }
+
+    AgUiEvent:
+      type: object
+      description: One AG-UI event (https://docs.ag-ui.com), by `type`.
+      additionalProperties: true
+      required: [type]
+      properties:
+        type: { type: string }
+
+    ToolMenuItem:
+      type: object
+      required: [server, label, chip, description, icon, mode, callable]
+      properties:
+        server: { type: string, description: Its name in MCP_SERVERS. }
+        label: { type: string }
+        chip: { type: string, description: The chip's text in the composer. }
+        description: { type: [string, "null"] }
+        icon: { type: [string, "null"] }
+        mode: { type: string, enum: [auto, manual] }
+        callable:
+          type: array
+          description: Tools the app may call with POST /tools/{server}/{tool}.
+          items: { type: string }
+
+    # --- Skills and the hub ---
+
+    SkillMode:
+      type: string
+      enum: [auto, manual, off]
+    SkillModeOrNull:
+      oneOf:
+        - $ref: "#/components/schemas/SkillMode"
+        - type: "null"
+    SkillSource:
+      type: string
+      enum: [builtin, workspace, hub]
+
+    HubPin:
+      type: object
+      description: An installed hub skill's version, the newest one to update to, and their standing.
+      required: [version, latest, verified, yanked, yankReason]
+      properties:
+        version: { type: integer }
+        latest: { type: integer, description: The newest version that isn't yanked. }
+        verified: { type: boolean }
+        yanked: { type: boolean }
+        yankReason: { type: [string, "null"] }
+
+    SkillInfo:
+      type: object
+      required: [name, description, argumentHint, source, path, modelInvocable, userInvocable, needsExecution,
+                 mode, defaultMode, workspaceMode, userMode, chatMode, hub]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: [string, "null"], description: "Shown after /name in the slash menu, such as [file]." }
+        source: { $ref: "#/components/schemas/SkillSource" }
+        path: { type: [string, "null"], description: Its SKILL.md in the workspace; null for built-in skills. }
+        modelInvocable: { type: boolean, description: "False when its front matter says disable-model-invocation: never auto." }
+        userInvocable: { type: boolean, description: "False when its front matter says user-invocable: false: no /name." }
+        needsExecution: { type: boolean, description: It ships scripts or asks for a shell. }
+        mode: { $ref: "#/components/schemas/SkillMode" }
+        defaultMode: { $ref: "#/components/schemas/SkillMode" }
+        workspaceMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        userMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        chatMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        hub:
+          oneOf:
+            - $ref: "#/components/schemas/HubPin"
+            - type: "null"
+
+    SkillList:
+      type: object
+      required: [skills, canSetDefaults, canPublish, hub, scripts]
+      properties:
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/SkillInfo" }
+        canSetDefaults: { type: boolean, description: "Editor at the root: may set defaults and add skills." }
+        canPublish: { type: boolean, description: Owner at the root. }
+        hub: { type: boolean, description: There is a hub (it needs storage). }
+        scripts: { type: boolean, description: "Skills' scripts run (SKILL_SCRIPTS=on)." }
+
+    ScanFlag:
+      type: object
+      required: [kind, path, line, detail]
+      properties:
+        kind: { type: string, enum: [scripts, network, large, binary, hidden-text, instructions] }
+        path: { type: string }
+        line: { type: [integer, "null"] }
+        detail: { type: string }
+
+    HubListing:
+      type: object
+      required: [name, description, argumentHint, modelInvocable, userInvocable, needsExecution, publisher, mine,
+                 latest, verified, yanked, flags, updatedAt, installed, reports]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: [string, "null"] }
+        modelInvocable: { type: boolean }
+        userInvocable: { type: boolean }
+        needsExecution: { type: boolean }
+        publisher: { type: [string, "null"], description: Who first published it. }
+        mine: { type: boolean, description: You published it. }
+        latest: { type: integer }
+        verified: { type: boolean, description: About `latest`. }
+        yanked: { type: boolean, description: About `latest`. }
+        flags: { type: integer, description: "How many scan flags `latest` has." }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        installed: { type: [integer, "null"], description: The version installed in this workspace. }
+        reports: { type: [integer, "null"], description: Open reports, for hub admins and the publisher. }
+
+    HubVersion:
+      type: object
+      required: [version, publishedAt, publishedBy, files, size, needsExecution, verified, yanked, yankReason, flags]
+      properties:
+        version: { type: integer }
+        publishedAt: { $ref: "#/components/schemas/Timestamp" }
+        publishedBy: { type: [string, "null"] }
+        files: { type: integer }
+        size: { type: integer }
+        needsExecution: { type: boolean }
+        verified: { type: boolean }
+        yanked: { type: boolean }
+        yankReason: { type: [string, "null"] }
+        flags:
+          type: array
+          items: { $ref: "#/components/schemas/ScanFlag" }
+
+    HubReport:
+      type: object
+      required: [id, version, reason, reporter, createdAt]
+      properties:
+        id: { type: string }
+        version: { type: [integer, "null"] }
+        reason: { type: string }
+        reporter: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    HubDetail:
+      allOf:
+        - $ref: "#/components/schemas/HubListing"
+        - type: object
+          required: [versions, version, skillMd, canModerate, canYank, openReports]
+          properties:
+            versions:
+              type: array
+              items: { $ref: "#/components/schemas/HubVersion" }
+            version: { type: integer, description: The version shown. }
+            skillMd: { type: string, description: "That version's SKILL.md." }
+            canModerate: { type: boolean, description: "A hub admin: may verify and dismiss reports." }
+            canYank: { type: boolean }
+            openReports:
+              oneOf:
+                - type: array
+                  items: { $ref: "#/components/schemas/HubReport" }
+                - type: "null"
+
+    HubList:
+      type: object
+      required: [skills, canInstall, canPublish, isAdmin]
+      properties:
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/HubListing" }
+        canInstall: { type: boolean }
+        canPublish: { type: boolean }
+        isAdmin: { type: boolean }
+
+    HubDiffFile:
+      type: object
+      required: [path, change, before, after, binary]
+      properties:
+        path: { type: string }
+        change: { type: string, enum: [added, removed, changed] }
+        before: { type: [string, "null"] }
+        after: { type: [string, "null"] }
+        binary: { type: boolean }
+
+    HubDiff:
+      type: object
+      required: [name, from, to, files, flags]
+      properties:
+        name: { type: string }
+        from: { type: integer }
+        to: { type: integer }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/HubDiffFile" }
+        flags:
+          type: array
+          description: "What the scan found in `to`."
+          items: { $ref: "#/components/schemas/ScanFlag" }
+
+    # --- Memory ---
+
+    MemoryType:
+      type: string
+      enum: [preference, profile, project, reference, feedback]
+    MemoryMode:
+      type: string
+      enum: ["on", ask, "off"]
+    MemoryAuthor:
+      type: string
+      enum: [user, agent]
+
+    MemoryInput:
+      type: object
+      required: [description, type, body]
+      properties:
+        description: { type: string, description: One line; it goes in the index. }
+        type: { type: string, description: "One of MemoryType." }
+        body: { type: string, description: The note, in markdown. }
+
+    MemorySummary:
+      type: object
+      required: [name, description, type, version, createdBy, updatedBy, archived, createdAt, updatedAt, lastUsedAt]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/MemoryType" }
+        version: { type: integer }
+        createdBy: { $ref: "#/components/schemas/MemoryAuthor" }
+        updatedBy: { $ref: "#/components/schemas/MemoryAuthor" }
+        archived: { type: boolean }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        lastUsedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
+    MemoryNote:
+      allOf:
+        - $ref: "#/components/schemas/MemorySummary"
+        - type: object
+          required: [body]
+          properties:
+            body: { type: string }
+
+    MemoryVersion:
+      type: object
+      required: [version, description, type, body, changedBy, threadId, createdAt]
+      properties:
+        version: { type: integer }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/MemoryType" }
+        body: { type: string }
+        changedBy: { $ref: "#/components/schemas/MemoryAuthor" }
+        threadId: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    MemoryEvent:
+      type: object
+      description: What Claude did with a note in a run, as the chat shows it.
+      required: [id, name, description, kind, version]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        kind: { type: string, enum: [read, create, update, archive, propose] }
+        version: { type: integer }
+        shared:
+          type: object
+          description: For a shared note, which one and where it lives.
+          required: [id, label]
+          properties:
+            id: { type: string }
+            label: { type: string }
+
+    MemoryActivity:
+      allOf:
+        - $ref: "#/components/schemas/MemoryEvent"
+        - type: object
+          required: [threadId, source, at, undone, undoable]
+          properties:
+            threadId: { type: string }
+            source: { type: string, enum: [chat, learn, inbox] }
+            at: { $ref: "#/components/schemas/Timestamp" }
+            undone: { type: boolean }
+            undoable: { type: boolean, description: "Still the note's latest change, so Undo can take it back." }
+
+    InboxItem:
+      type: object
+      description: A change Claude proposed, waiting for the user.
+      required: [id, op, name, description, type, body, baseVersion, source, threadId, reason, createdAt]
+      properties:
+        id: { type: string }
+        op: { type: string, enum: [add, update, delete] }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        type:
+          oneOf:
+            - $ref: "#/components/schemas/MemoryType"
+            - type: "null"
+        body: { type: [string, "null"] }
+        baseVersion: { type: [integer, "null"], description: "The note's version the change was made against." }
+        source: { type: string, enum: [chat, learn, import] }
+        threadId: { type: [string, "null"] }
+        reason: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    MemorySettings:
+      type: object
+      required: [mode, incognito]
+      properties:
+        mode: { $ref: "#/components/schemas/MemoryMode" }
+        incognito: { type: boolean }
+
+    MemoryImport:
+      type: object
+      required: [proposed, skipped, how]
+      properties:
+        proposed: { type: integer, description: Notes now waiting in the inbox. }
+        skipped: { type: integer, description: "Notes left out: invalid, or the inbox was full." }
+        how:
+          type: string
+          enum: [files, text, whole]
+          description: "files: front matter read as is; text: the model sorted plain text; whole: the model wasn't available, so the text is one note."
+
+    SharedScope:
+      type: string
+      enum: [workspace, node, group]
+    SharedMode:
+      type: string
+      enum: [auto, manual, "off"]
+
+    SharedTarget:
+      type: object
+      description: "A place for shared memory: the workspace, a knowledge node (`nodeId`) or a group (`groupId`)."
+      required: [scope]
+      properties:
+        scope: { $ref: "#/components/schemas/SharedScope" }
+        nodeId: { type: [string, "null"] }
+        groupId: { type: [string, "null"] }
+
+    SharedPlace:
+      type: object
+      required: [scope, nodeId, groupId, label]
+      properties:
+        scope: { $ref: "#/components/schemas/SharedScope" }
+        nodeId: { type: [string, "null"] }
+        groupId: { type: [string, "null"] }
+        label: { type: string, description: "\"Workspace\", the node's or the group's name." }
+
+    SharedSummary:
+      type: object
+      required: [id, name, description, type, version, place, canEdit, mode, myMode, everyoneMode, updatedAt, pack]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/MemoryType" }
+        version: { type: integer }
+        place: { $ref: "#/components/schemas/SharedPlace" }
+        canEdit: { type: boolean, description: "You can edit it, set it for everyone, and decide its proposals." }
+        mode: { $ref: "#/components/schemas/SharedMode" }
+        myMode:
+          oneOf:
+            - $ref: "#/components/schemas/SharedMode"
+            - type: "null"
+        everyoneMode: { $ref: "#/components/schemas/SharedMode" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        pack:
+          description: Installed from a memory pack, read-only until the pack is forked.
+          oneOf:
+            - type: object
+              required: [installId, name, version]
+              properties:
+                installId: { type: string }
+                name: { type: string }
+                version: { type: integer }
+            - type: "null"
+
+    SharedNote:
+      allOf:
+        - $ref: "#/components/schemas/SharedSummary"
+        - type: object
+          required: [body]
+          properties:
+            body: { type: string }
+
+    SharedVersion:
+      type: object
+      required: [version, description, type, body, changedBy, changedAs, createdAt]
+      properties:
+        version: { type: integer }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/MemoryType" }
+        body: { type: string }
+        changedBy: { type: [string, "null"] }
+        changedAs: { $ref: "#/components/schemas/MemoryAuthor" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    SharedProposal:
+      type: object
+      required: [id, op, place, memoryId, name, description, type, body, baseVersion, author, authorType, mine,
+                 canDecide, threadId, reason, createdAt]
+      properties:
+        id: { type: string }
+        op: { type: string, enum: [add, update, delete] }
+        place: { $ref: "#/components/schemas/SharedPlace" }
+        memoryId: { type: [string, "null"] }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        type:
+          oneOf:
+            - $ref: "#/components/schemas/MemoryType"
+            - type: "null"
+        body: { type: [string, "null"] }
+        baseVersion: { type: [integer, "null"] }
+        author: { type: [string, "null"], description: "The person, or the person Claude was working for." }
+        authorType: { $ref: "#/components/schemas/MemoryAuthor" }
+        mine: { type: boolean }
+        canDecide: { type: boolean }
+        threadId: { type: [string, "null"] }
+        reason: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    SharedTargetPlace:
+      allOf:
+        - $ref: "#/components/schemas/SharedPlace"
+        - type: object
+          required: [canEdit]
+          properties:
+            canEdit: { type: boolean }
+
+    PackNote:
+      type: object
+      required: [name, description, type, body]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/MemoryType" }
+        body: { type: string }
+
+    PackVersion:
+      type: object
+      required: [version, description, notes, flags, publishedBy, publishedAt, verified, yanked, yankReason]
+      properties:
+        version: { type: integer }
+        description: { type: string }
+        notes: { type: integer }
+        flags:
+          type: array
+          items: { $ref: "#/components/schemas/ScanFlag" }
+        publishedBy: { type: [string, "null"] }
+        publishedAt: { $ref: "#/components/schemas/Timestamp" }
+        verified: { type: boolean }
+        yanked: { type: boolean }
+        yankReason: { type: [string, "null"] }
+
+    PackListing:
+      type: object
+      required: [name, owner, mine, latest, updatedAt]
+      properties:
+        name: { type: string }
+        owner: { type: [string, "null"] }
+        mine: { type: boolean }
+        latest:
+          description: "The newest version that isn't yanked; null when all are."
+          oneOf:
+            - $ref: "#/components/schemas/PackVersion"
+            - type: "null"
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    PackDetail:
+      allOf:
+        - $ref: "#/components/schemas/PackListing"
+        - type: object
+          required: [versions, version, notes, isAdmin]
+          properties:
+            versions:
+              type: array
+              items: { $ref: "#/components/schemas/PackVersion" }
+            version: { $ref: "#/components/schemas/PackVersion" }
+            notes:
+              type: array
+              items: { $ref: "#/components/schemas/PackNote" }
+            isAdmin: { type: boolean }
+
+    PackInstall:
+      type: object
+      required: [id, name, version, latest, place, canEdit, notes, installedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: integer }
+        latest: { type: [integer, "null"], description: "A newer version that isn't yanked, if any." }
+        place: { $ref: "#/components/schemas/SharedPlace" }
+        canEdit: { type: boolean }
+        notes: { type: integer }
+        installedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    MemoryOverview:
+      allOf:
+        - $ref: "#/components/schemas/MemorySettings"
+        - type: object
+          required: [notes, inbox, shared, sharedProposals, targets, installs, types, limits]
+          properties:
+            notes:
+              type: array
+              description: Your notes, archived ones last.
+              items: { $ref: "#/components/schemas/MemorySummary" }
+            inbox:
+              type: array
+              items: { $ref: "#/components/schemas/InboxItem" }
+            shared:
+              type: array
+              items: { $ref: "#/components/schemas/SharedSummary" }
+            sharedProposals:
+              type: array
+              description: Open proposals you decide or made.
+              items: { $ref: "#/components/schemas/SharedProposal" }
+            targets:
+              type: array
+              description: The places you can share to.
+              items: { $ref: "#/components/schemas/SharedTargetPlace" }
+            installs:
+              type: array
+              description: Packs installed in places you read.
+              items: { $ref: "#/components/schemas/PackInstall" }
+            types:
+              type: array
+              items: { $ref: "#/components/schemas/MemoryType" }
+            limits:
+              type: object
+              required: [notes, body, description, index]
+              properties:
+                notes: { type: integer }
+                body: { type: integer }
+                description: { type: integer }
+                index: { type: integer }
+
+    DeletedFlag:
+      type: object
+      required: [id, deleted]
+      properties:
+        id: { type: string }
+        deleted: { type: boolean, const: true }

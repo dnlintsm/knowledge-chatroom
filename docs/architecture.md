@@ -626,11 +626,14 @@ Transport timestamps are date strings, with hashes/sizes and a read-only flag.
 Local files hold numeric timestamps and text or binary data/HTTP URLs instead.
 
 The storage API's HTTP contract (`/files`, `/nodes`, `/experiments`, `/search`,
-`/proposals`, `/chats`, `/access`) is written down in
+`/proposals`, `/chats`, `/access`), and that of the agent server's other routes
+(`/memory`, `/skills`, `/hub`, `/tools`, `/suggest`, `/identity/public-key`, `/health`), is written
+down in
 `packages/contracts/openapi/storage.yaml`, the source of truth that a Python storage
 service has to match (issue #169). `pnpm -C packages/contracts openapi` generates
 `src/generated/storage-api.ts` from it, and the Quality workflow fails when that file
-is out of date. `apps/agent/src/storage/api-contract.ts` ties the agent's own types to
+is out of date. The chat run itself (`POST /`) is AG-UI's contract, not this one.
+`apps/agent/src/storage/api-contract.ts` ties the agent's own types to
 the spec's schemas, so `pnpm typecheck` fails when a route's answer and the spec drift
 apart in either direction. `pnpm test:conformance` then checks the running agent's real
 answers against the spec, operation by operation ([Testing](testing.md)). When a route

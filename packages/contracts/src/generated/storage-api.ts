@@ -556,6 +556,832 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The server is up */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/identity/public-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Ed25519 key that verifies identity and storage tokens
+         * @description Outside services (MCP servers, a remote agent backend) verify `X-Knowledge-User` and
+         *     `X-Knowledge-Storage` tokens with this key instead of AUTH_SECRET (docs/remote-agent.md).
+         */
+        get: operations["getIdentityPublicKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow-up chips for the chat
+         * @description One Messages API call on a small model that answers CopilotKit's forced
+         *     `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+         *     RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
+         *     stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
+         *     TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
+         *     The events come as Server-Sent Events for `Accept: text/event-stream` (what the app
+         *     sends), and as AG-UI protobuf otherwise, as the AG-UI encoder picks.
+         */
+        post: operations["suggestFollowUps"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chat's "+" menu of outside tools
+         * @description The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+         */
+        get: operations["listTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools/{server}/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server: string;
+                tool: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call one of a menu server's tools as the signed-in user
+         * @description Only the tools in that server's `ui.tools` (its `callable` list in the menu).
+         */
+        post: operations["callTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every skill you can use, with the mode that applies
+         * @description Works without storage too: then only the built-in skills, for the local user, with
+         *     modes kept until the server restarts.
+         */
+        get: operations["listSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a skill from a .zip to the workspace's skills/ (editors) */
+        post: operations["importSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Set (or clear, with null) a skill's mode for you, everyone, or one chat */
+        put: operations["setSkillMode"];
+        post?: never;
+        /** Delete a workspace skill's whole folder under skills/ (editors) */
+        delete: operations["deleteSkill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** The skill as a .zip (<name>/SKILL.md, ...) */
+        get: operations["exportSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The skill hub (needs storage; 404 without it)
+         * @description Every /hub route needs access to the workspace root (403 without it).
+         */
+        get: operations["listHubSkills"];
+        put?: never;
+        /** Publish a workspace skill to the hub, as a new version when it changed (owners) */
+        post: operations["publishHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** A hub skill's versions, and one version's SKILL.md */
+        get: operations["getHubSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Install a hub skill, or move its pin to another version (editors) */
+        put: operations["installHubSkill"];
+        post?: never;
+        /** Uninstall a hub skill (editors) */
+        delete: operations["uninstallHubSkill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Copy a hub skill into the workspace's skills/ to change it (editors) */
+        post: operations["forkHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** What changed between two versions */
+        get: operations["diffHubSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a version checked, or not (hub admins, HUB_ADMINS) */
+        post: operations["verifyHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/yank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a version, or bring it back (its publisher, hub admins)
+         * @description A yanked version still works where it is installed; new installs skip it.
+         */
+        post: operations["yankHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a hub skill to its publisher and the hub admins (anyone who reads the workspace) */
+        post: operations["reportHubSkill"];
+        /** Dismiss a report (hub admins) */
+        delete: operations["dismissHubReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your memory, its inbox, the shared notes you read and where you can share
+         * @description Memory needs MEMORY=on and server storage; otherwise every /memory route answers 404
+         *     and the app hides memory. Everything under /memory but /memory/agent is the signed-in
+         *     user's own: nobody reads another's notes. Errors: 400 for a bad request (including a
+         *     change not allowed in that place), 404 for no such note, 409 for a change made since.
+         */
+        get: operations["getMemory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn memory on, ask-first or off for you, or make a chat incognito */
+        put: operations["setMemorySettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Claude's recent changes to your notes, newest first */
+        get: operations["getMemoryActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/inbox/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a change waiting in your inbox */
+        post: operations["acceptMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/inbox/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drop a change waiting in your inbox */
+        post: operations["rejectMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every note as memory/<name>.md, zipped */
+        get: operations["exportMemory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import notes into your inbox, from pasted text, a .md file or an export .zip
+         * @description Notes with front matter (name, description, type) are read as they are; other text is
+         *     sorted into notes by the model, or becomes one note when the model isn't available.
+         *     Everything waits in the inbox. At most 2 MB.
+         */
+        post: operations["importMemory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        /** A note and its versions */
+        get: operations["getMemoryNote"];
+        /** Create or replace a note, as yours */
+        put: operations["saveMemoryNote"];
+        post?: never;
+        /** Delete a note for good, with its versions */
+        delete: operations["deleteMemoryNote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make an earlier version current (as a new version) */
+        post: operations["restoreMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/notes/{name}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive a note, or bring it back */
+        post: operations["archiveMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/events/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo one of Claude's changes, while it is the note's latest */
+        post: operations["undoMemoryChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Share a note to the workspace, a knowledge node or a group
+         * @description Where you edit shared memory it becomes a note there; elsewhere a proposal for its editors.
+         */
+        post: operations["shareMemoryNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/proposals/{id}/{decision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description accept or reject (its place's editors), withdraw (its author). */
+                decision: "accept" | "reject" | "withdraw";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept, reject or withdraw a proposed change to shared memory */
+        post: operations["decideSharedMemoryProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /** A shared note you read, and its versions */
+        get: operations["getSharedMemoryNote"];
+        /** Change a shared note (its place's editors) */
+        put: operations["updateSharedMemoryNote"];
+        post?: never;
+        /** Delete a shared note for good (its place's editors) */
+        delete: operations["deleteSharedMemoryNote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/shared/{id}/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a shared note's mode for you, or for everyone (its place's editors) */
+        put: operations["setSharedMemoryMode"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The hub's memory packs */
+        get: operations["listMemoryPacks"];
+        put?: never;
+        /** Publish a place's own shared notes as a pack (its editors) */
+        post: operations["publishMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        /** A pack's versions, and one version's notes */
+        get: operations["getMemoryPack"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install a pack in a place, or move its install to a version (its editors) */
+        post: operations["installMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a version checked, or not (hub admins) */
+        post: operations["verifyMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/packs/{name}/yank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw a version, or bring it back (its publisher, hub admins) */
+        post: operations["yankMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/installs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uninstall a pack, with its notes (its place's editors) */
+        delete: operations["uninstallMemoryPack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/installs/{id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make an installed pack's notes the place's own */
+        post: operations["forkMemoryPack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An outside MCP server's view of one chat's memory: the prompt and the tools
+         * @description With an `X-Knowledge-Memory` token (memoryAccess in MCP_SERVERS), a server uses the
+         *     user's memory in the chat the token was made for, through the same memory_* tools
+         *     Claude has. Its changes always wait in the user's inbox (or go to a shared note's
+         *     editors).
+         */
+        get: operations["getMemoryAgent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/agent/tools/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Call one memory tool for an outside MCP server */
+        post: operations["callMemoryTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -887,8 +1713,461 @@ export interface components {
             };
             at: components["schemas"]["Timestamp"];
         };
+        /** @description An AG-UI run request (https://docs.ag-ui.com); only the fields /suggest reads are listed. */
+        RunAgentInput: {
+            threadId: string;
+            runId: string;
+            messages: {
+                [key: string]: unknown;
+            }[];
+            tools?: {
+                [key: string]: unknown;
+            }[];
+            context?: {
+                [key: string]: unknown;
+            }[];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description One AG-UI event (https://docs.ag-ui.com), by `type`. */
+        AgUiEvent: {
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        ToolMenuItem: {
+            /** @description Its name in MCP_SERVERS. */
+            server: string;
+            label: string;
+            /** @description The chip's text in the composer. */
+            chip: string;
+            description: string | null;
+            icon: string | null;
+            /** @enum {string} */
+            mode: "auto" | "manual";
+            /** @description Tools the app may call with POST /tools/{server}/{tool}. */
+            callable: string[];
+        };
+        /** @enum {string} */
+        SkillMode: "auto" | "manual" | "off";
+        SkillModeOrNull: components["schemas"]["SkillMode"] | null;
+        /** @enum {string} */
+        SkillSource: "builtin" | "workspace" | "hub";
+        /** @description An installed hub skill's version, the newest one to update to, and their standing. */
+        HubPin: {
+            version: number;
+            /** @description The newest version that isn't yanked. */
+            latest: number;
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+        };
+        SkillInfo: {
+            name: string;
+            description: string;
+            /** @description Shown after /name in the slash menu, such as [file]. */
+            argumentHint: string | null;
+            source: components["schemas"]["SkillSource"];
+            /** @description Its SKILL.md in the workspace; null for built-in skills. */
+            path: string | null;
+            /** @description False when its front matter says disable-model-invocation: never auto. */
+            modelInvocable: boolean;
+            /** @description False when its front matter says user-invocable: false: no /name. */
+            userInvocable: boolean;
+            /** @description It ships scripts or asks for a shell. */
+            needsExecution: boolean;
+            mode: components["schemas"]["SkillMode"];
+            defaultMode: components["schemas"]["SkillMode"];
+            workspaceMode: components["schemas"]["SkillModeOrNull"];
+            userMode: components["schemas"]["SkillModeOrNull"];
+            chatMode: components["schemas"]["SkillModeOrNull"];
+            hub: components["schemas"]["HubPin"] | null;
+        };
+        SkillList: {
+            skills: components["schemas"]["SkillInfo"][];
+            /** @description Editor at the root: may set defaults and add skills. */
+            canSetDefaults: boolean;
+            /** @description Owner at the root. */
+            canPublish: boolean;
+            /** @description There is a hub (it needs storage). */
+            hub: boolean;
+            /** @description Skills' scripts run (SKILL_SCRIPTS=on). */
+            scripts: boolean;
+        };
+        ScanFlag: {
+            /** @enum {string} */
+            kind: "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
+            path: string;
+            line: number | null;
+            detail: string;
+        };
+        HubListing: {
+            name: string;
+            description: string;
+            argumentHint: string | null;
+            modelInvocable: boolean;
+            userInvocable: boolean;
+            needsExecution: boolean;
+            /** @description Who first published it. */
+            publisher: string | null;
+            /** @description You published it. */
+            mine: boolean;
+            latest: number;
+            /** @description About `latest`. */
+            verified: boolean;
+            /** @description About `latest`. */
+            yanked: boolean;
+            /** @description How many scan flags `latest` has. */
+            flags: number;
+            updatedAt: components["schemas"]["Timestamp"];
+            /** @description The version installed in this workspace. */
+            installed: number | null;
+            /** @description Open reports */
+            reports: number | null;
+        };
+        HubVersion: {
+            version: number;
+            publishedAt: components["schemas"]["Timestamp"];
+            publishedBy: string | null;
+            files: number;
+            size: number;
+            needsExecution: boolean;
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+            flags: components["schemas"]["ScanFlag"][];
+        };
+        HubReport: {
+            id: string;
+            version: number | null;
+            reason: string;
+            reporter: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        HubDetail: components["schemas"]["HubListing"] & {
+            versions: components["schemas"]["HubVersion"][];
+            /** @description The version shown. */
+            version: number;
+            /** @description That version's SKILL.md. */
+            skillMd: string;
+            /** @description A hub admin: may verify and dismiss reports. */
+            canModerate: boolean;
+            canYank: boolean;
+            openReports: components["schemas"]["HubReport"][] | null;
+        };
+        HubList: {
+            skills: components["schemas"]["HubListing"][];
+            canInstall: boolean;
+            canPublish: boolean;
+            isAdmin: boolean;
+        };
+        HubDiffFile: {
+            path: string;
+            /** @enum {string} */
+            change: "added" | "removed" | "changed";
+            before: string | null;
+            after: string | null;
+            binary: boolean;
+        };
+        HubDiff: {
+            name: string;
+            from: number;
+            to: number;
+            files: components["schemas"]["HubDiffFile"][];
+            /** @description What the scan found in `to`. */
+            flags: components["schemas"]["ScanFlag"][];
+        };
+        /** @enum {string} */
+        MemoryType: "preference" | "profile" | "project" | "reference" | "feedback";
+        /** @enum {string} */
+        MemoryMode: "on" | "ask" | "off";
+        /** @enum {string} */
+        MemoryAuthor: "user" | "agent";
+        MemoryInput: {
+            /** @description One line; it goes in the index. */
+            description: string;
+            /** @description One of MemoryType. */
+            type: string;
+            /** @description The note */
+            body: string;
+        };
+        MemorySummary: {
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            version: number;
+            createdBy: components["schemas"]["MemoryAuthor"];
+            updatedBy: components["schemas"]["MemoryAuthor"];
+            archived: boolean;
+            createdAt: components["schemas"]["Timestamp"];
+            updatedAt: components["schemas"]["Timestamp"];
+            lastUsedAt: components["schemas"]["Timestamp"] | null;
+        };
+        MemoryNote: components["schemas"]["MemorySummary"] & {
+            body: string;
+        };
+        MemoryVersion: {
+            version: number;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+            changedBy: components["schemas"]["MemoryAuthor"];
+            threadId: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        /** @description What Claude did with a note in a run, as the chat shows it. */
+        MemoryEvent: {
+            id: string;
+            name: string;
+            description: string;
+            /** @enum {string} */
+            kind: "read" | "create" | "update" | "archive" | "propose";
+            version: number;
+            /** @description For a shared note, which one and where it lives. */
+            shared?: {
+                id: string;
+                label: string;
+            };
+        };
+        MemoryActivity: components["schemas"]["MemoryEvent"] & {
+            threadId: string;
+            /** @enum {string} */
+            source: "chat" | "learn" | "inbox";
+            at: components["schemas"]["Timestamp"];
+            undone: boolean;
+            /** @description Still the note's latest change, so Undo can take it back. */
+            undoable: boolean;
+        };
+        /** @description A change Claude proposed, waiting for the user. */
+        InboxItem: {
+            id: string;
+            /** @enum {string} */
+            op: "add" | "update" | "delete";
+            name: string;
+            description: string | null;
+            type: components["schemas"]["MemoryType"] | null;
+            body: string | null;
+            /** @description The note's version the change was made against. */
+            baseVersion: number | null;
+            /** @enum {string} */
+            source: "chat" | "learn" | "import";
+            threadId: string | null;
+            reason: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        MemorySettings: {
+            mode: components["schemas"]["MemoryMode"];
+            incognito: boolean;
+        };
+        MemoryImport: {
+            /** @description Notes now waiting in the inbox. */
+            proposed: number;
+            /** @description Notes left out: invalid, or the inbox was full. */
+            skipped: number;
+            /**
+             * @description files: front matter read as is; text: the model sorted plain text; whole: the model wasn't available, so the text is one note.
+             * @enum {string}
+             */
+            how: "files" | "text" | "whole";
+        };
+        /** @enum {string} */
+        SharedScope: "workspace" | "node" | "group";
+        /** @enum {string} */
+        SharedMode: "auto" | "manual" | "off";
+        /** @description A place for shared memory: the workspace, a knowledge node (`nodeId`) or a group (`groupId`). */
+        SharedTarget: {
+            scope: components["schemas"]["SharedScope"];
+            nodeId?: string | null;
+            groupId?: string | null;
+        };
+        SharedPlace: {
+            scope: components["schemas"]["SharedScope"];
+            nodeId: string | null;
+            groupId: string | null;
+            /** @description "Workspace", the node's or the group's name. */
+            label: string;
+        };
+        SharedSummary: {
+            id: string;
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            version: number;
+            place: components["schemas"]["SharedPlace"];
+            /** @description You can edit it, set it for everyone, and decide its proposals. */
+            canEdit: boolean;
+            mode: components["schemas"]["SharedMode"];
+            myMode: components["schemas"]["SharedMode"] | null;
+            everyoneMode: components["schemas"]["SharedMode"];
+            updatedAt: components["schemas"]["Timestamp"];
+            /** @description Installed from a memory pack, read-only until the pack is forked. */
+            pack: {
+                installId: string;
+                name: string;
+                version: number;
+            } | null;
+        };
+        SharedNote: components["schemas"]["SharedSummary"] & {
+            body: string;
+        };
+        SharedVersion: {
+            version: number;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+            changedBy: string | null;
+            changedAs: components["schemas"]["MemoryAuthor"];
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        SharedProposal: {
+            id: string;
+            /** @enum {string} */
+            op: "add" | "update" | "delete";
+            place: components["schemas"]["SharedPlace"];
+            memoryId: string | null;
+            name: string;
+            description: string | null;
+            type: components["schemas"]["MemoryType"] | null;
+            body: string | null;
+            baseVersion: number | null;
+            /** @description The person, or the person Claude was working for. */
+            author: string | null;
+            authorType: components["schemas"]["MemoryAuthor"];
+            mine: boolean;
+            canDecide: boolean;
+            threadId: string | null;
+            reason: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        SharedTargetPlace: components["schemas"]["SharedPlace"] & {
+            canEdit: boolean;
+        };
+        PackNote: {
+            name: string;
+            description: string;
+            type: components["schemas"]["MemoryType"];
+            body: string;
+        };
+        PackVersion: {
+            version: number;
+            description: string;
+            notes: number;
+            flags: components["schemas"]["ScanFlag"][];
+            publishedBy: string | null;
+            publishedAt: components["schemas"]["Timestamp"];
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+        };
+        PackListing: {
+            name: string;
+            owner: string | null;
+            mine: boolean;
+            /** @description The newest version that isn't yanked; null when all are. */
+            latest: components["schemas"]["PackVersion"] | null;
+            updatedAt: components["schemas"]["Timestamp"];
+        };
+        PackDetail: components["schemas"]["PackListing"] & {
+            versions: components["schemas"]["PackVersion"][];
+            version: components["schemas"]["PackVersion"];
+            notes: components["schemas"]["PackNote"][];
+            isAdmin: boolean;
+        };
+        PackInstall: {
+            id: string;
+            name: string;
+            version: number;
+            /** @description A newer version that isn't yanked, if any. */
+            latest: number | null;
+            place: components["schemas"]["SharedPlace"];
+            canEdit: boolean;
+            notes: number;
+            installedAt: components["schemas"]["Timestamp"];
+        };
+        MemoryOverview: components["schemas"]["MemorySettings"] & {
+            /** @description Your notes, archived ones last. */
+            notes: components["schemas"]["MemorySummary"][];
+            inbox: components["schemas"]["InboxItem"][];
+            shared: components["schemas"]["SharedSummary"][];
+            /** @description Open proposals you decide or made. */
+            sharedProposals: components["schemas"]["SharedProposal"][];
+            /** @description The places you can share to. */
+            targets: components["schemas"]["SharedTargetPlace"][];
+            /** @description Packs installed in places you read. */
+            installs: components["schemas"]["PackInstall"][];
+            types: components["schemas"]["MemoryType"][];
+            limits: {
+                notes: number;
+                body: number;
+                description: number;
+                index: number;
+            };
+        };
+        DeletedFlag: {
+            id: string;
+            /** @constant */
+            deleted: true;
+        };
     };
     responses: {
+        /** @description No such note (or proposal, pack, install), or memory is off on this server (MEMORY=on) or has no storage. */
+        MemoryNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The note changed since (or the name is in use, or the change was already undone). */
+        MemoryChanged: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Memory is off in that chat (incognito, or turned off). */
+        MemoryOffInChat: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The note now. */
+        MemoryNoteAnswer: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    note: components["schemas"]["MemoryNote"];
+                };
+            };
+        };
+        /** @description The pack, at that version. */
+        PackAnswer: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    pack: components["schemas"]["PackDetail"];
+                };
+            };
+        };
+        /** @description Something is in the way, such as a skill folder of that name or a read-only file in it. */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description The request is malformed or names something invalid. */
         BadRequest: {
             headers: {
@@ -1019,6 +2298,12 @@ export interface components {
         FilePath: string;
         /** @description A knowledge node's files; leave out both node and experiment for the workspace root. */
         Node: string;
+        /** @description A skill's name (lowercase letters, digits and dashes). */
+        SkillName: string;
+        /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+        MemoryName: string;
+        /** @description A version number; leave out for the newest. */
+        HubVersion: number;
         /** @description An experiment's files, instead of a node's. */
         Experiment: string;
     };
@@ -2370,6 +3655,1664 @@ export interface operations {
             };
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        status: "ok";
+                    };
+                };
+            };
+        };
+    };
+    getIdentityPublicKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The public key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        alg: "Ed25519";
+                        /** @description The raw public key */
+                        key: string;
+                    };
+                };
+            };
+            /** @description Login is off, so there are no identity tokens. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    suggestFollowUps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunAgentInput"];
+            };
+        };
+        responses: {
+            /** @description AG-UI events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                    "application/vnd.ag-ui.event+proto": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            /** @description Chat is served by a remote backend (AGENT_URL), which answers this instead. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The menu. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tools: components["schemas"]["ToolMenuItem"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+        };
+    };
+    callTool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server: string;
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    arguments: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description What the tool answered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Its structured content, or the JSON in its text, or null. */
+                        result: unknown;
+                        text: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            /** @description The tool isn't one the app may call. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such server in the menu. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tool ran and reported an error (the reason is in `error`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The server couldn't be reached. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSkills: {
+        parameters: {
+            query?: {
+                /** @description Include this chat's modes (`chatMode`). */
+                thread?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The skills. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillList"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    importSkill: {
+        parameters: {
+            query?: {
+                /** @description The .zip's file name, to name the skill when the .zip has no folder. */
+                filename?: string;
+                /** @description `1` or `true` replaces a skill folder of that name. */
+                replace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description Added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description Its SKILL.md in the workspace. */
+                        path: string;
+                        files: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setSkillMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    mode: components["schemas"]["SkillModeOrNull"];
+                    /**
+                     * @description `workspace` needs editor access at the root.
+                     * @default user
+                     * @enum {string}
+                     */
+                    scope?: "user" | "workspace" | "chat";
+                    /** @description The chat */
+                    thread?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The skill as you now see it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description How many files. */
+                        deleted: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    exportSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The .zip. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listHubSkills: {
+        parameters: {
+            query?: {
+                /** @description Words to look for in names and descriptions. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hub's skills. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    publishHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace skill's name. */
+                    skill: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Published (or `unchanged`, when the newest version has the same files). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        unchanged: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getHubSkill: {
+        parameters: {
+            query?: {
+                /** @description A version number; leave out for the newest. */
+                version?: components["parameters"]["HubVersion"];
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The skill. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    installHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Leave out for the newest. */
+                    version?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Installed at that version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    uninstallHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstalled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        installed: null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    forkHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Copied. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description Its SKILL.md in the workspace. */
+                        path: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    diffHubSkill: {
+        parameters: {
+            query: {
+                from: number;
+                to: number;
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changed files. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubDiff"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    verifyHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    verified?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Done. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        verified: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    yankHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    yanked?: boolean;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Done. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        yanked: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    reportHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason: string;
+                    version?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Reported. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdOnly"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    dismissHubReport: {
+        parameters: {
+            query: {
+                id: string;
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dismissed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        dismissed: true;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemory: {
+        parameters: {
+            query?: {
+                /** @description Say whether this chat is incognito (`incognito`). */
+                thread?: string;
+                /** @description Add this knowledge node to `targets`. */
+                node?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The overview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryOverview"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setMemorySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    mode?: components["schemas"]["MemoryMode"];
+                    /** @description The chat */
+                    thread?: string;
+                    incognito?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings now (`incognito` for `thread`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryActivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        activity: components["schemas"]["MemoryActivity"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    acceptMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        status: "accepted";
+                        /** @description The note now; null when the change deleted it. */
+                        note: components["schemas"]["MemoryNote"] | null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    rejectMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dropped. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        status: "rejected";
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    exportMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The .zip. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    importMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text?: string;
+                    /** @description Where it came from */
+                    label?: string;
+                };
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description What went to the inbox. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryImport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["MemoryNote"];
+                        versions: components["schemas"]["MemoryVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    saveMemoryNote: {
+        parameters: {
+            query?: {
+                /** @description `1` or `true` refuses a name already in use (409). */
+                create?: string;
+            };
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["MemoryNote"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @constant */
+                        deleted: true;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    restoreMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MemoryNoteAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    archiveMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default true */
+                    archived?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MemoryNoteAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    undoMemoryChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Undone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description The note now; null when undoing removed it. */
+                        note: components["schemas"]["MemoryNote"] | null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    shareMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & components["schemas"]["MemoryInput"] & {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new note, or the proposal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"] | null;
+                        proposal: components["schemas"]["SharedProposal"] | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    decideSharedMemoryProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description accept or reject (its place's editors), withdraw (its author). */
+                decision: "accept" | "reject" | "withdraw";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @enum {string} */
+                        status: "accept" | "reject" | "withdraw";
+                        /** @description The note after an accepted change; otherwise null. */
+                        note: components["schemas"]["SharedNote"] | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The note. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"];
+                        versions: components["schemas"]["SharedVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    updateSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"] & {
+                    /** @description Refuse (409) if the note is past this version. */
+                    version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedNote"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteSharedMemoryNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedFlag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setSharedMemoryMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description null clears your own choice. */
+                    mode?: components["schemas"]["SharedMode"] | null;
+                    /** @default false */
+                    everyone?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The note as you now see it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        note: components["schemas"]["SharedSummary"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listMemoryPacks: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The packs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        packs: components["schemas"]["PackListing"][];
+                        isAdmin: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    publishMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & {
+                    name: string;
+                    description: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Published (or `unchanged`). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        unchanged: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryPack: {
+        parameters: {
+            query?: {
+                /** @description A version number; leave out for the newest. */
+                version?: components["parameters"]["HubVersion"];
+            };
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    installMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTarget"] & {
+                    version?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Installed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        install: components["schemas"]["PackInstall"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            409: components["responses"]["MemoryChanged"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    verifyMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    verified?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    yankMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A note's or a pack's name: lowercase letters, digits and dashes (e.g. writing-style). */
+                name: components["parameters"]["MemoryName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    yanked?: boolean;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["PackAnswer"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    uninstallMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstalled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedFlag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    forkMemoryPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        notes: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getMemoryAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The memory section for the server's own model, and the tools. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        prompt: string;
+                        tools: {
+                            name: string;
+                            description: string;
+                            /** @description A JSON Schema. */
+                            inputSchema: {
+                                [key: string]: unknown;
+                            };
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["MemoryOffInChat"];
+            404: components["responses"]["MemoryNotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    callMemoryTool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description What the tool answered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        text: string;
+                        isError: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["MemoryOffInChat"];
+            404: components["responses"]["MemoryNotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
