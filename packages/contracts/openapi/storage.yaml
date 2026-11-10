@@ -5,8 +5,12 @@ info:
   description: |
     The storage API served by the agent server (apps/agent/src/storage/http.ts):
     workspace files, the knowledge tree, experiments, search, proposals, chat
-    history and access. It is the contract a Python service has to match before it
-    can take over a route group (issue #169).
+    history and access; and the rest of that server's HTTP routes: skills and the
+    skill hub (apps/agent/src/skills/http.ts), the "+" menu's tools
+    (apps/agent/src/tools-api.ts), follow-up suggestions, the identity public key
+    and the health check. It is the contract a Python service has to match before
+    it can take over a route group (issue #169). The chat run itself (`POST /`) is
+    an AG-UI endpoint, specified by AG-UI rather than here.
 
     This file is the source of truth. `pnpm -C packages/contracts openapi` turns it
     into src/generated/storage-api.ts; CI fails when that file is out of date.
@@ -37,6 +41,10 @@ tags:
   - name: proposals
   - name: chats
   - name: access
+  - name: skills
+  - name: hub
+  - name: tools
+  - name: server
 
 paths:
   /files:
@@ -1194,6 +1202,622 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  # --- The rest of the agent server (issue #169, step 3) ---
+
+  /health:
+    get:
+      tags: [server]
+      operationId: getHealth
+      summary: The server is up
+      security: [{}]
+      responses:
+        "200":
+          description: Up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /identity/public-key:
+    get:
+      tags: [server]
+      operationId: getIdentityPublicKey
+      summary: The Ed25519 key that verifies identity and storage tokens
+      description: |
+        Outside services (MCP servers, a remote agent backend) verify `X-Knowledge-User` and
+        `X-Knowledge-Storage` tokens with this key instead of AUTH_SECRET (docs/remote-agent.md).
+      security: [{}]
+      responses:
+        "200":
+          description: The public key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alg, key]
+                properties:
+                  alg: { type: string, const: Ed25519 }
+                  key: { type: string, description: The raw public key, base64url. }
+        "404":
+          description: Login is off, so there are no identity tokens.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /suggest:
+    post:
+      tags: [server]
+      operationId: suggestFollowUps
+      summary: Follow-up chips for the chat
+      description: |
+        One Messages API call on a small model that answers CopilotKit's forced
+        `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+        RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
+        stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
+        TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
+        The events come as Server-Sent Events for `Accept: text/event-stream` (what the app
+        sends), and as AG-UI protobuf otherwise, as the AG-UI encoder picks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunAgentInput" }
+      responses:
+        "200":
+          description: AG-UI events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Lines of `data: <AG-UI event JSON>` separated by blank lines."
+              x-event-schema: { $ref: "#/components/schemas/AgUiEvent" }
+            application/vnd.ag-ui.event+proto:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "404":
+          description: Chat is served by a remote backend (AGENT_URL), which answers this instead.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /tools:
+    get:
+      tags: [tools]
+      operationId: listTools
+      summary: The chat's "+" menu of outside tools
+      description: The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+      responses:
+        "200":
+          description: The menu.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tools]
+                properties:
+                  tools:
+                    type: array
+                    items: { $ref: "#/components/schemas/ToolMenuItem" }
+        "401": { $ref: "#/components/responses/SignIn" }
+
+  /tools/{server}/{tool}:
+    parameters:
+      - name: server
+        in: path
+        required: true
+        schema: { type: string }
+      - name: tool
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [tools]
+      operationId: callTool
+      summary: Call one of a menu server's tools as the signed-in user
+      description: Only the tools in that server's `ui.tools` (its `callable` list in the menu).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arguments]
+              properties:
+                arguments: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: What the tool answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, text]
+                properties:
+                  result:
+                    description: Its structured content, or the JSON in its text, or null.
+                  text: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403":
+          description: The tool isn't one the app may call.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such server in the menu.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The tool ran and reported an error (the reason is in `error`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The server couldn't be reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /skills:
+    get:
+      tags: [skills]
+      operationId: listSkills
+      summary: Every skill you can use, with the mode that applies
+      description: |
+        Works without storage too: then only the built-in skills, for the local user, with
+        modes kept until the server restarts.
+      parameters:
+        - name: thread
+          in: query
+          description: Include this chat's modes (`chatMode`).
+          schema: { type: string }
+      responses:
+        "200":
+          description: The skills.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillList" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/import:
+    post:
+      tags: [skills]
+      operationId: importSkill
+      summary: Add a skill from a .zip to the workspace's skills/ (editors)
+      parameters:
+        - name: filename
+          in: query
+          description: The .zip's file name, to name the skill when the .zip has no folder.
+          schema: { type: string }
+        - name: replace
+          in: query
+          description: "`1` or `true` replaces a skill folder of that name."
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, path, files]
+                properties:
+                  name: { type: string }
+                  path: { type: string, description: Its SKILL.md in the workspace. }
+                  files: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/{name}:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    put:
+      tags: [skills]
+      operationId: setSkillMode
+      summary: Set (or clear, with null) a skill's mode for you, everyone, or one chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { $ref: "#/components/schemas/SkillModeOrNull" }
+                scope:
+                  type: string
+                  enum: [user, workspace, chat]
+                  default: user
+                  description: "`workspace` needs editor access at the root."
+                thread: { type: string, description: The chat, for scope `chat`. }
+      responses:
+        "200":
+          description: The skill as you now see it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [skills]
+      operationId: deleteSkill
+      summary: Delete a workspace skill's whole folder under skills/ (editors)
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, deleted]
+                properties:
+                  name: { type: string }
+                  deleted: { type: integer, description: How many files. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /skills/{name}/export:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [skills]
+      operationId: exportSkill
+      summary: The skill as a .zip (<name>/SKILL.md, ...)
+      responses:
+        "200":
+          description: The .zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub:
+    get:
+      tags: [hub]
+      operationId: listHubSkills
+      summary: The skill hub (needs storage; 404 without it)
+      description: Every /hub route needs access to the workspace root (403 without it).
+      parameters:
+        - name: q
+          in: query
+          description: Words to look for in names and descriptions.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The hub's skills.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [hub]
+      operationId: publishHubSkill
+      summary: Publish a workspace skill to the hub, as a new version when it changed (owners)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skill]
+              properties:
+                skill: { type: string, description: The workspace skill's name. }
+      responses:
+        "201":
+          description: Published (or `unchanged`, when the newest version has the same files).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, unchanged]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  unchanged: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [hub]
+      operationId: getHubSkill
+      summary: A hub skill's versions, and one version's SKILL.md
+      parameters:
+        - $ref: "#/components/parameters/HubVersion"
+      responses:
+        "200":
+          description: The skill.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/install:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    put:
+      tags: [hub]
+      operationId: installHubSkill
+      summary: Install a hub skill, or move its pin to another version (editors)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: [integer, "null"], minimum: 1, description: Leave out for the newest. }
+      responses:
+        "200":
+          description: Installed at that version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [hub]
+      operationId: uninstallHubSkill
+      summary: Uninstall a hub skill (editors)
+      responses:
+        "200":
+          description: Uninstalled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, installed]
+                properties:
+                  name: { type: string }
+                  installed: { type: "null" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/fork:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: forkHubSkill
+      summary: Copy a hub skill into the workspace's skills/ to change it (editors)
+      responses:
+        "201":
+          description: Copied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, path]
+                properties:
+                  name: { type: string }
+                  path: { type: string, description: Its SKILL.md in the workspace. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/diff:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    get:
+      tags: [hub]
+      operationId: diffHubSkill
+      summary: What changed between two versions
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The changed files.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/verify:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: verifyHubSkill
+      summary: Mark a version checked, or not (hub admins, HUB_ADMINS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                verified: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, verified]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  verified: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/yank:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: yankHubSkill
+      summary: Withdraw a version, or bring it back (its publisher, hub admins)
+      description: A yanked version still works where it is installed; new installs skip it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                yanked: { type: boolean, default: true }
+                reason: { type: [string, "null"] }
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, yanked]
+                properties:
+                  name: { type: string }
+                  version: { type: integer }
+                  yanked: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /hub/{name}/reports:
+    parameters:
+      - $ref: "#/components/parameters/SkillName"
+    post:
+      tags: [hub]
+      operationId: reportHubSkill
+      summary: Report a hub skill to its publisher and the hub admins (anyone who reads the workspace)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                version: { type: [integer, "null"], minimum: 1 }
+      responses:
+        "201":
+          description: Reported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdOnly" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [hub]
+      operationId: dismissHubReport
+      summary: Dismiss a report (hub admins)
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Dismissed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, dismissed]
+                properties:
+                  id: { type: string }
+                  dismissed: { type: boolean, const: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
 components:
   securitySchemes:
     user:
@@ -1225,6 +1849,17 @@ components:
       in: query
       description: A knowledge node's files; leave out both node and experiment for the workspace root.
       schema: { type: string }
+    SkillName:
+      name: name
+      in: path
+      required: true
+      description: A skill's name (lowercase letters, digits and dashes).
+      schema: { type: string }
+    HubVersion:
+      name: version
+      in: query
+      description: A version number; leave out for the newest.
+      schema: { type: integer, minimum: 1 }
     Experiment:
       name: experiment
       in: query
@@ -1232,6 +1867,11 @@ components:
       schema: { type: string }
 
   responses:
+    Conflict:
+      description: Something is in the way, such as a skill folder of that name or a read-only file in it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: The request is malformed or names something invalid.
       content:
@@ -1733,3 +2373,211 @@ components:
         action: { type: string, description: "Such as node.create, group.add_member or grant.set." }
         target: { type: object, additionalProperties: true }
         at: { $ref: "#/components/schemas/Timestamp" }
+
+    # --- Server, tools and suggestions ---
+
+    RunAgentInput:
+      type: object
+      description: An AG-UI run request (https://docs.ag-ui.com); only the fields /suggest reads are listed.
+      additionalProperties: true
+      required: [threadId, runId, messages]
+      properties:
+        threadId: { type: string }
+        runId: { type: string }
+        messages: { type: array, items: { type: object, additionalProperties: true } }
+        tools: { type: array, items: { type: object, additionalProperties: true } }
+        context: { type: array, items: { type: object, additionalProperties: true } }
+
+    AgUiEvent:
+      type: object
+      description: One AG-UI event (https://docs.ag-ui.com), by `type`.
+      additionalProperties: true
+      required: [type]
+      properties:
+        type: { type: string }
+
+    ToolMenuItem:
+      type: object
+      required: [server, label, chip, description, icon, mode, callable]
+      properties:
+        server: { type: string, description: Its name in MCP_SERVERS. }
+        label: { type: string }
+        chip: { type: string, description: The chip's text in the composer. }
+        description: { type: [string, "null"] }
+        icon: { type: [string, "null"] }
+        mode: { type: string, enum: [auto, manual] }
+        callable:
+          type: array
+          description: Tools the app may call with POST /tools/{server}/{tool}.
+          items: { type: string }
+
+    # --- Skills and the hub ---
+
+    SkillMode:
+      type: string
+      enum: [auto, manual, off]
+    SkillModeOrNull:
+      oneOf:
+        - $ref: "#/components/schemas/SkillMode"
+        - type: "null"
+    SkillSource:
+      type: string
+      enum: [builtin, workspace, hub]
+
+    HubPin:
+      type: object
+      description: An installed hub skill's version, the newest one to update to, and their standing.
+      required: [version, latest, verified, yanked, yankReason]
+      properties:
+        version: { type: integer }
+        latest: { type: integer, description: The newest version that isn't yanked. }
+        verified: { type: boolean }
+        yanked: { type: boolean }
+        yankReason: { type: [string, "null"] }
+
+    SkillInfo:
+      type: object
+      required: [name, description, argumentHint, source, path, modelInvocable, userInvocable, needsExecution,
+                 mode, defaultMode, workspaceMode, userMode, chatMode, hub]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: [string, "null"], description: "Shown after /name in the slash menu, such as [file]." }
+        source: { $ref: "#/components/schemas/SkillSource" }
+        path: { type: [string, "null"], description: Its SKILL.md in the workspace; null for built-in skills. }
+        modelInvocable: { type: boolean, description: "False when its front matter says disable-model-invocation: never auto." }
+        userInvocable: { type: boolean, description: "False when its front matter says user-invocable: false: no /name." }
+        needsExecution: { type: boolean, description: It ships scripts or asks for a shell. }
+        mode: { $ref: "#/components/schemas/SkillMode" }
+        defaultMode: { $ref: "#/components/schemas/SkillMode" }
+        workspaceMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        userMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        chatMode: { $ref: "#/components/schemas/SkillModeOrNull" }
+        hub:
+          oneOf:
+            - $ref: "#/components/schemas/HubPin"
+            - type: "null"
+
+    SkillList:
+      type: object
+      required: [skills, canSetDefaults, canPublish, hub, scripts]
+      properties:
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/SkillInfo" }
+        canSetDefaults: { type: boolean, description: "Editor at the root: may set defaults and add skills." }
+        canPublish: { type: boolean, description: Owner at the root. }
+        hub: { type: boolean, description: There is a hub (it needs storage). }
+        scripts: { type: boolean, description: "Skills' scripts run (SKILL_SCRIPTS=on)." }
+
+    ScanFlag:
+      type: object
+      required: [kind, path, line, detail]
+      properties:
+        kind: { type: string, enum: [scripts, network, large, binary, hidden-text, instructions] }
+        path: { type: string }
+        line: { type: [integer, "null"] }
+        detail: { type: string }
+
+    HubListing:
+      type: object
+      required: [name, description, argumentHint, modelInvocable, userInvocable, needsExecution, publisher, mine,
+                 latest, verified, yanked, flags, updatedAt, installed, reports]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        argumentHint: { type: [string, "null"] }
+        modelInvocable: { type: boolean }
+        userInvocable: { type: boolean }
+        needsExecution: { type: boolean }
+        publisher: { type: [string, "null"], description: Who first published it. }
+        mine: { type: boolean, description: You published it. }
+        latest: { type: integer }
+        verified: { type: boolean, description: About `latest`. }
+        yanked: { type: boolean, description: About `latest`. }
+        flags: { type: integer, description: "How many scan flags `latest` has." }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        installed: { type: [integer, "null"], description: The version installed in this workspace. }
+        reports: { type: [integer, "null"], description: Open reports, for hub admins and the publisher. }
+
+    HubVersion:
+      type: object
+      required: [version, publishedAt, publishedBy, files, size, needsExecution, verified, yanked, yankReason, flags]
+      properties:
+        version: { type: integer }
+        publishedAt: { $ref: "#/components/schemas/Timestamp" }
+        publishedBy: { type: [string, "null"] }
+        files: { type: integer }
+        size: { type: integer }
+        needsExecution: { type: boolean }
+        verified: { type: boolean }
+        yanked: { type: boolean }
+        yankReason: { type: [string, "null"] }
+        flags:
+          type: array
+          items: { $ref: "#/components/schemas/ScanFlag" }
+
+    HubReport:
+      type: object
+      required: [id, version, reason, reporter, createdAt]
+      properties:
+        id: { type: string }
+        version: { type: [integer, "null"] }
+        reason: { type: string }
+        reporter: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    HubDetail:
+      allOf:
+        - $ref: "#/components/schemas/HubListing"
+        - type: object
+          required: [versions, version, skillMd, canModerate, canYank, openReports]
+          properties:
+            versions:
+              type: array
+              items: { $ref: "#/components/schemas/HubVersion" }
+            version: { type: integer, description: The version shown. }
+            skillMd: { type: string, description: "That version's SKILL.md." }
+            canModerate: { type: boolean, description: "A hub admin: may verify and dismiss reports." }
+            canYank: { type: boolean }
+            openReports:
+              oneOf:
+                - type: array
+                  items: { $ref: "#/components/schemas/HubReport" }
+                - type: "null"
+
+    HubList:
+      type: object
+      required: [skills, canInstall, canPublish, isAdmin]
+      properties:
+        skills:
+          type: array
+          items: { $ref: "#/components/schemas/HubListing" }
+        canInstall: { type: boolean }
+        canPublish: { type: boolean }
+        isAdmin: { type: boolean }
+
+    HubDiffFile:
+      type: object
+      required: [path, change, before, after, binary]
+      properties:
+        path: { type: string }
+        change: { type: string, enum: [added, removed, changed] }
+        before: { type: [string, "null"] }
+        after: { type: [string, "null"] }
+        binary: { type: boolean }
+
+    HubDiff:
+      type: object
+      required: [name, from, to, files, flags]
+      properties:
+        name: { type: string }
+        from: { type: integer }
+        to: { type: integer }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/HubDiffFile" }
+        flags:
+          type: array
+          description: "What the scan found in `to`."
+          items: { $ref: "#/components/schemas/ScanFlag" }

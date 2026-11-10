@@ -556,6 +556,358 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The server is up */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/identity/public-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Ed25519 key that verifies identity and storage tokens
+         * @description Outside services (MCP servers, a remote agent backend) verify `X-Knowledge-User` and
+         *     `X-Knowledge-Storage` tokens with this key instead of AUTH_SECRET (docs/remote-agent.md).
+         */
+        get: operations["getIdentityPublicKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow-up chips for the chat
+         * @description One Messages API call on a small model that answers CopilotKit's forced
+         *     `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+         *     RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
+         *     stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
+         *     TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
+         *     The events come as Server-Sent Events for `Accept: text/event-stream` (what the app
+         *     sends), and as AG-UI protobuf otherwise, as the AG-UI encoder picks.
+         */
+        post: operations["suggestFollowUps"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chat's "+" menu of outside tools
+         * @description The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+         */
+        get: operations["listTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools/{server}/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server: string;
+                tool: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call one of a menu server's tools as the signed-in user
+         * @description Only the tools in that server's `ui.tools` (its `callable` list in the menu).
+         */
+        post: operations["callTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every skill you can use, with the mode that applies
+         * @description Works without storage too: then only the built-in skills, for the local user, with
+         *     modes kept until the server restarts.
+         */
+        get: operations["listSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a skill from a .zip to the workspace's skills/ (editors) */
+        post: operations["importSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Set (or clear, with null) a skill's mode for you, everyone, or one chat */
+        put: operations["setSkillMode"];
+        post?: never;
+        /** Delete a workspace skill's whole folder under skills/ (editors) */
+        delete: operations["deleteSkill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** The skill as a .zip (<name>/SKILL.md, ...) */
+        get: operations["exportSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The skill hub (needs storage; 404 without it)
+         * @description Every /hub route needs access to the workspace root (403 without it).
+         */
+        get: operations["listHubSkills"];
+        put?: never;
+        /** Publish a workspace skill to the hub, as a new version when it changed (owners) */
+        post: operations["publishHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** A hub skill's versions, and one version's SKILL.md */
+        get: operations["getHubSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Install a hub skill, or move its pin to another version (editors) */
+        put: operations["installHubSkill"];
+        post?: never;
+        /** Uninstall a hub skill (editors) */
+        delete: operations["uninstallHubSkill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Copy a hub skill into the workspace's skills/ to change it (editors) */
+        post: operations["forkHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        /** What changed between two versions */
+        get: operations["diffHubSkill"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a version checked, or not (hub admins, HUB_ADMINS) */
+        post: operations["verifyHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/yank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a version, or bring it back (its publisher, hub admins)
+         * @description A yanked version still works where it is installed; new installs skip it.
+         */
+        post: operations["yankHubSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub/{name}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a hub skill to its publisher and the hub admins (anyone who reads the workspace) */
+        post: operations["reportHubSkill"];
+        /** Dismiss a report (hub admins) */
+        delete: operations["dismissHubReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -887,8 +1239,181 @@ export interface components {
             };
             at: components["schemas"]["Timestamp"];
         };
+        /** @description An AG-UI run request (https://docs.ag-ui.com); only the fields /suggest reads are listed. */
+        RunAgentInput: {
+            threadId: string;
+            runId: string;
+            messages: {
+                [key: string]: unknown;
+            }[];
+            tools?: {
+                [key: string]: unknown;
+            }[];
+            context?: {
+                [key: string]: unknown;
+            }[];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description One AG-UI event (https://docs.ag-ui.com), by `type`. */
+        AgUiEvent: {
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        ToolMenuItem: {
+            /** @description Its name in MCP_SERVERS. */
+            server: string;
+            label: string;
+            /** @description The chip's text in the composer. */
+            chip: string;
+            description: string | null;
+            icon: string | null;
+            /** @enum {string} */
+            mode: "auto" | "manual";
+            /** @description Tools the app may call with POST /tools/{server}/{tool}. */
+            callable: string[];
+        };
+        /** @enum {string} */
+        SkillMode: "auto" | "manual" | "off";
+        SkillModeOrNull: components["schemas"]["SkillMode"] | null;
+        /** @enum {string} */
+        SkillSource: "builtin" | "workspace" | "hub";
+        /** @description An installed hub skill's version, the newest one to update to, and their standing. */
+        HubPin: {
+            version: number;
+            /** @description The newest version that isn't yanked. */
+            latest: number;
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+        };
+        SkillInfo: {
+            name: string;
+            description: string;
+            /** @description Shown after /name in the slash menu, such as [file]. */
+            argumentHint: string | null;
+            source: components["schemas"]["SkillSource"];
+            /** @description Its SKILL.md in the workspace; null for built-in skills. */
+            path: string | null;
+            /** @description False when its front matter says disable-model-invocation: never auto. */
+            modelInvocable: boolean;
+            /** @description False when its front matter says user-invocable: false: no /name. */
+            userInvocable: boolean;
+            /** @description It ships scripts or asks for a shell. */
+            needsExecution: boolean;
+            mode: components["schemas"]["SkillMode"];
+            defaultMode: components["schemas"]["SkillMode"];
+            workspaceMode: components["schemas"]["SkillModeOrNull"];
+            userMode: components["schemas"]["SkillModeOrNull"];
+            chatMode: components["schemas"]["SkillModeOrNull"];
+            hub: components["schemas"]["HubPin"] | null;
+        };
+        SkillList: {
+            skills: components["schemas"]["SkillInfo"][];
+            /** @description Editor at the root: may set defaults and add skills. */
+            canSetDefaults: boolean;
+            /** @description Owner at the root. */
+            canPublish: boolean;
+            /** @description There is a hub (it needs storage). */
+            hub: boolean;
+            /** @description Skills' scripts run (SKILL_SCRIPTS=on). */
+            scripts: boolean;
+        };
+        ScanFlag: {
+            /** @enum {string} */
+            kind: "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
+            path: string;
+            line: number | null;
+            detail: string;
+        };
+        HubListing: {
+            name: string;
+            description: string;
+            argumentHint: string | null;
+            modelInvocable: boolean;
+            userInvocable: boolean;
+            needsExecution: boolean;
+            /** @description Who first published it. */
+            publisher: string | null;
+            /** @description You published it. */
+            mine: boolean;
+            latest: number;
+            /** @description About `latest`. */
+            verified: boolean;
+            /** @description About `latest`. */
+            yanked: boolean;
+            /** @description How many scan flags `latest` has. */
+            flags: number;
+            updatedAt: components["schemas"]["Timestamp"];
+            /** @description The version installed in this workspace. */
+            installed: number | null;
+            /** @description Open reports */
+            reports: number | null;
+        };
+        HubVersion: {
+            version: number;
+            publishedAt: components["schemas"]["Timestamp"];
+            publishedBy: string | null;
+            files: number;
+            size: number;
+            needsExecution: boolean;
+            verified: boolean;
+            yanked: boolean;
+            yankReason: string | null;
+            flags: components["schemas"]["ScanFlag"][];
+        };
+        HubReport: {
+            id: string;
+            version: number | null;
+            reason: string;
+            reporter: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+        };
+        HubDetail: components["schemas"]["HubListing"] & {
+            versions: components["schemas"]["HubVersion"][];
+            /** @description The version shown. */
+            version: number;
+            /** @description That version's SKILL.md. */
+            skillMd: string;
+            /** @description A hub admin: may verify and dismiss reports. */
+            canModerate: boolean;
+            canYank: boolean;
+            openReports: components["schemas"]["HubReport"][] | null;
+        };
+        HubList: {
+            skills: components["schemas"]["HubListing"][];
+            canInstall: boolean;
+            canPublish: boolean;
+            isAdmin: boolean;
+        };
+        HubDiffFile: {
+            path: string;
+            /** @enum {string} */
+            change: "added" | "removed" | "changed";
+            before: string | null;
+            after: string | null;
+            binary: boolean;
+        };
+        HubDiff: {
+            name: string;
+            from: number;
+            to: number;
+            files: components["schemas"]["HubDiffFile"][];
+            /** @description What the scan found in `to`. */
+            flags: components["schemas"]["ScanFlag"][];
+        };
     };
     responses: {
+        /** @description Something is in the way, such as a skill folder of that name or a read-only file in it. */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description The request is malformed or names something invalid. */
         BadRequest: {
             headers: {
@@ -1019,6 +1544,10 @@ export interface components {
         FilePath: string;
         /** @description A knowledge node's files; leave out both node and experiment for the workspace root. */
         Node: string;
+        /** @description A skill's name (lowercase letters, digits and dashes). */
+        SkillName: string;
+        /** @description A version number; leave out for the newest. */
+        HubVersion: number;
         /** @description An experiment's files, instead of a node's. */
         Experiment: string;
     };
@@ -2370,6 +2899,758 @@ export interface operations {
             };
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        status: "ok";
+                    };
+                };
+            };
+        };
+    };
+    getIdentityPublicKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The public key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        alg: "Ed25519";
+                        /** @description The raw public key */
+                        key: string;
+                    };
+                };
+            };
+            /** @description Login is off, so there are no identity tokens. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    suggestFollowUps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunAgentInput"];
+            };
+        };
+        responses: {
+            /** @description AG-UI events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                    "application/vnd.ag-ui.event+proto": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            /** @description Chat is served by a remote backend (AGENT_URL), which answers this instead. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The menu. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tools: components["schemas"]["ToolMenuItem"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+        };
+    };
+    callTool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server: string;
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    arguments: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description What the tool answered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Its structured content, or the JSON in its text, or null. */
+                        result: unknown;
+                        text: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            /** @description The tool isn't one the app may call. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such server in the menu. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tool ran and reported an error (the reason is in `error`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The server couldn't be reached. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSkills: {
+        parameters: {
+            query?: {
+                /** @description Include this chat's modes (`chatMode`). */
+                thread?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The skills. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillList"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    importSkill: {
+        parameters: {
+            query?: {
+                /** @description The .zip's file name, to name the skill when the .zip has no folder. */
+                filename?: string;
+                /** @description `1` or `true` replaces a skill folder of that name. */
+                replace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description Added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description Its SKILL.md in the workspace. */
+                        path: string;
+                        files: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setSkillMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    mode: components["schemas"]["SkillModeOrNull"];
+                    /**
+                     * @description `workspace` needs editor access at the root.
+                     * @default user
+                     * @enum {string}
+                     */
+                    scope?: "user" | "workspace" | "chat";
+                    /** @description The chat */
+                    thread?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The skill as you now see it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description How many files. */
+                        deleted: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    exportSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The .zip. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listHubSkills: {
+        parameters: {
+            query?: {
+                /** @description Words to look for in names and descriptions. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hub's skills. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    publishHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace skill's name. */
+                    skill: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Published (or `unchanged`, when the newest version has the same files). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        unchanged: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getHubSkill: {
+        parameters: {
+            query?: {
+                /** @description A version number; leave out for the newest. */
+                version?: components["parameters"]["HubVersion"];
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The skill. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    installHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Leave out for the newest. */
+                    version?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Installed at that version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    uninstallHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstalled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        installed: null;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    forkHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Copied. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** @description Its SKILL.md in the workspace. */
+                        path: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    diffHubSkill: {
+        parameters: {
+            query: {
+                from: number;
+                to: number;
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changed files. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubDiff"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    verifyHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    verified?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Done. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        verified: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    yankHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** @default true */
+                    yanked?: boolean;
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Done. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        name: string;
+                        version: number;
+                        yanked: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    reportHubSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason: string;
+                    version?: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Reported. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdOnly"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    dismissHubReport: {
+        parameters: {
+            query: {
+                id: string;
+            };
+            header?: never;
+            path: {
+                /** @description A skill's name (lowercase letters, digits and dashes). */
+                name: components["parameters"]["SkillName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dismissed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @constant */
+                        dismissed: true;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
