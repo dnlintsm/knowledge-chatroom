@@ -71,6 +71,19 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   status?: draft|shared|archived,
  *                                   state?: ready|running|done|failed}
  *   DELETE /experiments/<id>        soft delete, with its files
+ *   POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?,
+ *                                   inputs?, rerunOf?, provenance?} → 201 a new
+ *                                   run: state running, its inputs linked read
+ *                                   only under inputs/, and a report.md whose
+ *                                   front matter records where it came from
+ *                                   (provenance: what the caller says, e.g.
+ *                                   {chat, model, skill, tools}; who, when and
+ *                                   the input versions are the server's).
+ *                                   rerunOf: run that run again as a new one,
+ *                                   reusing what isn't given.
+ *   POST   /experiments/<id>/finish {results, state?: done|failed} → the run,
+ *                                   finished, its front matter refreshed. Only
+ *                                   its author; a finished run stays finished.
  *   POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
  *                                   → the experiment, with each file linked in
  *                                   read only under inputs/ and recorded in its
@@ -203,9 +216,9 @@ export function agentRefusal(method: string, url: URL): string | null {
       if (method === "POST" && sub === "upload") {
         return "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload";
       }
-      if (method === "POST" && sub === "") return null;
+      if (method === "POST" && (sub === "" || sub === "runs")) return null;
       if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
-      if (method === "POST" && /^[^/]+\/inputs$/.test(sub)) return null;
+      if (method === "POST" && /^[^/]+\/(inputs|finish)$/.test(sub)) return null;
       return "Claude doesn't delete experiments or move folders into them";
     case "proposals":
       return method === "POST" && sub === "" ? null : "Claude doesn't accept, reject or withdraw proposals";
@@ -370,6 +383,37 @@ function runInputs(value: unknown): RunInputSource[] | null {
     });
   }
   return out;
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Most a run's caller-given provenance may hold, as JSON. */
+const MAX_PROVENANCE_BYTES = 16 * 1024;
+const RUN_EXPECTED =
+  "Expected {nodeId?: string|null, title?: string, hypothesis?: string, params?: object, " +
+  "inputs?: [{path, node?, experiment?, as?}], rerunOf?: string, provenance?: object}";
+
+/** A POST /experiments/runs body, or null when it isn't one. */
+function runRequest(body: Record<string, unknown>): {
+  nodeId: string | null | undefined;
+  inputs: RunInputSource[] | undefined;
+  rerunOf: string | undefined;
+  provenance: Record<string, unknown>;
+  input: ExperimentInput;
+} | null {
+  const { nodeId, inputs, rerunOf, provenance = {}, ...rest } = body;
+  if (!(nodeId === undefined || nodeId === null || typeof nodeId === "string")) return null;
+  if (!(rerunOf === undefined || typeof rerunOf === "string")) return null;
+  if (!isObject(provenance) || JSON.stringify(provenance).length > MAX_PROVENANCE_BYTES) return null;
+  const parsedInputs = inputs === undefined ? undefined : runInputs(inputs);
+  if (parsedInputs === null) return null;
+  // A run starts running, as a draft; finish it with /finish, share it in the app.
+  for (const key of ["results", "status", "state"]) if (key in rest) return null;
+  if (rest.params !== undefined && !isObject(rest.params)) return null;
+  const input = experimentInput(rest);
+  if (!input) return null;
+  return { nodeId, inputs: parsedInputs, rerunOf, provenance, input };
 }
 
 const UPLOAD_META =
@@ -554,6 +598,35 @@ async function handleExperiments(
     }
     // Like POST /experiments: a new experiment is a draft whatever status says.
     return json(res, 201, await session.uploadExperiment(upload.id, upload.path, upload.input, upload.files));
+  }
+
+  if (id === "runs") {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    const body = await readJson(req);
+    const run = body && runRequest(body);
+    if (!run) return json(res, 400, { error: RUN_EXPECTED });
+    const { nodeId, inputs, rerunOf, provenance, input } = run;
+    if (rerunOf) {
+      return json(res, 201, await session.rerun(
+        rerunOf,
+        { ...input, ...(inputs && { inputs }), ...(nodeId !== undefined && { node: nodeId }) },
+        provenance,
+      ));
+    }
+    if (!input.title) return json(res, 400, { error: "A new run needs a title (or rerunOf)" });
+    return json(res, 201, await session.startRun(nodeId ?? null, input, inputs ?? [], provenance));
+  }
+
+  const finishOf = /^([^/]+)\/finish$/.exec(id)?.[1];
+  if (finishOf) {
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+    const body = await readJson(req);
+    const results = body?.results;
+    const state = body?.state ?? "done";
+    if (!isObject(results) || (state !== "done" && state !== "failed")) {
+      return json(res, 400, { error: "Expected {results: object, state?: done|failed}" });
+    }
+    return json(res, 200, await session.finishRun(finishOf, results, state));
   }
 
   const inputsOf = /^([^/]+)\/inputs$/.exec(id)?.[1];

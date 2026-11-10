@@ -311,6 +311,32 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("PATCH", `/experiments/${exp.id}`, { headers: alice, json: { status: "shared" }, expect: 200 });
   });
 
+  step("runs", async () => {
+    const token = storageToken("conformance|alice");
+    const provenance = { chat: "chat-1", model: "claude-test", skill: { name: "analysis" }, startedBy: "forged" };
+    const run = (await call<Schema["Experiment"]>("POST", "/experiments/runs", {
+      headers: token,
+      json: { nodeId: mod.id, title: "Run it", params: { a: 1 }, inputs: [{ path: "notes/a.md", node: mod.id }], provenance },
+      expect: 201,
+    })).data;
+    assert.equal(run.state, "running");
+    assert.equal(run.provenance.chat, "chat-1");
+    // Who started it and what it read are the server's to record, not the caller's.
+    assert.notEqual(run.provenance.startedBy, "forged");
+    assert.deepEqual((run.provenance.inputs as { path: string }[]).map((i) => i.path), ["inputs/a.md"]);
+    await call("GET", `/files/report.md?experiment=${run.id}`, { headers: alice, expect: 200 });
+    await call("POST", "/experiments/runs", { headers: alice, json: { nodeId: mod.id }, expect: 400 });
+    await call("POST", "/experiments/runs", { headers: alice, json: { nodeId: mod.id, title: "x", state: "done" }, expect: 400 });
+    await call("POST", "/experiments/runs", { headers: alice, json: { nodeId: mod.id, title: "x", provenance: "x" }, expect: 400 });
+    await call("POST", `/experiments/${run.id}/finish`, { headers: alice, json: { results: "x" }, expect: 400 });
+    const done = (await call<Schema["Experiment"]>("POST", `/experiments/${run.id}/finish`, { headers: token, json: { results: { ok: 1 } }, expect: 200 })).data;
+    assert.equal(done.state, "done");
+    await call("POST", `/experiments/${run.id}/finish`, { headers: alice, json: { results: { ok: 2 }, state: "failed" }, expect: 400 });
+    const again = (await call<Schema["Experiment"]>("POST", "/experiments/runs", { headers: token, json: { rerunOf: run.id }, expect: 201 })).data;
+    assert.equal(again.title, "Run it (rerun)");
+    assert.deepEqual(again.provenance.rerunOf, { id: run.id });
+  });
+
   step("experiment uploads", async () => {
     // Under the suite's own tree (deleted with it), adding a loop and a process named None.
     const id = crypto.randomUUID();

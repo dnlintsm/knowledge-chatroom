@@ -1025,6 +1025,33 @@ class DeleteExperimentResponse(BaseModel):
     """
 
 
+class StartRunRequest(BaseModel):
+    nodeId: str | None = None
+    """
+    The node to fork; null or left out for the workspace root (with rerunOf, the old run's place).
+    """
+    title: Annotated[str | None, Field(max_length=200)] = None
+    """
+    Required unless rerunOf.
+    """
+    hypothesis: str | None = None
+    params: dict[str, Any] | None = None
+    inputs: list[RunInputSource] | None = None
+    rerunOf: str | None = None
+    """
+    The run to run again.
+    """
+    provenance: dict[str, Any] | None = None
+    """
+    At most 16 KiB of JSON.
+    """
+
+
+class FinishRunRequest(BaseModel):
+    results: dict[str, Any]
+    state: Literal["done", "failed"] | None = "done"
+
+
 class AddRunInputsRequest(BaseModel):
     inputs: list[RunInputSource]
 

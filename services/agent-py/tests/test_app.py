@@ -7,11 +7,12 @@ import time
 from typing import Any
 
 import pytest
-from agent_py.app import create_app
-from agent_py.prompt import SYSTEM_PROMPT
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
+
+from agent_py.app import create_app
+from agent_py.prompt import SYSTEM_PROMPT
 
 KEY = Ed25519PrivateKey.generate()
 PUBLIC_KEY = base64.urlsafe_b64encode(KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()

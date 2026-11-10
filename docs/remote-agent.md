@@ -176,6 +176,9 @@ to it.
    - **Writes in an experiment or at the root** change the file directly.
    - **Read-only files can't be written.**
    - **Experiments**: inside one, write only there, never to its node.
+   - **Runs**: start one with `POST /experiments/runs` (its inputs, and what you know about
+     it as `provenance`: chat, model, skill) and finish it with `POST /experiments/{id}/finish`,
+     so its report.md front matter records where it came from.
 
    `apps/agent/src/storage/tools.ts` is this repo's version, and
    `services/agent-py/agent_py/workspace.py` the same tools in Python, to copy from.
