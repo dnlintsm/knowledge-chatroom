@@ -218,8 +218,11 @@ to it.
 `agent_py/adapter.py` and `agent_py/app.py` do what this section describes.
 
 `ClaudeAgentAdapter` keeps one Claude session per `threadId`. It builds that session's
-options once, with `build_options(input_data)`, on the thread's first run (and again only
-if the session is restarted). So that first run, which already carries
+options with `build_options(input_data)` on the thread's first run, and again, resuming the
+same session from its working folder, on each run that carries tools. The chat always sends
+its browser tools, so in practice each run gets fresh options: keep the working folder the
+same for the chat (agent-py uses one per user), or the session can't be resumed. A client
+that sends no tools keeps the first run's options. So the first run, which already carries
 `knowledge_chatroom`, is where to set the session up for the user and place:
 
 ```python

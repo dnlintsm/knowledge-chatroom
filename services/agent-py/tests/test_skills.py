@@ -187,3 +187,27 @@ def test_without_the_agent_server_the_run_goes_on_without_skills(claude, tmp_pat
     options = claude.created[0].options
     assert options.tools == [] and not options.skills
     assert claude.created[0].prompts == [" /demo"]
+
+
+# The chat always sends its browser tools (apps/web/src/components/workspace/agent-bridge.tsx).
+BROWSER_TOOLS = [{"name": "openTaskBoard", "description": "Open the task board", "parameters": {"type": "object", "properties": {}}}]
+
+
+def test_a_mode_changed_mid_chat_reaches_the_next_run(client, claude, agent_server, monkeypatch):
+    sessions: list[tuple[str, str | None]] = []
+    # The adapter resumes the chat's session from the user's folder; the fake has no transcript.
+    monkeypatch.setattr(claude_agent_sdk, "get_session_info", lambda sid, directory=None: sessions.append((sid, directory)) or {})
+    first = run_input("one")
+    first["tools"] = BROWSER_TOOLS
+    events(client.post("/agent/report", json=first))
+    agent_server.skills[0]["mode"] = "manual"  # the user turns demo to manual in the chat
+    second = run_input("two")
+    second["tools"] = BROWSER_TOOLS
+    second["messages"] = [{"id": "m1", "role": "user", "content": "one"}, {"id": "m2", "role": "user", "content": "two"}]
+    events(client.post("/agent/report", json=second))
+    # A run with the browser's tools gets its options built again, resuming the same session.
+    before, after = (json.loads(c.options.settings)["skillOverrides"]["demo"] for c in claude.created)
+    assert (before, after) == ("on", "user-invocable-only")
+    assert claude.created[1].options.resume == "11111111-2222-3333-4444-555555555555"
+    # ...found in the same user folder the first run used.
+    assert sessions == [("11111111-2222-3333-4444-555555555555", claude.created[0].options.cwd)]

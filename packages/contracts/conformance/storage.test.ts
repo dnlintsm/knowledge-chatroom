@@ -604,6 +604,19 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     assert.equal(used.data.source, "workspace");
     await call("POST", "/skills/used", { headers: alice, json: { thread, skill, trigger: "sometimes" }, expect: 400 });
     await call("POST", "/skills/used", { headers: alice, json: { thread, skill: "no-such-skill", trigger: "model" }, expect: 404 });
+    // The token reads skills and notes uses, nothing else on those paths (PUT or DELETE
+    // /skills/run is /skills/{name} for a skill named "run"; fetched directly, as the spec
+    // matches these paths to the literal routes).
+    for (const method of ["PUT", "DELETE"]) {
+      for (const path of ["/skills/run", "/skills/used"]) {
+        const res = await fetch(`${BASE}${path}`, {
+          method,
+          headers: { ...storageToken("conformance|alice"), "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "off" }),
+        });
+        assert.equal(res.status, 401, `${method} ${path} with a storage token`);
+      }
+    }
   });
 
   step("skill hub", async () => {

@@ -229,8 +229,12 @@ export function createSkillsHandler(
     try {
       let userId: string | null = null;
       if (s) {
-        // Only what a run needs takes the run's storage token (outside agents).
-        const forRun = !isHub && /^\/skills\/(run|used)\/?$/.test(url.pathname);
+        // Only what a run needs takes the run's storage token (outside agents):
+        // reading its skills and noting a use. Never another method on those paths
+        // (PUT or DELETE /skills/run would change or delete a skill named "run").
+        const path = url.pathname.replace(/\/$/, "");
+        const forRun =
+          (req.method === "GET" && path === "/skills/run") || (req.method === "POST" && path === "/skills/used");
         const principal = await identify(req, s, "user", { storageTokens: forRun });
         if (!principal) return send(res, 401, { error: "Sign in first" });
         userId = principal.userId;
