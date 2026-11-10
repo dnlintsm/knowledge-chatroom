@@ -41,6 +41,8 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     ...process.env,
     DATABASE_URL: process.env.TEST_DATABASE_URL,
     S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
+    // Signed-in users, whatever AUTH_MODE the shell or the repository .env sets.
+    AUTH_MODE: "oidc",
     AUTH_SECRET: authSecret,
     AGENT_PORT: String(port),
     // Full-text search is enough here; search by meaning has its own tests.

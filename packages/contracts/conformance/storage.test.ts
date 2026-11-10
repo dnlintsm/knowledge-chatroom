@@ -102,9 +102,12 @@ function undocumented(node: SchemaObject, data: unknown, at: string): string[] {
   return Object.entries(data).flatMap(([k, v]) => (props[k] ? undocumented(props[k], v, `${at}.${k}`) : [`${at}.${k}`]));
 }
 
+/** Checks an answer against one named schema, undocumented fields included. */
 function validates(ref: string, data: unknown, label: string): void {
-  const validate = ajv.compile({ $ref: `spec#/components/schemas/${ref}` });
+  const schema = { $ref: `spec#/components/schemas/${ref}` };
+  const validate = ajv.compile(schema);
   if (!validate(data)) problems.push(`${label}: not a ${ref}: ${ajv.errorsText(validate.errors)}`);
+  else for (const extra of undocumented(schema, data, "")) problems.push(`${label}: field not in the ${ref} schema: ${extra}`);
 }
 
 const now = () => Math.floor(Date.now() / 1000);
