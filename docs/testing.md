@@ -66,6 +66,19 @@ with the backend on a fresh database, since the suite's first user must become t
 workspace owner, with `HUB_ADMINS=conformance|alice`, since that user also moderates
 the skill hub and memory packs, and with `MEMORY=on` (and `MEMORY_LEARN=off`). When you add or change a route, add its calls there too.
 
+With `CONFORMANCE_SAMPLES=<file>` the suite also writes every request and answer that
+matched the spec to that file, one JSON line each. `packages/knowledge-py/tests/test_api.py`
+parses them into the generated Python models (`knowledge_chatroom.api`) when
+`API_SAMPLES` names the file, and checks no field is lost; CI does both:
+
+```bash
+CONFORMANCE_SAMPLES=/tmp/api-samples.jsonl pnpm test:conformance
+cd packages/knowledge-py && API_SAMPLES=/tmp/api-samples.jsonl uv run pytest -q tests/test_api.py
+```
+
+After changing the spec, regenerate the models with `uv run datamodel-codegen` in
+`packages/knowledge-py` (the Quality workflow runs it with `--check`).
+
 The normal integration suite tests vector search using a deterministic embedder.
 Set `EMBEDDING_TEST=1` to also run the real model-download test; it needs network
 access and caches roughly 120 MB. For local UI tests, `EMBEDDING_MODEL=off` keeps

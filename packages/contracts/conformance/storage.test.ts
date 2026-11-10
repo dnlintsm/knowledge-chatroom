@@ -11,9 +11,14 @@
  * database: the first user to sign in becomes the workspace owner, and the suite
  * relies on that being its own user. `pnpm -C apps/agent test:conformance` starts
  * the agent on the test database and runs this file.
+ *
+ * With CONFORMANCE_SAMPLES set to a file path, every JSON answer that matched the
+ * spec, and every JSON request that succeeded, is written there as one JSON line
+ * ({operationId, status, response} or {operationId, request}), so the Python
+ * models (packages/knowledge-py) can be checked against real traffic.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
 import { Ajv2020, type AnySchema } from "ajv/dist/2020.js";
@@ -39,6 +44,9 @@ type Spec = { paths: Record<string, Record<string, Operation>>; components: Reco
 
 const BASE = process.env.STORAGE_URL?.replace(/\/$/, "");
 const SECRET = process.env.AUTH_SECRET;
+const SAMPLES = process.env.CONFORMANCE_SAMPLES;
+if (SAMPLES) writeFileSync(SAMPLES, "");
+const sample = (line: Record<string, unknown>) => SAMPLES && appendFileSync(SAMPLES, JSON.stringify(line) + "\n");
 const METHODS = ["get", "put", "post", "patch", "delete"];
 
 // Refs become "spec#/components/..." so Ajv resolves them against one shared schema.
@@ -148,6 +156,7 @@ async function call<T = Json>(method: string, path: string, opts: CallOptions = 
   if (!response) return problems.push(`${label}: status not in the spec for ${op.operationId}: ${text.slice(0, 200)}`), result;
 
   const type = (res.headers.get("content-type") ?? "").split(";")[0];
+  if (res.ok && opts.json !== undefined) sample({ operationId: op.operationId, request: opts.json });
   if (type === "application/json") {
     result.data = JSON.parse(text) as T;
     const schema = response.content?.["application/json"]?.schema;
@@ -155,7 +164,11 @@ async function call<T = Json>(method: string, path: string, opts: CallOptions = 
     else {
       const validate = ajv.compile(schema as AnySchema);
       if (!validate(result.data)) problems.push(`${label} (${op.operationId}): ${ajv.errorsText(validate.errors)}\n   ${text.slice(0, 300)}`);
-      else for (const extra of undocumented(schema, result.data, "")) problems.push(`${label} (${op.operationId}): field not in the spec: ${extra}`);
+      else {
+        const extras = undocumented(schema, result.data, "");
+        for (const extra of extras) problems.push(`${label} (${op.operationId}): field not in the spec: ${extra}`);
+        if (!extras.length) sample({ operationId: op.operationId, status: res.status, response: result.data });
+      }
       // A file read with ?versions is the history, not just any JSON.
       if (op.operationId === "readFile" && url.searchParams.has("versions")) validates("VersionList", result.data, label);
     }

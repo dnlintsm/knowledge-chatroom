@@ -30,6 +30,9 @@
   ```
 - The spec and the conformance suite also cover memory, skills, the skill hub, the "+" menu's tools,
   follow-up suggestions, the identity public key and the health check (issue #169).
+- Python models of the whole API: `knowledge_chatroom.api` (`packages/knowledge-py`, install
+  the `api` extra for pydantic) is generated from the OpenAPI spec, and CI checks that it is
+  up to date and that it parses every request and answer of the conformance run (issue #169).
 
 ## 0.2.3
 
