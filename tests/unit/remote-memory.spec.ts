@@ -58,8 +58,8 @@ test.describe("memory tokens for a remote chat agent", () => {
     Object.assign(process.env, LOGIN_ENV);
     const user = { sub: "kc|alice", email: "alice@example.com", name: "Alice" };
     const token = memoryHeaderOf(createDefaultAgent(), { [IDENTITY_HEADER]: identityHeader(user) });
-    const claims = readIdentityToken(token ?? undefined, SECRET, Date.now(), MEMORY_AUDIENCE);
-    expect(claims).toMatchObject({ ...user, aud: "memory", via: "remote", thread: "t1", node: NODE });
+    const claims = readIdentityToken(token ?? undefined, SECRET);
+    expect(claims).toMatchObject({ ...user, aud: MEMORY_AUDIENCE, via: "remote", thread: "t1", node: NODE });
     // Not an identity token.
     expect(readIdentityHeader(token ?? undefined)).toBeNull();
   });
