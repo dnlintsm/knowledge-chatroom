@@ -123,7 +123,7 @@ export function KnowledgeTree() {
       {editing?.mode === "experiment" && editing.nodeId === nodeId && (
         <NameInput
           depth={depth}
-          placeholder={nodeId === null ? "New run title" : "New experiment title"}
+          placeholder="New experiment title"
           onCancel={() => setEditing(null)}
           onSubmit={(title) => run(() => ws.createExperiment(nodeId, title))}
         />
@@ -287,7 +287,7 @@ export function KnowledgeTree() {
         <House className="size-4 text-[var(--muted-foreground)]" />
         <span className="min-w-0 flex-1 truncate font-medium">Workspace</span>
         {ws.rootRole && (
-          <RowAction label="Start a run in the workspace" onClick={() => setEditing({ mode: "experiment", nodeId: null })}>
+          <RowAction label="Start an experiment in the workspace" onClick={() => setEditing({ mode: "experiment", nodeId: null })}>
             <FlaskConical className="size-3.5" />
           </RowAction>
         )}

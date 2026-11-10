@@ -514,7 +514,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
 
     @tool(
         "list_experiments",
-        "List the experiments (runs) the user can see, on one knowledge node or (without node) anywhere: id, "
+        "List the experiments the user can see, on one knowledge node or (without node) anywhere: id, "
         "title, node (null = at the workspace root), status (draft = only its author sees it, shared, archived), "
         "state (ready, running, done, failed), author, hypothesis, params and results. Use it to compare "
         "experiments on a node.",
@@ -548,7 +548,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     @tool(
         "update_experiment",
         "Change an experiment the user authored: title, hypothesis or params (each replaces the old value whole, "
-        "so send the complete object). Record results and finish a run with set_experiment_results instead. "
+        "so send the complete object). Record results and finish an experiment with set_experiment_results instead. "
         "Sharing and archiving are the user's to do in the app.",
         schema(
             {
@@ -600,14 +600,14 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
 
     @tool(
         "create_experiment",
-        "Start a run (an experiment) for the user: a private draft on a knowledge node (usually a process) with "
+        "Start an experiment for the user: a private draft on a knowledge node (usually a process) with "
         "a copy of the node's files, where changes don't touch the node; or, without node, at the workspace root, "
         "starting empty. Only when the user asks to try, explore, analyze or run something. List the files it "
-        "works from as `inputs`: each is linked in read only under inputs/ at its current version, so the run "
-        "keeps exactly what it read. The run starts in state running with a report.md whose front matter records "
-        "where it came from (who, this chat, model, skill, input versions); write the report below the front "
-        "matter. Work in it by passing its id as `experiment` to the file tools, and finish with "
-        "set_experiment_results. To run an earlier run again, pass rerunOf instead of changing it.",
+        "works from as `inputs`: each is copied under inputs/ at its current version, and the experiment's "
+        "record keeps which version that was. It starts in state running with a report.md whose front matter "
+        "records where it came from (who, this chat, model, skill, input versions); write the report below the "
+        "front matter. Work in it by passing its id as `experiment` to the file tools, and finish with "
+        "set_experiment_results. To repeat an earlier experiment, pass rerunOf instead of changing it.",
         schema(
             {
                 "node": {"type": "string", "description": "Knowledge node id to fork; omit for the workspace root."},
@@ -619,7 +619,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                 "params": {"type": "object", "description": 'What is varied, e.g. {"rfPower_W": 40}'},
                 "inputs": {
                     "type": "array",
-                    "description": "Files the run reads (uploads, data, earlier results); the user must be able "
+                    "description": "Files the experiment reads (uploads, data, earlier results); the user must be able "
                     "to read each.",
                     "items": {
                         "type": "object",
@@ -632,7 +632,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                         "required": ["path"],
                     },
                 },
-                "skill": {"type": "string", "description": "The skill this run follows, if any, e.g. analysis."},
+                "skill": {"type": "string", "description": "The skill this experiment follows, if any, e.g. analysis."},
                 "rerunOf": {
                     "type": "string",
                     "description": "Run this earlier run (experiment id) again as a new run: its place (node), "
@@ -673,10 +673,10 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
 
     @tool(
         "set_experiment_results",
-        "Record a run's results and finish it: state done, or failed when it couldn't be completed (say why in "
+        "Record an experiment's results and finish it: state done, or failed when it couldn't be completed (say why in "
         "its report). Results replace the old ones whole, as numbers with units in the key where you can, e.g. "
-        '{"yield_pct": 92.5}. Also refreshes the record in its report.md front matter. Only for runs the user '
-        "authored.",
+        '{"yield_pct": 92.5}. Also refreshes the record in its report.md front matter. Only for experiments the '
+        "user authored.",
         schema(
             {
                 "id": {"type": "string", "description": "Experiment id"},

@@ -187,8 +187,8 @@ function TitleBar() {
 }
 
 /**
- * The app name, which goes home: the workspace root with the Runs view, which
- * there lists every run. Leaving a run changes the URL, so Back returns to
+ * The app name, which goes home: the workspace root with the Experiments view,
+ * which there lists every experiment. Leaving a run changes the URL, so Back returns to
  * it. Open tabs and chats stay as they are. A real link to "/", so a
  * middle-click or Ctrl-click opens a new tab.
  */
@@ -198,7 +198,7 @@ function HomeLink() {
   return (
     <a
       href="/"
-      title="Home: all runs"
+      title="Home: all experiments"
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();

@@ -237,7 +237,7 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "showPane",
     description:
-      "Show a pane of the workspace: 'explorer' (files and runs on the left), 'editor' (the middle pane) or 'chat'. On a phone this switches to that pane.",
+      "Show a pane of the workspace: 'explorer' (files and experiments on the left), 'editor' (the middle pane) or 'chat'. On a phone this switches to that pane.",
     parameters: z.object({ pane: z.enum(["explorer", "editor", "chat"]) }),
     handler: async ({ pane }) => {
       latestWorkbench.current.panes.show(pane);
@@ -259,15 +259,15 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "listRuns",
     description:
-      "List the runs (experiments, each maybe with a report) where the user is and below it, all of them at the workspace root, and which one the user is in.",
+      "List the experiments (each maybe with a report.md) where the user is and below it, all of them at the workspace root, and which one the user is in.",
     parameters: z.object({}),
     handler: async () => {
       const ws = latest.current;
       if (ws.storageMode === "loading") return { error: FILES_LOADING };
-      if (ws.storageMode !== "server") return { error: "Runs need server storage; there are none in this browser-only workspace." };
+      if (ws.storageMode !== "server") return { error: "Experiments need server storage; there are none in this browser-only workspace." };
       return {
         current: ws.experiment?.id ?? null,
-        runs: runsUnder(ws.experiments, ws.nodes, ws.node).map((e) => ({
+        experiments: runsUnder(ws.experiments, ws.nodes, ws.node).map((e) => ({
           id: e.id,
           title: e.title,
           node: e.nodeId,
@@ -283,24 +283,24 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "openRun",
     description:
-      "Move the workspace into a run (an id from listRuns): the panes and this chat then work on it, and its report opens.",
-    parameters: z.object({ id: z.string().describe("The run's experiment id") }),
+      "Move the workspace into an experiment (an id from listRuns): the panes and this chat then work on it, and its report opens.",
+    parameters: z.object({ id: z.string().describe("The experiment's id") }),
     handler: async ({ id }) => {
       const ws = latest.current;
       if (ws.storageMode === "loading") return { error: FILES_LOADING };
-      if (!(await ws.enterExperiment(id))) return { error: `No run ${id}. Call listRuns for the runs there are.` };
-      return { ok: true, run: id };
+      if (!(await ws.enterExperiment(id))) return { error: `No experiment ${id}. Call listRuns for the experiments there are.` };
+      return { ok: true, experiment: id };
     },
   });
 
   useFrontendTool({
     name: "listActions",
     description:
-      "List the actions for the current run (the buttons in its Actions block): id, label, what it does, whether it can run now, and whether you may run it.",
+      "List the actions for the current experiment (the buttons in its Actions block): id, label, what it does, whether it can run now, and whether you may run it.",
     parameters: z.object({}),
     handler: async () => {
       const { items } = latestActions.current;
-      if (!items.length) return { error: "The user isn't in a run, so there are no actions." };
+      if (!items.length) return { error: "The user isn't in an experiment, so there are no actions." };
       return items.map(({ def, view }) => ({
         id: def.id,
         label: view.label,
@@ -315,7 +315,7 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "runAction",
     description:
-      "Run one of the current run's actions by id (from listActions), as if the user clicked it, with the user's permissions. Only actions marked youMayRun.",
+      "Run one of the current experiment's actions by id (from listActions), as if the user clicked it, with the user's permissions. Only actions marked youMayRun.",
     parameters: z.object({ id: z.string().describe("e.g. generate-rules") }),
     handler: async ({ id }) => {
       const result = await latestActions.current.run(id, "agent");

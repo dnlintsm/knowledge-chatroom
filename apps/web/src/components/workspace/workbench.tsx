@@ -152,7 +152,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     };
     if (!urlChecked.current) {
       urlChecked.current = true;
-      if (linked && linked !== experimentId) notify("That run isn't there, or isn't shared with you.", "warning");
+      if (linked && linked !== experimentId) notify("That experiment isn't there, or isn't shared with you.", "warning");
       if (linked !== experimentId || new URLSearchParams(search).has("run")) go("replace");
       return;
     }
@@ -175,7 +175,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         void enterExperiment(linked).then((ok) => {
           if (ok || popTarget.current !== linked) return;
           popTarget.current = undefined;
-          notify("That run is gone.", "warning");
+          notify("That experiment is gone.", "warning");
         });
       } else {
         void enterNode(experimentNode);

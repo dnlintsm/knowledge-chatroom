@@ -49,13 +49,13 @@ test("a run with a report offers all of its chips, named after the file and run"
   expect(chips.map((s) => s.title)).toEqual(["Summarize effects.csv", "Draft a note", "Analyze the report"]);
   expect(chips[0].message).toContain("data/effects.csv");
   expect(chips[0].message).toContain("the artifacts folder.");
-  expect(chips[1].message).toContain('the run "Etch, higher RF"');
-  expect(chips[1].message).toContain("notes/next-steps.md in the run");
+  expect(chips[1].message).toContain('the experiment "Etch, higher RF"');
+  expect(chips[1].message).toContain("notes/next-steps.md in the experiment");
   expect(chips[2]).toEqual({
     title: "Analyze the report",
     message:
-      'Analyze the report of the run "Etch, higher RF" at report.md: the key findings and how strong the evidence is, ' +
-      "anything that looks off or inconsistent, and which runs to try next.",
+      'Analyze the report of the experiment "Etch, higher RF" at report.md: the key findings and how strong the evidence is, ' +
+      "anything that looks off or inconsistent, and which experiments to try next.",
   });
 });
 
@@ -73,7 +73,7 @@ test("similar experiments needs server storage and names what to compare against
     firstRoundSuggestions({ ...nowhere, serverStorage: true, ...place }).find(
       (s) => s.title === "Search similar experiments",
     )!.message;
-  expect(like({ runTitle: "Higher RF power", nodeName: "Main etch" })).toContain('the run "Higher RF power"');
+  expect(like({ runTitle: "Higher RF power", nodeName: "Main etch" })).toContain('the experiment "Higher RF power"');
   expect(like({ nodeName: "Main etch" })).toContain("the work on Main etch");
   expect(like({})).toContain("what I'm working on");
   expect(like({})).toContain("list_experiments");
@@ -97,9 +97,9 @@ test("all conditions met produces full ordered list of chips", () => {
   ]);
 
   expect(chips[0].title).toBe("Summarize main.py");
-  expect(chips[1].message).toContain('the run "Run 1"');
-  expect(chips[2].message).toContain('the run "Run 1" at results/report.html');
-  expect(chips[3].message).toContain('Find experiments similar to the run "Run 1"');
+  expect(chips[1].message).toContain('the experiment "Run 1"');
+  expect(chips[2].message).toContain('the experiment "Run 1" at results/report.html');
+  expect(chips[3].message).toContain('Find experiments similar to the experiment "Run 1"');
 });
 
 test("serverStorage with nodeName alone compares against the work on that node", () => {

@@ -4,14 +4,15 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import postgres from "postgres";
 
 /** Shows a sidebar view; clicking it while it is already shown would fold the sidebar away. */
-async function showView(page: Page, name: "Files" | "Runs") {
+async function showView(page: Page, name: "Files" | "Experiments") {
   const button = page.getByRole("button", { name, exact: true });
   if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
 }
 const showFiles = (page: Page) => showView(page, "Files");
 
 /**
- * Runs are experiments with a report (issue #82). Runs need server storage,
+ * Runs are experiments with a report (issue #82), shown as experiments
+ * (#185). They need server storage,
  * so this runs with it (pnpm test:e2e:storage). Screenshots continue the
  * numbering of preview.spec.ts.
  */
@@ -72,7 +73,7 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
   await makeRun(request, "litho-2026-10-03", { "report.md": "# xDOE report: CD vs. dose and focus\n" });
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await showView(page, "Runs");
+  await showView(page, "Experiments");
   const list = page.getByTestId("run-list");
   await expect(list).toContainText("etch-2026-10-01");
   await expect(list).toContainText("litho-2026-10-03");
@@ -107,8 +108,8 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
 
   // Compare: one row per run.
-  await showView(page, "Runs");
-  await page.getByRole("button", { name: "Compare runs" }).click();
+  await showView(page, "Experiments");
+  await page.getByRole("button", { name: "Compare experiments" }).click();
   const table = page.getByTestId("runs-panel").getByRole("table");
   await expect(table.locator("tbody tr")).toHaveCount(2);
   await shot(page, "02b-compare-runs");
@@ -117,15 +118,15 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
 test("runs: a new run at the root starts empty and tracks its state", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await showView(page, "Runs");
-  await page.getByRole("button", { name: "New run in the workspace" }).click();
-  await page.getByRole("textbox", { name: "New run title" }).fill("First uploads");
+  await showView(page, "Experiments");
+  await page.getByRole("button", { name: "New experiment in the workspace" }).click();
+  await page.getByRole("textbox", { name: "New experiment title" }).fill("First uploads");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\?experiment=/);
   const panel = page.getByTestId("experiment-panel");
-  await expect(panel).toContainText("Run in the workspace");
+  await expect(panel).toContainText("Experiment in the workspace");
   await expect(panel).toContainText("It started empty");
-  await panel.getByRole("combobox", { name: "Run state" }).selectOption("running");
+  await panel.getByRole("combobox", { name: "Experiment state" }).selectOption("running");
   await expect(page.getByTestId("run-list").locator('[data-state="running"]')).toBeVisible();
   await shot(page, "02c-run-state");
 });
@@ -184,16 +185,16 @@ test("files can be uploaded into an existing run and added as its inputs", async
   const run = await makeRun(request, "Wafer data", { "report.md": "# Wafer data\n" });
   await gotoRun(page, run, "Wafer data");
   // The Runs view leads to the run's panel, where files are added.
-  await showView(page, "Runs");
+  await showView(page, "Experiments");
   await page.getByRole("button", { name: `Add files to ${run.title}` }).click();
   const add = page.getByTestId("add-files");
   await expect(add).toContainText(`Upload to ${run.title}`);
-  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeChecked();
+  await expect(add.getByRole("checkbox", { name: "Add as inputs" })).toBeChecked();
   await page.getByTestId("add-files-input").setInputFiles([
     { name: "lot-7.csv", mimeType: "text/csv", buffer: Buffer.from("wafer,dose\n7,31\n") },
   ]);
   const panel = page.getByTestId("experiment-panel");
-  await expect(panel.getByRole("status")).toContainText("added it as run inputs under inputs/");
+  await expect(panel.getByRole("status")).toContainText("added it as inputs under inputs/");
   const inputs = page.getByRole("list", { name: "Inputs" });
   await expect(inputs).toContainText("from uploads/lot-7.csv");
   await shot(page, "02e-run-add-files");
@@ -205,8 +206,8 @@ test("files can be uploaded into an existing run and added as its inputs", async
 
   // A finished run keeps its inputs: uploads only.
   await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
-  await panel.getByRole("combobox", { name: "Run state" }).selectOption("done");
-  await expect(add.getByRole("checkbox", { name: "Add as run inputs" })).toBeDisabled();
+  await panel.getByRole("combobox", { name: "Experiment state" }).selectOption("done");
+  await expect(add.getByRole("checkbox", { name: "Add as inputs" })).toBeDisabled();
   await page.getByTestId("add-files-input").setInputFiles([
     { name: "late.csv", mimeType: "text/csv", buffer: Buffer.from("x\n") },
   ]);
@@ -216,7 +217,7 @@ test("files can be uploaded into an existing run and added as its inputs", async
 
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {
   await page.goto("/?experiment=00000000-0000-4000-8000-000000000000");
-  await expect(page.getByTestId("notices")).toContainText("That run isn't there, or isn't shared with you.");
+  await expect(page.getByTestId("notices")).toContainText("That experiment isn't there, or isn't shared with you.");
   await expect(page).not.toHaveURL(/experiment=/);
   await page.goto(`/?run=${ETCH}`);
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();

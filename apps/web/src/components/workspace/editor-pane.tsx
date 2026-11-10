@@ -32,7 +32,7 @@ const BUILT_IN_TABS = {
   [TASKS_TAB]: { label: "Task board", icon: ListTodo },
   [EXPERIMENT_TAB]: { label: "Experiment", icon: FlaskConical },
   [REVIEW_TAB]: { label: "Proposed changes", icon: FileDiff },
-  [RUNS_TAB]: { label: "Runs", icon: Table2 },
+  [RUNS_TAB]: { label: "Experiments", icon: Table2 },
   [MEMORY_TAB]: { label: "Memory", icon: Brain },
 };
 
