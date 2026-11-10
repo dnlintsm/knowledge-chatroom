@@ -283,6 +283,31 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("PATCH", `/experiments/${exp.id}`, { headers: alice, json: { status: "shared" }, expect: 200 });
   });
 
+  step("experiment uploads", async () => {
+    // Under the suite's own tree (deleted with it), adding a loop and a process named None.
+    const id = crypto.randomUUID();
+    const form = (meta: unknown, files: Record<string, string> = {}) => {
+      const body = new FormData();
+      body.append("meta", JSON.stringify(meta));
+      for (const [path, text] of Object.entries(files)) body.append(path, new Blob([text], { type: "text/plain" }), path.split("/").pop());
+      return body;
+    };
+    const path = `${tech.name}/Module X//`;
+    const up = await call<Schema["ExperimentUpload"]>("POST", "/experiments/upload", {
+      headers: alice,
+      body: form({ id, path, title: "Uploaded", params: { a: 2 } }, { "report.md": "# Uploaded", "data/metrics.csv": "a,b\n1,2" }),
+      expect: 201,
+    });
+    assert.equal(up.data.experiment.id, id);
+    assert.deepEqual(up.data.created.map((n) => n.name), ["None", "None"]);
+    await call("POST", "/experiments/upload", { headers: alice, body: form({ id, path, title: "Again" }), expect: 409 });
+    await call("POST", "/experiments/upload", { headers: alice, body: form({ id: crypto.randomUUID(), path: tech.name, title: "Short" }), expect: 400 });
+    await call("POST", "/experiments/upload", { headers: alice, json: { id, path, title: "JSON" }, expect: 415 });
+    // Bob only views the tree: adding a process below it needs editor.
+    await call("POST", "/experiments/upload", { headers: bob, body: form({ id: crypto.randomUUID(), path: `${tech.name}/Module X/None/Bob's`, title: "Bob" }), expect: 403 });
+    await call("POST", "/experiments/upload", { headers: storageToken("conformance|alice"), body: form({ id: crypto.randomUUID(), path, title: "Token" }), expect: 403 });
+  });
+
   step("search", async () => {
     await call("GET", "/search?q=conformance", { headers: alice, expect: 200 });
     await call("GET", `/search?q=hello&scope=${tech.id}&limit=5`, { headers: alice, expect: 200 });
