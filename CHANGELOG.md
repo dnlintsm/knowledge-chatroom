@@ -14,13 +14,21 @@
   `GET /skills/run?thread=<id>` lists the skills a run gets in that chat (mode, source,
   files in base64) and `POST /skills/used` (`{thread, run?, skill, trigger}`) records a
   use. Both take the run's storage token (issue #176).
+- Memory for a remote backend's chat agent: for each run with `AGENT_URL` the app also sends
+  an `X-Knowledge-Memory` token for that chat (`via` `remote`; unsigned `local.` form without
+  login). With it, `/memory/agent` treats the backend as Claude in the chat: the past-chat
+  tools too, changes made with Undo until the run has used another tool (`?tainted=1`), and
+  each tool answer lists the notes it read or changed (`events`, `tainted`). Outside MCP
+  servers' memory tokens work as before (issue #176).
 - `services/agent-py`: the chat agent in Python (FastAPI and `ag_ui_claude_sdk`), for
   `AGENT_URL` (issue #176, step 1 of phase 2 of #169). It chats with the app's own tools,
   checks the run's user, and gives the model the user's open file and place on every run.
   It works on the workspace's files through the storage API with the run's storage token,
   with the TypeScript agent's file and run tools (step 2), and has the user's skills, as
   on the agent server: auto and manual modes, `/name`, `skill_used` events and usage
-  history, without scripts (step 3). Memory and tool chips follow in later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
+  history, without scripts (step 3), and the user's memory in the chat: the memory prompt,
+  the `memory_*` and `chats_*` tools and `memory` events (step 4). Tool chips follow in
+  later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
   adapter does).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
   with TypeScript types generated from it and checks that keep the spec, the generated types

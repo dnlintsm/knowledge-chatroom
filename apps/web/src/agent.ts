@@ -1,7 +1,7 @@
 import { HttpAgent, type RunAgentInput } from "@ag-ui/client";
-import { chatAgentUrl, localAgentUrl, localSuggester } from "@/lib/agent-target";
-import { IDENTITY_HEADER, authSecret, readIdentityHeader } from "@/lib/auth";
-import { LOCAL_USER, withChatroomUser, type ChatroomUser } from "@/lib/chatroom-props";
+import { chatAgentUrl, localAgentUrl, localSuggester, remoteAgentUrl } from "@/lib/agent-target";
+import { IDENTITY_HEADER, MEMORY_HEADER, authSecret, memoryHeader, readIdentityHeader, type SessionUser } from "@/lib/auth";
+import { CHATROOM_PROPS, LOCAL_USER, withChatroomUser, type ChatroomUser } from "@/lib/chatroom-props";
 
 /**
  * An AG-UI client that puts the run's user into
@@ -9,18 +9,36 @@ import { LOCAL_USER, withChatroomUser, type ChatroomUser } from "@/lib/chatroom-
  * runtime gives each request its own clone of the agent, carrying that
  * request's x-* headers, so the user comes from the identity route.ts signed
  * into X-Knowledge-User, never from the browser.
+ *
+ * A remote backend's chat agent also gets an X-Knowledge-Memory token for the
+ * run's chat (and knowledge node), to use the user's memory there through the
+ * agent server's /memory/agent (docs/remote-agent.md).
  */
 class ChatroomAgent extends HttpAgent {
   protected override requestInit(input: RunAgentInput): RequestInit {
-    return super.requestInit(withChatroomUser(input, this.chatroomUser()));
+    const signedIn = this.signedInUser();
+    const user: ChatroomUser | null = !authSecret()
+      ? LOCAL_USER
+      : signedIn && { id: signedIn.sub, email: signedIn.email ?? null, name: signedIn.name ?? null, signed_in: true };
+    const init = super.requestInit(withChatroomUser(input, user));
+    if (!user || !input.threadId || !remoteAgentUrl() || this.url !== chatAgentUrl()) return init;
+    const headers = new Headers(init.headers);
+    headers.set(MEMORY_HEADER, memoryHeader(signedIn, input.threadId, runNode(input)));
+    return { ...init, headers };
   }
 
-  private chatroomUser(): ChatroomUser | null {
-    if (!authSecret()) return LOCAL_USER;
+  /** With login, the user route.ts signed into X-Knowledge-User. */
+  private signedInUser(): SessionUser | null {
     const header = Object.entries(this.headers).find(([name]) => name.toLowerCase() === IDENTITY_HEADER)?.[1];
-    const user = readIdentityHeader(header);
-    return user ? { id: user.sub, email: user.email ?? null, name: user.name ?? null, signed_in: true } : null;
+    return readIdentityHeader(header);
   }
+}
+
+/** The knowledge node the run's chat is in, from the browser's chatroom props (null = the root). */
+function runNode(input: RunAgentInput): string | null {
+  const props = input.forwardedProps as Record<string, unknown> | undefined;
+  const place = props?.[CHATROOM_PROPS] as { node?: { id?: unknown } | null } | undefined;
+  return typeof place?.node?.id === "string" ? place.node.id : null;
 }
 
 /**

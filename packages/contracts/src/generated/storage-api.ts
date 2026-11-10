@@ -1434,6 +1434,11 @@ export interface paths {
          *     user's memory in the chat the token was made for, through the same memory_* tools
          *     Claude has. Its changes always wait in the user's inbox (or go to a shared note's
          *     editors).
+         *
+         *     A token `via` "remote", which the app makes for each run of a remote backend's chat
+         *     agent (AGENT_URL), is Claude in that chat: it also gets chats_search and chats_read,
+         *     and the prompt and changes Claude gets there (made with Undo while memory is on,
+         *     until the run has used another tool; see `tainted` on the tool calls).
          */
         get: operations["getMemoryAgent"];
         put?: never;
@@ -1446,16 +1451,28 @@ export interface paths {
     };
     "/memory/agent/tools/{name}": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Remote chat agents only (via "remote"): the run has used a tool other than memory's,
+                 *     so changes wait in the inbox. Pass on what the last call answered in `tainted`.
+                 *     Ignored for an outside server, whose changes always wait.
+                 */
+                tainted?: "0" | "1" | "true" | "false";
+                /** @description Remote chat agents only, the AG-UI run id, kept with the notes the call reads and changes. */
+                run?: string;
+            };
             header?: never;
             path: {
-                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete" | "chats_search" | "chats_read";
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Call one memory tool for an outside MCP server */
+        /**
+         * Call one memory tool for an outside MCP server or a remote chat agent
+         * @description chats_search and chats_read are for remote chat agents only (404 for an outside server).
+         */
         post: operations["callMemoryTool"];
         delete?: never;
         options?: never;
@@ -5535,10 +5552,19 @@ export interface operations {
     };
     callMemoryTool: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Remote chat agents only (via "remote"): the run has used a tool other than memory's,
+                 *     so changes wait in the inbox. Pass on what the last call answered in `tainted`.
+                 *     Ignored for an outside server, whose changes always wait.
+                 */
+                tainted?: "0" | "1" | "true" | "false";
+                /** @description Remote chat agents only, the AG-UI run id, kept with the notes the call reads and changes. */
+                run?: string;
+            };
             header?: never;
             path: {
-                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete";
+                name: "memory_view" | "memory_search" | "memory_save" | "memory_edit" | "memory_delete" | "chats_search" | "chats_read";
             };
             cookie?: never;
         };
@@ -5559,6 +5585,10 @@ export interface operations {
                     "application/json": {
                         text: string;
                         isError: boolean;
+                        /** @description The notes this call read or changed, for the chat's "Used / Updated" line. */
+                        events: components["schemas"]["MemoryEvent"][];
+                        /** @description Whether the run's later changes wait in the inbox (reading a shared note or a past chat sets it). */
+                        tainted: boolean;
                     };
                 };
             };

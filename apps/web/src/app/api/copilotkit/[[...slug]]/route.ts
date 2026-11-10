@@ -7,6 +7,7 @@ import { createDefaultAgent, createSuggesterAgent, dynamicSuggestions } from "@/
 import { handle } from "hono/vercel";
 import {
   IDENTITY_HEADER,
+  MEMORY_HEADER,
   STORAGE_HEADER,
   authSecret,
   identityHeader,
@@ -96,13 +97,15 @@ const handler = handle(app);
 // (never one the browser sent), and src/agent.ts copies that user into the
 // run's forwardedProps. With login on, chat needs a signed-in user. A remote
 // backend also gets an X-Knowledge-Storage token, to reach the user's files
-// through the storage API for the whole run (issue #88). Without
+// through the storage API for the whole run (issue #88), and src/agent.ts
+// adds an X-Knowledge-Memory token for the run's chat (issue #176). Without
 // Intelligence, the history routes come from the user's own chats
 // (src/lib/chat-routes.ts), and only a run's own user may stop it.
 async function withUser(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete(IDENTITY_HEADER);
   headers.delete(STORAGE_HEADER);
+  headers.delete(MEMORY_HEADER);
   const user = authSecret() ? sessionFrom(req) : null;
   if (authSecret()) {
     if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });

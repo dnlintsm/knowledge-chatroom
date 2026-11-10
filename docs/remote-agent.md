@@ -25,6 +25,10 @@ With `AGENT_URL` set:
   with the run's `X-Knowledge-Storage` token returns the skills that run gets, with their
   files, and `POST /skills/used` adds a use to the history, as `services/agent-py` does
   (`agent_py/skills.py`). Otherwise a message such as `/tldr RF power` arrives as plain text.
+- **Memory** (`MEMORY=on` on the agent server): the Memory view works the same, and the
+  backend gets the user's memory in the chat only if it asks for it with the run's
+  `X-Knowledge-Memory` token (below), as `services/agent-py` does (`agent_py/memory.py`).
+  The agent server keeps learning from chats once they go quiet, whichever agent served them.
 - **The browser**: works the same. It still talks only to the Next.js app (`/api/copilotkit`).
 
 The variable names come from the code (`apps/web/src/lib/agent-target.ts`). The backend is called only
@@ -151,6 +155,31 @@ Only the storage API accepts it: it can't start chat runs. Don't read the databa
 store directly instead. The app's connection owns the tables, so row security doesn't apply
 to it.
 
+### `X-Knowledge-Memory`
+
+Sent on every run, for the user's memory in this chat through `/memory/agent` at
+`LOCAL_AGENT_URL`. It has `aud` `memory`, `via` `remote`, the run's `thread` and `node`, and
+lasts as long as the storage token. Without login it is `local.<base64url JSON>` with the same
+claims, accepted only by an agent server without login. Pass it on unchanged:
+
+- `GET /memory/agent` gives `{prompt, tools}`: the system prompt's memory section (with the
+  index of the user's notes) and the `memory_*` and `chats_*` tools with their JSON schemas.
+  404 means memory is off on the server, 403 that it is off for the user or the chat is
+  incognito: run without it.
+- `POST /memory/agent/tools/<name>?run=<runId>&tainted=0|1` runs one with its arguments and
+  answers `{text, isError, events, tainted}`. The server checks memory is still on at each
+  call (403 once it isn't).
+- **Tainted runs**: Claude's changes are made with Undo while memory is on, and wait in the
+  user's Memory inbox once the run has used any tool but memory's (a file, a skill, an outside
+  server), so content from those can't steer later chats. Mark the run yourself before each
+  such tool (`agent_py/memory.py` does it in a `PreToolUse` hook), pass `tainted=1` from then
+  on, and keep `tainted` from each answer: reading a shared note or a past chat sets it.
+- **Events**: send each of `events` to the chat as an AG-UI `CUSTOM` event named `memory`, for
+  the "Used / Updated" line under the reply, where the user can undo a change.
+
+An outside MCP server's memory token (`memoryAccess`, `via` `mcp:<name>`) gets only the
+`memory_*` tools, and its changes always wait in the inbox.
+
 ## What the backend must do
 
 1. **Serve the route.** Accept `POST /agent/report` and stream AG-UI events: `RUN_STARTED`
@@ -192,7 +221,8 @@ to it.
    the system prompt, as `apps/agent/src/agent.ts` does, and number lines in file content your
    tools return, the same way. Links to working-folder copies or other places show greyed out.
 7. **Optional**: report each skill a run uses as an AG-UI `CUSTOM` event named `skill_used`
-   (`{skill, source, trigger}`), as this repo's agent does, to show it under the chat input.
+   (`{skill, source, trigger}`), as this repo's agent does, to show it under the chat input,
+   and give the model the user's memory with the run's `X-Knowledge-Memory` token (above).
 8. **Honour tool chips.** The chat's "+" menu lists the MCP servers in this repo's
    `MCP_SERVERS` that have a `ui` block (`GET /tools` on `LOCAL_AGENT_URL`), and
    `knowledge_chatroom.tools` names the ones whose chip is on. For each server you run:

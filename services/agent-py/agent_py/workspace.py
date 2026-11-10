@@ -83,8 +83,10 @@ class Storage:
         params: Mapping[str, str | None] | None = None,
         json_body: Any = None,
         content: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        headers = {STORAGE_HEADER: self.token} if self.token else {}
+        """`headers` replace the storage token (memory calls send their own)."""
+        headers = dict(headers) if headers is not None else {STORAGE_HEADER: self.token} if self.token else {}
         if content is not None:
             headers["Content-Type"] = "application/octet-stream"
         query = {k: v for k, v in (params or {}).items() if v is not None}

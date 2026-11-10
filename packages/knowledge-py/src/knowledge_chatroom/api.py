@@ -1556,6 +1556,14 @@ class CallMemoryToolRequest(BaseModel):
 class CallMemoryToolResponse(BaseModel):
     text: str
     isError: bool
+    events: list[MemoryEvent]
+    """
+    The notes this call read or changed, for the chat's "Used / Updated" line.
+    """
+    tainted: bool
+    """
+    Whether the run's later changes wait in the inbox (reading a shared note or a past chat sets it).
+    """
 
 
 class RunSkill(BaseModel):
