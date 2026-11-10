@@ -893,14 +893,13 @@ export class FilesSession {
   async write(
     path: string,
     bytes: Uint8Array,
-    opts: { mime?: string; createOnly?: boolean; readOnly?: boolean } = {},
+    opts: { mime?: string; createOnly?: boolean } = {},
   ) {
     this.needEditor();
     return this.run((s) =>
       s.write(path, bytes, {
         mime: opts.mime,
         createOnly: opts.createOnly,
-        readOnly: opts.readOnly,
         author: this.principal.actor,
         authorId: this.principal.userId,
         inTx: this.audit("file.write", { path, size: bytes.byteLength }),

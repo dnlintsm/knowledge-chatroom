@@ -324,7 +324,6 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "size": f["size"],
                     "lastWrittenBy": f["author"],
                     "updatedAt": f["updatedAt"],
-                    **({"readOnly": True} if f.get("readOnly") else {}),
                 }
                 for f in files
             ]
@@ -448,8 +447,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         "until someone who can edit there accepts the change (writing the same file again revises your "
         "proposal). Put new generated documents under artifacts/ (in the run, when the user is in one), unless "
         "the user asks to change an existing file. Paths starting with notes/, skills/<name>/SKILL.md, uploads/ "
-        "or artifacts/ decide where the file is listed. Every write is kept as a version. Read-only files "
-        "(readOnly in list_files) can't be written.",
+        "or artifacts/ decide where the file is listed. Every write is kept as a version.",
         schema(
             {
                 "path": {"type": "string", "description": "e.g. artifacts/summary.md"},
@@ -473,7 +471,7 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         "exists, even several edits in a row: it keeps the chat small. oldText must match exactly one place "
         "unless replaceAll is set, so include a few surrounding lines when a snippet repeats. Same rules as "
         "write_file: PROPOSED in a knowledge node or for skills (editing again revises your proposal), kept as a "
-        "version, never on a read-only file. The result shows the changed lines.",
+        "version. The result shows the changed lines.",
         schema(
             {
                 "path": {"type": "string", "description": "Workspace path of the file, e.g. artifacts/page.html"},

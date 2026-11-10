@@ -6,8 +6,10 @@ import { FileExistsError } from "./types";
 
 /**
  * Generate Rules → Open Rules. Without the run's models/general_rules.md the
- * action asks the rules API once, writes the file read-only and opens it;
- * once the file exists it only opens it. Calls to the API are kept to one:
+ * action asks the rules API once, writes the file and opens it; once the
+ * file exists it only opens it. Like any file of the run, whoever may edit
+ * there may change or delete it; once it is gone, the action reads Generate
+ * Rules again. While the file exists, calls to the API are kept to one:
  * - the runner never starts the action twice at once (one tab);
  * - a Web Lock per file serializes tabs of this browser, and the check right
  *   before the call asks the server, so a tab that waited finds the file;
@@ -19,8 +21,8 @@ export const generateRules: ActionDef = {
   requiredRole: ({ workspace }) => (workspace.getFile(RULES_FILE) ? "viewer" : "editor"),
   agentInvocable: true,
   description:
-    `Open the run's ${RULES_FILE}. If it doesn't exist yet, first generate it (once, read-only) ` +
-    "from the rules API.",
+    `Open the run's ${RULES_FILE}. If it doesn't exist yet (never generated, or deleted), first ` +
+    "generate it from the rules API.",
   view: ({ workspace }) => {
     if (workspace.getFile(RULES_FILE)) {
       return { label: "Open Rules", icon: BookOpenCheck, enabled: true, hint: `Open ${RULES_FILE}` };
@@ -54,7 +56,7 @@ async function generateOrOpenRules({ run, workbench, workspace }: ActionContext)
     }
     const markdown = rulesToMarkdown(parseRulesResponse(json));
     try {
-      await workspace.create(path, markdown, { mime: "text/markdown", readOnly: true });
+      await workspace.create(path, markdown, { mime: "text/markdown" });
     } catch (err) {
       if (err instanceof FileExistsError) return alreadyGenerated();
       throw err;

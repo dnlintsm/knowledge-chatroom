@@ -119,9 +119,6 @@ paths:
               schema: { type: string }
             X-File-Author:
               schema: { $ref: "#/components/schemas/AuthorType" }
-            X-File-Read-Only:
-              description: "`true` for a read-only file; absent otherwise."
-              schema: { type: string, enum: ["true"] }
           content:
             application/json:
               # Any JSON, not anyOf [VersionList, {}]: a stored document that happens to have
@@ -169,10 +166,6 @@ paths:
           in: header
           description: "`*` only creates: 412 when the file exists."
           schema: { type: string, enum: ["*"] }
-        - name: X-Read-Only
-          in: header
-          description: "`true` makes a newly created file read-only. No effect on an existing file."
-          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -191,7 +184,7 @@ paths:
               schema: { $ref: "#/components/schemas/Proposal" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
-        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "412": { $ref: "#/components/responses/Exists" }
         "413": { $ref: "#/components/responses/TooLarge" }
@@ -218,7 +211,7 @@ paths:
               schema: { $ref: "#/components/schemas/FileInfo" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
-        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "412": { $ref: "#/components/responses/Exists" }
         "500": { $ref: "#/components/responses/StorageError" }
@@ -239,7 +232,7 @@ paths:
                   deleted: { type: string, description: The path. }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
-        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
@@ -622,8 +615,8 @@ paths:
     post:
       tags: [experiments]
       operationId: addRunInputs
-      summary: Link files into an experiment as read-only inputs
-      description: Each file is linked read-only under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
+      summary: Link files into an experiment as inputs
+      description: Each file is linked under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
       requestBody:
         required: true
         content:
@@ -843,7 +836,7 @@ paths:
               schema: { $ref: "#/components/schemas/Proposal" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
-        "403": { $ref: "#/components/responses/ForbiddenOrReadOnly" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
@@ -2848,7 +2841,7 @@ components:
             properties:
               pack: { $ref: "#/components/schemas/PackDetail" }
     Conflict:
-      description: Something is in the way, such as a skill folder of that name or a read-only file in it.
+      description: Something is in the way, such as a skill folder of that name.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -2864,11 +2857,6 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
       description: Signed in, but not allowed to do this (or a storage token may not).
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/Error" }
-    ForbiddenOrReadOnly:
-      description: Not allowed, or the file is read-only (then `readOnly` is true).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -2932,7 +2920,6 @@ components:
       required: [error]
       properties:
         error: { type: string }
-        readOnly: { type: boolean, const: true, description: The file is read-only. }
         exists: { type: boolean, const: true, description: The path already has a file. }
 
     IdOnly:
@@ -2966,7 +2953,7 @@ components:
 
     FileInfo:
       type: object
-      required: [path, kind, mime, size, sha256, updatedAt, author, readOnly]
+      required: [path, kind, mime, size, sha256, updatedAt, author]
       properties:
         path: { type: string }
         kind: { $ref: "#/components/schemas/FileKind" }
@@ -2975,7 +2962,6 @@ components:
         sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
         author: { $ref: "#/components/schemas/AuthorType" }
-        readOnly: { type: boolean }
 
     FileList:
       type: object

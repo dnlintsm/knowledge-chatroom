@@ -45,8 +45,8 @@ shown in [Testing](testing.md).
 
 A run is an experiment with a report (`report.md`), so runs need server storage.
 `RULES_API_URL` configures the server-side rules provider; when
-unset, the built-in mock answers. Actions use the user's role in the run, and generated
-rules files are read-only. See [Architecture](architecture.md).
+unset, the built-in mock answers. Actions, and what may happen to the generated rules file,
+follow the user's role in the run. See [Architecture](architecture.md).
 
 With pgvector, semantic search downloads a local embedding model on first use
 and caches it under `EMBEDDING_CACHE_DIR` or `~/.cache/knowledge-chatroom/models`.

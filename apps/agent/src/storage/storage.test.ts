@@ -25,7 +25,7 @@ import { createStorageHandler } from "./http";
 import { IDENTITY_HEADER, STORAGE_HEADER, signIdentity, verifyIdentity } from "./identity";
 import { ExperimentError, ExperimentExistsError } from "./experiments";
 import { NodeNotFoundError } from "./nodes";
-import { FileExistsError, ReadOnlyFileError } from "./files";
+import { FileExistsError } from "./files";
 import { ProposalError } from "./proposals";
 import { initStorage, type Storage } from "./index";
 import { ChatError, ChatTakenError, type ChatSummary, type NewRun } from "./chats";
@@ -173,8 +173,6 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     assert.equal(await storage.files.rename("notes/draft.txt", "notes/x.md"), null);
     await storage.files.write("notes/draft.txt", text("new"));
     await assert.rejects(storage.files.rename("notes/draft.txt", "notes/plan.md"), FileExistsError);
-    await storage.files.write("notes/fixed.md", text("x"), { createOnly: true, readOnly: true });
-    await assert.rejects(storage.files.rename("notes/fixed.md", "notes/free.md"), ReadOnlyFileError);
     await assert.rejects(storage.files.rename("notes/plan.md", "../out.md"), /Invalid path/);
     await waitFor(() => events.length >= 2);
     stop();
@@ -204,25 +202,6 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       ),
     );
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
-  });
-
-  test("read-only files can't be changed or deleted", async () => {
-    const info = await storage.files.write("runs/r1/models/general_rules.md", text("# Rules"), {
-      createOnly: true,
-      readOnly: true,
-    });
-    assert.equal(info.readOnly, true);
-    await assert.rejects(
-      storage.files.write("runs/r1/models/general_rules.md", text("changed")),
-      ReadOnlyFileError,
-    );
-    await assert.rejects(storage.files.remove("runs/r1/models/general_rules.md"), ReadOnlyFileError);
-    const listed = (await storage.files.list()).find((f) => f.path === "runs/r1/models/general_rules.md");
-    assert.equal(listed?.readOnly, true);
-    assert.equal((await storage.files.history("runs/r1/models/general_rules.md"))!.length, 1);
-    // The flag only applies when creating.
-    await storage.files.write("notes/plain.md", text("a"));
-    assert.equal((await storage.files.write("notes/plain.md", text("b"), { readOnly: true })).readOnly, false);
   });
 
   test("concurrent writes to a new path do not collide", async () => {
@@ -768,6 +747,38 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await assert.rejects(as(dave).experiments(leveling), NodeNotFoundError);
     });
 
+    test("a run's rules file follows the run's roles: its author changes or deletes it, readers can't", async () => {
+      const exp = await as(carol).createExperiment(leveling, { title: "Rules run" });
+      await as(carol).updateExperiment(exp.id, { status: "shared" });
+      const mine = await as(carol).experimentFiles(exp.id);
+      const rules = "models/general_rules.md";
+      await mine.write(rules, text("# Rules"), { createOnly: true });
+      await assert.rejects(mine.write(rules, text("# Again"), { createOnly: true }), FileExistsError);
+
+      // Bob may read the shared run, nothing more.
+      const theirs = await as(bob).experimentFiles(exp.id);
+      assert.equal(theirs.role, "viewer");
+      assert.equal(await read(theirs, rules), "# Rules");
+      await assert.rejects(theirs.write(rules, text("mine")), ForbiddenError);
+      await assert.rejects(theirs.rename(rules, "models/moved.md"), ForbiddenError);
+      await assert.rejects(theirs.remove(rules), ForbiddenError);
+      // Nor can Claude acting for him.
+      await assert.rejects((await as(bob, "agent").experimentFiles(exp.id)).write(rules, text("x")), ForbiddenError);
+
+      // The author edits, renames and deletes it; then it can be generated again.
+      await mine.write(rules, text("# Edited"));
+      assert.equal((await mine.rename(rules, "models/old_rules.md"))?.path, "models/old_rules.md");
+      assert.equal(await mine.remove("models/old_rules.md"), true);
+      assert.equal(await mine.stat(rules), null);
+      await mine.write(rules, text("# Rules"), { createOnly: true });
+
+      // Archived, the run is read only for its author too.
+      await as(carol).updateExperiment(exp.id, { status: "archived" });
+      const archived = await as(carol).experimentFiles(exp.id);
+      await assert.rejects(archived.remove(rules), ForbiddenError);
+      await assert.rejects(archived.write(rules, text("x")), ForbiddenError);
+    });
+
     test("archived experiments are read only until restored", async () => {
       const exp = await as(carol).createExperiment(leveling, { title: "Dead end" });
       await as(carol).updateExperiment(exp.id, { status: "archived" });
@@ -941,10 +952,8 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const files = await claude(carol).experimentFiles(run.id);
       const node = await as(alice).files(leveling);
       const input = (await files.stat("inputs/map.bin"))!;
-      assert.equal(input.readOnly, true);
       assert.equal(input.sha256, (await node.stat("uploads/map.bin"))!.sha256, "the bytes are shared");
       assert.equal(p.inputs[0].sha256, input.sha256);
-      await assert.rejects(files.write("inputs/recipe.md", text("changed")), ReadOnlyFileError);
       // The run keeps the version it read when the node's file moves on.
       await node.write("notes/recipe.md", text("dose 31"));
       assert.equal(await read(files, "inputs/recipe.md"), "dose 30");
@@ -1019,10 +1028,7 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
         (added.provenance as Inputs).inputs.map((i) => [i.path, i.from.experiment, i.from.path]),
         [["inputs/extra.csv", run.id, "uploads/extra.csv"], ["inputs/baseline.csv", null, "uploads/root.csv"]],
       );
-      const input = (await files.stat("inputs/extra.csv"))!;
-      assert.equal(input.readOnly, true);
-      await assert.rejects(files.write("inputs/extra.csv", text("changed")), ReadOnlyFileError);
-      // The upload stays editable; the input keeps the version it linked.
+      // The upload changes on; the input keeps the version it linked.
       await files.write("uploads/extra.csv", text("wafer,dose\n2,32"));
       assert.equal(await read(files, "inputs/extra.csv"), "wafer,dose\n2,31");
 
@@ -1554,9 +1560,6 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual(await as(dave).proposals(), []);
       await assert.rejects(as(dave).proposal(added.id), NodeNotFoundError);
       await assert.rejects(as(dave).propose(anneal, "notes/x.md", text("x")), NodeNotFoundError);
-      // A read-only file can't change, so it can't be proposed to either.
-      await (await as(alice).files(anneal)).write("notes/fixed.md", text("fixed"), { readOnly: true });
-      await assert.rejects(as(carol).propose(anneal, "notes/fixed.md", text("x")), ReadOnlyFileError);
 
       await assert.rejects(as(bob).decide(added.id, "withdraw"), ForbiddenError);
       assert.equal((await as(bob).decide(added.id, "reject")).status, "rejected");
@@ -1703,18 +1706,6 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       const offline = createFileTools(() => null)[0];
       const result = (await offline.handler({} as never, {})) as { isError?: boolean };
       assert.equal(result.isError, true);
-    });
-
-    test("write_file refuses read-only files", async () => {
-      await storage.files.write("runs/r2/models/general_rules.md", text("# Rules"), { readOnly: true });
-      const result = await call("write_file", { path: "runs/r2/models/general_rules.md", content: "x" });
-      assert.equal(result.isError, true);
-      assert.match(result.text, /read-only/);
-      const edit = await call("edit_file", { path: "runs/r2/models/general_rules.md", oldText: "Rules", newText: "x" });
-      assert.equal(edit.isError, true);
-      assert.match(edit.text, /read-only/);
-      const listed = JSON.parse((await call("list_files")).text) as { path: string; readOnly?: boolean }[];
-      assert.equal(listed.find((f) => f.path === "runs/r2/models/general_rules.md")?.readOnly, true);
     });
 
     test("tools made for a user can do only what that user can", async () => {
@@ -2407,27 +2398,17 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(await statusFor("failed"), 500);
     });
 
-    test("If-None-Match: * only creates; read-only files refuse PUT and DELETE", async () => {
+    test("If-None-Match: * only creates; a deleted file's path can be created again", async () => {
       const url = `${base}/files/runs/r3/models/general_rules.md`;
       const create = () =>
-        fetch(url, {
-          method: "PUT",
-          headers: { "Content-Type": "text/markdown", "If-None-Match": "*", "X-Read-Only": "true" },
-          body: "# Rules",
-        });
-      const first = await create();
-      assert.equal(first.status, 200);
-      assert.equal(((await first.json()) as { readOnly: boolean }).readOnly, true);
+        fetch(url, { method: "PUT", headers: { "Content-Type": "text/markdown", "If-None-Match": "*" }, body: "# Rules" });
+      assert.equal((await create()).status, 200);
       assert.equal((await create()).status, 412);
-
-      const get = await fetch(url);
-      assert.equal(get.headers.get("x-file-read-only"), "true");
-      assert.equal(await get.text(), "# Rules");
-
-      const put = await fetch(url, { method: "PUT", body: "changed" });
-      assert.equal(put.status, 403);
-      assert.equal((await fetch(url, { method: "DELETE" })).status, 403);
       assert.equal(await (await fetch(url)).text(), "# Rules");
+      assert.equal((await fetch(url, { method: "PUT", body: "# Edited" })).status, 200);
+      assert.equal((await fetch(url, { method: "DELETE" })).status, 200);
+      assert.equal((await fetch(url)).status, 404);
+      assert.equal((await create()).status, 200);
     });
 
     test("experiments: create, files, update, delete", async () => {
@@ -2707,17 +2688,13 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       await assert.rejects(hub.importZip(editor, zipSync({ "a/b.md": strToU8("x") })), HubError);
       await assert.rejects(hub.importZip(editor, strToU8("not a zip")), HubError);
 
-      // Delete: the whole folder goes, for editors; read-only files block it.
+      // Delete: the whole folder goes, for editors.
       await hub.importZip(editor, recap, { replace: true });
       await assert.rejects(hub.deleteSkill(viewer, "recap"), SkillForbiddenError);
       assert.deepEqual(await hub.deleteSkill(editor, "recap"), { name: "recap", deleted: 2 });
       assert.equal(await find(viewer, "recap"), undefined);
       assert.equal(await storage.files.stat("skills/recap/notes.md"), null);
       await assert.rejects(hub.deleteSkill(editor, "recap"), HubNotFoundError);
-      await hub.importZip(editor, recap);
-      await storage.files.write("skills/recap/locked.md", strToU8("x"), { readOnly: true });
-      await assert.rejects(hub.deleteSkill(editor, "recap"), HubConflictError);
-      assert.equal((await find(viewer, "recap"))?.name, "recap");
       // The name comes from SKILL.md: the folder it lives in may differ.
       await storage.files.write("skills/odd-folder/SKILL.md", strToU8("---\nname: renamed\ndescription: R\n---\nR"));
       await storage.files.write("skills/odd-folder/notes.md", strToU8("n"));

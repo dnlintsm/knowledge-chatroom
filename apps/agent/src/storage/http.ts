@@ -8,7 +8,7 @@ import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, ExperimentExistsError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
 import type { Storage, StorageState } from "./index";
-import { FileExistsError, ReadOnlyFileError } from "./files";
+import { FileExistsError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
 import { ProposalError, type Decision, type ProposalStatus } from "./proposals";
@@ -31,8 +31,7 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *   PUT    /files/<path>            create or replace; body = bytes,
  *                                   Content-Type = mime (optional).
  *                                   `If-None-Match: *` only creates (412 when
- *                                   the file exists); `X-Read-Only: true`
- *                                   makes a new file read-only
+ *                                   the file exists)
  *   PUT    /files/<path>?propose    propose that content instead, for an
  *                                   editor to accept (see /proposals); a
  *                                   viewer may propose too. ?note= says why
@@ -40,8 +39,9 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   place); 412 when the new path is taken
  *   DELETE /files/<path>            soft delete
  *
- *   Read-only files answer 403 to PUT, PATCH and DELETE, and carry
- *   `X-File-Read-Only: true` on GET.
+ *   PUT, PATCH and DELETE need write access to the place (403 otherwise):
+ *   editor on a node or the root, or an experiment's author while it isn't
+ *   archived.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
  *   ?experiment=<id> for an experiment's; without either, files at the
@@ -1010,10 +1010,6 @@ export function createStorageHandler(
         json(res, 403, { error: err.message });
         return;
       }
-      if (err instanceof ReadOnlyFileError) {
-        json(res, 403, { error: err.message, readOnly: true });
-        return;
-      }
       if (err instanceof ExperimentExistsError) {
         json(res, 409, { error: err.message, exists: true });
         return;
@@ -1111,7 +1107,6 @@ export function createStorageHandler(
           ETag: etag,
           "Last-Modified": new Date(file.info.updatedAt).toUTCString(),
           "X-File-Author": file.info.author,
-          ...(file.info.readOnly ? { "X-File-Read-Only": "true" } : {}),
           "Cache-Control": "no-cache",
           ...STORED_CONTENT_HEADERS,
         });
@@ -1138,7 +1133,6 @@ export function createStorageHandler(
         const info = await service.write(path, bytes, {
           mime,
           createOnly: req.headers["if-none-match"]?.trim() === "*",
-          readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
         });
         json(res, 200, info);
         return;
