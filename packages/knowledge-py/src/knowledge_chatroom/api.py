@@ -1025,6 +1025,30 @@ class DeleteExperimentResponse(BaseModel):
     """
 
 
+class Skill(BaseModel):
+    name: str
+    source: str | None = None
+    version: float | None = None
+    sha256: str | None = None
+
+
+class Provenance(BaseModel):
+    """
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    chat: str | None = None
+    model: str | None = None
+    skill: Skill | None = None
+    tools: dict[str, Any] | None = None
+    """
+    Each tool's version, by name.
+    """
+
+
 class StartRunRequest(BaseModel):
     nodeId: str | None = None
     """
@@ -1041,9 +1065,9 @@ class StartRunRequest(BaseModel):
     """
     The run to run again.
     """
-    provenance: dict[str, Any] | None = None
+    provenance: Provenance | None = None
     """
-    At most 16 KiB of JSON.
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
     """
 
 

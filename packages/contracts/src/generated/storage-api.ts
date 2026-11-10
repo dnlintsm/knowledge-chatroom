@@ -197,7 +197,7 @@ export interface paths {
         put?: never;
         /**
          * Start a run, or run an earlier one again
-         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` linked read-only under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools); who started it, when, the input versions and rerunOf are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis, params and the exact input versions it read, unless given here. Finish it with /finish.
+         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` linked read-only under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis, params and the exact input versions it read, unless given here. Finish it with /finish.
          */
         post: operations["startRun"];
         delete?: never;
@@ -2943,8 +2943,21 @@ export interface operations {
                     inputs?: components["schemas"]["RunInputSource"][];
                     /** @description The run to run again. */
                     rerunOf?: string;
-                    /** @description At most 16 KiB of JSON. */
+                    /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given. */
                     provenance?: {
+                        chat?: string | null;
+                        model?: string | null;
+                        skill?: {
+                            name: string;
+                            source?: string;
+                            version?: number;
+                            sha256?: string;
+                        } | null;
+                        /** @description Each tool's version, by name. */
+                        tools?: {
+                            [key: string]: string;
+                        } | null;
+                    } & {
                         [key: string]: unknown;
                     };
                 };

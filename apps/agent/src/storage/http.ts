@@ -392,7 +392,8 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 const MAX_PROVENANCE_BYTES = 16 * 1024;
 const RUN_EXPECTED =
   "Expected {nodeId?: string|null, title?: string, hypothesis?: string, params?: object, " +
-  "inputs?: [{path, node?, experiment?, as?}], rerunOf?: string, provenance?: object}";
+  "inputs?: [{path, node?, experiment?, as?}], rerunOf?: string, provenance?: {chat?: string, model?: string, " +
+  "skill?: {name, source?, version?: number, sha256?}, tools?: {[name]: version}, ...}}";
 
 /** A POST /experiments/runs body, or null when it isn't one. */
 function runRequest(body: Record<string, unknown>): {
@@ -406,6 +407,8 @@ function runRequest(body: Record<string, unknown>): {
   if (!(nodeId === undefined || nodeId === null || typeof nodeId === "string")) return null;
   if (!(rerunOf === undefined || typeof rerunOf === "string")) return null;
   if (!isObject(provenance) || JSON.stringify(provenance).length > MAX_PROVENANCE_BYTES) return null;
+  const given = callerProvenance(provenance);
+  if (!given) return null;
   const parsedInputs = inputs === undefined ? undefined : runInputs(inputs);
   if (parsedInputs === null) return null;
   // A run starts running, as a draft; finish it with /finish, share it in the app.
@@ -413,7 +416,32 @@ function runRequest(body: Record<string, unknown>): {
   if (rest.params !== undefined && !isObject(rest.params)) return null;
   const input = experimentInput(rest);
   if (!input) return null;
-  return { nodeId, inputs: parsedInputs, rerunOf, provenance, input };
+  return { nodeId, inputs: parsedInputs, rerunOf, provenance: given, input };
+}
+
+/** Provenance only the server writes: who started it and when, its inputs, its source run, when it finished. */
+const SERVER_PROVENANCE = ["startedBy", "startedAt", "finishedAt", "inputs", "rerunOf"];
+
+const optional = (v: unknown, type: "string" | "number") => v === undefined || typeof v === type;
+
+/**
+ * What a caller says about its run, without the server's own keys, or null
+ * when a field the run panel shows (chat, model, skill, tools) has another
+ * shape than it reads. Other keys are kept as they are.
+ */
+function callerProvenance(provenance: Record<string, unknown>): Record<string, unknown> | null {
+  const kept = Object.fromEntries(Object.entries(provenance).filter(([key]) => !SERVER_PROVENANCE.includes(key)));
+  const { chat, model, skill, tools } = kept;
+  if (!(chat == null || typeof chat === "string") || !(model == null || typeof model === "string")) return null;
+  if (
+    skill != null &&
+    !(isObject(skill) && typeof skill.name === "string" && optional(skill.source, "string") &&
+      optional(skill.version, "number") && optional(skill.sha256, "string"))
+  ) {
+    return null;
+  }
+  if (tools != null && !(isObject(tools) && Object.values(tools).every((v) => typeof v === "string"))) return null;
+  return kept;
 }
 
 const UPLOAD_META =
