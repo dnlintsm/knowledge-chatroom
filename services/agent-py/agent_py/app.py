@@ -7,6 +7,7 @@ Environment:
     ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...  read by Claude Code itself
     KNOWLEDGE_PUBLIC_KEY            the agent server's GET /identity/public-key; set it with login on
     AGENT_RUN_TIMEOUT_SECONDS       stop a run after this long (default 1800, 0 = never)
+    LOCAL_AGENT_URL                 the agent server with the storage API (default http://localhost:8000)
     AGENT_PY_WORKDIR                Claude Code's working folder (default: a new empty temp folder)
     AGENT_PY_HOST / AGENT_PY_PORT   where to listen (default 127.0.0.1:9300)
 """
@@ -29,6 +30,7 @@ from .adapter import ChatroomAdapter
 from .model import resolve_model
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
+from .workspace import STORAGE_HEADER, storage_url
 
 logger = logging.getLogger("agent_py")
 
@@ -48,6 +50,7 @@ def make_adapter(env: Mapping[str, str]) -> ChatroomAdapter:
             "cwd": env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-"),
         },
         system_prompt=SYSTEM_PROMPT,
+        storage_url=storage_url(env),
         query_timeout_seconds=timeout or None,
     )
 
@@ -79,6 +82,7 @@ def create_app(env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | 
         await adapter.shutdown()
 
     app = FastAPI(title="agent-py", lifespan=lifespan)
+    app.state.adapter = adapter
 
     @app.post("/agent/report")
     async def report(input_data: RunAgentInput, request: Request) -> StreamingResponse:
@@ -94,7 +98,7 @@ def create_app(env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | 
             if reason:
                 yield encoder.encode(run_error(input_data, reason))
                 return
-            async for event in adapter.run(input_data):
+            async for event in adapter.run(input_data, storage_token=request.headers.get(STORAGE_HEADER)):
                 yield encoder.encode(event)
 
         return StreamingResponse(events(), media_type=encoder.get_content_type())

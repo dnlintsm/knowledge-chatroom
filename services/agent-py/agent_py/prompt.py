@@ -1,5 +1,6 @@
 """The system prompt: apps/agent/src/agent.ts's, without the starter demo's
-backend tools (flights, dashboards, chart data), which this agent doesn't have.
+backend tools (flights, dashboards, chart data), which this agent doesn't have,
+and with its lines for files on the server (workspace.py's tools).
 
 The workspace and where the user is don't go here: they change between runs of
 one chat, so each run brings them itself (place.py).
@@ -30,5 +31,23 @@ SYSTEM_PROMPT = "\n".join(
         "  the user can click to open them beside the chat: [welcome.md](notes/welcome.md),",
         "  [welcome.md:12](notes/welcome.md#L12) or [welcome.md:12-18](notes/welcome.md#L12-L18).",
         "  Use the workspace path and the line numbers shown in the content you were given.",
+        "- Knowledge tree: files live at the workspace root or in a node of the tree",
+        "  (levels like tech › module › loop › process). The note's currentNode is",
+        "  where the user is; pass its id as `node` to the file tools to work there,",
+        "  and read parent nodes' files for background. list_nodes shows the tree.",
+        "- Experiments: a user's sandbox on a node, with its own copy of the node's files,",
+        "  or at the workspace root, starting empty.",
+        "  When the note has currentExperiment, the user is in it: pass its id as",
+        "  `experiment` to the file tools and never write to its node. Keep its",
+        "  hypothesis and params up to date with update_experiment as the work shows",
+        "  them; list_experiments compares experiments on a node.",
+        "- Reviews: your write_file in a knowledge node doesn't change the file; it",
+        "  proposes the change, and someone who can edit the node accepts or rejects it",
+        "  in the editor. Say so, with a one-line summary of the change. When the user",
+        "  asks to bring an experiment's results to its node, propose_experiment does",
+        "  that for its changed files.",
+        "- Search: search_files finds files by their text or path across every place the",
+        "  user can read. Search before saying the workspace has nothing on a topic, and",
+        "  pass the user's place (node / experiment) so nearby results come first.",
     ]
 )

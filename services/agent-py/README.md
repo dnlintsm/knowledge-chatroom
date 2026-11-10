@@ -8,11 +8,12 @@ TypeScript agent server (`apps/agent`) keeps serving storage, skills and memory 
 `LOCAL_AGENT_URL`.
 
 It is phase 2 of moving the backend to Python (issue #169), built in steps under
-issue #176. So far (step 1) it chats: the app's own tools (task board, workbench
-panes, and the browser's file tools while files live only in the browser) work, and
-each run tells the model where the user is. Workspace file tools over the storage API,
-skills, memory, tool chips and follow-up chips come in the next steps; until then,
-use the TypeScript agent for those.
+issue #176. So far it chats with the app's own tools (task board, workbench panes,
+and the browser's file tools while files live only in the browser), tells the model
+where the user is on every run, and works on the workspace's files on the server
+through the storage API (step 2). Starting and finishing runs (`create_experiment`,
+`set_experiment_results`), skills, memory, tool chips and follow-up chips come in the
+next steps; until then, use the TypeScript agent for those.
 
 ## Run it
 
@@ -37,6 +38,7 @@ for a gateway) in this server's environment.
 | --- | --- |
 | `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model, chosen as the TypeScript agent does (default `claude-sonnet-5`). |
 | `KNOWLEDGE_PUBLIC_KEY` | With login on: the agent server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
+| `LOCAL_AGENT_URL` | The agent server with the storage API, as for the app (default `http://localhost:8000`). |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
 | `AGENT_PY_WORKDIR` | Claude Code's working folder (default: a new empty temp folder). |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |
@@ -54,6 +56,15 @@ for a gateway) in this server's environment.
   result. The browser's
   `forwardedProps` don't reach the SDK options, so a browser can't pick the model or
   resume someone else's session. Claude Code's built-in tools are off.
+- `agent_py/workspace.py`: the workspace tools, with the TypeScript agent's names,
+  descriptions and results (`list_nodes`, `create_node`, `list_files`, `read_file`,
+  `search_files`, `write_file`, `edit_file`, `list_experiments`, `update_experiment`,
+  `propose_experiment`; `apps/agent/src/storage/tools.ts`). Each call goes to the
+  storage API with the run's `X-Knowledge-Storage` token, so Claude acts for the
+  signed-in user: only what they can reach, writes in a knowledge node and to skills
+  as proposals, no renaming, deleting or sharing. Without login there is no token and
+  the API answers as the local user, so files Claude writes show as the user's.
+  `agent_py/text.py` numbers lines and applies exact edits as the TypeScript agent does.
 - `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
   backend tools.
 

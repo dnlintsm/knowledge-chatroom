@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ag_ui.core import RunAgentInput, TextInputContent, ToolMessage, UserMessage
-
 from agent_py.adapter import ChatroomAdapter, with_note
 from agent_py.model import resolve_model
 from agent_py.place import workspace_note

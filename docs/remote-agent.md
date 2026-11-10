@@ -177,7 +177,8 @@ to it.
    - **Read-only files can't be written.**
    - **Experiments**: inside one, write only there, never to its node.
 
-   `apps/agent/src/storage/tools.ts` is this repo's version, to copy from.
+   `apps/agent/src/storage/tools.ts` is this repo's version, and
+   `services/agent-py/agent_py/workspace.py` the same tools in Python, to copy from.
 6. **Cite files the way the chat can open them.** A Markdown link to the file's path in the
    place, with GitHub-style lines: `[report.md:12-18](report.md#L12-L18)`.
    The chat opens it in the middle pane (`apps/web/src/components/workspace/file-refs.ts`). Teach it in
