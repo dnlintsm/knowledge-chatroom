@@ -14,7 +14,8 @@ the thread's first run. Three things change that for this app:
   could pick the model or resume another chat's session. They are dropped; the
   app's own `knowledge_chatroom` is read by place.py.
 - No built-in Claude Code tools (Bash, Read, Write, ...): the model works on
-  the workspace through the app's tools, not on this server's disk.
+  the workspace through the browser's tools and this agent's workspace tools
+  (workspace.py), which call the storage API with the run's storage token.
 """
 
 from __future__ import annotations
@@ -33,21 +34,39 @@ from ag_ui.core import (
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
 from .place import workspace_note
+from .workspace import Storage, file_tools, server, tool_names
 
 
 class ChatroomAdapter(ClaudeAgentAdapter):
-    def __init__(self, *args: Any, system_prompt: str = "", **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, system_prompt: str = "", storage_url: str | None = None, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._system_prompt = system_prompt
+        self._storage_url = storage_url
         # thread_id -> the last <workspace> note the thread's session was given.
         self._notes: OrderedDict[str, str] = OrderedDict()
+        # thread_id -> the storage token of the thread's latest run.
+        self._tokens: OrderedDict[str, str | None] = OrderedDict()
 
-    def build_options(self, input_data: RunAgentInput | None = None, *args: Any, **kwargs: Any):
-        options = super().build_options(input_data, *args, **kwargs)
+    def build_options(
+        self, input_data: RunAgentInput | None = None, thread_id: str | None = None, *args: Any, **kwargs: Any
+    ):
+        options = super().build_options(input_data, thread_id, *args, **kwargs)
         options.system_prompt = self._system_prompt
+        if self._storage_url and thread_id:
+            # The tools ask for the storage API when called, so they use the
+            # token of the run they're called in, not the chat's first.
+            tools = file_tools(lambda: Storage(self._storage_url or "", self._tokens.get(thread_id)))
+            options.mcp_servers = {**(options.mcp_servers or {}), "copilotkit": server(tools)}
+            options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
         return options
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(
+        self, input_data: RunAgentInput, storage_token: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        """Runs `input_data`; `storage_token` is its X-Knowledge-Storage header (with login)."""
+        remember(self._tokens, input_data.thread_id, storage_token, self._max_workers)
         async for event in super().run(self.prepare(input_data)):
             yield event
 
@@ -66,14 +85,17 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         )
         if note and carrier and (fresh or self._notes.get(thread_id) != note):
             messages[-1] = with_note(last, note)
-            self._remember(thread_id, note)
+            remember(self._notes, thread_id, note, self._max_workers)
         return input_data.model_copy(update={"messages": messages, "forwarded_props": {}})
 
-    def _remember(self, thread_id: str, note: str) -> None:
-        self._notes[thread_id] = note
-        self._notes.move_to_end(thread_id)
-        while len(self._notes) > self._max_workers:
-            self._notes.popitem(last=False)
+
+
+def remember(cache: OrderedDict[str, Any], key: str, value: Any, size: int) -> None:
+    """Sets `key`, keeping only the `size` most recent keys."""
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > size:
+        cache.popitem(last=False)
 
 
 def with_note(message: UserMessage | ToolMessage, note: str) -> UserMessage | ToolMessage:

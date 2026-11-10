@@ -57,13 +57,13 @@ dependencies = [
     { name = "ag-ui-claude-sdk" },
     { name = "claude-agent-sdk" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "knowledge-chatroom" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
 ]
 
@@ -72,15 +72,13 @@ requires-dist = [
     { name = "ag-ui-claude-sdk", specifier = "==0.2.3" },
     { name = "claude-agent-sdk", specifier = ">=0.2.180,<0.3" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "knowledge-chatroom", editable = "packages/knowledge-py" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", specifier = ">=8" },
-]
+dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "annotated-doc"

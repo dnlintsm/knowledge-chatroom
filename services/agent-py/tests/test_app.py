@@ -7,12 +7,11 @@ import time
 from typing import Any
 
 import pytest
+from agent_py.app import create_app
+from agent_py.prompt import SYSTEM_PROMPT
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
-
-from agent_py.app import create_app
-from agent_py.prompt import SYSTEM_PROMPT
 
 KEY = Ed25519PrivateKey.generate()
 PUBLIC_KEY = base64.urlsafe_b64encode(KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()
@@ -165,3 +164,14 @@ def test_the_note_also_goes_in_front_of_a_message_with_parts(client, claude):
     blocks = prompt[0]["message"]["content"]
     assert blocks[0]["text"].startswith("<workspace>")
     assert blocks[-1]["text"] == "what is this?"
+
+
+def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
+    with TestClient(create_app(env={"LOCAL_AGENT_URL": "http://storage.test/"})) as c:
+        response = c.post("/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-Storage": "tok-1"})
+        events(response)
+        adapter_tokens = c.app.state.adapter._tokens
+    options = claude.created[0].options
+    assert "copilotkit" in options.mcp_servers
+    assert "mcp__copilotkit__read_file" in options.allowed_tools
+    assert adapter_tokens["t1"] == "tok-1"
