@@ -60,7 +60,10 @@ export interface paths {
          */
         put: operations["writeFile"];
         post?: never;
-        /** Delete a file (soft delete; its history stays) */
+        /**
+         * Delete a file (soft delete; its history stays)
+         * @description A read-only file answers 403 unless it was created deletable.
+         */
         delete: operations["deleteFile"];
         options?: never;
         head?: never;
@@ -1426,6 +1429,8 @@ export interface components {
             updatedAt: components["schemas"]["Timestamp"];
             author: components["schemas"]["AuthorType"];
             readOnly: boolean;
+            /** @description A read-only file that may still be deleted, but never changed or renamed. Always false unless readOnly. */
+            deletable: boolean;
         };
         FileList: {
             files: components["schemas"]["FileInfo"][];
@@ -2425,6 +2430,11 @@ export interface operations {
                 "If-None-Match"?: "*";
                 /** @description `true` makes a newly created file read-only. No effect on an existing file. */
                 "X-Read-Only"?: string;
+                /**
+                 * @description With `X-Read-Only: true`, `true` lets the new read-only file still be deleted (never
+                 *     changed or renamed). No effect on an existing file.
+                 */
+                "X-Deletable"?: string;
             };
             path: {
                 /** @description The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept. */

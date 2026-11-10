@@ -789,7 +789,7 @@ test("a file loads when it is opened", async ({ page }) => {
   // list shows at once, and the note says it's loading until it arrives.
   const info = {
     path: "notes/big-note.md", kind: "note", mime: "text/markdown", size: 12,
-    sha256: "a".repeat(64), updatedAt: new Date().toISOString(), author: "user", readOnly: false,
+    sha256: "a".repeat(64), updatedAt: new Date().toISOString(), author: "user", readOnly: false, deletable: false,
   };
   let send = () => {};
   const sent = new Promise<void>((resolve) => { send = resolve; });

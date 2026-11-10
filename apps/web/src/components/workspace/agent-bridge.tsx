@@ -157,7 +157,7 @@ export function useWorkspaceAgent() {
     }),
     handler: async ({ path, content }) => {
       const existing = latest.current.getFile(path);
-      if (existing?.readOnly) return { error: `${existing.path} is read-only: it can't be changed or deleted.` };
+      if (existing?.readOnly) return { error: `${existing.path} is read-only: it can't be changed.` };
       const existed = Boolean(existing);
       const file = latest.current.write(path, content, { author: "agent" });
       latestWorkbench.current.editor.open(file.path);
@@ -179,7 +179,7 @@ export function useWorkspaceAgent() {
     handler: async ({ path, oldText, newText, replaceAll }) => {
       const existing = latest.current.getFile(path);
       if (!existing) return { error: `No file at ${path}. Use writeWorkspaceFile to create it.` };
-      if (existing.readOnly) return { error: `${existing.path} is read-only: it can't be changed or deleted.` };
+      if (existing.readOnly) return { error: `${existing.path} is read-only: it can't be changed.` };
       if (!isTextFile(existing)) return { error: `${existing.path} is not a text file.` };
       if (existing.unloaded) return { error: FILES_LOADING };
       const edit = applyEdit(existing.content, { oldText, newText, replaceAll });

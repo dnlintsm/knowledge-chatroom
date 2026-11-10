@@ -220,9 +220,26 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
     const listed = (await storage.files.list()).find((f) => f.path === "runs/r1/models/general_rules.md");
     assert.equal(listed?.readOnly, true);
     assert.equal((await storage.files.history("runs/r1/models/general_rules.md"))!.length, 1);
+    assert.equal(listed?.deletable, false);
     // The flag only applies when creating.
     await storage.files.write("notes/plain.md", text("a"));
     assert.equal((await storage.files.write("notes/plain.md", text("b"), { readOnly: true })).readOnly, false);
+  });
+
+  test("deletable read-only files can be deleted, not changed or renamed, then created again", async () => {
+    const path = "runs/r4/models/general_rules.md";
+    const info = await storage.files.write(path, text("# Rules"), { createOnly: true, readOnly: true, deletable: true });
+    assert.equal(info.readOnly, true);
+    assert.equal(info.deletable, true);
+    await assert.rejects(storage.files.write(path, text("changed")), ReadOnlyFileError);
+    await assert.rejects(storage.files.rename(path, "runs/r4/models/moved.md"), ReadOnlyFileError);
+    assert.equal(await storage.files.remove(path), true);
+    assert.equal(await storage.files.stat(path), null);
+    // The path is free again, for a new create-only write.
+    const again = await storage.files.write(path, text("# Rules v2"), { createOnly: true, readOnly: true, deletable: true });
+    assert.equal(again.deletable, true);
+    // Without readOnly the flag means nothing.
+    assert.equal((await storage.files.write("notes/loose.md", text("a"), { deletable: true })).deletable, false);
   });
 
   test("concurrent writes to a new path do not collide", async () => {
@@ -2428,6 +2445,32 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(put.status, 403);
       assert.equal((await fetch(url, { method: "DELETE" })).status, 403);
       assert.equal(await (await fetch(url)).text(), "# Rules");
+    });
+
+    test("X-Deletable: a read-only file that DELETE removes, so it can be created again", async () => {
+      const url = `${base}/files/runs/r5/models/general_rules.md`;
+      const create = () =>
+        fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "text/markdown", "If-None-Match": "*", "X-Read-Only": "true", "X-Deletable": "true" },
+          body: "# Rules",
+        });
+      const first = await create();
+      assert.equal(first.status, 200);
+      const info = (await first.json()) as { readOnly: boolean; deletable: boolean };
+      assert.deepEqual([info.readOnly, info.deletable], [true, true]);
+      const put = await fetch(url, { method: "PUT", body: "changed" });
+      assert.equal(put.status, 403);
+      assert.equal(((await put.json()) as { readOnly?: boolean }).readOnly, true);
+      const rename = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "runs/r5/models/moved.md" }),
+      });
+      assert.equal(rename.status, 403);
+      assert.equal((await fetch(url, { method: "DELETE" })).status, 200);
+      assert.equal((await fetch(url)).status, 404);
+      assert.equal((await create()).status, 200);
     });
 
     test("experiments: create, files, update, delete", async () => {

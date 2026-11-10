@@ -12,7 +12,7 @@ export type { AuthorType, FileEvent } from "./events";
 import type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 export type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 
-/** A write or delete of a read-only file. */
+/** A write, rename or delete of a read-only file (deletes are allowed for deletable ones). */
 export class ReadOnlyFileError extends Error {
   constructor(readonly path: string) {
     super(`${path} is read-only`);
@@ -48,6 +48,11 @@ export interface WriteOptions {
   createOnly?: boolean;
   /** Make a newly created file read-only. Has no effect on an existing file. */
   readOnly?: boolean;
+  /**
+   * With `readOnly`: the new file may still be deleted, though never changed
+   * or renamed. Has no effect on an existing file.
+   */
+  deletable?: boolean;
 }
 
 interface FileRow {
@@ -59,6 +64,7 @@ interface FileRow {
   updated_at: Date;
   author_type: AuthorType;
   read_only: boolean;
+  deletable: boolean;
 }
 
 function toInfo(row: FileRow): FileInfo {
@@ -71,6 +77,7 @@ function toInfo(row: FileRow): FileInfo {
     updatedAt: row.updated_at.toISOString(),
     author: row.author_type,
     readOnly: row.read_only,
+    deletable: row.read_only && row.deletable,
   };
 }
 
@@ -139,7 +146,7 @@ export class FileService {
   async list(): Promise<FileInfo[]> {
     const rows = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only
+             f.updated_at, v.author_type, f.read_only, f.deletable
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.deleted_at IS NULL
       ORDER BY f.path`;
@@ -150,7 +157,7 @@ export class FileService {
     const path = normalizePath(rawPath);
     const [row] = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only
+             f.updated_at, v.author_type, f.read_only, f.deletable
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
     return row ? toInfo(row) : null;
@@ -186,9 +193,10 @@ export class FileService {
       // Create the row if needed, then lock it so concurrent writers to one
       // path serialize instead of racing on the unique index.
       const created = await tx`
-        INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime, read_only)
+        INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime, read_only, deletable)
         VALUES (${this.workspaceId}, ${this.nodeId}, ${this.experimentId}, ${path},
-                ${kindForPath(path)}, ${mime}, ${opts.readOnly ?? false})
+                ${kindForPath(path)}, ${mime}, ${opts.readOnly ?? false},
+                ${Boolean(opts.readOnly && opts.deletable)})
         ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING`;
       const [file] = await tx<
         { id: string; sha256: string | null; mime: string; read_only: boolean }[]
@@ -224,16 +232,19 @@ export class FileService {
     return (await this.stat(path))!;
   }
 
-  /** Soft delete: history stays, and the path is free for a new file. Read-only files can't be deleted. */
+  /**
+   * Soft delete: history stays, and the path is free for a new file. Read-only
+   * files can't be deleted unless they were created deletable.
+   */
   async remove(rawPath: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     const path = normalizePath(rawPath);
     return this.sql.begin(async (tx) => {
-      const [file] = await tx<{ id: string; read_only: boolean }[]>`
-        SELECT f.id, f.read_only FROM files f
+      const [file] = await tx<{ id: string; read_only: boolean; deletable: boolean }[]>`
+        SELECT f.id, f.read_only, f.deletable FROM files f
         WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
       if (!file) return false;
-      if (file.read_only) throw new ReadOnlyFileError(path);
+      if (file.read_only && !file.deletable) throw new ReadOnlyFileError(path);
       await tx`UPDATE files SET deleted_at = now() WHERE id = ${file.id}`;
       await inTx?.(tx);
       await this.events.notify(tx, { op: "delete", ...this.place, path });

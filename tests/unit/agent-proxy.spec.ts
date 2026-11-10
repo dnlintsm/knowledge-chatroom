@@ -47,6 +47,7 @@ test.describe("agentProxy", () => {
         accept: "text/plain",
         "if-none-match": '"00000"',
         "x-read-only": "true",
+        "x-deletable": "true",
         "x-custom-browser-header": "dropped",
       },
     });
@@ -69,6 +70,7 @@ test.describe("agentProxy", () => {
     expect(forwardedReqHeaders.get("accept")).toBe("text/plain");
     expect(forwardedReqHeaders.get("if-none-match")).toBe('"00000"');
     expect(forwardedReqHeaders.get("x-read-only")).toBe("true");
+    expect(forwardedReqHeaders.get("x-deletable")).toBe("true");
     expect(forwardedReqHeaders.get("x-custom-browser-header")).toBeNull();
 
     expect(res.status).toBe(200);

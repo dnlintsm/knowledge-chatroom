@@ -32,7 +32,9 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   Content-Type = mime (optional).
  *                                   `If-None-Match: *` only creates (412 when
  *                                   the file exists); `X-Read-Only: true`
- *                                   makes a new file read-only
+ *                                   makes a new file read-only, and with
+ *                                   it `X-Deletable: true` lets it still be
+ *                                   deleted
  *   PUT    /files/<path>?propose    propose that content instead, for an
  *                                   editor to accept (see /proposals); a
  *                                   viewer may propose too. ?note= says why
@@ -40,8 +42,8 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   place); 412 when the new path is taken
  *   DELETE /files/<path>            soft delete
  *
- *   Read-only files answer 403 to PUT, PATCH and DELETE, and carry
- *   `X-File-Read-Only: true` on GET.
+ *   Read-only files answer 403 to PUT, PATCH and DELETE (DELETE succeeds
+ *   for deletable ones), and carry `X-File-Read-Only: true` on GET.
  *
  *   Every /files route takes ?node=<id> for that knowledge node's files, or
  *   ?experiment=<id> for an experiment's; without either, files at the
@@ -225,6 +227,10 @@ const STORED_CONTENT_HEADERS = {
   "Content-Security-Policy": "sandbox",
   "X-Content-Type-Options": "nosniff",
 };
+
+/** A request header set to `true` (any case, surrounding spaces ignored). */
+const headerIsTrue = (value: string | string[] | undefined) =>
+  String(value ?? "").trim().toLowerCase() === "true";
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -1037,7 +1043,8 @@ export function createStorageHandler(
         const info = await service.write(path, bytes, {
           mime,
           createOnly: req.headers["if-none-match"]?.trim() === "*",
-          readOnly: String(req.headers["x-read-only"] ?? "").trim().toLowerCase() === "true",
+          readOnly: headerIsTrue(req.headers["x-read-only"]),
+          deletable: headerIsTrue(req.headers["x-deletable"]),
         });
         json(res, 200, info);
         return;

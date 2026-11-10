@@ -3,11 +3,11 @@ import { normalizePath, InvalidPathError } from "@knowledge-chatroom/contracts/f
 import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 import * as backend from "../../apps/agent/src/storage/paths";
 import * as browser from "../../apps/web/src/components/workspace/types";
-import { listServerFiles, loadServerFile, putServerFile } from "../../apps/web/src/components/workspace/server-files";
+import { deleteServerFile, listServerFiles, loadServerFile, putServerFile, serverFileExists } from "../../apps/web/src/components/workspace/server-files";
 import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../apps/web/src/components/workspace/local-persistence";
 import { parsePersistedWorkspace } from "../../apps/web/src/components/workspace/workspace-state";
 
-const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false };
+const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false, deletable: false };
 const state = { files: [{ path: info.path, kind: info.kind, mime: info.mime, content: "kept", updatedAt: 1, author: info.author }], tabs: [info.path], active: info.path };
 
 test("relative paths reject traversal/control bytes and normalize Windows separators", () => {
@@ -47,9 +47,12 @@ test("the editor pane picks a preview from the type, or the extension for untype
 
 test("metadata allows additive fields and legacy missing readOnly but rejects bad payloads", () => {
   expect(parseFileList({ files: [{ ...info, futureField: true }] })).toMatchObject([info]);
-  const legacy = { ...info, readOnly: undefined };
-  expect(parseFileInfo(legacy).readOnly).toBe(false);
-  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }, { readOnly: "false" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
+  const legacy = { ...info, readOnly: undefined, deletable: undefined };
+  expect(parseFileInfo(legacy)).toMatchObject({ readOnly: false, deletable: false });
+  expect(parseFileInfo({ ...info, readOnly: true, deletable: true }).deletable).toBe(true);
+  // Only a read-only file is "deletable"; any other file can be deleted anyway.
+  expect(parseFileInfo({ ...info, readOnly: false, deletable: true }).deletable).toBe(false);
+  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }, { readOnly: "false" }, { deletable: "true" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
 });
 
 test("event contracts cover scoped writes, node/experiment changes and proposals", () => {
@@ -84,6 +87,50 @@ test("SVG upload sends actual bytes and its browser preview remains a versioned 
   try {
     await putServerFile({ path: image.path, mime: image.mime, content: `data:image/svg+xml,${encodeURIComponent(svg)}` });
     expect((await loadServerFile(image)).content).toBe(`/api/files/uploads/a.svg?v=${image.sha256}`);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a file being deleted is only asked about, or created again, once the delete is done", async () => {
+  const original = globalThis.fetch;
+  const calls: string[] = [];
+  let finishDelete!: () => void;
+  globalThis.fetch = async (_input, init) => {
+    const method = init?.method ?? "GET";
+    calls.push(method);
+    if (method === "DELETE") {
+      await new Promise<void>((resolve) => (finishDelete = resolve));
+      return Response.json({ deleted: info.path });
+    }
+    if (method === "PUT") return Response.json({ ...info, readOnly: true, deletable: true });
+    return new Response(null, { status: 404 });
+  };
+  try {
+    const removing = deleteServerFile(info.path, "x:run");
+    const exists = serverFileExists(info.path, "x:run");
+    const created = putServerFile({ path: info.path, mime: info.mime, content: "again" }, "x:run", { createOnly: true, readOnly: true, deletable: true });
+    // Another place's file doesn't wait.
+    expect(await serverFileExists(info.path, "x:other")).toBe(false);
+    expect(calls).toEqual(["DELETE", "GET"]);
+    finishDelete();
+    await removing;
+    expect(await exists).toBe(false);
+    expect((await created).deletable).toBe(true);
+    expect(calls).toEqual(["DELETE", "GET", "GET", "PUT"]);
+  } finally { globalThis.fetch = original; }
+});
+
+test("putServerFile asks for a deletable read-only file only together with read-only", async () => {
+  const original = globalThis.fetch;
+  const sent: Headers[] = [];
+  globalThis.fetch = async (_input, init) => {
+    sent.push(new Headers(init?.headers));
+    return Response.json(info);
+  };
+  try {
+    await putServerFile({ path: info.path, mime: info.mime, content: "a" }, null, { readOnly: true, deletable: true });
+    await putServerFile({ path: info.path, mime: info.mime, content: "a" }, null, { deletable: true });
+    expect([sent[0].get("x-read-only"), sent[0].get("x-deletable")]).toEqual(["true", "true"]);
+    expect([sent[1].get("x-read-only"), sent[1].get("x-deletable")]).toEqual([null, null]);
   } finally { globalThis.fetch = original; }
 });
 

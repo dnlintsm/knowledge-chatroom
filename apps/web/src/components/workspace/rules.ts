@@ -1,7 +1,8 @@
 /**
  * A run's general rules: fetched as JSON from the rules API (RULES_API_URL,
  * via /api/rules) and turned into the run's models/general_rules.md by a fixed
- * transform. The file is written once, read-only, and never regenerated.
+ * transform. The file is read-only; an editor may delete it, and the run's
+ * Generate Rules action then writes it again from the API.
  */
 
 /** Where the rules go, relative to the run (an experiment). */

@@ -399,37 +399,37 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
-      {file.readOnly ? (
+      {file.readOnly && (
         <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
-      ) : (
-        canEdit && (
-          <>
-            <button
-              type="button"
-              aria-label={`Rename ${file.path}`}
-              title="Rename"
-              onClick={(e) => {
-                e.stopPropagation();
-                setRenaming(true);
-              }}
-              className={cn(actionClass, "hover:text-[var(--foreground)]")}
-            >
-              <Pencil className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label={`Delete ${file.path}`}
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
-              }}
-              className={cn(actionClass, "hover:text-[var(--destructive)]")}
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </>
-        )
+      )}
+      {canEdit && !file.readOnly && (
+        <button
+          type="button"
+          aria-label={`Rename ${file.path}`}
+          title="Rename"
+          onClick={(e) => {
+            e.stopPropagation();
+            setRenaming(true);
+          }}
+          className={cn(actionClass, "hover:text-[var(--foreground)]")}
+        >
+          <Pencil className="size-3.5" />
+        </button>
+      )}
+      {/* A deletable read-only file (a run's generated rules) can't be renamed, only deleted. */}
+      {canEdit && (!file.readOnly || file.deletable) && (
+        <button
+          type="button"
+          aria-label={`Delete ${file.path}`}
+          title="Delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(`Delete ${file.path}?`)) remove(file.path);
+          }}
+          className={cn(actionClass, "hover:text-[var(--destructive)]")}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
       )}
     </div>
   );

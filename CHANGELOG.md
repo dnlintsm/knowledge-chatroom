@@ -31,6 +31,16 @@
 - The spec and the conformance suite also cover memory, skills, the skill hub, the "+" menu's tools,
   follow-up suggestions, the identity public key and the health check (issue #169).
 
+### Changed
+
+- A run's generated `models/general_rules.md` can now be deleted. It is still read-only (no
+  edits or renames, for anyone), but an editor can delete it from the file list, and the run's
+  **Open Rules** action then turns back into **Generate Rules**, which asks the rules API again.
+  The storage API has a new create-time header for this, `X-Deletable: true` (with
+  `X-Read-Only: true`), and `FileInfo` a `deletable` field. Other read-only files, such as an
+  experiment's linked inputs, still can't be deleted. Migration `022_deletable.sql` makes rules
+  files generated before it deletable too.
+
 ## 0.2.3
 
 Search papers from the chat (OpenAlex and arXiv) with a new "+" menu, Papers chip and paper

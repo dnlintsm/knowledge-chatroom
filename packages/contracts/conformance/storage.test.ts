@@ -230,6 +230,10 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "If-None-Match": "*" }, body: "again", expect: 412 });
     await call("PUT", `/files/notes/locked.md${q}`, { headers: { ...alice, "X-Read-Only": "true" }, body: "locked", expect: 200 });
     await call("PUT", `/files/notes/locked.md${q}`, { headers: alice, body: "change", expect: 403 });
+    await call("DELETE", `/files/notes/locked.md${q}`, { headers: alice, expect: 403 });
+    await call("PUT", `/files/notes/removable.md${q}`, { headers: { ...alice, "X-Read-Only": "true", "X-Deletable": "true" }, body: "removable", expect: 200 });
+    await call("PUT", `/files/notes/removable.md${q}`, { headers: alice, body: "change", expect: 403 });
+    await call("DELETE", `/files/notes/removable.md${q}`, { headers: alice, expect: 200 });
     await call("PUT", `/files/uploads/pic.bin${q}`, { headers: { ...alice, "Content-Type": "application/octet-stream" }, body: new Uint8Array([0, 1, 2, 255]), expect: 200 });
     await call("GET", `/files${q}`, { headers: alice, expect: 200 });
     const read = await call("GET", `/files/notes/a.md${q}`, { headers: alice, expect: 200 });

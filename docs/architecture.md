@@ -215,7 +215,7 @@ and Timeline sections), whose buttons act on the current run:
 | Action | Role | Does |
 | --- | --- | --- |
 | **New Chat** | viewer | starts an empty conversation, still about the same run |
-| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file read-only and opens it; once it exists: opens it |
+| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file read-only (but deletable) and opens it; once it exists: opens it. Deleting the file brings back Generate Rules |
 
 Actions are entries in one registry (`apps/web/src/components/workspace/actions.tsx`), each with an
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
@@ -242,10 +242,13 @@ at `/api/mock/rules`. The answer looks like this:
 ```
 
 A fixed transform (`apps/web/src/components/workspace/rules.ts`, unit tested) turns it into a markdown
-table. The file is written once and is read-only for everyone, Claude included: the editor
-only previews it, and the file API refuses to change or delete it.
+table. The file is read-only for everyone, Claude included: the editor only previews it, and
+the file API refuses to change or rename it. It is created *deletable*, though: an editor can
+delete it from the file list (the API's `DELETE` works for it, and Claude has no way to delete
+files), and the action then reads Generate Rules again and asks the API afresh. Other read-only
+files, such as an experiment's linked inputs, can't be deleted.
 
-The API is called at most once per run. The button is disabled while it works, and a lock
+While the file exists, the API isn't called again. The button is disabled while it works, and a lock
 shared by the browser's tabs, plus a check with the server just before the call, stops a
 second tab from asking again. The write only creates (`If-None-Match: *`), so even two
 browsers can't overwrite the file.
@@ -483,7 +486,8 @@ For local setup, see [Development](development.md).
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
   (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,
-  `PUT` and `DELETE` answer 403, for every role. Login is optional (see below); keep the agent port private in either mode.
+  `PUT`, `PATCH` and `DELETE` answer 403, for every role. With `X-Deletable: true` as well,
+  `DELETE` still works (a run's generated rules); `FileInfo.deletable` says so. Login is optional (see below); keep the agent port private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
   Postgres `ltree`, and the database checks that each node sits exactly one level below its

@@ -132,7 +132,7 @@ export function EditorPane() {
           {readOnly && (
             <span
               data-testid="read-only-badge"
-              title="This file can't be edited or deleted"
+              title={activeFile.deletable ? "This file can't be edited, only deleted" : "This file can't be edited or deleted"}
               className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
             >
               <Lock className="size-3" /> Read-only

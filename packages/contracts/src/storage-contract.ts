@@ -12,6 +12,8 @@ export interface FileInfo {
   updatedAt: string;
   author: AuthorType;
   readOnly: boolean;
+  /** A read-only file that may still be deleted (never changed or renamed). Always false unless readOnly. */
+  deletable: boolean;
 }
 
 export interface FileEvent {
@@ -72,10 +74,12 @@ export function parseFileInfo(value: unknown): FileInfo {
       !text(item.mime) || !hash(item.sha256) || !author(item.author) ||
       typeof item.size !== "number" || !Number.isSafeInteger(item.size) || item.size < 0 ||
       !text(item.updatedAt) || !Number.isFinite(Date.parse(item.updatedAt)) ||
-      (item.readOnly !== undefined && typeof item.readOnly !== "boolean")) {
+      (item.readOnly !== undefined && typeof item.readOnly !== "boolean") ||
+      (item.deletable !== undefined && typeof item.deletable !== "boolean")) {
     throw new StorageContractError("Invalid storage file metadata");
   }
-  return { ...item, readOnly: item.readOnly ?? false } as unknown as FileInfo;
+  const readOnly = item.readOnly ?? false;
+  return { ...item, readOnly, deletable: readOnly && (item.deletable ?? false) } as unknown as FileInfo;
 }
 
 export function parseFileList(value: unknown): FileInfo[] {
@@ -113,6 +117,8 @@ export interface LocalFile {
   updatedAt: number;
   author: AuthorType;
   readOnly?: boolean;
+  /** With readOnly: the file may still be deleted. */
+  deletable?: boolean;
 }
 
 export function parseLocalFile(value: unknown): LocalFile {
@@ -120,7 +126,8 @@ export function parseLocalFile(value: unknown): LocalFile {
   if (!canonicalPath(item.path) || !text(item.kind) || !Object.keys(KIND_FOLDERS).includes(item.kind) ||
       typeof item.content !== "string" || !text(item.mime) || !author(item.author) ||
       typeof item.updatedAt !== "number" || !Number.isFinite(item.updatedAt) ||
-      (item.readOnly !== undefined && typeof item.readOnly !== "boolean")) {
+      (item.readOnly !== undefined && typeof item.readOnly !== "boolean") ||
+      (item.deletable !== undefined && typeof item.deletable !== "boolean")) {
     throw new StorageContractError("Invalid persisted workspace file");
   }
   return item as unknown as LocalFile;

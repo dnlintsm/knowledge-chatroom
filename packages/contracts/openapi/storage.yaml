@@ -173,6 +173,12 @@ paths:
           in: header
           description: "`true` makes a newly created file read-only. No effect on an existing file."
           schema: { type: string }
+        - name: X-Deletable
+          in: header
+          description: |
+            With `X-Read-Only: true`, `true` lets the new read-only file still be deleted (never
+            changed or renamed). No effect on an existing file.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -227,6 +233,7 @@ paths:
       tags: [files]
       operationId: deleteFile
       summary: Delete a file (soft delete; its history stays)
+      description: A read-only file answers 403 unless it was created deletable.
       responses:
         "200":
           description: Deleted.
@@ -2867,7 +2874,7 @@ components:
 
     FileInfo:
       type: object
-      required: [path, kind, mime, size, sha256, updatedAt, author, readOnly]
+      required: [path, kind, mime, size, sha256, updatedAt, author, readOnly, deletable]
       properties:
         path: { type: string }
         kind: { $ref: "#/components/schemas/FileKind" }
@@ -2877,6 +2884,9 @@ components:
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
         author: { $ref: "#/components/schemas/AuthorType" }
         readOnly: { type: boolean }
+        deletable:
+          type: boolean
+          description: A read-only file that may still be deleted, but never changed or renamed. Always false unless readOnly.
 
     FileList:
       type: object

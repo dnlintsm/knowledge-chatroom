@@ -83,6 +83,16 @@ export function fileUrl(path: string, place: PlaceId = null) {
 }
 
 /**
+ * Deletes on their way to the server, by file. The store doesn't wait for a
+ * delete, so asking about the same file (or creating it again) waits for it
+ * first: a run's rules deleted and generated again at once must not find the
+ * old file still there.
+ */
+const deleting = new Map<string, Promise<void>>();
+const deleteKey = (path: string, place: PlaceId) => `${place ?? ""}\n${path}`;
+const deleted = (path: string, place: PlaceId) => deleting.get(deleteKey(path, place));
+
+/**
  * The file list; "starting" when storage (or the agent server) may just not be
  * up yet (503, 502, network error), so asking again shortly makes sense; null
  * when this session has no server storage (404 = not configured, 500 = failed).
@@ -123,6 +133,7 @@ function fileBase(info: ServerFile) {
     author: info.author,
     updatedAt: Date.parse(info.updatedAt),
     ...(info.readOnly ? { readOnly: true } : {}),
+    ...(info.readOnly && info.deletable ? { deletable: true } : {}),
   };
 }
 
@@ -153,14 +164,16 @@ export async function loadServerText(path: string, place: PlaceId = null): Promi
 
 /**
  * Saves a file. With `createOnly` the server refuses to replace an existing
- * file (FileExistsError); `readOnly` makes a newly created file read-only.
- * Writing a read-only file throws ReadOnlyFileError.
+ * file (FileExistsError); `readOnly` makes a newly created file read-only,
+ * and `deletable` lets it still be deleted. Writing a read-only file throws
+ * ReadOnlyFileError.
  */
 export async function putServerFile(
-  file: Pick<WorkspaceFile, "path" | "mime" | "content" | "readOnly">,
+  file: Pick<WorkspaceFile, "path" | "mime" | "content" | "readOnly" | "deletable">,
   place: PlaceId = null,
-  opts: { createOnly?: boolean; readOnly?: boolean } = {},
+  opts: { createOnly?: boolean; readOnly?: boolean; deletable?: boolean } = {},
 ): Promise<ServerFile> {
+  await deleted(file.path, place);
   // Binary uploads arrive as data: URLs; send their bytes.
   const body =
     !isTextFile(file) && file.content.startsWith("data:")
@@ -169,7 +182,10 @@ export async function putServerFile(
   const headers: Record<string, string> = { "Content-Type": file.mime };
   if (opts.createOnly) headers["If-None-Match"] = "*";
   // A read-only browser file stays read-only when it first moves to the server.
-  if (opts.readOnly ?? file.readOnly) headers["X-Read-Only"] = "true";
+  if (opts.readOnly ?? file.readOnly) {
+    headers["X-Read-Only"] = "true";
+    if (opts.deletable ?? file.deletable) headers["X-Deletable"] = "true";
+  }
   const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
   if (res.status === 412) throw new FileExistsError(file.path);
   if (res.status === 403) {
@@ -183,6 +199,7 @@ export async function putServerFile(
 
 /** Asks the server itself, not the local copy of the file list. */
 export async function serverFileExists(path: string, place: PlaceId = null): Promise<boolean> {
+  await deleted(path, place);
   const res = await apiFetch(fileUrl(path, place), { method: "GET", cache: "no-store" });
   await res.body?.cancel();
   if (res.ok) return true;
@@ -190,13 +207,23 @@ export async function serverFileExists(path: string, place: PlaceId = null): Pro
   throw new Error(`GET ${path}: ${res.status}`);
 }
 
-export async function deleteServerFile(path: string, place: PlaceId = null): Promise<void> {
-  const res = await apiFetch(fileUrl(path, place), { method: "DELETE" });
-  if (res.status === 403) {
-    const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
-    if (answer?.readOnly) throw new ReadOnlyFileError(path);
-  }
-  if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
+export function deleteServerFile(path: string, place: PlaceId = null): Promise<void> {
+  const key = deleteKey(path, place);
+  const done = (async () => {
+    const res = await apiFetch(fileUrl(path, place), { method: "DELETE" });
+    if (res.status === 403) {
+      const answer = (await res.json().catch(() => null)) as { readOnly?: boolean } | null;
+      if (answer?.readOnly) throw new ReadOnlyFileError(path);
+    }
+    if (!res.ok && res.status !== 404) throw new Error(`DELETE ${path}: ${res.status}`);
+  })();
+  // Waiters only need it finished; the caller still gets the failure.
+  const settled = done.then(() => {}, () => {});
+  deleting.set(key, settled);
+  void settled.then(() => {
+    if (deleting.get(key) === settled) deleting.delete(key);
+  });
+  return done;
 }
 
 /** Renames a file within its place, keeping its history. */

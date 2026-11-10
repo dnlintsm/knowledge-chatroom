@@ -255,7 +255,7 @@ test("the Actions block starts a new chat about the run", async ({ page, request
   await expect(page.getByTestId("actions")).toHaveCount(0);
 });
 
-test("Generate Rules writes the run's rules once, read-only, then opens them", async ({ page, request }) => {
+test("Generate Rules writes the run's rules once, read-only, then opens them; deleting them brings it back", async ({ page, request }) => {
   const run = await makeRun(request, "etch-2026-10-01", { "report.md": "# Etch rules report\n" });
   const other = await makeRun(request, "litho-2026-10-03", { "report.md": "# Litho report\n" });
   const apiCalls: string[] = [];
@@ -277,7 +277,9 @@ test("Generate Rules writes the run's rules once, read-only, then opens them", a
   await expect(actions.getByRole("button", { name: "Open Rules" })).toBeVisible();
   const row = page.getByRole("treeitem", { name: /general_rules\.md/ });
   await expect(row).toHaveAttribute("title", "models/general_rules.md");
-  await expect(row.getByRole("button", { name: /Delete/ })).toHaveCount(0);
+  // Read-only: no rename, but it can be deleted.
+  await expect(row.getByRole("button", { name: /Rename/ })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /Delete/ })).toHaveCount(1);
   await shot(page, "10-generated-rules");
   expect(apiCalls).toHaveLength(1);
   const asked = new URL(apiCalls[0]).searchParams;
@@ -289,6 +291,21 @@ test("Generate Rules writes the run's rules once, read-only, then opens them", a
   await page.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
   await expect(preview).toContainText("General rules: etch-2026-10-01");
   expect(apiCalls).toHaveLength(1);
+
+  // Deleting the file turns the action back into Generate Rules, which asks the API again.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await row.hover();
+  await row.getByRole("button", { name: /Delete/ }).click();
+  await expect(row).toHaveCount(0);
+  const again = page.getByTestId("actions").getByRole("button", { name: "Generate Rules" });
+  await expect(again).toBeEnabled();
+  // The runner refuses an action for 600 ms after it starts (a double click),
+  // and Open Rules above was this same action.
+  await page.waitForTimeout(700);
+  await again.click();
+  await expect(preview).toContainText("General rules: etch-2026-10-01");
+  await expect(page.getByTestId("actions").getByRole("button", { name: "Open Rules" })).toBeVisible();
+  expect(apiCalls).toHaveLength(2);
 
   // The other run has no rules yet.
   await gotoRun(page, other, "Litho report");

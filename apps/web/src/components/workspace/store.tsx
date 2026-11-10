@@ -132,14 +132,15 @@ interface WorkspaceValue {
   /**
    * Creates a new file, saved right away (not debounced). Throws
    * FileExistsError when the path is taken, here or on the server, which
-   * decides when two tabs race. `readOnly` files can never change afterwards.
+   * decides when two tabs race. `readOnly` files can never change afterwards;
+   * with `deletable` too, they can still be deleted.
    */
   create: (
     path: string,
     content: string,
-    opts?: { mime?: string; author?: WorkspaceFile["author"]; readOnly?: boolean },
+    opts?: { mime?: string; author?: WorkspaceFile["author"]; readOnly?: boolean; deletable?: boolean },
   ) => Promise<WorkspaceFile>;
-  /** Throws ReadOnlyFileError for a read-only file. */
+  /** Throws ReadOnlyFileError for a read-only file that isn't deletable. */
   remove: (path: string) => void;
   /**
    * Moves a file to a new path in the same place, keeping its history and
@@ -596,6 +597,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         author: opts?.author ?? "user",
         updatedAt: Date.now(),
         ...(opts?.readOnly ? { readOnly: true } : {}),
+        ...(opts?.readOnly && opts.deletable ? { deletable: true } : {}),
       };
       if (mode.current === "server") {
         const at = placeRef.current;
@@ -603,7 +605,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         sync.beginWrite(path, at);
         let lost = false;
         try {
-          const info = await putServerFile(file, at, { createOnly: true, readOnly: opts?.readOnly });
+          const info = await putServerFile(file, at, {
+            createOnly: true,
+            readOnly: opts?.readOnly,
+            deletable: opts?.deletable,
+          });
           sync.remember(path, info.sha256, at);
         } catch (err) {
           if (!(err instanceof FileExistsError)) throw err;
@@ -631,7 +637,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const remove = useCallback(
     (path: string) => {
-      if (files.current.find((f) => f.path === path)?.readOnly) throw new ReadOnlyFileError(path);
+      const existing = files.current.find((f) => f.path === path);
+      if (existing?.readOnly && !existing.deletable) throw new ReadOnlyFileError(path);
       removeLocal(path);
       if (mode.current !== "server") return;
       sync.cancel(path);
