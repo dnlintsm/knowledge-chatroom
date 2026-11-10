@@ -1226,6 +1226,25 @@ class GetIdentityPublicKeyResponse(BaseModel):
     """
 
 
+class TradeMcpTokensRequest(BaseModel):
+    servers: Annotated[
+        dict[str, list[Literal["identity", "storage", "memory"]]], Field(max_length=32)
+    ]
+    """
+    The tokens wanted, by server name.
+    """
+
+
+class Tokens(BaseModel):
+    identity: str | None = None
+    storage: str | None = None
+    memory: str | None = None
+
+
+class TradeMcpTokensResponse(BaseModel):
+    tokens: dict[str, Tokens]
+
+
 class ListToolsResponse(BaseModel):
     tools: list[ToolMenuItem]
 

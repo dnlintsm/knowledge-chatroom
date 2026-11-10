@@ -4,7 +4,9 @@
  * Serves the agent (defined in src/agent.ts) over AG-UI: `POST /` streams
  * `adapter.run(input)`, `POST /suggest` answers the chat's follow-up chips
  * (src/suggest.ts), `GET /health` reports status, `GET /identity/public-key`
- * gives outside services the key that verifies identity tokens. Runs on port 8000. With
+ * gives outside services the key that verifies identity tokens, and
+ * `POST /identity/mcp-tokens` gives a remote backend its MCP servers' tokens
+ * (src/mcp-tokens.ts). Runs on port 8000. With
  * AGENT_URL set, the app's chat goes to a remote backend instead and both chat
  * routes answer 404 (docs/remote-agent.md).
  * When DATABASE_URL is set it also serves the workspace file API under
@@ -37,6 +39,7 @@ import { IDENTITY_HEADER, identify, localMemoryToken, signIdentity, verifyIdenti
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
+import { mcpTokens } from "./mcp-tokens";
 import { continuesAfterTool, prepareMemory, trackLiveRun } from "./memory/run";
 
 /**
@@ -207,6 +210,29 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/identity/public-key") {
     res.writeHead(publicKey ? 200 : 404, { "Content-Type": "application/json" });
     res.end(JSON.stringify(publicKey ? { alg: "Ed25519", key: publicKey } : { error: "Login is off: there are no identity tokens." }));
+    return;
+  }
+
+  if (pathname === "/identity/mcp-tokens") {
+    // A remote backend trades its run's tokens for its MCP servers' (./mcp-tokens.ts).
+    let answer: { status: number; body: unknown } = { status: 405, body: { error: "Method not allowed" } };
+    if (req.method === "POST") {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += (chunk as Buffer).byteLength;
+        if (size <= 16 * 1024) chunks.push(chunk as Buffer);
+      }
+      let body: unknown;
+      try {
+        body = size <= 16 * 1024 ? JSON.parse(Buffer.concat(chunks).toString("utf8") || "null") : null;
+      } catch {
+        body = null;
+      }
+      answer = mcpTokens(req.headers, body, authSecret ?? null);
+    }
+    res.writeHead(answer.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(answer.body));
     return;
   }
 

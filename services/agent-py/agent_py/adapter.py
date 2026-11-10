@@ -24,6 +24,8 @@ the thread's first run. Three things change that for this app:
   memory section and Claude the memory_* and chats_* tools, run by the agent
   server's /memory/agent. Each note they read or change goes to the chat as a
   `memory` event.
+- Outside MCP servers (mcp.py): the servers in MCP_SERVERS, each run with the
+  user's tokens for them, and the chat's tool chips in the prompt.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,7 @@ from ag_ui.core import (
 )
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
+from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
 from .place import workspace_note
 from .skills import (
@@ -70,6 +73,7 @@ class Run:
     cwd: Path | None = None
     skills: Sequence[RunSkill] = ()
     memory: RunMemory | None = None
+    servers: RunServers | None = None
     # (name, value) of CUSTOM events for the chat: skill_used, memory.
     pending: list[tuple[str, Any]] = field(default_factory=list)
 
@@ -82,10 +86,13 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         storage_url: str | None = None,
         skills_root: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        mcp_servers: Mapping[str, McpServer] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._system_prompt = system_prompt
+        # The outside MCP servers in MCP_SERVERS (mcp.py).
+        self._servers = dict(mcp_servers or {})
         self._storage_url = storage_url
         self._transport = transport  # for tests
         # Each user's run folder (with their skills) is a folder in here.
@@ -105,7 +112,13 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
         run = self._runs.get(thread_id or "")
         memory = run.memory if run else None
-        options.system_prompt = f"{self._system_prompt}\n{memory.prompt}" if memory else self._system_prompt
+        servers = run.servers if run else None
+        options.system_prompt = "\n".join(
+            part for part in (self._system_prompt, memory and memory.prompt, servers and servers.prompt) if part
+        )
+        if servers and servers.configs:
+            options.mcp_servers = {**(options.mcp_servers or {}), **servers.configs}
+            options.allowed_tools = [*(options.allowed_tools or []), *(f"mcp__{name}" for name in servers.configs)]
         if self._storage_url and thread_id:
             tools = file_tools(
                 lambda: self._storage(thread_id or ""),
@@ -168,6 +181,14 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             # used another tool already: changes wait in the inbox from the start.
             if run.memory and input_data.messages and isinstance(input_data.messages[-1], ToolMessage):
                 run.memory.tainted = True
+        if self._servers:
+            # Memory tokens only for runs with memory, as the TypeScript agent sends them.
+            tokens = (
+                await trade_tokens(self._storage(thread_id), memory_token if run.memory else None, self._servers)
+                if self._storage_url
+                else {}
+            )
+            run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
         remember(self._runs, thread_id, run, self._max_workers)
         prepared, slash = self.prepare(input_data, run.skills)
         if slash:

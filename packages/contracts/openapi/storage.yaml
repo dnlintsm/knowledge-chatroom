@@ -1342,6 +1342,61 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /identity/mcp-tokens:
+    post:
+      tags: [server]
+      operationId: tradeMcpTokens
+      summary: "A remote backend's tokens for its outside MCP servers"
+      description: |
+        A remote backend's chat agent (AGENT_URL) connects to the servers in its own MCP_SERVERS
+        and forwards the user to them as this agent does, but holds no AUTH_SECRET. With the
+        run's `X-Knowledge-Storage` token (and `X-Knowledge-Memory`, for memory tokens), both
+        `via` "remote", it gets per server: an identity token with `aud` "mcp:<name>"
+        (forwardIdentity), a storage token and a memory token `via` "mcp:<name>"
+        (storageAccess, memoryAccess). They are for the same user and chat and expire no later
+        than the tokens they came from; tokens made for an outside service can't be traded.
+        Without login it needs no storage token and gives only memory tokens, in the unsigned
+        local form.
+      security:
+        - storage: []
+        - storage: []
+          memory: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [servers]
+              properties:
+                servers:
+                  type: object
+                  maxProperties: 32
+                  description: The tokens wanted, by server name.
+                  additionalProperties:
+                    type: array
+                    items: { type: string, enum: [identity, storage, memory] }
+      responses:
+        "200":
+          description: "The tokens made, by server name: a kind is missing when the run has none (no login, or no memory in this chat)."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        identity: { type: string }
+                        storage: { type: string }
+                        memory: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+
   /suggest:
     post:
       tags: [server]

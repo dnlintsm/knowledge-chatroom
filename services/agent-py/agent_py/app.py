@@ -8,6 +8,7 @@ Environment:
     KNOWLEDGE_PUBLIC_KEY            the agent server's GET /identity/public-key; set it with login on
     AGENT_RUN_TIMEOUT_SECONDS       stop a run after this long (default 1800, 0 = never)
     LOCAL_AGENT_URL                 the agent server with the storage API (default http://localhost:8000)
+    MCP_SERVERS                     outside MCP servers and tool chips, as for the agent server (mcp.py)
     AGENT_PY_WORKDIR                where each user's working folder (with their skills) goes
                                     (default: a new empty temp folder)
     AGENT_PY_HOST / AGENT_PY_PORT   where to listen (default 127.0.0.1:9300)
@@ -30,6 +31,7 @@ from fastapi.responses import StreamingResponse
 from knowledge_chatroom.identity import User, caller, public_key
 
 from .adapter import ChatroomAdapter
+from .mcp import servers_from_env
 from .memory import MEMORY_HEADER
 from .model import resolve_model
 from .place import chatroom_props
@@ -58,6 +60,7 @@ def make_adapter(env: Mapping[str, str], transport: httpx.AsyncBaseTransport | N
         storage_url=storage_url(env),
         skills_root=Path(root),
         transport=transport,
+        mcp_servers=servers_from_env(env),
         query_timeout_seconds=timeout or None,
     )
 

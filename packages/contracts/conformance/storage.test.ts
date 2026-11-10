@@ -560,6 +560,21 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/health", { expect: 200 });
     const key = await call<{ key: string }>("GET", "/identity/public-key", { expect: 200 });
     assert.ok(key.data.key, "a public key");
+    // A remote backend trades its run's tokens for its MCP servers' (issue #176).
+    const remote = {
+      "X-Knowledge-Storage": signIdentityToken({ sub: "conformance|alice", exp: now() + 600, aud: "storage", via: "remote" }, SECRET!),
+      ...memoryToken("conformance|alice", `conformance-${stamp}`, "remote"),
+    };
+    const traded = await call<{ tokens: Record<string, Record<string, string>> }>("POST", "/identity/mcp-tokens", {
+      headers: remote,
+      json: { servers: { lab: ["identity", "storage", "memory"], papers: ["identity"] } },
+      expect: 200,
+    });
+    assert.deepEqual(Object.keys(traded.data.tokens.lab).sort(), ["identity", "memory", "storage"]);
+    assert.deepEqual(Object.keys(traded.data.tokens.papers), ["identity"]);
+    await call("POST", "/identity/mcp-tokens", { headers: remote, json: { servers: { lab: ["root"] } }, expect: 400 });
+    await call("POST", "/identity/mcp-tokens", { headers: storageToken("conformance|alice"), json: { servers: { lab: ["identity"] } }, expect: 401 });
+    await call("POST", "/identity/mcp-tokens", { json: { servers: {} }, expect: 401 });
     const input = { threadId: `conformance-${stamp}`, runId: "s1", messages: [], tools: [], context: [] };
     await call("POST", "/suggest", { json: input, expect: 401 });
     await call("POST", "/suggest", { headers: { ...alice, "Content-Type": "application/json" }, body: "{", expect: 400 });
