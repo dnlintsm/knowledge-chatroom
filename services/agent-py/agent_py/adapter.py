@@ -6,7 +6,9 @@ the thread's first run. Three things change that for this app:
 - The system prompt stays the same for the whole chat. The adapter would append
   the first run's `context` and `state` to it, and they go out of date as the
   user moves around; each run brings them in a <workspace> note instead
-  (place.py), in front of the user's message, whenever the note changed.
+  (place.py), in front of the user's message, whenever the note changed. A run
+  that continues after a browser tool (openRun, openWorkspaceFile, ...) has no
+  user message, so its note goes after that tool's result.
 - `forwardedProps` come from the browser. The adapter turns whitelisted keys
   (`model`, `resume`, `max_budget_usd`, ...) into SDK options, so a browser
   could pick the model or resume another chat's session. They are dropped; the
@@ -21,7 +23,13 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ag_ui.core import BaseEvent, RunAgentInput, TextInputContent, UserMessage
+from ag_ui.core import (
+    BaseEvent,
+    RunAgentInput,
+    TextInputContent,
+    ToolMessage,
+    UserMessage,
+)
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
 from .place import workspace_note
@@ -51,7 +59,12 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         last = messages[-1] if messages else None
         # A session that's new (first run, evicted or restarted) has seen no note.
         fresh = thread_id not in self._workers
-        if note and isinstance(last, UserMessage) and (fresh or self._notes.get(thread_id) != note):
+        # After a browser tool, only the result it answers with: earlier ones
+        # are history the adapter checks against the session's transcript.
+        carrier = isinstance(last, UserMessage) or (
+            isinstance(last, ToolMessage) and not (len(messages) > 1 and isinstance(messages[-2], ToolMessage))
+        )
+        if note and carrier and (fresh or self._notes.get(thread_id) != note):
             messages[-1] = with_note(last, note)
             self._remember(thread_id, note)
         return input_data.model_copy(update={"messages": messages, "forwarded_props": {}})
@@ -63,9 +76,12 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             self._notes.popitem(last=False)
 
 
-def with_note(message: UserMessage, note: str) -> UserMessage:
-    """The user's message with `note` in front of it."""
+def with_note(message: UserMessage | ToolMessage, note: str) -> UserMessage | ToolMessage:
+    """The user's message with `note` in front of it, or a tool's result with `note` after it."""
     content = message.content
+    after = isinstance(message, ToolMessage)
     if isinstance(content, str):
-        return message.model_copy(update={"content": f"{note}\n\n{content}"})
-    return message.model_copy(update={"content": [TextInputContent(text=note), *content]})
+        text = f"{content}\n\n{note}" if after else f"{note}\n\n{content}"
+        return message.model_copy(update={"content": text})
+    part = TextInputContent(text=note)
+    return message.model_copy(update={"content": [*content, part] if after else [part, *content]})

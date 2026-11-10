@@ -49,7 +49,9 @@ for a gateway) in this server's environment.
   The adapter keeps one Claude session per chat and builds its options once, so the
   system prompt stays fixed and each run's `context` (open file, selection, node,
   experiment) and shared state go in a `<workspace>` note in front of the user's
-  message, only when they changed (`agent_py/place.py`). The browser's
+  message, only when they changed (`agent_py/place.py`). A run that goes on after a
+  browser tool such as `openRun` has no user message, so the note follows that tool's
+  result. The browser's
   `forwardedProps` don't reach the SDK options, so a browser can't pick the model or
   resume someone else's session. Claude Code's built-in tools are off.
 - `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
