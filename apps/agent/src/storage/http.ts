@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Readable } from "node:stream";
+
+import busboy from "busboy";
 
 import { AccessError, ForbiddenError, ROLES, type Principal, type Role } from "./access";
 import { ChatError, ChatTakenError } from "./chats";
@@ -82,7 +83,8 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   hypothesis?, params?, results?, state?};
  *                                   every other part is a file, its field name
  *                                   the file's path in the experiment (at most
- *                                   MAX_UPLOAD_BYTES each). path names a node
+ *                                   MAX_UPLOAD_BYTES each, meta 256 KiB; 413
+ *                                   as soon as one is over). path names a node
  *                                   at every level, as "Tech/Module/Loop/Process"
  *                                   or a list of names; an empty name means a
  *                                   node called "None", and missing nodes are
@@ -375,7 +377,7 @@ const UPLOAD_META =
   "hypothesis?: string, params?, results?: object, state?: ready|running|done|failed}";
 
 /** Why an upload request can't be read, with the status to answer. */
-class UploadError extends Error {
+export class UploadError extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -385,49 +387,114 @@ class UploadError extends Error {
 }
 
 /**
+ * The "meta" part is small JSON: a title, a hypothesis (≤ 20000 characters)
+ * and params and results (≤ 64 KiB of JSON each), with room to spare.
+ */
+export const MAX_UPLOAD_META_BYTES = 256 * 1024;
+
+/**
+ * Reads a multipart body part by part, refusing it as soon as a file grows
+ * past `maxFileBytes` or the "meta" part past MAX_UPLOAD_META_BYTES, so an
+ * oversized part is never held in memory. The rest of a refused body is
+ * left unread (the HTTP server discards it once the answer is sent).
+ */
+function readParts(req: IncomingMessage, maxFileBytes: number): Promise<{ meta: string | undefined; files: UploadedFile[] }> {
+  return new Promise((resolve, reject) => {
+    let parser: busboy.Busboy;
+    try {
+      // One more byte than allowed, as busboy calls a part that reaches its limit too large.
+      parser = busboy({
+        headers: req.headers,
+        limits: { fileSize: maxFileBytes + 1, fieldSize: MAX_UPLOAD_META_BYTES + 1 },
+      });
+    } catch {
+      return reject(new UploadError(400, "The multipart body could not be read"));
+    }
+    let meta: string | undefined;
+    const files: UploadedFile[] = [];
+    const pending: Promise<void>[] = [];
+    let failed = false;
+    const fail = (err: UploadError) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(parser);
+      parser.removeAllListeners();
+      parser.on("error", () => {}); // late parse errors of the abandoned body
+      reject(err);
+    };
+    const setMeta = (text: string) => {
+      if (meta !== undefined) return fail(new UploadError(400, 'Send one "meta" part'));
+      meta = text;
+    };
+    const tooLarge = (name: string) =>
+      name === "meta"
+        ? new UploadError(413, `The "meta" part exceeds ${MAX_UPLOAD_META_BYTES} bytes`)
+        : new UploadError(413, `${name} exceeds ${maxFileBytes} bytes`);
+
+    parser.on("field", (name, value, info) => {
+      if (failed) return;
+      if (name !== "meta") {
+        return fail(new UploadError(400, `"${name}" isn't a file: put everything but files in the "meta" part`));
+      }
+      if (info.valueTruncated) return fail(tooLarge(name));
+      setMeta(value);
+    });
+    parser.on("file", (name, stream, info) => {
+      if (failed) return void stream.resume();
+      const limit = name === "meta" ? MAX_UPLOAD_META_BYTES : maxFileBytes;
+      const chunks: Buffer[] = [];
+      let size = 0;
+      pending.push(
+        new Promise<void>((done) => {
+          stream.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size > limit) return fail(tooLarge(name));
+            if (!failed) chunks.push(chunk);
+          });
+          stream.on("limit", () => fail(tooLarge(name)));
+          stream.on("close", () => done());
+          stream.on("end", () => {
+            if (failed) return;
+            const bytes = new Uint8Array(Buffer.concat(chunks, size));
+            if (name === "meta") return setMeta(new TextDecoder().decode(bytes));
+            const mime = info.mimeType.split(";")[0].trim();
+            files.push({
+              path: name,
+              bytes,
+              ...(mime && mime !== "application/octet-stream" && { mime }),
+            });
+          });
+        }),
+      );
+    });
+    parser.on("error", () => fail(new UploadError(400, "The multipart body could not be read")));
+    parser.on("close", () => {
+      void Promise.all(pending).then(() => {
+        if (!failed) resolve({ meta, files });
+      });
+    });
+    req.pipe(parser);
+  });
+}
+
+/**
  * The parts of a POST /experiments/upload: its "meta" JSON and its files,
  * each named by its field. The form is read whole before anything is
  * written, so a broken upload changes nothing.
  */
-async function readUpload(req: IncomingMessage, url: URL, maxFileBytes: number) {
+export async function readUpload(req: IncomingMessage, maxFileBytes: number) {
   const type = req.headers["content-type"] ?? "";
   if (!/^multipart\/form-data\s*;/i.test(type)) {
     throw new UploadError(415, "Send the experiment as multipart/form-data: a \"meta\" part and one part per file");
   }
-  let form: FormData;
-  try {
-    form = await new Request(url, {
-      method: "POST",
-      headers: { "content-type": type },
-      body: Readable.toWeb(req) as ReadableStream<Uint8Array>,
-      duplex: "half",
-    } as RequestInit).formData();
-  } catch {
-    throw new UploadError(400, "The multipart body could not be read");
-  }
-
+  const { meta: text, files } = await readParts(req, maxFileBytes);
   let meta: unknown;
-  const files: UploadedFile[] = [];
-  for (const [name, value] of form.entries()) {
-    if (name === "meta") {
-      if (meta !== undefined) throw new UploadError(400, 'Send one "meta" part');
-      try {
-        meta = JSON.parse(typeof value === "string" ? value : await value.text());
-      } catch {
-        throw new UploadError(400, `The "meta" part isn't JSON. ${UPLOAD_META}`);
-      }
-      continue;
+  if (text !== undefined) {
+    try {
+      meta = JSON.parse(text);
+    } catch {
+      throw new UploadError(400, `The "meta" part isn't JSON. ${UPLOAD_META}`);
     }
-    if (typeof value === "string") {
-      throw new UploadError(400, `"${name}" isn't a file: put everything but files in the "meta" part`);
-    }
-    if (value.size > maxFileBytes) throw new UploadError(413, `${name} exceeds ${maxFileBytes} bytes`);
-    const mime = value.type.split(";")[0].trim();
-    files.push({
-      path: name,
-      bytes: new Uint8Array(await value.arrayBuffer()),
-      ...(mime && mime !== "application/octet-stream" && { mime }),
-    });
   }
 
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new UploadError(400, UPLOAD_META);
@@ -480,7 +547,7 @@ async function handleExperiments(
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
     let upload: Awaited<ReturnType<typeof readUpload>>;
     try {
-      upload = await readUpload(req, url, maxUploadBytes);
+      upload = await readUpload(req, maxUploadBytes);
     } catch (err) {
       if (err instanceof UploadError) return json(res, err.status, { error: err.message });
       throw err;

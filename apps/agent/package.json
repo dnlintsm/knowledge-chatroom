@@ -23,6 +23,7 @@
     "@huggingface/transformers": "4.3.1",
     "@knowledge-chatroom/contracts": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "busboy": "1.6.0",
     "dotenv": "^16.4.0",
     "fflate": "0.8.3",
     "postgres": "^3.4.9",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@ag-ui/client": "1.0.4",
+    "@types/busboy": "1.5.4",
     "@types/node": "^22.9.0",
     "rxjs": "7.8.1",
     "tsx": "^4.19.0",

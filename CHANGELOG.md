@@ -13,7 +13,9 @@
   (`"Etch/Module 3//"`), and nodes that don't exist yet are added, which needs editor access
   where they go. The experiment holds only the uploaded files, not a copy of its node's, and
   everything is written in one transaction, so a failed upload leaves nothing behind. Each
-  file is limited by `MAX_UPLOAD_BYTES`, as for `PUT /files`. Storage tokens can't use it.
+  file is limited by `MAX_UPLOAD_BYTES`, as for `PUT /files`, and `meta` to 256 KiB; the body
+  is read as it streams in, so an oversized part is refused without being held in memory.
+  Storage tokens can't use it.
 
   ```bash
   curl -X POST http://localhost:8000/experiments/upload \
