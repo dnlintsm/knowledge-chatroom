@@ -1,0 +1,30 @@
+[project]
+name = "agent-py"
+version = "0.2.3"
+description = "The chatroom's chat agent in Python, served to the app through AGENT_URL (issue #176)"
+# ag-ui-claude-sdk needs 3.11.
+requires-python = ">=3.11"
+dependencies = [
+    "knowledge-chatroom",
+    # The AG-UI adapter for the Claude Agent SDK (docs/remote-agent.md).
+    "ag-ui-claude-sdk==0.2.3",
+    "claude-agent-sdk>=0.2.180,<0.3",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    # The storage API client (workspace.py).
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# A server run from its folder (python -m agent_py), not a library.
+package = false
+
+[tool.uv.sources]
+knowledge-chatroom = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

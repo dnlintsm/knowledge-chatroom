@@ -176,7 +176,8 @@ to it.
    - **Writes in an experiment or at the root** change the file directly.
    - **Experiments**: inside one, write only there, never to its node.
 
-   `apps/agent/src/storage/tools.ts` is this repo's version, to copy from.
+   `apps/agent/src/storage/tools.ts` is this repo's version, and
+   `services/agent-py/agent_py/workspace.py` the same tools in Python, to copy from.
 6. **Cite files the way the chat can open them.** A Markdown link to the file's path in the
    place, with GitHub-style lines: `[report.md:12-18](report.md#L12-L18)`.
    The chat opens it in the middle pane (`apps/web/src/components/workspace/file-refs.ts`). Teach it in
@@ -203,6 +204,9 @@ to it.
    through this repo's agent server, so they work the same with a remote backend.
 
 ## With `ag_ui_claude_sdk` (Python)
+
+`services/agent-py` is this repo's own Python backend, built this way (issue #176); its
+`agent_py/adapter.py` and `agent_py/app.py` do what this section describes.
 
 `ClaudeAgentAdapter` keeps one Claude session per `threadId`. It builds that session's
 options once, with `build_options(input_data)`, on the thread's first run (and again only
@@ -250,6 +254,11 @@ add_claude_fastapi_endpoint(
 
 Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 
+- **Drop `forwardedProps` before the adapter sees them.** They come from the browser, and
+  the adapter turns whitelisted keys (`ALLOWED_FORWARDED_PROPS`: `model`, `resume`,
+  `max_budget_usd`, ...) into SDK options, so a browser could pick the model or resume
+  another chat's Claude session. Read `knowledge_chatroom` yourself, then pass the run on
+  with `forwarded_props={}`, as `services/agent-py` does.
 - **The warning is expected.** The adapter applies only whitelisted `forwarded_props` keys
   (`ALLOWED_FORWARDED_PROPS`) as SDK options. It logs "Ignoring non-whitelisted
   forwarded_prop" for `knowledge_chatroom` (and `a2uiCatalogAvailable`) and otherwise leaves

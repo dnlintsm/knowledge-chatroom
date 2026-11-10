@@ -4,6 +4,13 @@
 
 ### Added
 
+- `services/agent-py`: the chat agent in Python (FastAPI and `ag_ui_claude_sdk`), for
+  `AGENT_URL` (issue #176, step 1 of phase 2 of #169). It chats with the app's own tools,
+  checks the run's user, and gives the model the user's open file and place on every run.
+  It works on the workspace's files through the storage API with the run's storage token,
+  with the TypeScript agent's file tools (step 2). Starting runs, skills, memory and tool
+  chips follow in later steps. The uv workspace now needs Python 3.11 or later (the AG-UI
+  adapter does).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
   with TypeScript types generated from it and checks that keep the spec, the generated types
   and the agent's own types in step (issue #169). No change to how the API behaves.
@@ -30,6 +37,9 @@
   ```
 - The spec and the conformance suite also cover memory, skills, the skill hub, the "+" menu's tools,
   follow-up suggestions, the identity public key and the health check (issue #169).
+- Python models of the whole API: `knowledge_chatroom.api` (`packages/knowledge-py`, install
+  the `api` extra for pydantic) is generated from the OpenAPI spec, and CI checks that it is
+  up to date and that it parses every request and answer of the conformance run (issue #169).
 
 ### Changed
 
