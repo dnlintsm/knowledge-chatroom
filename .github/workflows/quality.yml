@@ -32,7 +32,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
-      - name: Check lint and frontend/agent types
+      - name: Check lint and types (root, web, agent, contracts)
         run: pnpm lint && pnpm typecheck
       # packages/contracts/openapi/storage.yaml is the source of truth (issue #169).
       - name: Check the generated storage API types are up to date

@@ -10,7 +10,7 @@ The [`main rule`](https://github.com/dnlintsm/knowledge-chatroom/settings/rules/
 requires two checks from **GitHub Actions** (app ID `15368`), with branches up to date
 before merging:
 
-- `checks` (Quality: lint, both typechecks and service-free units)
+- `checks` (Quality: lint, typechecks and service-free units)
 - `preview` (UI preview: production build plus browser, storage and login E2E)
 
 The rule also keeps the PR, deletion and non-fast-forward rules. Both checks run for
