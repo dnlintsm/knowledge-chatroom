@@ -108,7 +108,7 @@ the workspace like on a local project:
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.
-- **Writing back**: changes still go through `write_file` / `edit_file`, so read-only files stay unchanged,
+- **Writing back**: changes still go through `write_file` / `edit_file`, so the user's role decides,
   writes in a node or to skills become proposals and every write is a version. `save_file` stores
   a file a script made in the run folder (a plot, a CSV) the same way.
 
@@ -178,7 +178,7 @@ is no separate run folder or mode (issue #82):
 
 - **Runs Claude starts** (`create_experiment`, `apps/agent/src/storage/session.ts` `startRun`)
   begin in state running. The files the run works from are its **inputs**: each is linked
-  in read only under `inputs/`, at the version it had then and sharing its stored bytes, so
+  in under `inputs/`, at the version it had then and sharing its stored bytes, so
   later changes to the original don't change what the run read, and promoting the run never
   proposes them back. Starting one needs view access where it goes and read access to each
   input; it is a draft of the signed-in user's, and Claude writes only into runs that user
@@ -215,7 +215,7 @@ and Timeline sections), whose buttons act on the current run:
 | Action | Role | Does |
 | --- | --- | --- |
 | **New Chat** | viewer | starts an empty conversation, still about the same run |
-| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file read-only (but deletable) and opens it; once it exists: opens it. Deleting the file brings back Generate Rules |
+| **Generate Rules** → **Open Rules** | editor to generate, viewer to open | without the run's `models/general_rules.md`: asks the rules API once, writes the file and opens it; once it exists: opens it. Deleting the file brings back Generate Rules |
 
 Actions are entries in one registry (`apps/web/src/components/workspace/actions.tsx`), each with an
 id, the role it needs, whether Claude may run it, a `view(ctx)` that gives its label, icon
@@ -225,8 +225,8 @@ unauthorized or already-running actions, so a double click never runs one twice.
 
 The role is the user's role in the run: editor for its author while it isn't archived, viewer
 for everyone else who can see it. A viewer sees Generate Rules disabled, with a tooltip saying
-why, and Claude acting for them gets the same refusal. The server checks again: any write, a
-read-only file included, needs editor.
+why, and Claude acting for them gets the same refusal. The server checks again: any write,
+rename or delete needs editor.
 
 #### Rules API
 
@@ -242,11 +242,10 @@ at `/api/mock/rules`. The answer looks like this:
 ```
 
 A fixed transform (`apps/web/src/components/workspace/rules.ts`, unit tested) turns it into a markdown
-table. The file is read-only for everyone, Claude included: the editor only previews it, and
-the file API refuses to change or rename it. It is created *deletable*, though: an editor can
-delete it from the file list (the API's `DELETE` works for it, and Claude has no way to delete
-files), and the action then reads Generate Rules again and asks the API afresh. Other read-only
-files, such as an experiment's linked inputs, can't be deleted.
+table. It is an ordinary file of the run, so roles decide what happens to it, as for every
+file: the run's author (while it isn't archived) may edit, rename or delete it, and everyone
+else who can see the run may read it. Claude acts with the user's role, and never deletes
+files. Once the file is gone, the action reads Generate Rules again and asks the API afresh.
 
 While the file exists, the API isn't called again. The button is disabled while it works, and a lock
 shared by the browser's tabs, plus a check with the server just before the call, stops a
@@ -485,9 +484,8 @@ For local setup, see [Development](development.md).
   `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
-  (412 if the file exists), and `X-Read-Only: true` makes a new file read-only: after that,
-  `PUT`, `PATCH` and `DELETE` answer 403, for every role. With `X-Deletable: true` as well,
-  `DELETE` still works (a run's generated rules); `FileInfo.deletable` says so. Login is optional (see below); keep the agent port private in either mode.
+  (412 if the file exists). `PUT`, `PATCH` and `DELETE` need write access to the place (403
+  otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the agent port private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
   Postgres `ltree`, and the database checks that each node sits exactly one level below its
@@ -626,7 +624,7 @@ Coordinate changes with the feature PR stack before introducing new semantics.
 `packages/contracts/src/files.ts` and `packages/contracts/src/storage-contract.ts` have no React, database or SDK
 imports. File metadata and committed events use one transport definition on both
 sides; the browser validates lists, PUT responses and SSE messages before use.
-Transport timestamps are date strings, with hashes/sizes and a read-only flag.
+Transport timestamps are date strings, with hashes and sizes.
 Local files hold numeric timestamps and text or binary data/HTTP URLs instead.
 
 The storage API's HTTP contract (`/files`, `/nodes`, `/experiments`, `/search`,
@@ -651,7 +649,8 @@ are ignored; reconnect still refreshes the server list.
 Local workspace/tab payloads are structurally validated. Invalid local file data
 is rejected and preserved under `knowledge-chatroom.workspace.v1.invalid` before
 replacement; if that backup cannot be written, the original value is retained.
-Valid existing v1 files/tabs and optional read-only fields remain compatible.
+Valid existing v1 files/tabs remain compatible, including the read-only flag older versions saved
+(now ignored).
 
 `workspace/save-scheduler.ts` owns debounce timers, ordered per-place/path write
 chains, in-flight/failed protection and observed server hashes. The provider injects

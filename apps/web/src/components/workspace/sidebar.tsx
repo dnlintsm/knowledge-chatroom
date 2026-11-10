@@ -14,7 +14,6 @@ import {
   ListFilter,
   ListTodo,
   LocateFixed,
-  Lock,
   Network,
   Package,
   Pencil,
@@ -56,7 +55,7 @@ import {
   EXPERIMENT_TAB,
   fileName,
   FileExistsError,
-  ReadOnlyFileError,
+  FileMovingError,
   RUNS_TAB,
   TASKS_TAB,
   type WorkspaceFile,
@@ -131,7 +130,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
 
   const upload = async (list: FileList | null) => {
     const written = await uploadFiles(list, write, (path) =>
-      notify(`${path} is read-only, so the upload was skipped.`, "warning"),
+      notify(`${path} is being renamed, so the upload was skipped.`, "warning"),
     );
     if (written.length) open(written[written.length - 1]);
   };
@@ -399,10 +398,7 @@ function FileRow({
       {file.author === "agent" && (
         <Bot className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Written by Claude" />
       )}
-      {file.readOnly && (
-        <Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" aria-label="Read-only" />
-      )}
-      {canEdit && !file.readOnly && (
+      {canEdit && (
         <button
           type="button"
           aria-label={`Rename ${file.path}`}
@@ -416,8 +412,7 @@ function FileRow({
           <Pencil className="size-3.5" />
         </button>
       )}
-      {/* A deletable read-only file (a run's generated rules) can't be renamed, only deleted. */}
-      {canEdit && (!file.readOnly || file.deletable) && (
+      {canEdit && (
         <button
           type="button"
           aria-label={`Delete ${file.path}`}
@@ -775,8 +770,8 @@ function NewFileInput({
       setError(
         err instanceof FileExistsError
           ? `${checked.path} already exists`
-          : err instanceof ReadOnlyFileError
-            ? `${checked.path} is read-only`
+          : err instanceof FileMovingError
+            ? err.message
             : err instanceof Error
               ? err.message
               : String(err),

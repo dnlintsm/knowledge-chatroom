@@ -33,13 +33,23 @@
 
 ### Changed
 
-- A run's generated `models/general_rules.md` can now be deleted. It is still read-only (no
-  edits or renames, for anyone), but an editor can delete it from the file list, and the run's
-  **Open Rules** action then turns back into **Generate Rules**, which asks the rules API again.
-  The storage API has a new create-time header for this, `X-Deletable: true` (with
-  `X-Read-Only: true`), and `FileInfo` a `deletable` field. Other read-only files, such as an
-  experiment's linked inputs, still can't be deleted. Migration `022_deletable.sql` makes rules
-  files generated before it deletable too.
+- Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
+  file (a node's or the root's editors, an experiment's author while it isn't archived), the
+  same as for everything else. A run's generated `models/general_rules.md` is now an ordinary
+  file of the run: its author can edit, rename or delete it, others who can see the run read
+  it, and once it is deleted the run's **Open Rules** action turns back into
+  **Generate Rules**, which asks the rules API again. An experiment's linked inputs
+  (`inputs/…`) can also be changed or deleted by its author now; the run's provenance still
+  records the versions it linked.
+
+### Upgrading
+
+- Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
+  files, linked inputs, locked skill files) become ordinary files when it runs.
+- Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends
+  `X-File-Read-Only`, and `FileInfo` and 403 errors no longer carry `readOnly`. Clients that
+  relied on them should check the user's role instead. Deleting a skill no longer refuses
+  because one of its files is read-only.
 
 ## 0.2.3
 

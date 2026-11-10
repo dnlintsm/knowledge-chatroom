@@ -13,14 +13,13 @@ import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth
 
 const LOCAL_AGENT_URL = localAgentUrl();
 
-const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-read-only", "x-deletable"];
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",
   "etag",
   "last-modified",
   "x-file-author",
-  "x-file-read-only",
   "cache-control",
   // Skill .zip exports download under the skill's name.
   "content-disposition",

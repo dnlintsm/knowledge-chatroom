@@ -60,10 +60,7 @@ export interface paths {
          */
         put: operations["writeFile"];
         post?: never;
-        /**
-         * Delete a file (soft delete; its history stays)
-         * @description A read-only file answers 403 unless it was created deletable.
-         */
+        /** Delete a file (soft delete; its history stays) */
         delete: operations["deleteFile"];
         options?: never;
         head?: never;
@@ -201,8 +198,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Link files into an experiment as read-only inputs
-         * @description Each file is linked read-only under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
+         * Link files into an experiment as inputs
+         * @description Each file is linked under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
          */
         post: operations["addRunInputs"];
         delete?: never;
@@ -1392,11 +1389,6 @@ export interface components {
         Error: {
             error: string;
             /**
-             * @description The file is read-only.
-             * @constant
-             */
-            readOnly?: true;
-            /**
              * @description The path already has a file.
              * @constant
              */
@@ -1428,9 +1420,6 @@ export interface components {
             sha256: string;
             updatedAt: components["schemas"]["Timestamp"];
             author: components["schemas"]["AuthorType"];
-            readOnly: boolean;
-            /** @description A read-only file that may still be deleted, but never changed or renamed. Always false unless readOnly. */
-            deletable: boolean;
         };
         FileList: {
             files: components["schemas"]["FileInfo"][];
@@ -2164,7 +2153,7 @@ export interface components {
                 };
             };
         };
-        /** @description Something is in the way, such as a skill folder of that name or a read-only file in it. */
+        /** @description Something is in the way, such as a skill folder of that name. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -2193,15 +2182,6 @@ export interface components {
         };
         /** @description Signed in, but not allowed to do this (or a storage token may not). */
         Forbidden: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Not allowed, or the file is read-only (then `readOnly` is true). */
-        ForbiddenOrReadOnly: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2381,8 +2361,6 @@ export interface operations {
                     ETag?: string;
                     "Last-Modified"?: string;
                     "X-File-Author"?: components["schemas"]["AuthorType"];
-                    /** @description `true` for a read-only file; absent otherwise. */
-                    "X-File-Read-Only"?: "true";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2428,13 +2406,6 @@ export interface operations {
             header?: {
                 /** @description `*` only creates: 412 when the file exists. */
                 "If-None-Match"?: "*";
-                /** @description `true` makes a newly created file read-only. No effect on an existing file. */
-                "X-Read-Only"?: string;
-                /**
-                 * @description With `X-Read-Only: true`, `true` lets the new read-only file still be deleted (never
-                 *     changed or renamed). No effect on an existing file.
-                 */
-                "X-Deletable"?: string;
             };
             path: {
                 /** @description The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept. */
@@ -2468,7 +2439,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
-            403: components["responses"]["ForbiddenOrReadOnly"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             412: components["responses"]["Exists"];
             413: components["responses"]["TooLarge"];
@@ -2507,7 +2478,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
-            403: components["responses"]["ForbiddenOrReadOnly"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
@@ -2548,7 +2519,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
-            403: components["responses"]["ForbiddenOrReadOnly"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             412: components["responses"]["Exists"];
             500: components["responses"]["StorageError"];
@@ -3135,7 +3106,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
-            403: components["responses"]["ForbiddenOrReadOnly"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];

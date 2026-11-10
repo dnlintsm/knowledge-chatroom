@@ -65,7 +65,7 @@ import {
   isBuiltInTab,
   kindForPath,
   mimeForPath,
-  ReadOnlyFileError,
+  FileMovingError,
   REVIEW_TAB,
   type TabId,
   type WorkspaceFile,
@@ -123,7 +123,7 @@ interface WorkspaceValue {
   /** Opens a tab; with `lines`, the middle pane also brings those lines into view. */
   open: (tab: TabId, lines?: LineRange) => void;
   close: (tab: TabId) => void;
-  /** Creates the file when it does not exist. Throws ReadOnlyFileError for a read-only file. */
+  /** Creates the file when it does not exist. Throws FileMovingError while it is being renamed. */
   write: (
     path: string,
     content: string,
@@ -132,20 +132,19 @@ interface WorkspaceValue {
   /**
    * Creates a new file, saved right away (not debounced). Throws
    * FileExistsError when the path is taken, here or on the server, which
-   * decides when two tabs race. `readOnly` files can never change afterwards;
-   * with `deletable` too, they can still be deleted.
+   * decides when two tabs race.
    */
   create: (
     path: string,
     content: string,
-    opts?: { mime?: string; author?: WorkspaceFile["author"]; readOnly?: boolean; deletable?: boolean },
+    opts?: { mime?: string; author?: WorkspaceFile["author"] },
   ) => Promise<WorkspaceFile>;
-  /** Throws ReadOnlyFileError for a read-only file that isn't deletable. */
+  /** Throws FileMovingError while the file is being renamed. */
   remove: (path: string) => void;
   /**
    * Moves a file to a new path in the same place, keeping its history and
-   * open tab. Throws FileExistsError when the path is taken, ReadOnlyFileError
-   * for a read-only file, and with a message for other failures.
+   * open tab. Throws FileExistsError when the path is taken, FileMovingError
+   * while it is already being renamed, and with a message for other failures.
    */
   rename: (from: string, to: string) => Promise<WorkspaceFile>;
   setSelection: (text: string) => void;
@@ -194,7 +193,7 @@ interface WorkspaceValue {
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
   /**
-   * Adds files of experiment `id` (by path) as its run inputs: read-only
+   * Adds files of experiment `id` (by path) as its run inputs:
    * copies under inputs/, recorded in its provenance. Throws with a message.
    */
   addRunInputs: (id: string, paths: string[]) => Promise<Experiment>;
@@ -562,7 +561,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (rawPath, content, opts) => {
       const path = normalizePath(rawPath);
       const existing = files.current.find((f) => f.path === path);
-      if (existing?.readOnly) throw new ReadOnlyFileError(path);
+      if (existing?.moving) throw new FileMovingError(path);
       const file: WorkspaceFile = {
         path,
         content,
@@ -596,8 +595,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         mime: opts?.mime ?? mimeForPath(path),
         author: opts?.author ?? "user",
         updatedAt: Date.now(),
-        ...(opts?.readOnly ? { readOnly: true } : {}),
-        ...(opts?.readOnly && opts.deletable ? { deletable: true } : {}),
       };
       if (mode.current === "server") {
         const at = placeRef.current;
@@ -605,11 +602,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         sync.beginWrite(path, at);
         let lost = false;
         try {
-          const info = await putServerFile(file, at, {
-            createOnly: true,
-            readOnly: opts?.readOnly,
-            deletable: opts?.deletable,
-          });
+          const info = await putServerFile(file, at, { createOnly: true });
           sync.remember(path, info.sha256, at);
         } catch (err) {
           if (!(err instanceof FileExistsError)) throw err;
@@ -638,7 +631,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const remove = useCallback(
     (path: string) => {
       const existing = files.current.find((f) => f.path === path);
-      if (existing?.readOnly && !existing.deletable) throw new ReadOnlyFileError(path);
+      if (existing?.moving) throw new FileMovingError(path);
       removeLocal(path);
       if (mode.current !== "server") return;
       sync.cancel(path);
@@ -655,7 +648,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const to = normalizePath(rawTo);
       const existing = files.current.find((f) => f.path === from);
       if (!existing) throw new Error(`${from} is gone`);
-      if (existing.readOnly) throw new ReadOnlyFileError(from);
+      if (existing.moving) throw new FileMovingError(from);
       if (to === from) return existing;
       if (files.current.some((f) => f.path === to)) throw new FileExistsError(to);
       // A type picked from the old name follows the new one; one set on upload stays.
@@ -674,7 +667,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           files.current = files.current.map((x) => (x.path === from ? f : x));
           upsert(f);
         };
-        lock({ ...latest, readOnly: true });
+        lock({ ...latest, moving: true });
         // Counted as in flight, so this rename's own change events are ignored.
         sync.beginWrite(from, at);
         sync.beginWrite(to, at);

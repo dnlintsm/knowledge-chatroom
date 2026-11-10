@@ -12,14 +12,6 @@ export type { AuthorType, FileEvent } from "./events";
 import type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 export type { FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
 
-/** A write, rename or delete of a read-only file (deletes are allowed for deletable ones). */
-export class ReadOnlyFileError extends Error {
-  constructor(readonly path: string) {
-    super(`${path} is read-only`);
-    this.name = "ReadOnlyFileError";
-  }
-}
-
 /** A create-only write to a path that already has a file. */
 export class FileExistsError extends Error {
   constructor(readonly path: string) {
@@ -46,13 +38,6 @@ export interface WriteOptions {
   inTx?: (tx: Tx) => Promise<unknown>;
   /** Fail with FileExistsError instead of replacing an existing file. */
   createOnly?: boolean;
-  /** Make a newly created file read-only. Has no effect on an existing file. */
-  readOnly?: boolean;
-  /**
-   * With `readOnly`: the new file may still be deleted, though never changed
-   * or renamed. Has no effect on an existing file.
-   */
-  deletable?: boolean;
 }
 
 interface FileRow {
@@ -63,8 +48,6 @@ interface FileRow {
   sha256: string;
   updated_at: Date;
   author_type: AuthorType;
-  read_only: boolean;
-  deletable: boolean;
 }
 
 function toInfo(row: FileRow): FileInfo {
@@ -76,8 +59,6 @@ function toInfo(row: FileRow): FileInfo {
     sha256: row.sha256,
     updatedAt: row.updated_at.toISOString(),
     author: row.author_type,
-    readOnly: row.read_only,
-    deletable: row.read_only && row.deletable,
   };
 }
 
@@ -146,7 +127,7 @@ export class FileService {
   async list(): Promise<FileInfo[]> {
     const rows = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only, f.deletable
+             f.updated_at, v.author_type
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.deleted_at IS NULL
       ORDER BY f.path`;
@@ -157,7 +138,7 @@ export class FileService {
     const path = normalizePath(rawPath);
     const [row] = await this.sql<FileRow[]>`
       SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256 AS sha256,
-             f.updated_at, v.author_type, f.read_only, f.deletable
+             f.updated_at, v.author_type
       FROM files f JOIN file_versions v ON v.id = f.current_version_id
       WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL`;
     return row ? toInfo(row) : null;
@@ -171,8 +152,7 @@ export class FileService {
 
   /**
    * Creates the file when missing. Writing identical bytes adds no version.
-   * Throws ReadOnlyFileError for a read-only file, and FileExistsError for an
-   * existing one when `createOnly` is set.
+   * Throws FileExistsError for an existing one when `createOnly` is set.
    */
   async write(rawPath: string, bytes: Uint8Array, opts: WriteOptions = {}): Promise<FileInfo> {
     const path = normalizePath(rawPath);
@@ -193,23 +173,19 @@ export class FileService {
       // Create the row if needed, then lock it so concurrent writers to one
       // path serialize instead of racing on the unique index.
       const created = await tx`
-        INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime, read_only, deletable)
+        INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime)
         VALUES (${this.workspaceId}, ${this.nodeId}, ${this.experimentId}, ${path},
-                ${kindForPath(path)}, ${mime}, ${opts.readOnly ?? false},
-                ${Boolean(opts.readOnly && opts.deletable)})
+                ${kindForPath(path)}, ${mime})
         ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING`;
       const [file] = await tx<
-        { id: string; sha256: string | null; mime: string; read_only: boolean }[]
+        { id: string; sha256: string | null; mime: string }[]
       >`
-        SELECT f.id, v.blob_sha256 AS sha256, f.mime, f.read_only
+        SELECT f.id, v.blob_sha256 AS sha256, f.mime
         FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
         WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
 
-      if (created.count === 0) {
-        if (opts.createOnly) throw new FileExistsError(path);
-        if (file.read_only) throw new ReadOnlyFileError(path);
-      }
+      if (created.count === 0 && opts.createOnly) throw new FileExistsError(path);
       if (file.sha256 === sha256 && file.mime === mime) return;
 
       const [version] = await tx<{ id: string }[]>`
@@ -232,19 +208,15 @@ export class FileService {
     return (await this.stat(path))!;
   }
 
-  /**
-   * Soft delete: history stays, and the path is free for a new file. Read-only
-   * files can't be deleted unless they were created deletable.
-   */
+  /** Soft delete: history stays, and the path is free for a new file. */
   async remove(rawPath: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     const path = normalizePath(rawPath);
     return this.sql.begin(async (tx) => {
-      const [file] = await tx<{ id: string; read_only: boolean; deletable: boolean }[]>`
-        SELECT f.id, f.read_only, f.deletable FROM files f
+      const [file] = await tx<{ id: string }[]>`
+        SELECT f.id FROM files f
         WHERE ${this.here} AND f.path = ${path} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
       if (!file) return false;
-      if (file.read_only && !file.deletable) throw new ReadOnlyFileError(path);
       await tx`UPDATE files SET deleted_at = now() WHERE id = ${file.id}`;
       await inTx?.(tx);
       await this.events.notify(tx, { op: "delete", ...this.place, path });
@@ -254,8 +226,8 @@ export class FileService {
 
   /**
    * Moves a file to another path in the same place, keeping its history.
-   * Returns null when there is no file at `rawFrom`. Throws ReadOnlyFileError
-   * for a read-only file and FileExistsError when `rawTo` is taken. Change
+   * Returns null when there is no file at `rawFrom`. Throws FileExistsError
+   * when `rawTo` is taken. Change
    * events name `author` (who renamed it), not who wrote its current version.
    */
   async rename(
@@ -269,14 +241,13 @@ export class FileService {
       if (this.nodeId) await NodeService.lockLive(tx, this.workspaceId, this.nodeId);
       if (this.experimentId) await lockLiveExperiment(tx, this.workspaceId, this.experimentId);
       const [file] = await tx<
-        { id: string; read_only: boolean; mime: string; sha256: string }[]
+        { id: string; mime: string; sha256: string }[]
       >`
-        SELECT f.id, f.read_only, f.mime, v.blob_sha256 AS sha256
+        SELECT f.id, f.mime, v.blob_sha256 AS sha256
         FROM files f JOIN file_versions v ON v.id = f.current_version_id
         WHERE ${this.here} AND f.path = ${from} AND f.deleted_at IS NULL
         FOR UPDATE OF f`;
       if (!file) return false;
-      if (file.read_only) throw new ReadOnlyFileError(from);
       if (from === to) return true;
       const [taken] = await tx`
         SELECT 1 FROM files f WHERE ${this.here} AND f.path = ${to} AND f.deleted_at IS NULL`;

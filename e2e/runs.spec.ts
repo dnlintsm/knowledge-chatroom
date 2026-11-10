@@ -255,7 +255,7 @@ test("the Actions block starts a new chat about the run", async ({ page, request
   await expect(page.getByTestId("actions")).toHaveCount(0);
 });
 
-test("Generate Rules writes the run's rules once, read-only, then opens them; deleting them brings it back", async ({ page, request }) => {
+test("Generate Rules writes the run's rules once and opens them; its author can edit and delete them, which brings Generate Rules back", async ({ page, request }) => {
   const run = await makeRun(request, "etch-2026-10-01", { "report.md": "# Etch rules report\n" });
   const other = await makeRun(request, "litho-2026-10-03", { "report.md": "# Litho report\n" });
   const apiCalls: string[] = [];
@@ -271,25 +271,32 @@ test("Generate Rules writes the run's rules once, read-only, then opens them; de
   await generate.dblclick();
   const preview = page.getByTestId("file-preview");
   await expect(preview).toContainText("General rules: etch-2026-10-01");
-  await expect(page.getByTestId("read-only-badge")).toBeVisible();
-  await expect(page.getByRole("group", { name: "View mode" })).toHaveCount(0);
   await expect(page.getByTestId("notices")).toContainText("Generated models/general_rules.md");
   await expect(actions.getByRole("button", { name: "Open Rules" })).toBeVisible();
   const row = page.getByRole("treeitem", { name: /general_rules\.md/ });
   await expect(row).toHaveAttribute("title", "models/general_rules.md");
-  // Read-only: no rename, but it can be deleted.
-  await expect(row.getByRole("button", { name: /Rename/ })).toHaveCount(0);
+  // An ordinary file of the run: its author may rename or delete it.
+  await expect(row.getByRole("button", { name: /Rename/ })).toHaveCount(1);
   await expect(row.getByRole("button", { name: /Delete/ })).toHaveCount(1);
   await shot(page, "10-generated-rules");
   expect(apiCalls).toHaveLength(1);
   const asked = new URL(apiCalls[0]).searchParams;
   expect([asked.get("run"), asked.get("experiment")]).toEqual(["etch-2026-10-01", run.id]);
 
+  // ...and edit it.
+  await page.getByRole("group", { name: "View mode" }).getByRole("button", { name: /edit/i }).click();
+  const editor = page.getByTestId("file-editor");
+  await editor.press("ControlOrMeta+End");
+  await editor.pressSequentially("\nReviewed by the author.\n");
+  const rulesUrl = `/api/files/models/general_rules.md?experiment=${run.id}`;
+  await expect.poll(async () => (await request.get(rulesUrl)).text()).toContain("Reviewed by the author.");
+  await page.getByRole("group", { name: "View mode" }).getByRole("button", { name: /preview/i }).click();
+
   // After a reload the rules are there, so the action only opens them.
   await page.reload();
   await page.getByRole("tab", { name: /report\.md/ }).click();
   await page.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
-  await expect(preview).toContainText("General rules: etch-2026-10-01");
+  await expect(preview).toContainText("Reviewed by the author.");
   expect(apiCalls).toHaveLength(1);
 
   // Deleting the file turns the action back into Generate Rules, which asks the API again.
@@ -304,6 +311,7 @@ test("Generate Rules writes the run's rules once, read-only, then opens them; de
   await page.waitForTimeout(700);
   await again.click();
   await expect(preview).toContainText("General rules: etch-2026-10-01");
+  await expect(preview).not.toContainText("Reviewed by the author.");
   await expect(page.getByTestId("actions").getByRole("button", { name: "Open Rules" })).toBeVisible();
   expect(apiCalls).toHaveLength(2);
 
@@ -319,7 +327,6 @@ test("Claude runs actions and switches runs through the workbench", async ({ pag
   await gotoRun(page, run, "Etch report");
   await send(page, "Please generate the rules for this run");
   await expect(page.getByTestId("file-preview")).toContainText("General rules: etch-2026-10-01", reply);
-  await expect(page.getByTestId("read-only-badge")).toBeVisible();
   await expect(page.getByText("Generated the run's general rules")).toBeVisible(reply);
   await shot(page, "11-claude-runs-action");
 

@@ -11,9 +11,6 @@ export interface FileInfo {
   sha256: string;
   updatedAt: string;
   author: AuthorType;
-  readOnly: boolean;
-  /** A read-only file that may still be deleted (never changed or renamed). Always false unless readOnly. */
-  deletable: boolean;
 }
 
 export interface FileEvent {
@@ -73,13 +70,11 @@ export function parseFileInfo(value: unknown): FileInfo {
       (!text(item.kind) || !Object.keys(KIND_FOLDERS).includes(item.kind)) ||
       !text(item.mime) || !hash(item.sha256) || !author(item.author) ||
       typeof item.size !== "number" || !Number.isSafeInteger(item.size) || item.size < 0 ||
-      !text(item.updatedAt) || !Number.isFinite(Date.parse(item.updatedAt)) ||
-      (item.readOnly !== undefined && typeof item.readOnly !== "boolean") ||
-      (item.deletable !== undefined && typeof item.deletable !== "boolean")) {
+      !text(item.updatedAt) || !Number.isFinite(Date.parse(item.updatedAt))) {
     throw new StorageContractError("Invalid storage file metadata");
   }
-  const readOnly = item.readOnly ?? false;
-  return { ...item, readOnly, deletable: readOnly && (item.deletable ?? false) } as unknown as FileInfo;
+  // Fields an older server still sends (readOnly) or a newer one adds are left as they are.
+  return item as unknown as FileInfo;
 }
 
 export function parseFileList(value: unknown): FileInfo[] {
@@ -116,18 +111,13 @@ export interface LocalFile {
   mime: string;
   updatedAt: number;
   author: AuthorType;
-  readOnly?: boolean;
-  /** With readOnly: the file may still be deleted. */
-  deletable?: boolean;
 }
 
 export function parseLocalFile(value: unknown): LocalFile {
   const item = object(value);
   if (!canonicalPath(item.path) || !text(item.kind) || !Object.keys(KIND_FOLDERS).includes(item.kind) ||
       typeof item.content !== "string" || !text(item.mime) || !author(item.author) ||
-      typeof item.updatedAt !== "number" || !Number.isFinite(item.updatedAt) ||
-      (item.readOnly !== undefined && typeof item.readOnly !== "boolean") ||
-      (item.deletable !== undefined && typeof item.deletable !== "boolean")) {
+      typeof item.updatedAt !== "number" || !Number.isFinite(item.updatedAt)) {
     throw new StorageContractError("Invalid persisted workspace file");
   }
   return item as unknown as LocalFile;

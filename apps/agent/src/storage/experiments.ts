@@ -54,7 +54,7 @@ export interface ExperimentInput {
 }
 
 /**
- * A file linked into a new run as one of its inputs: a read-only copy at
+ * A file linked into a new run as one of its inputs: a copy at
  * `path` of the file version `versionId`, sharing its stored bytes.
  */
 export interface LinkedInput {
@@ -251,16 +251,15 @@ export class ExperimentService {
   }
 
   /**
-   * Read-only copies of other files' versions in experiment `id`, as a run's
-   * inputs. Their bytes are shared, and since each starts from the version it
+   * Copies of other files' versions in experiment `id`, as a run's inputs. Their bytes are shared, and since each starts from the version it
    * copies, promoting the run never proposes them back to its node.
    */
   private async linkInputs(tx: Tx, id: string, inputs: LinkedInput[]) {
     const linked: { path: string; sha256: string }[] = [];
     for (const input of inputs) {
       const [file] = await tx<{ id: string }[]>`
-        INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from, read_only)
-        SELECT ${this.workspaceId}, ${id}, ${input.path}, ${kindForPath(input.path)}, v.mime, v.id, true
+        INSERT INTO files (workspace_id, experiment_id, path, kind, mime, forked_from)
+        SELECT ${this.workspaceId}, ${id}, ${input.path}, ${kindForPath(input.path)}, v.mime, v.id
         FROM file_versions v WHERE v.id = ${input.versionId}
         ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING
         RETURNING id`;

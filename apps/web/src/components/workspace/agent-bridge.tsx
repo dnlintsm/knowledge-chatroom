@@ -128,7 +128,6 @@ export function useWorkspaceAgent() {
         mime: f.mime,
         size: f.content.length,
         lastWrittenBy: f.author,
-        ...(f.readOnly ? { readOnly: true } : {}),
       })),
   }, [browserFiles]);
 
@@ -157,7 +156,7 @@ export function useWorkspaceAgent() {
     }),
     handler: async ({ path, content }) => {
       const existing = latest.current.getFile(path);
-      if (existing?.readOnly) return { error: `${existing.path} is read-only: it can't be changed.` };
+      if (existing?.moving) return { error: `${existing.path} is being renamed; try again in a moment.` };
       const existed = Boolean(existing);
       const file = latest.current.write(path, content, { author: "agent" });
       latestWorkbench.current.editor.open(file.path);
@@ -179,7 +178,7 @@ export function useWorkspaceAgent() {
     handler: async ({ path, oldText, newText, replaceAll }) => {
       const existing = latest.current.getFile(path);
       if (!existing) return { error: `No file at ${path}. Use writeWorkspaceFile to create it.` };
-      if (existing.readOnly) return { error: `${existing.path} is read-only: it can't be changed.` };
+      if (existing.moving) return { error: `${existing.path} is being renamed; try again in a moment.` };
       if (!isTextFile(existing)) return { error: `${existing.path} is not a text file.` };
       if (existing.unloaded) return { error: FILES_LOADING };
       const edit = applyEdit(existing.content, { oldText, newText, replaceAll });

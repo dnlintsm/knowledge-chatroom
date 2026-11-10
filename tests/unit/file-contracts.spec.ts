@@ -7,7 +7,7 @@ import { deleteServerFile, listServerFiles, loadServerFile, putServerFile, serve
 import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../apps/web/src/components/workspace/local-persistence";
 import { parsePersistedWorkspace } from "../../apps/web/src/components/workspace/workspace-state";
 
-const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user", readOnly: false, deletable: false };
+const info: FileInfo = { path: "notes/a.md", kind: "note", mime: "text/markdown", size: 1, sha256: "a".repeat(64), updatedAt: "2026-10-12T00:00:00.000Z", author: "user" };
 const state = { files: [{ path: info.path, kind: info.kind, mime: info.mime, content: "kept", updatedAt: 1, author: info.author }], tabs: [info.path], active: info.path };
 
 test("relative paths reject traversal/control bytes and normalize Windows separators", () => {
@@ -45,14 +45,10 @@ test("the editor pane picks a preview from the type, or the extension for untype
   for (const [path, mime, kind] of kinds) expect(browser.previewKind({ path, mime }), path).toBe(kind);
 });
 
-test("metadata allows additive fields and legacy missing readOnly but rejects bad payloads", () => {
+test("metadata allows additive fields, and an older server's readOnly, but rejects bad payloads", () => {
   expect(parseFileList({ files: [{ ...info, futureField: true }] })).toMatchObject([info]);
-  const legacy = { ...info, readOnly: undefined, deletable: undefined };
-  expect(parseFileInfo(legacy)).toMatchObject({ readOnly: false, deletable: false });
-  expect(parseFileInfo({ ...info, readOnly: true, deletable: true }).deletable).toBe(true);
-  // Only a read-only file is "deletable"; any other file can be deleted anyway.
-  expect(parseFileInfo({ ...info, readOnly: false, deletable: true }).deletable).toBe(false);
-  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }, { readOnly: "false" }, { deletable: "true" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
+  expect(parseFileInfo({ ...info, readOnly: true })).toEqual({ ...info, readOnly: true });
+  for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
 });
 
 test("event contracts cover scoped writes, node/experiment changes and proposals", () => {
@@ -101,36 +97,30 @@ test("a file being deleted is only asked about, or created again, once the delet
       await new Promise<void>((resolve) => (finishDelete = resolve));
       return Response.json({ deleted: info.path });
     }
-    if (method === "PUT") return Response.json({ ...info, readOnly: true, deletable: true });
+    if (method === "PUT") return Response.json(info);
     return new Response(null, { status: 404 });
   };
   try {
     const removing = deleteServerFile(info.path, "x:run");
     const exists = serverFileExists(info.path, "x:run");
-    const created = putServerFile({ path: info.path, mime: info.mime, content: "again" }, "x:run", { createOnly: true, readOnly: true, deletable: true });
+    const created = putServerFile({ path: info.path, mime: info.mime, content: "again" }, "x:run", { createOnly: true });
     // Another place's file doesn't wait.
     expect(await serverFileExists(info.path, "x:other")).toBe(false);
     expect(calls).toEqual(["DELETE", "GET"]);
     finishDelete();
     await removing;
     expect(await exists).toBe(false);
-    expect((await created).deletable).toBe(true);
+    expect((await created).path).toBe(info.path);
     expect(calls).toEqual(["DELETE", "GET", "GET", "PUT"]);
   } finally { globalThis.fetch = original; }
 });
 
-test("putServerFile asks for a deletable read-only file only together with read-only", async () => {
+test("a 403 from the server says the user can't change or delete files there", async () => {
   const original = globalThis.fetch;
-  const sent: Headers[] = [];
-  globalThis.fetch = async (_input, init) => {
-    sent.push(new Headers(init?.headers));
-    return Response.json(info);
-  };
+  globalThis.fetch = async () => Response.json({ error: "This needs editor access" }, { status: 403 });
   try {
-    await putServerFile({ path: info.path, mime: info.mime, content: "a" }, null, { readOnly: true, deletable: true });
-    await putServerFile({ path: info.path, mime: info.mime, content: "a" }, null, { deletable: true });
-    expect([sent[0].get("x-read-only"), sent[0].get("x-deletable")]).toEqual(["true", "true"]);
-    expect([sent[1].get("x-read-only"), sent[1].get("x-deletable")]).toEqual([null, null]);
+    await expect(putServerFile({ path: info.path, mime: info.mime, content: "a" })).rejects.toThrow("You can't change files here");
+    await expect(deleteServerFile(info.path)).rejects.toThrow("You can't delete files here");
   } finally { globalThis.fetch = original; }
 });
 

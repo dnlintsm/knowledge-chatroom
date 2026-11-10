@@ -126,6 +126,22 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.mouse.move(600, 500);
   await shot(bob, "18-actions-by-role");
 
+  // Once Alice has generated the rules, Bob can open them, but only read them:
+  // his role in the run decides, as for any of its files.
+  await alice.getByTestId("actions").getByRole("button", { name: "Generate Rules" }).click();
+  await expect(alice.getByTestId("file-preview")).toContainText("General rules: r1");
+  await bob.reload();
+  await showFiles(bob);
+  await bob.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
+  await expect(bob.getByTestId("file-preview")).toContainText("General rules: r1");
+  await expect(bob.getByText("Read only")).toBeVisible();
+  const bobRules = bob.getByRole("treeitem", { name: /general_rules\.md/ });
+  await expect(bobRules.getByRole("button", { name: /Delete|Rename/ })).toHaveCount(0);
+  const rulesUrl = `/api/files/models/general_rules.md?experiment=${run.id}`;
+  expect((await bob.request.put(rulesUrl, { headers: { "Content-Type": "text/markdown" }, data: "# Bob's rules" })).status()).toBe(403);
+  expect((await bob.request.delete(rulesUrl)).status()).toBe(403);
+  expect((await alice.request.get(rulesUrl)).ok()).toBe(true);
+
   // Admin panel (#67): only workspace owners get it. Alice puts Bob in a
   // group, sees the change logged, and makes him a workspace editor.
   await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);

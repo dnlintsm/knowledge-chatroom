@@ -18,7 +18,6 @@ import { z } from "zod";
 import { AccessError, ForbiddenError, type Principal } from "./access";
 import { ExperimentError } from "./experiments";
 import type { Storage } from "./index";
-import { ReadOnlyFileError } from "./files";
 import { NodeError, type KnowledgeNode } from "./nodes";
 import type { FilesSession, Session } from "./session";
 import { InvalidPathError, isTextFile, kindForPath, normalizePath } from "./paths";
@@ -219,9 +218,6 @@ export function createFileTools(
       const principal: Principal = { userId, actor: "agent" };
       return await fn(current.session(principal));
     } catch (err) {
-      if (err instanceof ReadOnlyFileError) {
-        return error(`${err.path} is read-only: it can't be changed or deleted.`);
-      }
       if (err instanceof NodeError && err.message === "Node not found") {
         return error("No such knowledge node (or the user can't see it). Call list_nodes.");
       }
@@ -373,7 +369,6 @@ export function createFileTools(
               size: f.size,
               lastWrittenBy: f.author,
               updatedAt: f.updatedAt,
-              ...(f.readOnly ? { readOnly: true } : {}),
             })),
           ),
         ),
@@ -494,8 +489,7 @@ export function createFileTools(
         "change (writing the same file again revises your proposal). Put new generated documents under " +
         "artifacts/ (in the run, when the user is in one), unless the user asks to change an existing file. Paths starting with notes/, " +
         "skills/<name>/SKILL.md, uploads/ or artifacts/ decide where the file is listed. " +
-        "Every write is kept as a version. Read-only files (readOnly in list_files) can't be " +
-        "written.",
+        "Every write is kept as a version.",
       {
         path: z.string().describe("e.g. artifacts/summary.md"),
         content: z.string().describe("The full file content (markdown for .md files)."),
@@ -517,7 +511,7 @@ export function createFileTools(
         "the chat small. oldText must match exactly one place unless replaceAll is set, so " +
         "include a few surrounding lines when a snippet repeats. Same rules as write_file: " +
         "PROPOSED in a knowledge node or for skills (editing again revises your proposal), " +
-        "kept as a version, never on a read-only file. The result shows the changed lines.",
+        "kept as a version. The result shows the changed lines.",
       {
         path: z.string().describe("Workspace path of the file, e.g. artifacts/page.html"),
         oldText: z.string().describe("The exact text to replace, without line numbers."),
@@ -567,7 +561,7 @@ export function createFileTools(
             "Save a file from the working folder (one a script made, e.g. out/plot.png or a CSV) " +
               "into the workspace, with the same rules as write_file: where the user is working " +
               "unless they say otherwise, PROPOSED in a knowledge node or for skills, kept as a " +
-              "version, never over a read-only file. Use write_file for text you write yourself.",
+              "version. Use write_file for text you write yourself.",
             {
               from: z.string().describe("Path in the working folder, e.g. out/plot.png"),
               path: z.string().describe("Workspace path to save it as, e.g. artifacts/plot.png"),
