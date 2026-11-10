@@ -632,7 +632,9 @@ service has to match (issue #169). `pnpm -C packages/contracts openapi` generate
 `src/generated/storage-api.ts` from it, and the Quality workflow fails when that file
 is out of date. `apps/agent/src/storage/api-contract.ts` ties the agent's own types to
 the spec's schemas, so `pnpm typecheck` fails when a route's answer and the spec drift
-apart in either direction. When a route changes, change the spec in the same PR.
+apart in either direction. `pnpm test:conformance` then checks the running agent's real
+answers against the spec, operation by operation ([Testing](testing.md)). When a route
+changes, change the spec and the conformance suite in the same PR.
 
 Path normalization, kinds and MIME inference are shared. SVG is intentionally
 readable as text by agent tools, while browser previews/uploads retain image URLs.

@@ -5,9 +5,10 @@ The default test command runs only fast units; integration and E2E are explicit.
 
 | Command | Services/credentials | Coverage |
 | --- | --- | --- |
-| `pnpm check` | None | ESLint, both TypeScript projects, all unit tests |
+| `pnpm check` | None | ESLint, all TypeScript projects (root, web, agent, contracts), all unit tests |
 | `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
 | `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
+| `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every storage API operation against `openapi/storage.yaml` |
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
 | `pnpm test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `pnpm test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
@@ -52,6 +53,17 @@ Create each database once. This bucket name matches the integration fixtures and
 avoids reserving separate SeaweedFS volume collections for each suite. Test blobs
 are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testing;
 integration does not fall back to `DATABASE_URL`.
+
+`pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values: it resets the
+database, starts the agent on it with a throwaway `AUTH_SECRET`, and runs
+`packages/contracts/conformance/storage.test.ts`. That suite calls every operation in
+`packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
+a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
+operation was never called. It only speaks HTTP, so it can check any backend that
+serves the storage API (a Python one later, issue #169):
+`STORAGE_URL=http://localhost:8010 AUTH_SECRET=... pnpm -C packages/contracts test:conformance`,
+with the backend on a fresh database, since the suite's first user must become the
+workspace owner. When you add or change a route, add its calls there too.
 
 The normal integration suite tests vector search using a deterministic embedder.
 Set `EMBEDDING_TEST=1` to also run the real model-download test; it needs network
@@ -98,7 +110,8 @@ successful checks before merging and for preview-step limits.
   unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
   suites of `packages/knowledge-py` and every `services/*` project.
 - `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
-  including the cached real embedding-model test (`EMBEDDING_TEST=1`).
+  including the cached real embedding-model test (`EMBEDDING_TEST=1`), then the storage
+  API conformance suite against the running agent.
 - `ui-preview.yml`: the `preview` job: production build, explicit browser/storage/login
   runs, artifacts and the combined outcome in the preview comment.
 - `docker.yml`: checks the compose file and builds the demo images when the
