@@ -23,7 +23,7 @@ test("turns the API's JSON into a fixed markdown table", () => {
     [
       "# General rules: etch-01",
       "",
-      "Generated from the rules API for `runs/etch-01` (2026-10-08T00:00:00.000Z). This file is read-only.",
+      "Generated from the rules API for `runs/etch-01` (2026-10-08T00:00:00.000Z).",
       "",
       "| ID | Rule | When | Then | Confidence |",
       "| --- | --- | --- | --- | --- |",

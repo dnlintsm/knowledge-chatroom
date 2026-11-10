@@ -14,14 +14,18 @@ import type { LocalFile } from "@knowledge-chatroom/contracts/storage-contract";
  * is opened (or otherwise needed): it is `unloaded`, with empty content, until
  * the store fetches it (store.tsx).
  */
-export type WorkspaceFile = LocalFile & { unloaded?: true };
+export type WorkspaceFile = LocalFile & {
+  unloaded?: true;
+  /** Being renamed: held still until the server has moved it (store.tsx). Never saved. */
+  moving?: true;
+};
 export { extension, KIND_FOLDERS, kindForPath, mimeForPath, type FileKind } from "@knowledge-chatroom/contracts/files";
 
-/** An edit or delete of a read-only file. */
-export class ReadOnlyFileError extends Error {
+/** An edit, rename or delete of a file while it is being renamed. */
+export class FileMovingError extends Error {
   constructor(readonly path: string) {
-    super(`${path} is read-only`);
-    this.name = "ReadOnlyFileError";
+    super(`${path} is being renamed; try again in a moment`);
+    this.name = "FileMovingError";
   }
 }
 

@@ -123,7 +123,7 @@ test("parsePersistedWorkspace validates structure and rejects non-objects, bad t
   const validWorkspace = {
     tabs: ["notes/a.md"],
     active: "notes/a.md",
-    files: [{ ...file, readOnly: false }],
+    files: [{ ...file, readOnly: false }], // Saved by an older version, which had read-only files.
   };
   expect(parsePersistedWorkspace(validWorkspace)).toEqual(validWorkspace);
 
@@ -142,7 +142,6 @@ test("parsePersistedWorkspace validates structure and rejects non-objects, bad t
     { ...file, updatedAt: "2026-01-01" },
     { ...file, updatedAt: NaN },
     { ...file, updatedAt: Infinity },
-    { ...file, readOnly: "false" },
   ];
 
   for (const badFile of invalidFiles) {

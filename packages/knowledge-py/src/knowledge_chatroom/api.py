@@ -12,10 +12,6 @@ from typing_extensions import TypeAliasType
 
 class Error(BaseModel):
     error: str
-    readOnly: Literal[True] | None = None
-    """
-    The file is read-only.
-    """
     exists: Literal[True] | None = None
     """
     The path already has a file.
@@ -55,7 +51,6 @@ class FileInfo(BaseModel):
     sha256: Annotated[str, Field(pattern="^[a-f0-9]{64}$")]
     updatedAt: Timestamp
     author: AuthorType
-    readOnly: bool
 
 
 class FileList(BaseModel):

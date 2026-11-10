@@ -577,7 +577,7 @@ export class SkillHub {
    * Deletes the workspace skill called `name`: every file in its folder (which
    * may be named differently, as the name comes from SKILL.md), as the user
    * (editors). SKILL.md goes last, so a failure part way leaves the skill
-   * listed to try again. A folder with read-only files is left alone.
+   * listed to try again.
    */
   async deleteSkill(userId: string | null, name: string): Promise<{ name: string; deleted: number }> {
     const { storage } = await this.open(userId, "editor", "Deleting skills needs editor access to the workspace");
@@ -586,8 +586,6 @@ export class SkillHub {
     const session = await storage.session({ userId: userId!, actor: "user" }).files(null);
     const prefix = skill.path.slice(0, -"SKILL.md".length);
     const files = (await session.list()).filter((f) => f.path.startsWith(prefix));
-    const locked = files.find((f) => f.readOnly);
-    if (locked) throw new HubConflictError(`${locked.path} is read-only, so ${name} can't be deleted`);
     const main = `${prefix}SKILL.md`;
     files.sort((a, b) => Number(a.path === main) - Number(b.path === main));
     for (const file of files) await session.remove(file.path);

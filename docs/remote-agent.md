@@ -174,12 +174,11 @@ to it.
    run (see the notes on `ag_ui_claude_sdk` below).
 5. **Bring file tools when `storage` is `"server"`.** The browser's file tools are off then,
    so the model needs the backend's own. Use this repo's storage API with the run's
-   `X-Knowledge-Storage` token. The API enforces the first three rules; the last one is
+   `X-Knowledge-Storage` token. The API enforces the first two rules; the last one is
    for your tools and prompt:
    - **Writes in a knowledge node are proposals**: `PUT /files/<path>?node=<id>&propose`, so
      the node's editors review them.
    - **Writes in an experiment or at the root** change the file directly.
-   - **Read-only files can't be written.**
    - **Experiments**: inside one, write only there, never to its node.
    - **Runs**: start one with `POST /experiments/runs` (its inputs, and what you know about
      it as `provenance`: chat, model, skill) and finish it with `POST /experiments/{id}/finish`,

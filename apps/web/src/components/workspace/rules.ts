@@ -1,7 +1,9 @@
 /**
  * A run's general rules: fetched as JSON from the rules API (RULES_API_URL,
  * via /api/rules) and turned into the run's models/general_rules.md by a fixed
- * transform. The file is written once, read-only, and never regenerated.
+ * transform. It is an ordinary file of the run: who may change or delete it
+ * is up to their role there. Once it is deleted, the run's Generate Rules
+ * action writes it again from the API.
  */
 
 /** Where the rules go, relative to the run (an experiment). */
@@ -60,7 +62,7 @@ export function rulesToMarkdown(data: RulesResponse): string {
   const lines = [
     `# General rules: ${name}`,
     "",
-    `Generated from the rules API for \`${data.run}\` (${data.generatedAt}). This file is read-only.`,
+    `Generated from the rules API for \`${data.run}\` (${data.generatedAt}).`,
     "",
   ];
   if (!data.rules.length) {

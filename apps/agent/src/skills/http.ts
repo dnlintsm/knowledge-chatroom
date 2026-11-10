@@ -25,8 +25,7 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *                        in `thread`). mode null clears that level
  *   DELETE /skills/<name> deletes that workspace skill: its whole folder under
  *                        skills/ (editors; 404 when the workspace has no
- *                        skill of that name, 409 when a file in it is
- *                        read-only)
+ *                        skill of that name)
  *   GET /skills/<name>/export   the skill as a .zip (<name>/SKILL.md, ...)
  *   GET /skills/run      {skills}: what a run gets (?thread=<id> for that
  *                        chat's modes): each skill that isn't off, with name,

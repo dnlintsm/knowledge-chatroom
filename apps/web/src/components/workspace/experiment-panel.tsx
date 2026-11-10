@@ -354,7 +354,7 @@ function Promote({ experiment, nodeName }: { experiment: Experiment; nodeName: s
 
 /**
  * Uploads into this experiment (issue #114): files go to its uploads/ and,
- * unless the run already finished, are also added as run inputs, read-only
+ * unless the run already finished, are also added as run inputs,
  * copies under inputs/ recorded in its provenance, so a rerun reads them too.
  */
 function AddFiles({ experiment }: { experiment: Experiment }) {
@@ -382,7 +382,7 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
         () => here.current === experiment.id,
       );
       if (!written.length) {
-        if (skipped.length) setMessage({ text: `${skipped.join(", ")} is read-only, so nothing was uploaded.`, error: true });
+        if (skipped.length) setMessage({ text: `${skipped.join(", ")} is being renamed, so nothing was uploaded.`, error: true });
         return;
       }
       const count = `${written.length} ${written.length === 1 ? "file" : "files"}`;
@@ -442,7 +442,7 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
           {finished
             ? "Files go to uploads/. This run finished, so its inputs stay as they were."
             : linking
-              ? "Files go to uploads/, and a read-only copy under inputs/ is recorded with the run, so a rerun reads it too."
+              ? "Files go to uploads/, and a copy under inputs/ is recorded with the run, so a rerun reads it too."
               : "Files go to uploads/ in this experiment."}
         </p>
         <input

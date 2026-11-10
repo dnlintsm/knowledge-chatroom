@@ -17,7 +17,7 @@ import { Session } from "./session";
 
 export { ChatService } from "./chats";
 export type { ChatRun, ChatSummary } from "./chats";
-export { FileExistsError, FileService, ReadOnlyFileError } from "./files";
+export { FileExistsError, FileService } from "./files";
 export { MemoryService } from "./memory";
 export { SharedMemoryService } from "./shared-memory";
 export { MemoryPackHub } from "./memory-packs";

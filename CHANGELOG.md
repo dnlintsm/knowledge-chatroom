@@ -52,6 +52,26 @@
   the `api` extra for pydantic) is generated from the OpenAPI spec, and CI checks that it is
   up to date and that it parses every request and answer of the conformance run (issue #169).
 
+### Changed
+
+- Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
+  file (a node's or the root's editors, an experiment's author while it isn't archived), the
+  same as for everything else. A run's generated `models/general_rules.md` is now an ordinary
+  file of the run: its author can edit, rename or delete it, others who can see the run read
+  it, and once it is deleted the run's **Open Rules** action turns back into
+  **Generate Rules**, which asks the rules API again. An experiment's linked inputs
+  (`inputs/…`) can also be changed or deleted by its author now; the run's provenance still
+  records the versions it linked.
+
+### Upgrading
+
+- Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
+  files, linked inputs, locked skill files) become ordinary files when it runs.
+- Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends
+  `X-File-Read-Only`, and `FileInfo` and 403 errors no longer carry `readOnly`. Clients that
+  relied on them should check the user's role instead. Deleting a skill no longer refuses
+  because one of its files is read-only.
+
 ## 0.2.3
 
 Search papers from the chat (OpenAlex and arXiv) with a new "+" menu, Papers chip and paper

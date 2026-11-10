@@ -37,8 +37,8 @@ work easier to find, understand, and reuse.
     memory packs on the hub.
   - **Import and recall**: paste in your memory from ChatGPT or Claude. Claude can look
     back through your earlier chats and, with an embedding model, find notes by meaning.
-- **Run common actions** — start a new chat about a run or generate its read-only
-  rules through the same controls used by Claude.
+- **Run common actions** — start a new chat about a run or generate its rules
+  through the same controls used by Claude.
 - **Compare experiments** — fork a knowledge node, record hypotheses, parameters,
   and results, and compare experiments side by side.
 - **Review proposed changes** — inspect diffs for Claude's edits to knowledge nodes
