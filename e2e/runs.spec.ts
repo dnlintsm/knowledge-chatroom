@@ -205,6 +205,35 @@ test("runs: a new run at the root starts empty and tracks its state", async ({ p
   await shot(page, "02c-run-state");
 });
 
+test("an archived experiment says why it's read only, and a rerun reads its inputs as recorded (#187)", async ({ page, request }) => {
+  const run = await makeRun(request, "Dose sweep", { "uploads/dose.csv": "dose\n30\n" });
+  const linked = await request.post(`/api/experiments/${run.id}/inputs`, {
+    data: { inputs: [{ path: "uploads/dose.csv", experiment: run.id }] },
+  });
+  expect(linked.ok()).toBe(true);
+  // Since #175 the copy under inputs/ is an ordinary file; someone edits it.
+  const edit = await request.put(`/api/files/inputs/dose.csv?experiment=${run.id}`, { data: "dose\n99\n", headers: md });
+  expect(edit.ok()).toBe(true);
+  expect((await request.patch(`/api/experiments/${run.id}`, { data: { status: "archived" } })).ok()).toBe(true);
+
+  await page.goto(`/?experiment=${run.id}`);
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Dose sweep", exact: true }).click();
+  const panel = page.getByTestId("experiment-panel");
+  await expect(panel.getByTestId("read-only-reason")).toHaveText("Archived, so it's read only. Restore it to change it.");
+  await expect(panel.getByRole("button", { name: "Restore" })).toBeVisible();
+
+  // Rerun makes a new experiment that reads the input as the record has it, not the edit.
+  await panel.getByRole("button", { name: "Rerun", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Dose sweep (rerun)");
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Dose sweep (rerun)" }).click();
+  await expect(page.getByTestId("experiment-panel")).toContainText("Dose sweep (rerun)");
+  await expect(page.getByTestId("experiment-panel").getByTestId("read-only-reason")).toHaveCount(0);
+  const { experiments } = await (await request.get("/api/experiments")).json();
+  const rerun = (experiments as Experiment[]).find((e) => e.title === "Dose sweep (rerun)")!;
+  const input = await request.get(`/api/files/inputs/dose.csv?experiment=${rerun.id}`);
+  expect(await input.text()).toBe("dose\n30\n");
+});
+
 test("a run Claude started shows where it came from", async ({ page, request }) => {
   const first = await makeRun(request, "Wafer analysis, first try", { "report.md": "# First try\n" });
   const run = await makeRun(request, "Wafer analysis", {

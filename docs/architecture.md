@@ -191,8 +191,10 @@ is no separate run folder or mode (issue #82):
   matter, refreshed when the results are set (`apps/agent/src/storage/run-report.ts`), and the
   run panel shows it under **Provenance**, with the inputs to open.
 - **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
-  place with the old run's parameters, hypothesis and the very input versions it read (from
-  its `inputs/`), unless changed (including `node`, to rerun elsewhere). The old run stays as it ended; a finished run can't be
+  place with the old run's parameters and hypothesis, and its inputs read from its `inputs/`
+  at the content (SHA-256) its provenance records, even if they were edited since (#187),
+  unless changed (including `node`, to rerun elsewhere; `inputs` reads files at their current
+  versions). A recorded input that is gone fails the rerun rather than read other content. The old run stays as it ended; a finished run can't be
   finished again with other results. The new run's provenance and front matter name the old
   one (`rerun_of`) by id only, since the old run may be a draft its viewers can't see; the
   panel links back to it for those who can see it.

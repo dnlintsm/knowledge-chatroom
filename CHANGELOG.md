@@ -76,6 +76,28 @@
   **Generate Rules**, which asks the rules API again. An experiment's linked inputs
   (`inputs/…`) can also be changed or deleted by its author now; the run's provenance still
   records the versions it linked.
+- The app and Claude call the existing object an **experiment** everywhere: the sidebar's
+  **Experiments** view (was Runs), **New experiment**, **Compare experiments**, the compare
+  tab, the experiment header and Claude's prompts and tool descriptions (#185). The frontend
+  tools keep the names `listRuns` and `openRun`, so saved chats keep working; storage API
+  names don't change.
+- The experiment list keeps its own scope, in the URL as `?list=<nodeId>` (and `&direct=1`
+  for a node's own experiments only), instead of following the place you're in: opening an
+  experiment no longer narrows a list of all experiments to its Process. The scope shows as a
+  chip with an ✕ back to all, and **Include sub-levels** is on by default. Moving to a node
+  in the Knowledge tree or the breadcrumb points the list there (#186).
+- Read-only badges say why: view access to the node, someone else's experiment (with its
+  author's name), or an archived one, and the experiment shows the step you can take:
+  **Restore** for its author, **Rerun as your own** for others who can see it, which starts
+  a new experiment of yours. Access refusals from the storage API say what you can do there
+  ("You can only view here; this needs editor access") (#187).
+
+### Fixed
+
+- A rerun reads its inputs at the content the earlier run recorded again, as it did before
+  #175 made `inputs/` editable: it no longer silently picks up an edited copy. If a recorded
+  input is gone, or an old record doesn't say what it held, the rerun fails and says which;
+  passing `inputs` reads those files at their current versions instead (#187).
 
 ### Upgrading
 

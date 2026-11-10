@@ -1013,6 +1013,57 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.deepEqual([old.state, old.results], ["done", { tilt_urad: 1.5 }]);
     });
 
+    test("a rerun reads the inputs at the content its earlier run recorded, not an edited copy (#187)", async () => {
+      const claude = (user: string) => as(user, "agent");
+      // Bob, an editor on the leveling, starts a run that reads the recipe (content A).
+      const run = await claude(bob).startRun(leveling, { title: "Recipe check" }, [
+        { path: "notes/recipe.md", node: leveling, as: "recipe.md" },
+      ]);
+      type Recorded = { inputs: { path: string; version: string; sha256: string }[] };
+      const recorded = (run.provenance as Recorded).inputs[0];
+      const files = await as(bob).experimentFiles(run.id);
+      const a = await read(files, "inputs/recipe.md");
+      // Since #175 the copy is an ordinary file: its author edits it to B.
+      await files.write("inputs/recipe.md", text("dose 99 (edited)"));
+      assert.notEqual((await files.stat("inputs/recipe.md"))!.sha256, recorded.sha256);
+
+      // By default a rerun reads A, and records the same content.
+      await as(bob).updateExperiment(run.id, { status: "shared" });
+      const rerun = await claude(bob).rerun(run.id);
+      const rerunFiles = await as(bob).experimentFiles(rerun.id);
+      assert.equal(await read(rerunFiles, "inputs/recipe.md"), a);
+      assert.equal((rerun.provenance as Recorded).inputs[0].sha256, recorded.sha256);
+
+      // A reader who can't edit the old run reruns it as their own, also with A.
+      await assert.rejects(as(carol).updateExperiment(run.id, { title: "x" }), ForbiddenError);
+      const theirs = await as(carol).rerun(run.id);
+      assert.equal(theirs.authorId, carol);
+      assert.equal(await read(await as(carol).experimentFiles(theirs.id), "inputs/recipe.md"), a);
+
+      // Asking for current inputs reads B, and records B's version and hash.
+      const current = await claude(bob).rerun(run.id, {
+        inputs: [{ path: "inputs/recipe.md", experiment: run.id, as: "recipe.md" }],
+      });
+      const [b] = (await files.history("inputs/recipe.md"))!;
+      assert.equal(await read(await as(bob).experimentFiles(current.id), "inputs/recipe.md"), "dose 99 (edited)");
+      const currentRecord = (current.provenance as Recorded).inputs[0];
+      assert.deepEqual([currentRecord.sha256, currentRecord.version], [b.sha256, b.id]);
+
+      // Once the copy is gone, the rerun says so instead of reading something else.
+      await files.remove("inputs/recipe.md");
+      await assert.rejects(claude(bob).rerun(run.id), (err: Error) =>
+        err instanceof ExperimentError && /inputs\/recipe\.md of the earlier experiment is gone/.test(err.message),
+      );
+
+      // A record that doesn't say what an input held can't be rerun as it was.
+      await storage.sql`
+        UPDATE experiments SET provenance = jsonb_set(provenance, '{inputs,0}', (provenance #> '{inputs,0}') - 'sha256')
+        WHERE id = ${rerun.id}`;
+      await assert.rejects(claude(bob).rerun(rerun.id), (err: Error) =>
+        err instanceof ExperimentError && /doesn't say what inputs\/recipe\.md held/.test(err.message),
+      );
+    });
+
     test("files uploaded later can be added to an existing run as inputs", async () => {
       const run = await as(alice).createExperiment(null, { title: "Late data" });
       const files = await as(alice).experimentFiles(run.id);

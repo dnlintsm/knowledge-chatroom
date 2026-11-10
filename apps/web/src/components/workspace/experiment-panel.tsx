@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
+import { Archive, FileDiff, FlaskConical, Lock, Plus, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useListScope } from "./list-scope";
+import { readOnlyReason } from "./read-only";
+import { hasRole } from "./roles";
 import { experimentsIn, shownScope } from "./runs";
 import {
   listPromotable,
@@ -81,11 +83,16 @@ export function ExperimentPanel() {
   const ws = useWorkspace();
   const exp = ws.experiment;
   const [error, setError] = useState<string | null>(null);
+  const [rerunning, setRerunning] = useState(false);
   if (!exp) {
     return <p className="p-8 text-sm text-[var(--muted-foreground)]">Loading the experiment…</p>;
   }
   const nodeName = placeName(ws.nodes, exp.nodeId);
   const canChange = exp.access === "writer";
+  // Anyone who can see it may rerun it as their own, where they can see the node (#187).
+  const nodeRole = exp.nodeId === null ? ws.rootRole : (ws.nodes.find((n) => n.id === exp.nodeId)?.role ?? null);
+  const canRerun = hasRole(nodeRole, "viewer");
+  const reason = readOnlyReason({ experiment: exp, placeRole: ws.placeRole, placeName: nodeName, canRerun });
 
   const save = async (change: ExperimentChange) => {
     try {
@@ -93,6 +100,17 @@ export function ExperimentPanel() {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const rerun = async () => {
+    setRerunning(true);
+    try {
+      await ws.rerunExperiment(exp.id);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRerunning(false);
     }
   };
   const remove = async () => {
@@ -116,9 +134,9 @@ export function ExperimentPanel() {
           </span>
           <StatusBadge status={exp.status} />
           <StateBadge state={exp.state} />
-          {!canChange && (
-            <span className="flex items-center gap-1">
-              <Lock className="size-3" /> Read only
+          {reason && (
+            <span className="flex items-center gap-1" title={reason.detail}>
+              <Lock className="size-3" /> {reason.label}
             </span>
           )}
         </div>
@@ -130,8 +148,24 @@ export function ExperimentPanel() {
           onSave={(title) => save({ title })}
           className="text-xl font-semibold"
         />
-        {exp.mine && (
+        {reason && (
+          <p data-testid="read-only-reason" className="text-xs text-[var(--muted-foreground)]">
+            {reason.detail}
+          </p>
+        )}
+        {(exp.mine || canRerun) && (
           <div className="flex flex-wrap items-center gap-2">
+            {canRerun && (
+              <ActionButton
+                onClick={() => void rerun()}
+                disabled={rerunning}
+                title="A new experiment of yours with the same parameters and the inputs as this one recorded them"
+              >
+                <Repeat className="size-3.5" /> {exp.mine ? "Rerun" : "Rerun as your own"}
+              </ActionButton>
+            )}
+            {exp.mine && (
+              <>
             {exp.status === "draft" && (
               <ActionButton onClick={() => save({ status: "shared" })} title={`Everyone who can view ${nodeName} will see it`}>
                 <Share2 className="size-3.5" /> Share
@@ -157,6 +191,8 @@ export function ExperimentPanel() {
             <ActionButton onClick={remove} destructive>
               <Trash2 className="size-3.5" /> Delete
             </ActionButton>
+              </>
+            )}
             {canChange && (
               <label className="ml-auto flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
                 State
@@ -553,20 +589,23 @@ function ActionButton({
   onClick,
   title,
   destructive,
+  disabled,
   children,
 }: {
   onClick: () => void;
   title?: string;
   destructive?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)]",
+        "flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)] disabled:cursor-default disabled:opacity-50",
         destructive && "hover:text-[var(--destructive)]",
       )}
     >

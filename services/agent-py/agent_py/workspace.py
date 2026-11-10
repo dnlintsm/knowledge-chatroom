@@ -635,9 +635,11 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                 "skill": {"type": "string", "description": "The skill this experiment follows, if any, e.g. analysis."},
                 "rerunOf": {
                     "type": "string",
-                    "description": "Run this earlier run (experiment id) again as a new run: its place (node), "
-                    "params, hypothesis and the exact input versions it read are reused unless given here. The old "
-                    "run is left as it is.",
+                    "description": "Run this earlier experiment (its id) again as a new one: its place (node), "
+                    "params and hypothesis are reused unless given here, and its inputs are read at the content its "
+                    "record names, even if they were edited since. Pass inputs instead to use other files or their "
+                    "current versions. If a recorded input isn't there any more, the rerun fails and says which. The "
+                    "old one is left as it is.",
                 },
             }
         ),

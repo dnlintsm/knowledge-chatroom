@@ -82,7 +82,8 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await showFiles(bob);
   await bob.getByRole("treeitem", { name: /untitled-1\.md/ }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("Alignment marks moved");
-  await expect(bob.getByText("Read only")).toBeVisible();
+  // The badge says why (#187), without naming who could grant more.
+  await expect(bob.getByTestId("read-only-badge")).toHaveText("Read only · view access");
   await expect(bob.getByRole("button", { name: "New file", exact: true })).toHaveCount(0);
   await expect(bob.getByRole("button", { name: "Upload files" })).toHaveCount(0);
   await bob.mouse.move(600, 500);
@@ -134,13 +135,28 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await showFiles(bob);
   await bob.getByTestId("actions").getByRole("button", { name: "Open Rules" }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("General rules: r1");
-  await expect(bob.getByText("Read only")).toBeVisible();
+  await expect(bob.getByTestId("read-only-badge")).toHaveText("Read only · only Alice Admin can edit");
   const bobRules = bob.getByRole("treeitem", { name: /general_rules\.md/ });
   await expect(bobRules.getByRole("button", { name: /Delete|Rename/ })).toHaveCount(0);
   const rulesUrl = `/api/files/models/general_rules.md?experiment=${run.id}`;
   expect((await bob.request.put(rulesUrl, { headers: { "Content-Type": "text/markdown" }, data: "# Bob's rules" })).status()).toBe(403);
   expect((await bob.request.delete(rulesUrl)).status()).toBe(403);
   expect((await alice.request.get(rulesUrl)).ok()).toBe(true);
+
+  // The experiment says why Bob can't change it and offers the step he can
+  // take (#187): rerun it as his own. Restore is Alice's alone.
+  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "r1" }).click();
+  const bobPanel = bob.getByTestId("experiment-panel");
+  await expect(bobPanel.getByTestId("read-only-reason")).toHaveText(
+    "Only Alice Admin can edit this experiment. Rerun it to work on your own copy.",
+  );
+  await expect(bobPanel.getByRole("button", { name: "Restore" })).toHaveCount(0);
+  await bobPanel.getByRole("button", { name: "Rerun as your own" }).click();
+  await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("r1 (rerun)");
+  // The new experiment opens on its report, like any other; its panel says it's his.
+  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "r1 (rerun)" }).click();
+  await expect(bob.getByTestId("experiment-panel")).toContainText("Only you can see this draft.");
+  await expect(bob.getByTestId("experiment-panel").getByTestId("read-only-reason")).toHaveCount(0);
 
   // Admin panel (#67): only workspace owners get it. Alice puts Bob in a
   // group, sees the change logged, and makes him a workspace editor.

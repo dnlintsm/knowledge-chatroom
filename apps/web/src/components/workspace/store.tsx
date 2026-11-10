@@ -28,6 +28,7 @@ import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspa
 import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace } from "./local-persistence";
 import {
   createServerExperiment,
+  rerunServerExperiment,
   createServerNode,
   decideProposal as decideServerProposal,
   addServerRunInputs,
@@ -190,6 +191,8 @@ interface WorkspaceValue {
    * the root (null, empty) and moves into it. These throw with a message too.
    */
   createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
+  /** Runs experiment `id` again as a new one of yours and moves into it; throws with a message. */
+  rerunExperiment: (id: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   deleteExperiment: (id: string) => Promise<void>;
   /**
@@ -753,6 +756,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment, settleSaves],
   );
+  const rerunExperiment = useCallback(
+    async (id: string) => {
+      // The rerun reads what the server has, so recent edits go first.
+      if (placeRef.current === experimentPlace(id)) await settleSaves(experimentPlace(id));
+      const created = await rerunServerExperiment(id);
+      await refreshExperiments();
+      await enterExperiment(created.id);
+      return created;
+    },
+    [refreshExperiments, enterExperiment, settleSaves],
+  );
   const updateExperiment = useCallback(
     async (id: string, change: ExperimentChange) => {
       // Archived is read only, so edits still on their way would be refused.
@@ -852,6 +866,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       renameNode,
       deleteNode,
       createExperiment,
+      rerunExperiment,
       updateExperiment,
       deleteExperiment,
       addRunInputs,
@@ -862,7 +877,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [
     state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
-    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
     updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);
 

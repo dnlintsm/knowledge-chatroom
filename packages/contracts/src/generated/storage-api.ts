@@ -197,7 +197,7 @@ export interface paths {
         put?: never;
         /**
          * Start a run, or run an earlier one again
-         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` linked read-only under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis, params and the exact input versions it read, unless given here. Finish it with /finish.
+         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` copied under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis and params unless given here, and its inputs read from its inputs/ at the content its record names, even if they were edited since (400 when one is gone or the record doesn't say). `inputs` instead reads those files at their current versions. Finish it with /finish.
          */
         post: operations["startRun"];
         delete?: never;
