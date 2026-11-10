@@ -581,6 +581,43 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/skills/import", { headers: asZip, body: bytes, expect: 409 });
     await call("POST", "/skills/import?replace=1", { headers: asZip, body: bytes, expect: 201 });
     await call("POST", "/skills/import", { headers: asZip, body: new Uint8Array([1, 2, 3]), expect: 400 });
+
+    // What an outside agent's run gets, with the run's storage token: modes as in that chat, files in base64.
+    const thread = `conformance-run-${stamp}`;
+    await call("GET", "/skills/run", { expect: 401 });
+    await call("PUT", `/skills/${skill}`, { headers: alice, json: { mode: "manual", scope: "chat", thread }, expect: 200 });
+    const run = await call<{ skills: Schema["RunSkill"][] }>(
+      "GET", `/skills/run?thread=${thread}`, { headers: storageToken("conformance|alice"), expect: 200 },
+    );
+    const mine = run.data.skills.find((s) => s.name === skill)!;
+    assert.equal(mine.mode, "manual");
+    assert.equal(mine.source, "workspace");
+    const md = mine.files.find((f) => f.path === "SKILL.md")!;
+    assert.match(Buffer.from(md.content, "base64").toString("utf8"), /name: conformance-/);
+    await call("PUT", `/skills/${skill}`, { headers: alice, json: { mode: "off", scope: "chat", thread }, expect: 200 });
+    const off = await call<{ skills: Schema["RunSkill"][] }>("GET", `/skills/run?thread=${thread}`, { headers: alice, expect: 200 });
+    assert.ok(!off.data.skills.some((s) => s.name === skill));
+    const used = await call<{ source: string }>("POST", "/skills/used", {
+      headers: storageToken("conformance|alice"),
+      json: { thread, run: "r1", skill, trigger: "slash" },
+      expect: 200,
+    });
+    assert.equal(used.data.source, "workspace");
+    await call("POST", "/skills/used", { headers: alice, json: { thread, skill, trigger: "sometimes" }, expect: 400 });
+    await call("POST", "/skills/used", { headers: alice, json: { thread, skill: "no-such-skill", trigger: "model" }, expect: 404 });
+    // The token reads skills and notes uses, nothing else on those paths (PUT or DELETE
+    // /skills/run is /skills/{name} for a skill named "run"; fetched directly, as the spec
+    // matches these paths to the literal routes).
+    for (const method of ["PUT", "DELETE"]) {
+      for (const path of ["/skills/run", "/skills/used"]) {
+        const res = await fetch(`${BASE}${path}`, {
+          method,
+          headers: { ...storageToken("conformance|alice"), "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "off" }),
+        });
+        assert.equal(res.status, 401, `${method} ${path} with a storage token`);
+      }
+    }
   });
 
   step("skill hub", async () => {

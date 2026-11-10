@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { identify } from "../storage/identity";
 import type { Storage, StorageState } from "../storage";
 import { HubConflictError, HubError, HubNotFoundError, MAX_ZIP_BYTES, type SkillHub } from "./hub";
-import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillService } from "./service";
+import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillService, type SkillTrigger } from "./service";
 
 /**
  * Skills API, mounted on the agent server next to the storage API:
@@ -27,6 +27,16 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *                        skills/ (editors; 404 when the workspace has no
  *                        skill of that name)
  *   GET /skills/<name>/export   the skill as a .zip (<name>/SKILL.md, ...)
+ *   GET /skills/run      {skills}: what a run gets (?thread=<id> for that
+ *                        chat's modes): each skill that isn't off, with name,
+ *                        mode (auto | manual), source, userInvocable,
+ *                        needsExecution and its files ({path, content} in
+ *                        base64). For agents outside this server
+ *                        (services/agent-py), which also call it with the
+ *                        run's X-Knowledge-Storage token
+ *   POST /skills/used    {thread, run?, skill, trigger: slash | model} notes
+ *                        that a run used one of its skills, for the usage
+ *                        history; storage tokens too
  *   POST /skills/import  a .zip as the body (?filename=, ?replace=1) → adds
  *                        it to the workspace as skills/<name>/ (editors; 409
  *                        when that folder exists, unless replace)
@@ -95,6 +105,36 @@ export function createSkillsHandler(
 
   async function routeSkills(req: IncomingMessage, res: ServerResponse, url: URL, userId: string | null, parts: string[]) {
     const [name, action] = parts;
+    if (req.method === "GET" && name === "run" && !action) {
+      const run = await skills.forRun(userId, url.searchParams.get("thread") || undefined);
+      return send(res, 200, {
+        skills: run.map(({ skill, mode }) => ({
+          name: skill.name,
+          mode,
+          source: skill.source,
+          userInvocable: skill.userInvocable,
+          needsExecution: skill.needsExecution,
+          files: skill.files.map((f) => ({ path: f.path, content: Buffer.from(f.bytes).toString("base64") })),
+        })),
+      });
+    }
+    if (req.method === "POST" && name === "used" && !action) {
+      const input = await json(req);
+      const { thread, run, skill, trigger } = input ?? {};
+      if (
+        typeof thread !== "string" || !thread || thread.length > 200 ||
+        (run !== undefined && (typeof run !== "string" || run.length > 200)) ||
+        typeof skill !== "string" || !skill ||
+        (trigger !== "slash" && trigger !== "model")
+      ) {
+        return send(res, 400, { error: "Say {thread, run?, skill, trigger: slash | model}" });
+      }
+      const found = await skills.find(userId, skill);
+      if (!found) return send(res, 404, { error: `No skill named ${skill}` });
+      const use = { skill: found.name, source: found.source, trigger: trigger as SkillTrigger };
+      await skills.record(userId, { threadId: thread, runId: run ?? "", ...use });
+      return send(res, 200, use);
+    }
     if (req.method === "GET" && !name) {
       return send(res, 200, await skills.list(userId, url.searchParams.get("thread") || undefined));
     }
@@ -188,7 +228,13 @@ export function createSkillsHandler(
     try {
       let userId: string | null = null;
       if (s) {
-        const principal = await identify(req, s);
+        // Only what a run needs takes the run's storage token (outside agents):
+        // reading its skills and noting a use. Never another method on those paths
+        // (PUT or DELETE /skills/run would change or delete a skill named "run").
+        const path = url.pathname.replace(/\/$/, "");
+        const forRun =
+          (req.method === "GET" && path === "/skills/run") || (req.method === "POST" && path === "/skills/used");
+        const principal = await identify(req, s, "user", { storageTokens: forRun });
         if (!principal) return send(res, 401, { error: "Sign in first" });
         userId = principal.userId;
       }

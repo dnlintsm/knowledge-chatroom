@@ -21,7 +21,10 @@ With `AGENT_URL` set:
   same `.env`), it turns its own chat routes off (`POST /` and `POST /suggest` answer 404) and
   serves storage and skills only.
 - **Skills**: the Skills view and the `/` menu still list this repo's skills, but they
-  don't reach the backend. A message such as `/tldr RF power` arrives as plain text.
+  reach the backend only if it asks for them: `GET ${LOCAL_AGENT_URL}/skills/run?thread=<id>`
+  with the run's `X-Knowledge-Storage` token returns the skills that run gets, with their
+  files, and `POST /skills/used` adds a use to the history, as `services/agent-py` does
+  (`agent_py/skills.py`). Otherwise a message such as `/tldr RF power` arrives as plain text.
 - **The browser**: works the same. It still talks only to the Next.js app (`/api/copilotkit`).
 
 The variable names come from the code (`apps/web/src/lib/agent-target.ts`). The backend is called only
@@ -130,7 +133,9 @@ v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.
 ### `X-Knowledge-Storage`
 
 Sent with `X-Knowledge-User` when login is on, for the storage API at `LOCAL_AGENT_URL`
-(`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`). Pass it on unchanged. It is
+(`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`) and the run's skills
+(`/skills/run`, `/skills/used`; the other `/skills` and `/hub` routes refuse it). Pass it on
+unchanged. It is
 the same token format with `aud` `storage` and `via` `remote`, valid for
 `STORAGE_TOKEN_SECONDS` (default an hour) so a long run keeps access. Requests with it act as
 Claude for the signed-in user:
@@ -212,8 +217,11 @@ to it.
 `agent_py/adapter.py` and `agent_py/app.py` do what this section describes.
 
 `ClaudeAgentAdapter` keeps one Claude session per `threadId`. It builds that session's
-options once, with `build_options(input_data)`, on the thread's first run (and again only
-if the session is restarted). So that first run, which already carries
+options with `build_options(input_data)` on the thread's first run, and again, resuming the
+same session from its working folder, on each run that carries tools. The chat always sends
+its browser tools, so in practice each run gets fresh options: keep the working folder the
+same for the chat (agent-py uses one per user), or the session can't be resumed. A client
+that sends no tools keeps the first run's options. So the first run, which already carries
 `knowledge_chatroom`, is where to set the session up for the user and place:
 
 ```python

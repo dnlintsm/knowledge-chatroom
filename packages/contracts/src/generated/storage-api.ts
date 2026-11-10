@@ -743,6 +743,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The skills a run gets, with their files (for agents outside this server)
+         * @description Each skill that isn't off for you (in `thread`, that chat's modes apply), with its files, so an
+         *     agent outside this server (services/agent-py) can give its run the same skills as this one's.
+         *     Unlike the other /skills routes it takes the run's storage token.
+         */
+        get: operations["runSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/used": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Note that a run used one of its skills (usage history) */
+        post: operations["recordSkillUse"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills/{name}": {
         parameters: {
             query?: never;
@@ -1818,6 +1857,26 @@ export interface components {
             userMode: components["schemas"]["SkillModeOrNull"];
             chatMode: components["schemas"]["SkillModeOrNull"];
             hub: components["schemas"]["HubPin"] | null;
+        };
+        RunSkill: {
+            name: string;
+            /**
+             * @description auto: Claude may use it and /name runs it; manual: only /name.
+             * @enum {string}
+             */
+            mode: "auto" | "manual";
+            source: components["schemas"]["SkillSource"];
+            /** @description False: no /name for it. */
+            userInvocable: boolean;
+            /** @description It ships scripts, which run only with SKILL_SCRIPTS=on on this server. */
+            needsExecution: boolean;
+            files: components["schemas"]["RunSkillFile"][];
+        };
+        RunSkillFile: {
+            /** @description Inside the skill's folder, e.g. SKILL.md. */
+            path: string;
+            /** @description The file's bytes in base64. */
+            content: string;
         };
         SkillList: {
             skills: components["schemas"]["SkillInfo"][];
@@ -4034,6 +4093,77 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    runSkills: {
+        parameters: {
+            query?: {
+                /** @description The chat; its modes apply. */
+                thread?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run's skills. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        skills: components["schemas"]["RunSkill"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    recordSkillUse: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    thread: string;
+                    run?: string;
+                    skill: string;
+                    /**
+                     * @description `/name` in the message, or Claude chose it.
+                     * @enum {string}
+                     */
+                    trigger: "slash" | "model";
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded (best effort); the use as the chat's skill_used event carries it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        skill: string;
+                        source: components["schemas"]["SkillSource"];
+                        /** @enum {string} */
+                        trigger: "slash" | "model";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

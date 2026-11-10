@@ -512,6 +512,17 @@ class SkillInfo(BaseModel):
     hub: HubPin | None
 
 
+class RunSkillFile(BaseModel):
+    path: str
+    """
+    Inside the skill's folder, e.g. SKILL.md.
+    """
+    content: str
+    """
+    The file's bytes in base64.
+    """
+
+
 class SkillList(BaseModel):
     skills: list[SkillInfo]
     canSetDefaults: bool
@@ -1240,6 +1251,22 @@ class ImportSkillResponse(BaseModel):
     files: int
 
 
+class RecordSkillUseRequest(BaseModel):
+    thread: Annotated[str, Field(max_length=200)]
+    run: Annotated[str | None, Field(max_length=200)] = None
+    skill: str
+    trigger: Literal["slash", "model"]
+    """
+    `/name` in the message, or Claude chose it.
+    """
+
+
+class RecordSkillUseResponse(BaseModel):
+    skill: str
+    source: SkillSource
+    trigger: Literal["slash", "model"]
+
+
 class SetSkillModeRequest(BaseModel):
     mode: SkillModeOrNull
     scope: Literal["user", "workspace", "chat"] | None = "user"
@@ -1529,3 +1556,25 @@ class CallMemoryToolRequest(BaseModel):
 class CallMemoryToolResponse(BaseModel):
     text: str
     isError: bool
+
+
+class RunSkill(BaseModel):
+    name: str
+    mode: Literal["auto", "manual"]
+    """
+    auto: Claude may use it and /name runs it; manual: only /name.
+    """
+    source: SkillSource
+    userInvocable: bool
+    """
+    False: no /name for it.
+    """
+    needsExecution: bool
+    """
+    It ships scripts, which run only with SKILL_SCRIPTS=on on this server.
+    """
+    files: list[RunSkillFile]
+
+
+class RunSkillsResponse(BaseModel):
+    skills: list[RunSkill]

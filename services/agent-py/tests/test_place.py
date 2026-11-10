@@ -72,7 +72,7 @@ def continuation(context: str, *results: str) -> RunAgentInput:
 
 def test_a_tool_continuation_carries_the_changed_note():
     adapter = ChatroomAdapter(name="t")
-    prepared = adapter.prepare(continuation('{"title": "Run 2"}', '{"ok": true}'))
+    prepared, _ = adapter.prepare(continuation('{"title": "Run 2"}', '{"ok": true}'))
     assert prepared.messages[-1].content.startswith('{"ok": true}\n\n<workspace>')
     assert "Run 2" in prepared.messages[-1].content
     assert prepared.messages[0].content == "open run 2"
@@ -80,5 +80,5 @@ def test_a_tool_continuation_carries_the_changed_note():
 
 def test_earlier_tool_results_are_left_as_the_session_saw_them():
     adapter = ChatroomAdapter(name="t")
-    prepared = adapter.prepare(continuation('{"title": "Run 2"}', "first", "second"))
+    prepared, _ = adapter.prepare(continuation('{"title": "Run 2"}', "first", "second"))
     assert [m.content for m in prepared.messages[-2:]] == ["first", "second"]
