@@ -110,7 +110,7 @@ test("workspace walkthrough", async ({ page }) => {
 
   // The app name at the top-left goes home to the Runs view, which needs server storage.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
-  await expect(page.getByText("Runs need server storage.")).toBeVisible();
+  await expect(page.getByText("Experiments need server storage.")).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
 

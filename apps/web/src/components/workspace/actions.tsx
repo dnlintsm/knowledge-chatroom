@@ -70,8 +70,8 @@ const newChat: ActionDef = {
   requiredRole: "viewer",
   // It would end the conversation Claude is running in.
   agentInvocable: false,
-  description: "Start a new, empty chat about the current run.",
-  view: () => ({ label: "New Chat", icon: MessageSquarePlus, enabled: true, hint: "Start a new chat about this run" }),
+  description: "Start a new, empty chat about the current experiment.",
+  view: () => ({ label: "New Chat", icon: MessageSquarePlus, enabled: true, hint: "Start a new chat about this experiment" }),
   run: ({ workbench }) => workbench.chat.newThread(),
 };
 
@@ -152,7 +152,7 @@ export function ActionsProvider({
       const c = latest.current;
       const def = actions.find((a) => a.id === id);
       if (!def) return { ok: false, error: `No action "${id}"` };
-      if (!c) return { ok: false, error: "Actions need a run: open one first" };
+      if (!c) return { ok: false, error: "Actions need an experiment: open one first" };
       if (by === "agent" && !def.agentInvocable) return { ok: false, error: `Claude can't run "${id}"` };
       const required = roleFor(def, c);
       if (!hasRole(c.role, required)) {

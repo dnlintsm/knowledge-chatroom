@@ -44,7 +44,8 @@ import { persistCollapsedFolders, readCollapsedFolders } from "./local-persisten
 import { experimentPlace, type PlaceId } from "./server-files";
 import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
-import { runsUnder } from "./runs";
+import { useListScope } from "./list-scope";
+import { ALL_EXPERIMENTS, experimentsIn, shownScope, type ListScope } from "./runs";
 import { SearchPanel } from "./search-panel";
 import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
@@ -66,7 +67,7 @@ export type { SidebarView };
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
   { id: "search", label: "Search", icon: Search },
-  { id: "runs", label: "Runs", icon: FlaskConical },
+  { id: "runs", label: "Experiments", icon: FlaskConical },
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "memory", label: "Memory", icon: Brain },
@@ -916,23 +917,27 @@ function FileTreeView({
 }
 
 /**
- * Runs view: every run here and below (all of them at the workspace root),
- * newest first; picking one moves into it and opens its report.
+ * Experiments view: every experiment here and below (all of them at the
+ * workspace root), newest first; picking one moves into it and opens its report.
  */
 function RunList() {
   const ws = useWorkspace();
   const { editor, notify } = useWorkbench();
   const [adding, setAdding] = useState(false);
+  const [listScope, setListScope] = useListScope();
   if (ws.storageMode !== "server") {
     return (
       <p className="px-3 py-2 text-[var(--muted-foreground)]">
-        Runs need server storage. Set DATABASE_URL for the agent (see the README) to keep runs
-        with their reports, parameters and results.
+        Experiments need server storage. Set DATABASE_URL for the agent (see the README) to keep
+        experiments with their reports, parameters and results.
       </p>
     );
   }
-  const runs = runsUnder(ws.experiments, ws.nodes, ws.node);
-  // You can start a run wherever you can see the files (as for experiments).
+  // The list shows its own scope (#186), not where the user is: opening an
+  // experiment from it leaves it as it was. New ones still start where you are.
+  const scope = shownScope(listScope, ws.nodes);
+  const runs = experimentsIn(ws.experiments, ws.nodes, scope);
+  // You can start one wherever you can see the files.
   const role = ws.node === null ? ws.rootRole : (ws.nodes.find((n) => n.id === ws.node)?.role ?? null);
   const here = placeName(ws.nodes, ws.node);
   const start = async (title: string) => {
@@ -946,33 +951,41 @@ function RunList() {
   return (
     <div>
       <div className="flex items-center gap-1 px-3 pb-1 text-xs text-[var(--muted-foreground)]">
-        <span className="min-w-0 flex-1 truncate">
-          {ws.node === null ? "All runs" : `Runs in ${here}`}
-        </span>
+        <ScopeChip scope={scope} onChange={setListScope} />
         {ws.experiment?.access === "writer" && (
           <IconButton label={`Add files to ${ws.experiment.title}`} onClick={() => editor.open(EXPERIMENT_TAB)}>
             <Upload className="size-4" />
           </IconButton>
         )}
         {runs.length > 0 && (
-          <IconButton label="Compare runs" onClick={() => editor.open(RUNS_TAB)}>
+          <IconButton label="Compare experiments" onClick={() => editor.open(RUNS_TAB)}>
             <Table2 className="size-4" />
           </IconButton>
         )}
         {role && (
-          <IconButton label={`New run in ${here}`} onClick={() => setAdding(true)}>
+          <IconButton label={`New experiment in ${here}`} onClick={() => setAdding(true)}>
             <Plus className="size-4" />
           </IconButton>
         )}
       </div>
+      {scope.node !== null && (
+        <label className="flex items-center gap-1.5 px-3 pb-1 text-xs text-[var(--muted-foreground)]">
+          <input
+            type="checkbox"
+            checked={scope.descendants}
+            onChange={(e) => setListScope({ ...scope, descendants: e.target.checked })}
+          />
+          Include sub-levels
+        </label>
+      )}
       {adding && <RunTitleInput onSubmit={(t) => void start(t)} onCancel={() => setAdding(false)} />}
       {runs.length ? (
-        <ul aria-label="Runs" data-testid="run-list">
+        <ul aria-label="Experiments" data-testid="run-list">
           {runs.map((e) => (
             <RunRow
               key={e.id}
               title={e.title}
-              detail={[ws.node === e.nodeId ? null : placeName(ws.nodes, e.nodeId), e.mine ? null : e.authorName]
+              detail={[scope.node === e.nodeId ? null : placeName(ws.nodes, e.nodeId), e.mine ? null : e.authorName]
                 .filter(Boolean)
                 .join(" · ")}
               badges={
@@ -989,12 +1002,50 @@ function RunList() {
       ) : (
         !adding && (
           <p className="px-3 py-2 text-[var(--muted-foreground)]">
-            No runs {ws.node === null ? "yet" : "here yet"}. A run is an experiment with a report.md:
-            start one with +, or ask Claude to analyze your uploads.
+            No experiments {scope.node === null ? "yet" : "here yet"}. Start one with +, or ask Claude to
+            analyze your uploads.
           </p>
         )
       )}
     </div>
+  );
+}
+
+/**
+ * What the experiment list shows: every experiment, or a node's, as a chip
+ * whose ✕ goes back to all of them.
+ */
+function ScopeChip({ scope, onChange }: { scope: ListScope; onChange: (scope: ListScope, keepAll?: boolean) => void }) {
+  const ws = useWorkspace();
+  if (scope.node === null) {
+    return (
+      <span data-testid="list-scope" className="min-w-0 flex-1 truncate">
+        All experiments
+      </span>
+    );
+  }
+  const name = placeName(ws.nodes, scope.node);
+  return (
+    <span className="flex min-w-0 flex-1">
+      <span
+        data-testid="list-scope"
+        className="flex min-w-0 items-center gap-1 rounded-full bg-[var(--secondary)] py-0.5 pr-0.5 pl-2 text-[var(--foreground)]"
+      >
+        <span className="truncate">
+          In {name}
+          {scope.descendants ? " · including sub-levels" : ""}
+        </span>
+        <button
+          type="button"
+          aria-label="Show all experiments"
+          title="Show all experiments"
+          onClick={() => onChange(ALL_EXPERIMENTS, true)}
+          className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-[var(--background)] cursor-pointer"
+        >
+          <X className="size-3" />
+        </button>
+      </span>
+    </span>
   );
 }
 
@@ -1004,8 +1055,8 @@ function RunTitleInput({ onSubmit, onCancel }: { onSubmit: (title: string) => vo
     <div className="flex h-7 items-center px-3">
       <input
         autoFocus
-        aria-label="New run title"
-        placeholder="New run title"
+        aria-label="New experiment title"
+        placeholder="New experiment title"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {

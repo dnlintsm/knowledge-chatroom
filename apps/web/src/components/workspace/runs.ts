@@ -44,3 +44,52 @@ export function searchWithExperiment(search: string, id: string | null): string 
   const query = params.toString();
   return query ? `?${query}` : "";
 }
+
+/**
+ * Which experiments a list shows (#186): those on `node` (null: every one you
+ * can see) and, with `descendants`, on the nodes under it. It lives in the URL
+ * as `?list=<nodeId>` (and `&direct=1` without the sub-levels), apart from
+ * where the user is, so opening an experiment doesn't change it. Without a
+ * `list`, the list shows every experiment, so links to the workspace root
+ * stay as they were.
+ */
+export interface ListScope {
+  node: string | null;
+  descendants: boolean;
+}
+
+export const ALL_EXPERIMENTS: ListScope = { node: null, descendants: true };
+
+/** The list scope in a URL query string, or null when it has none. */
+export function listScopeFromSearch(search: string): ListScope | null {
+  const params = new URLSearchParams(search);
+  const list = params.get("list")?.trim();
+  if (!list) return null;
+  return list === "all" ? ALL_EXPERIMENTS : { node: list, descendants: params.get("direct") !== "1" };
+}
+
+/** The query string with the list scope set, keeping other parameters. */
+export function searchWithListScope(search: string, scope: ListScope, keepAll = false): string {
+  const params = new URLSearchParams(search);
+  params.delete("list");
+  params.delete("direct");
+  // All is no parameter, unless the user chose it on a node: then it says so,
+  // so a reload there doesn't narrow the list to the node again.
+  if (scope.node === null && keepAll) params.set("list", "all");
+  if (scope.node !== null) params.set("list", scope.node);
+  if (scope.node !== null && !scope.descendants) params.set("direct", "1");
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/** The experiments a scope shows; a node that isn't there (any more) shows them all. */
+export function experimentsIn(experiments: Experiment[], nodes: KnowledgeNode[], scope: ListScope): Experiment[] {
+  if (scope.node === null || !nodes.some((n) => n.id === scope.node)) return experiments;
+  if (!scope.descendants) return experiments.filter((e) => e.nodeId === scope.node);
+  return runsUnder(experiments, nodes, scope.node);
+}
+
+/** The scope as shown: a node that isn't there (any more) means all. */
+export function shownScope(scope: ListScope, nodes: KnowledgeNode[]): ListScope {
+  return scope.node !== null && !nodes.some((n) => n.id === scope.node) ? ALL_EXPERIMENTS : scope;
+}

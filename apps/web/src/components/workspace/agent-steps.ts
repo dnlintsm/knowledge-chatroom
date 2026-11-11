@@ -146,11 +146,11 @@ const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
   memory_delete: () => ["Forgetting a note", "Forgot a note"],
   chats_search: (a) => [`Looking through past chats${quoted(a.query)}`, `Looked through past chats${quoted(a.query)}`],
   chats_read: () => ["Reading a past chat", "Read a past chat"],
-  list_experiments: () => ["Looking at runs", "Looked at runs"],
-  create_experiment: () => ["Setting up a run", "Set up a run"],
-  propose_experiment: () => ["Proposing a run", "Proposed a run"],
-  update_experiment: () => ["Updating the run", "Updated the run"],
-  set_experiment_results: () => ["Recording the run's results", "Recorded the run's results"],
+  list_experiments: () => ["Looking at experiments", "Looked at experiments"],
+  create_experiment: () => ["Setting up an experiment", "Set up an experiment"],
+  propose_experiment: () => ["Proposing an experiment", "Proposed an experiment"],
+  update_experiment: () => ["Updating the experiment", "Updated the experiment"],
+  set_experiment_results: () => ["Recording the experiment's results", "Recorded the experiment's results"],
   // Paper search (services/papers-mcp).
   search_papers: (a) => [`Searching papers${quoted(a.query)}`, `Searched papers${quoted(a.query)}`],
   related_papers: () => ["Finding related papers", "Found related papers"],
@@ -176,8 +176,10 @@ const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
   openTaskBoard: () => ["Opening the task board", "Opened the task board"],
   showPane: () => ["Showing a pane", "Showed a pane"],
   hidePane: () => ["Hiding a pane", "Hid a pane"],
-  listRuns: () => ["Looking at runs", "Looked at runs"],
-  openRun: () => ["Opening a run", "Opened a run"],
+  // listRuns and openRun keep their names (saved chats call them by name);
+  // only what the user reads changed when "run" became "experiment" (#185).
+  listRuns: () => ["Looking at experiments", "Looked at experiments"],
+  openRun: () => ["Opening an experiment", "Opened an experiment"],
   listActions: () => ["Looking at actions", "Looked at actions"],
   runAction: (a) => [`Running ${short(a.id) || "an action"}`, `Ran ${short(a.id) || "an action"}`],
 };

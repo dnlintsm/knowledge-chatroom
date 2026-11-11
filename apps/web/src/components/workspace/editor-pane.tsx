@@ -7,11 +7,13 @@ import { ExampleCanvas } from "@/components/example-canvas";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { parseCsv } from "./csv";
-import { ExperimentPanel, RunsPanel } from "./experiment-panel";
+import { ExperimentPanel, placeName, RunsPanel } from "./experiment-panel";
 import { FileIcon } from "./file-icon";
 import { Centered, CodePreview, HtmlPreview, MediaPreview, NoPreview } from "./file-previews";
 import { MemoryEditor } from "./memory";
+import { readOnlyReason } from "./read-only";
 import { ReviewPanel } from "./review-panel";
+import { hasRole } from "./roles";
 import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
 import {
@@ -32,7 +34,7 @@ const BUILT_IN_TABS = {
   [TASKS_TAB]: { label: "Task board", icon: ListTodo },
   [EXPERIMENT_TAB]: { label: "Experiment", icon: FlaskConical },
   [REVIEW_TAB]: { label: "Proposed changes", icon: FileDiff },
-  [RUNS_TAB]: { label: "Runs", icon: Table2 },
+  [RUNS_TAB]: { label: "Experiments", icon: Table2 },
   [MEMORY_TAB]: { label: "Memory", icon: Brain },
 };
 
@@ -48,7 +50,17 @@ function canPreview(file: WorkspaceFile) {
 }
 
 export function EditorPane() {
-  const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment, storageMode } = useWorkspace();
+  const ws = useWorkspace();
+  const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment, storageMode } = ws;
+  // Why this place's files can't change, when they can't (#187).
+  const reason = canEdit
+    ? null
+    : readOnlyReason({
+        experiment,
+        placeRole: ws.placeRole,
+        placeName: placeName(ws.nodes, node),
+        canRerun: hasRole(node === null ? ws.rootRole : (ws.nodes.find((n) => n.id === node)?.role ?? null), "viewer"),
+      });
   // Changes proposed to the open file, waiting for review.
   const pending = activeFile && !experiment
     ? proposals.filter((p) => p.node === node && p.path === activeFile.path)
@@ -126,8 +138,12 @@ export function EditorPane() {
             </span>
           )}
           {!canEdit && (
-            <span className="flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5">
-              <Lock className="size-3" /> Read only
+            <span
+              data-testid="read-only-badge"
+              title={reason?.detail}
+              className="flex min-w-0 items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5"
+            >
+              <Lock className="size-3 shrink-0" /> <span className="truncate">{reason?.label ?? "Read only"}</span>
             </span>
           )}
           {pending.length > 0 && (

@@ -66,7 +66,7 @@ export function rulesToMarkdown(data: RulesResponse): string {
     "",
   ];
   if (!data.rules.length) {
-    lines.push("_The rules API returned no rules for this run._", "");
+    lines.push("_The rules API returned no rules for this experiment._", "");
     return lines.join("\n");
   }
   lines.push("| ID | Rule | When | Then | Confidence |", "| --- | --- | --- | --- | --- |");

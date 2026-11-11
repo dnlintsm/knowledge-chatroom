@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, FileDiff, FlaskConical, Lock, Plus, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
+import { Archive, FileDiff, FlaskConical, Lock, Plus, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { runsUnder } from "./runs";
+import { useListScope } from "./list-scope";
+import { readOnlyReason } from "./read-only";
+import { hasRole } from "./roles";
+import { experimentsIn, shownScope } from "./runs";
 import {
   listPromotable,
   type Experiment,
@@ -80,11 +83,16 @@ export function ExperimentPanel() {
   const ws = useWorkspace();
   const exp = ws.experiment;
   const [error, setError] = useState<string | null>(null);
+  const [rerunning, setRerunning] = useState(false);
   if (!exp) {
     return <p className="p-8 text-sm text-[var(--muted-foreground)]">Loading the experiment…</p>;
   }
   const nodeName = placeName(ws.nodes, exp.nodeId);
   const canChange = exp.access === "writer";
+  // Anyone who can see it may rerun it as their own, where they can see the node (#187).
+  const nodeRole = exp.nodeId === null ? ws.rootRole : (ws.nodes.find((n) => n.id === exp.nodeId)?.role ?? null);
+  const canRerun = hasRole(nodeRole, "viewer");
+  const reason = readOnlyReason({ experiment: exp, placeRole: ws.placeRole, placeName: nodeName, canRerun });
 
   const save = async (change: ExperimentChange) => {
     try {
@@ -92,6 +100,17 @@ export function ExperimentPanel() {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const rerun = async () => {
+    setRerunning(true);
+    try {
+      await ws.rerunExperiment(exp.id);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRerunning(false);
     }
   };
   const remove = async () => {
@@ -109,15 +128,15 @@ export function ExperimentPanel() {
         <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
           <FlaskConical className="size-3.5" />
           <span>
-            {exp.nodeId === null ? "Run in" : "Experiment on"} {nodeName}
+            {exp.nodeId === null ? "Experiment in" : "Experiment on"} {nodeName}
             {exp.authorName && !exp.mine ? ` by ${exp.authorName}` : ""}, started{" "}
             {new Date(exp.forkedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
           </span>
           <StatusBadge status={exp.status} />
           <StateBadge state={exp.state} />
-          {!canChange && (
-            <span className="flex items-center gap-1">
-              <Lock className="size-3" /> Read only
+          {reason && (
+            <span className="flex items-center gap-1" title={reason.detail}>
+              <Lock className="size-3" /> {reason.label}
             </span>
           )}
         </div>
@@ -129,8 +148,24 @@ export function ExperimentPanel() {
           onSave={(title) => save({ title })}
           className="text-xl font-semibold"
         />
-        {exp.mine && (
+        {reason && (
+          <p data-testid="read-only-reason" className="text-xs text-[var(--muted-foreground)]">
+            {reason.detail}
+          </p>
+        )}
+        {(exp.mine || canRerun) && (
           <div className="flex flex-wrap items-center gap-2">
+            {canRerun && (
+              <ActionButton
+                onClick={() => void rerun()}
+                disabled={rerunning}
+                title="A new experiment of yours with the same parameters and the inputs as this one recorded them"
+              >
+                <Repeat className="size-3.5" /> {exp.mine ? "Rerun" : "Rerun as your own"}
+              </ActionButton>
+            )}
+            {exp.mine && (
+              <>
             {exp.status === "draft" && (
               <ActionButton onClick={() => save({ status: "shared" })} title={`Everyone who can view ${nodeName} will see it`}>
                 <Share2 className="size-3.5" /> Share
@@ -156,11 +191,13 @@ export function ExperimentPanel() {
             <ActionButton onClick={remove} destructive>
               <Trash2 className="size-3.5" /> Delete
             </ActionButton>
+              </>
+            )}
             {canChange && (
               <label className="ml-auto flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
                 State
                 <select
-                  aria-label="Run state"
+                  aria-label="Experiment state"
                   value={exp.state}
                   onChange={(e) => void save({ state: e.target.value as ExperimentState })}
                   className="h-7 rounded-md border border-[var(--border)] bg-transparent px-1 text-xs text-[var(--foreground)] cursor-pointer"
@@ -389,7 +426,7 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
       if (linking) await ws.addRunInputs(experiment.id, written);
       setMessage({
         text: linking
-          ? `Uploaded ${count} to uploads/ and added ${written.length === 1 ? "it" : "them"} as run inputs under inputs/.`
+          ? `Uploaded ${count} to uploads/ and added ${written.length === 1 ? "it" : "them"} as inputs under inputs/.`
           : `Uploaded ${count} to uploads/.`,
       });
     } catch (err) {
@@ -428,21 +465,21 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
             <Upload className="size-3.5" /> Upload to {experiment.title}
           </button>
           <span className="text-xs text-[var(--muted-foreground)]">or drop files here</span>
-          <label className="ml-auto flex items-center gap-1.5 text-xs" title={finished ? "A finished run keeps the inputs it ran with; start a rerun to add more" : undefined}>
+          <label className="ml-auto flex items-center gap-1.5 text-xs" title={finished ? "A finished experiment keeps the inputs it ran with; rerun it to add more" : undefined}>
             <input
               type="checkbox"
               checked={linking}
               disabled={finished}
               onChange={(e) => setAsInputs(e.target.checked)}
             />
-            Add as run inputs
+            Add as inputs
           </label>
         </div>
         <p className="text-xs text-[var(--muted-foreground)]">
           {finished
-            ? "Files go to uploads/. This run finished, so its inputs stay as they were."
+            ? "Files go to uploads/. This experiment finished, so its inputs stay as they were."
             : linking
-              ? "Files go to uploads/, and a copy under inputs/ is recorded with the run, so a rerun reads it too."
+              ? "Files go to uploads/, and a copy under inputs/ is recorded with the experiment, so a rerun reads it too."
               : "Files go to uploads/ in this experiment."}
         </p>
         <input
@@ -500,7 +537,7 @@ function Provenance({ experiment }: { experiment: Experiment }) {
             {source.title}
           </button>
         ) : (
-          "a run you can't open"
+          "an experiment you can't open"
         )),
     ],
   ];
@@ -552,20 +589,23 @@ function ActionButton({
   onClick,
   title,
   destructive,
+  disabled,
   children,
 }: {
   onClick: () => void;
   title?: string;
   destructive?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)]",
+        "flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)] disabled:cursor-default disabled:opacity-50",
         destructive && "hover:text-[var(--destructive)]",
       )}
     >
@@ -750,27 +790,33 @@ function Compare({ current, nodeName }: { current: Experiment; nodeName: string 
 }
 
 /**
- * The Runs tab: every run you can see here and below (all of them at the
- * workspace root), one row each, with every param and result as a column.
+ * The Experiments tab: the experiments in the list's scope (all of them, or a
+ * node's), one row each, with every param and result as a column.
  */
 export function RunsPanel() {
   const ws = useWorkspace();
-  const runs = runsUnder(ws.experiments, ws.nodes, ws.node);
-  const here = ws.node === null ? "the workspace" : placeName(ws.nodes, ws.node);
+  // The same scope as the sidebar's list (#186).
+  const [listScope] = useListScope();
+  const scope = shownScope(listScope, ws.nodes);
+  const runs = experimentsIn(ws.experiments, ws.nodes, scope);
+  const here =
+    scope.node === null
+      ? "the workspace"
+      : `${placeName(ws.nodes, scope.node)}${scope.descendants ? "" : " (not its sub-levels)"}`;
   return (
     <div data-testid="runs-panel" className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-6 text-sm">
       <header className="flex items-center gap-2">
         <FlaskConical className="size-4 text-[var(--muted-foreground)]" />
-        <h2 className="text-base font-semibold">Runs in {here}</h2>
+        <h2 className="text-base font-semibold">Experiments in {here}</h2>
         <span className="text-xs text-[var(--muted-foreground)]">
-          {runs.length} {runs.length === 1 ? "run" : "runs"}
+          {runs.length} {runs.length === 1 ? "experiment" : "experiments"}
         </span>
       </header>
       {runs.length ? (
-        <RunsTable runs={runs} current={ws.experiment?.id ?? null} label={`Runs in ${here}`} showPlace />
+        <RunsTable runs={runs} current={ws.experiment?.id ?? null} label={`Experiments in ${here}`} showPlace />
       ) : (
         <p className="text-[var(--muted-foreground)]">
-          No runs here yet. Start one from the Runs view, or ask Claude to run an analysis on your files.
+          No experiments here yet. Start one from the Experiments view, or ask Claude to run an analysis on your files.
         </p>
       )}
     </div>
@@ -797,7 +843,7 @@ function RunsTable({
       <table aria-label={label} className="w-full border-collapse text-xs">
         <thead className="text-[var(--muted-foreground)]">
           <tr>
-            <th className={cell}>Run</th>
+            <th className={cell}>Experiment</th>
             {showPlace && <th className={cn(cell, "font-normal")}>Where</th>}
             {showPlace && <th className={cn(cell, "font-normal")}>By</th>}
             {paramKeys.map((k) => (

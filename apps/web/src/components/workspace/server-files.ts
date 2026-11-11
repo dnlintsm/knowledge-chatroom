@@ -337,6 +337,12 @@ export const addServerRunInputs = (id: string, paths: string[]) =>
   experimentRequest("POST", `/${encodeURIComponent(id)}/inputs`, {
     inputs: paths.map((path) => ({ path, experiment: id })),
   });
+/**
+ * Runs experiment `id` again as a new one of yours (#187), reading its inputs
+ * at the content its record names; the server says why when it can't.
+ */
+export const rerunServerExperiment = (id: string) =>
+  experimentRequest("POST", "/runs", { rerunOf: id, provenance: {} });
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 

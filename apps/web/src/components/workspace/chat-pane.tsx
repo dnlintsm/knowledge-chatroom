@@ -120,7 +120,7 @@ function ChatPaneView() {
         {experiment && (
           <span
             data-testid="chat-context-run"
-            title={`Run "${experiment.title}": its files, report, parameters and results`}
+            title={`Experiment "${experiment.title}": its files, report, parameters and results`}
             className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
           >
             <FlaskConical className="size-3 shrink-0" />

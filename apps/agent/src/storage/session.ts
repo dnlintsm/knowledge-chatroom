@@ -37,6 +37,9 @@ import type { SearchHit, SearchOptions, SearchService } from "./search";
  * enforces the same rules if a check here is ever missed.
  */
 
+/** What a role lets you do, for refusals: "You can only view here; ...". */
+const ROLE_VERB: Record<Role, string> = { viewer: "view", editor: "edit", owner: "manage" };
+
 /** A file a run reads: where it is now, and (optionally) its name under inputs/. */
 export interface RunInputSource {
   path: string;
@@ -46,6 +49,15 @@ export interface RunInputSource {
   experiment?: string | null;
   /** Its name under inputs/; its own file name by default. */
   as?: string;
+}
+
+/**
+ * An input a rerun reads at the content its earlier run recorded (#187), not
+ * at its current version. Only Session.rerun makes these, from the earlier
+ * run's own record; callers can't pass one.
+ */
+interface PinnedInput extends RunInputSource {
+  sha256: string;
 }
 
 /** One file of an uploaded experiment (see Session.uploadExperiment). */
@@ -113,7 +125,8 @@ export class Session {
       if (nodeId !== null) throw new NodeNotFoundError("Node not found");
       throw new ForbiddenError("You have no access to this workspace");
     }
-    if (!atLeast(role, min)) throw new ForbiddenError(`This needs ${min} access`);
+    // In the UI's words (#187): what you can do here, and what it takes.
+    if (!atLeast(role, min)) throw new ForbiddenError(`You can only ${ROLE_VERB[role]} here; this needs ${min} access`);
     return role;
   }
 
@@ -357,7 +370,7 @@ export class Session {
   async startRun(
     nodeId: string | null,
     input: ExperimentInput,
-    inputs: RunInputSource[] = [],
+    inputs: (RunInputSource | PinnedInput)[] = [],
     provenance: Record<string, unknown> = {},
   ): Promise<Experiment> {
     await this.need(nodeId, "viewer");
@@ -390,11 +403,12 @@ export class Session {
   }
 
   /**
-   * Each input's current version, to link in read only under inputs/, and
-   * what the run's provenance records about it. You need to be able to read
+   * Each input's version to copy under inputs/, and what the run's provenance
+   * records about it: its current version, or for a pinned input (a rerun's)
+   * the version of it with the recorded content. You need to be able to read
    * every input; `taken` are inputs/ paths the run already has.
    */
-  private async resolveInputs(inputs: RunInputSource[], taken: string[] = []) {
+  private async resolveInputs(inputs: (RunInputSource | PinnedInput)[], taken: string[] = []) {
     const links: LinkedInput[] = [];
     const recorded: Record<string, unknown>[] = [];
     for (const source of inputs) {
@@ -402,8 +416,22 @@ export class Session {
       const place = source.experiment
         ? await this.experimentFiles(source.experiment)
         : await this.files(source.node ?? null);
-      const [current] = (await place.history(from)) ?? [];
-      if (!current) throw new ExperimentError(`No file at ${from} to use as an input`);
+      const versions = (await place.history(from)) ?? [];
+      const pinned = "sha256" in source ? source.sha256 : null;
+      const current = pinned ? versions.find((v) => v.sha256 === pinned) : versions[0];
+      if (!current && pinned && versions.length) {
+        throw new ExperimentError(
+          `${from} in the earlier experiment no longer has the content it ran with; ` +
+            "pass inputs to rerun with other files or their current versions",
+        );
+      }
+      if (!current) {
+        throw new ExperimentError(
+          pinned
+            ? `${from} of the earlier experiment is gone; pass inputs to rerun with other files`
+            : `No file at ${from} to use as an input`,
+        );
+      }
       const path = normalizePath(`inputs/${source.as ?? from.split("/").pop()}`);
       if (taken.includes(path)) {
         throw new ExperimentError(`The run already has an input at ${path}; give this one another name`);
@@ -458,9 +486,12 @@ export class Session {
 
   /**
    * Runs `id` again as a new run (issue #82): same place, parameters,
-   * hypothesis and inputs (the very versions the old run read, from its
-   * inputs/) unless `changes` says otherwise. The old run stays as it is;
-   * the new one's provenance names it. You need to be able to see the old run.
+   * hypothesis and inputs unless `changes` says otherwise. The inputs are
+   * read from the old run's inputs/ at the content its record names (#187),
+   * even if someone edited them since; one that no longer has it fails the
+   * rerun rather than use other content. `changes.inputs` instead reads those
+   * files at their current versions. The old run stays as it is; the new
+   * one's provenance names it. You need to be able to see the old run.
    */
   async rerun(
     id: string,
@@ -469,11 +500,17 @@ export class Session {
   ): Promise<Experiment> {
     const old = await this.experiment(id);
     const { inputs, node, ...input } = changes;
-    const oldInputs = ((old.provenance.inputs as { path: string }[] | undefined) ?? []).map((i) => ({
-      path: i.path,
-      experiment: old.id,
-      as: i.path.replace(/^inputs\//, ""),
-    }));
+    const recordedInputs = (old.provenance.inputs as { path: string; sha256?: unknown }[] | undefined) ?? [];
+    const oldInputs = inputs
+      ? []
+      : recordedInputs.map((i): PinnedInput => {
+          if (typeof i.sha256 !== "string" || !i.sha256) {
+            throw new ExperimentError(
+              `The earlier experiment's record doesn't say what ${i.path} held; pass inputs to rerun with chosen files`,
+            );
+          }
+          return { path: i.path, experiment: old.id, as: i.path.replace(/^inputs\//, ""), sha256: i.sha256 };
+        });
     return this.startRun(
       node === undefined ? old.nodeId : node,
       {
@@ -870,7 +907,7 @@ export class FilesSession {
     throw new ForbiddenError(
       this.experimentId
         ? "Only the experiment's author can change its files, and not once it is archived"
-        : "This needs editor access",
+        : `You can only ${ROLE_VERB[this.role]} here; this needs editor access`,
     );
   }
 

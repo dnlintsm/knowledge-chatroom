@@ -25,7 +25,7 @@ export interface SuggestionPlace {
 
 export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] {
   const { openFile, runTitle, report, nodeName, serverStorage } = place;
-  const run = runTitle ? `the run "${runTitle}"` : null;
+  const run = runTitle ? `the experiment "${runTitle}"` : null;
   const chips: ChatSuggestion[] = [];
 
   if (openFile) {
@@ -39,7 +39,7 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
     title: "Draft a note",
     message: run
       ? `Draft a short note on what I should do next for ${run}, based on its report, files and results, ` +
-        "and save it as notes/next-steps.md in the run."
+        "and save it as notes/next-steps.md in the experiment."
       : "Look at my workspace files and draft a short note at notes/next-steps.md with what I should do next.",
   });
 
@@ -48,7 +48,7 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
       title: "Analyze the report",
       message:
         `Analyze the report of ${run} at ${report}: the key findings and how strong the evidence is, ` +
-        "anything that looks off or inconsistent, and which runs to try next.",
+        "anything that looks off or inconsistent, and which experiments to try next.",
     });
   }
 
@@ -72,4 +72,4 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
  */
 export const FOLLOW_UP_INSTRUCTIONS =
   "Suggest the next steps the user is most likely to want after Claude's last reply, " +
-  "about the files, run, report or experiments in front of them.";
+  "about the files, experiment, report or other experiments in front of them.";

@@ -610,7 +610,7 @@ export function createFileTools(
     ),
     tool(
       "list_experiments",
-      "List the experiments (runs) the user can see, on one knowledge node or (without node) " +
+      "List the experiments the user can see, on one knowledge node or (without node) " +
         "anywhere: id, title, node (null = at the workspace root), status (draft = only its " +
         "author sees it, shared, archived), state (ready, running, done, failed), author, " +
         "hypothesis, params and results. Use it to compare experiments on a node.",
@@ -640,15 +640,15 @@ export function createFileTools(
     ),
     tool(
       "create_experiment",
-      "Start a run (an experiment) for the user: a private draft on a knowledge node (usually " +
+      "Start an experiment for the user: a private draft on a knowledge node (usually " +
         "a process) with a copy of the node's files, where changes don't touch the node; or, " +
         "without node, at the workspace root, starting empty. Only when the user asks to try, " +
         "explore, analyze or run something. List the files it works from as `inputs`: each is " +
-        "linked in read only under inputs/ at its current version, so the run keeps exactly what " +
-        "it read. The run starts in state running with a report.md whose front matter records " +
+        "copied under inputs/ at its current version, and the experiment's record keeps which " +
+        "version that was. It starts in state running with a report.md whose front matter records " +
         "where it came from (who, this chat, model, skill, input versions); write the report " +
         "below the front matter. Work in it by passing its id as `experiment` to the file tools, " +
-        "and finish with set_experiment_results. To run an earlier run again, pass rerunOf " +
+        "and finish with set_experiment_results. To repeat an earlier experiment, pass rerunOf " +
         "instead of changing it.",
       {
         node: z.string().optional().describe("Knowledge node id to fork; omit for the workspace root."),
@@ -665,14 +665,16 @@ export function createFileTools(
             }),
           )
           .optional()
-          .describe("Files the run reads (uploads, data, earlier results); the user must be able to read each."),
-        skill: z.string().optional().describe("The skill this run follows, if any, e.g. analysis."),
+          .describe("Files the experiment reads (uploads, data, earlier results); the user must be able to read each."),
+        skill: z.string().optional().describe("The skill this experiment follows, if any, e.g. analysis."),
         rerunOf: z
           .string()
           .optional()
           .describe(
-            "Run this earlier run (experiment id) again as a new run: its place (node), params, hypothesis " +
-              "and the exact input versions it read are reused unless given here. The old run is left as it is.",
+            "Run this earlier experiment (its id) again as a new one: its place (node), params and hypothesis " +
+              "are reused unless given here, and its inputs are read at the content its record names, even if " +
+              "they were edited since. Pass inputs instead to use other files or their current versions. If a " +
+              "recorded input isn't there any more, the rerun fails and says which. The old one is left as it is.",
           ),
       },
       ({ node, inputs, skill, rerunOf, ...input }) =>
@@ -705,10 +707,10 @@ export function createFileTools(
     ),
     tool(
       "set_experiment_results",
-      "Record a run's results and finish it: state done, or failed when it couldn't be " +
+      "Record an experiment's results and finish it: state done, or failed when it couldn't be " +
         "completed (say why in its report). Results replace the old ones whole, as numbers with " +
         "units in the key where you can, e.g. {\"yield_pct\": 92.5}. Also refreshes the record " +
-        "in its report.md front matter. Only for runs the user authored.",
+        "in its report.md front matter. Only for experiments the user authored.",
       {
         id: z.string().describe("Experiment id"),
         results: jsonObject.describe('e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}'),
@@ -724,7 +726,7 @@ export function createFileTools(
       "update_experiment",
       "Change an experiment the user authored: title, hypothesis or params (each replaces " +
         "the old value whole, so send the complete object), or its status. Record results and " +
-        "finish a run with set_experiment_results instead. Only change status (shared shows it to everyone who can see the node; archived makes " +
+        "finish an experiment with set_experiment_results instead. Only change status (shared shows it to everyone who can see the node; archived makes " +
         "it read only) when the user asks.",
       {
         id: z.string().describe("Experiment id"),

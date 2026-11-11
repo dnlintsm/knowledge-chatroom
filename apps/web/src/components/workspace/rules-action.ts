@@ -21,7 +21,7 @@ export const generateRules: ActionDef = {
   requiredRole: ({ workspace }) => (workspace.getFile(RULES_FILE) ? "viewer" : "editor"),
   agentInvocable: true,
   description:
-    `Open the run's ${RULES_FILE}. If it doesn't exist yet (never generated, or deleted), first ` +
+    `Open the experiment's ${RULES_FILE}. If it doesn't exist yet (never generated, or deleted), first ` +
     "generate it from the rules API.",
   view: ({ workspace }) => {
     if (workspace.getFile(RULES_FILE)) {
@@ -32,7 +32,7 @@ export const generateRules: ActionDef = {
       label: "Generate Rules",
       icon: Wand2,
       enabled: !loading,
-      hint: loading ? "Waiting for the files to load" : `Generate ${RULES_FILE} for this run`,
+      hint: loading ? "Waiting for the files to load" : `Generate ${RULES_FILE} for this experiment`,
     };
   },
   run: generateOrOpenRules,
