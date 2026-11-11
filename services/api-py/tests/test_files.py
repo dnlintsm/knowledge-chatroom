@@ -21,15 +21,16 @@ import httpx
 import psycopg
 import pytest
 import uvicorn
-from support import ALICE, BOB, SECRET, URL, Client, storage_token
-
 from api_py.blobs import S3Settings
 from api_py.storage import EVENTS_CHANNEL
+from support import ALICE, BOB, SECRET, URL, Client, storage_token
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 pytestmark = [
     pytest.mark.anyio,
-    pytest.mark.skipif(not URL or not S3_ENDPOINT, reason="TEST_DATABASE_URL and S3_ENDPOINT are not set"),
+    pytest.mark.skipif(
+        not URL or not S3_ENDPOINT, reason="TEST_DATABASE_URL and S3_ENDPOINT are not set"
+    ),
 ]
 # One bucket for the whole run: blobs are keyed by their content, so tests can share it,
 # and some S3-compatible stores (SeaweedFS in CI) set aside volumes for every new bucket.
@@ -78,31 +79,54 @@ async def test_write_read_and_change_a_file(files):
     # Date.toUTCString(): to the second.
     modified = datetime.fromisoformat(info["updatedAt"]).replace(microsecond=0)
     assert got.headers["last-modified"] == format_datetime(modified, usegmt=True)
-    same = await files.get("/files/notes/plan.md", headers={**ALICE, "If-None-Match": got.headers["etag"]})
+    same = await files.get(
+        "/files/notes/plan.md", headers={**ALICE, "If-None-Match": got.headers["etag"]}
+    )
     assert (same.status_code, same.headers["etag"], same.content) == (304, got.headers["etag"], b"")
 
     # The same bytes add no version; new ones do, newest first.
     await files.put("/files/notes/plan.md", headers=ALICE, content=b"# Plan\n")
-    await files.put("/files/notes/plan.md", headers={**ALICE, "Content-Type": "text/plain; charset=utf-8"}, content=b"v2")
+    await files.put(
+        "/files/notes/plan.md",
+        headers={**ALICE, "Content-Type": "text/plain; charset=utf-8"},
+        content=b"v2",
+    )
     versions = (await files.get("/files/notes/plan.md?versions", headers=ALICE)).json()["versions"]
-    assert [(v["size"], v["mime"], v["author"]) for v in versions] == [(2, "text/plain", "user"), (7, "text/markdown", "user")]
+    assert [(v["size"], v["mime"], v["author"]) for v in versions] == [
+        (2, "text/plain", "user"),
+        (7, "text/markdown", "user"),
+    ]
     listed = (await files.get("/files", headers=ALICE)).json()["files"]
     assert [(f["path"], f["mime"]) for f in listed] == [("notes/plan.md", "text/plain")]
 
     # Only creating: an existing file is refused.
-    taken = await files.put("/files/notes/plan.md", headers={**ALICE, "If-None-Match": "*"}, content=b"x")
-    assert (taken.status_code, taken.json()) == (412, {"error": "notes/plan.md already exists", "exists": True})
+    taken = await files.put(
+        "/files/notes/plan.md", headers={**ALICE, "If-None-Match": "*"}, content=b"x"
+    )
+    assert (taken.status_code, taken.json()) == (
+        412,
+        {"error": "notes/plan.md already exists", "exists": True},
+    )
 
     moved = await files.patch("/files/notes/plan.md", headers=ALICE, json={"path": "notes/done.md"})
     assert (moved.json()["path"], moved.json()["mime"]) == ("notes/done.md", "text/plain")
     assert (await files.get("/files/notes/plan.md", headers=ALICE)).status_code == 404
-    assert len((await files.get("/files/notes/done.md?versions", headers=ALICE)).json()["versions"]) == 2
+    assert (
+        len((await files.get("/files/notes/done.md?versions", headers=ALICE)).json()["versions"])
+        == 2
+    )
     await files.put("/files/notes/other.md", headers=ALICE, content=b"o")
-    clash = await files.patch("/files/notes/done.md", headers=ALICE, json={"path": "notes/other.md"})
+    clash = await files.patch(
+        "/files/notes/done.md", headers=ALICE, json={"path": "notes/other.md"}
+    )
     assert (clash.status_code, clash.json()["exists"]) == (412, True)
 
-    assert (await files.delete("/files/notes/done.md", headers=ALICE)).json() == {"deleted": "notes/done.md"}
-    assert (await files.delete("/files/notes/done.md", headers=ALICE)).json() == {"error": "Not found"}
+    assert (await files.delete("/files/notes/done.md", headers=ALICE)).json() == {
+        "deleted": "notes/done.md"
+    }
+    assert (await files.delete("/files/notes/done.md", headers=ALICE)).json() == {
+        "error": "Not found"
+    }
     audit = (await files.get("/access/audit?kind=file", headers=ALICE)).json()["entries"]
     assert [e["action"] for e in audit][:3] == ["file.delete", "file.write", "file.rename"]
 
@@ -118,7 +142,9 @@ async def test_paths_bodies_and_methods(files):
     too_big = await files.put("/files/uploads/big.bin", headers=ALICE, content=b"x" * 4097)
     assert (too_big.status_code, too_big.json()) == (413, {"error": "File exceeds 4096 bytes"})
     typed = await files.put(
-        "/files/uploads/raw", headers={**ALICE, "Content-Type": "application/octet-stream"}, content=b"\x00\x01"
+        "/files/uploads/raw",
+        headers={**ALICE, "Content-Type": "application/octet-stream"},
+        content=b"\x00\x01",
     )
     assert (typed.json()["mime"], typed.json()["kind"]) == ("application/octet-stream", "upload")
     assert (await files.post("/files", headers=ALICE)).json() == {"error": "Method not allowed"}
@@ -131,18 +157,29 @@ async def test_paths_bodies_and_methods(files):
 async def test_files_in_a_node_follow_its_access(files):
     await files.get("/access", headers=ALICE)
     await files.get("/access", headers=BOB)
-    node = (await files.post("/nodes", headers=ALICE, json={"parentId": None, "name": "Etch"})).json()["id"]
+    node = (
+        await files.post("/nodes", headers=ALICE, json={"parentId": None, "name": "Etch"})
+    ).json()["id"]
     await files.put(f"/files/notes/recipe.md?node={node}", headers=ALICE, content=b"recipe")
     hidden = await files.get(f"/files?node={node}", headers=BOB)
     assert (hidden.status_code, hidden.json()) == (404, {"error": "Node not found"})
     bob = (await files.get("/access/users", headers=ALICE)).json()["users"][1]["id"]
     await files.post(
-        "/access/grants", headers=ALICE, json={"node": node, "principalType": "user", "principalId": bob, "role": "viewer"}
+        "/access/grants",
+        headers=ALICE,
+        json={"node": node, "principalType": "user", "principalId": bob, "role": "viewer"},
     )
-    assert [f["path"] for f in (await files.get(f"/files?node={node}", headers=BOB)).json()["files"]] == ["notes/recipe.md"]
-    assert (await files.get(f"/files/notes/recipe.md?node={node}", headers=BOB)).content == b"recipe"
+    assert [
+        f["path"] for f in (await files.get(f"/files?node={node}", headers=BOB)).json()["files"]
+    ] == ["notes/recipe.md"]
+    assert (
+        await files.get(f"/files/notes/recipe.md?node={node}", headers=BOB)
+    ).content == b"recipe"
     refused = await files.put(f"/files/notes/recipe.md?node={node}", headers=BOB, content=b"mine")
-    assert (refused.status_code, refused.json()) == (403, {"error": "You can only view here; this needs editor access"})
+    assert (refused.status_code, refused.json()) == (
+        403,
+        {"error": "You can only view here; this needs editor access"},
+    )
     # The root's files are separate from the node's.
     assert (await files.get("/files/notes/recipe.md", headers=ALICE)).status_code == 404
     entry = (await files.get("/access/audit?kind=file", headers=ALICE)).json()["entries"][0]
@@ -154,9 +191,14 @@ async def test_writes_index_text_for_search(files, database):
     info = (await files.put("/files/notes/etch.md", headers=ALICE, content=text.encode())).json()
     png = (await files.put("/files/uploads/shot.png", headers=ALICE, content=PNG)).json()
     async with await psycopg.AsyncConnection.connect(database) as conn:
-        cur = await conn.execute("SELECT chars FROM blob_texts WHERE sha256 = %s", (info["sha256"],))
+        cur = await conn.execute(
+            "SELECT chars FROM blob_texts WHERE sha256 = %s", (info["sha256"],)
+        )
         assert (await cur.fetchone()) == (len(text),)
-        cur = await conn.execute("SELECT ord, length(body) FROM blob_chunks WHERE sha256 = %s ORDER BY ord", (info["sha256"],))
+        cur = await conn.execute(
+            "SELECT ord, length(body) FROM blob_chunks WHERE sha256 = %s ORDER BY ord",
+            (info["sha256"],),
+        )
         chunks = await cur.fetchall()
         assert [c[0] for c in chunks] == list(range(len(chunks))) and len(chunks) == 4
         cur = await conn.execute("SELECT chars FROM blob_texts WHERE sha256 = %s", (png["sha256"],))
@@ -170,10 +212,17 @@ async def test_storage_tokens_write_as_claude(files):
     assert made.json()["author"] == "agent"
     skill = await files.put("/files/skills/x/SKILL.md", headers=claude, content=b"x")
     assert skill.json() == {"error": "Claude's changes to skills are proposals: add ?propose"}
-    node = await files.put("/files/notes/a.md?node=00000000-0000-0000-0000-000000000000", headers=claude, content=b"x")
-    assert node.json() == {"error": "Claude's writes in a knowledge node are proposals: add ?propose"}
+    node = await files.put(
+        "/files/notes/a.md?node=00000000-0000-0000-0000-000000000000", headers=claude, content=b"x"
+    )
+    assert node.json() == {
+        "error": "Claude's writes in a knowledge node are proposals: add ?propose"
+    }
     gone = await files.delete("/files/notes/by-claude.md", headers=claude)
-    assert (gone.status_code, gone.json()) == (403, {"error": "Claude doesn't rename or delete files"})
+    assert (gone.status_code, gone.json()) == (
+        403,
+        {"error": "Claude doesn't rename or delete files"},
+    )
     entry = (await files.get("/access/audit?kind=file", headers=ALICE)).json()["entries"][0]
     assert (entry["actorType"], entry["target"]["via"]) == ("agent", "mcp:lab")
 
@@ -181,20 +230,27 @@ async def test_storage_tokens_write_as_claude(files):
 async def test_proposals_are_served_here(files):
     made = await files.put("/files/notes/a.md?propose", headers=ALICE, content=b"x")
     assert (made.status_code, made.json()["path"]) == (201, "notes/a.md")
-    assert (await files.put("/files/a.md?propose&experiment=x", headers=ALICE, content=b"x")).status_code == 404
+    assert (
+        await files.put("/files/a.md?propose&experiment=x", headers=ALICE, content=b"x")
+    ).status_code == 404
     too_big = await files.put("/files/a.md?propose", headers=ALICE, content=b"x" * 4097)
     assert (too_big.status_code, too_big.json()) == (413, {"error": "File exceeds 4096 bytes"})
 
 
 async def test_binary_files_get_signed_links(database):
-    async with Client(database, SECRET, s3=s3(public_url="http://files.example.test")) as (api, _app):
+    async with Client(database, SECRET, s3=s3(public_url="http://files.example.test")) as (
+        api,
+        _app,
+    ):
         await api.put("/files/uploads/shot.png", headers=ALICE, content=PNG)
         await api.put("/files/notes/a.md", headers=ALICE, content=b"text")
         link = await api.get("/files/uploads/shot.png", headers=ALICE)
         assert (link.status_code, link.headers["cache-control"]) == (302, "no-store")
         location = httpx.URL(link.headers["location"])
         assert location.host == "files.example.test"
-        assert location.params["response-content-disposition"] == "inline; filename*=UTF-8''shot.png"
+        assert (
+            location.params["response-content-disposition"] == "inline; filename*=UTF-8''shot.png"
+        )
         assert location.params["X-Amz-Expires"] == "300"
         # Text is served here, from the app's origin.
         assert (await api.get("/files/notes/a.md", headers=ALICE)).content == b"text"
@@ -203,7 +259,9 @@ async def test_binary_files_get_signed_links(database):
 @asynccontextmanager
 async def served(app) -> AsyncIterator[str]:
     """`app` on a real socket: ASGITransport would wait for the whole of an endless event stream."""
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", lifespan="off"))
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", lifespan="off")
+    )
     serving = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.01)
@@ -233,21 +291,37 @@ async def test_watch_tells_each_user_what_they_may_see(database):
             ):
                 assert a.headers["content-type"] == "text/event-stream"
                 assert a.headers["x-accel-buffering"] == "no"
-                readers = [asyncio.create_task(events(a, alice)), asyncio.create_task(events(b, bob))]
+                readers = [
+                    asyncio.create_task(events(a, alice)),
+                    asyncio.create_task(events(b, bob)),
+                ]
                 info = (await api.put("/files/notes/w.md", headers=ALICE, content=b"w")).json()
                 # A change another process makes (the TypeScript server, Claude's tools) arrives too.
                 async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
                     cur = await conn.execute("SELECT id FROM workspaces WHERE slug = 'default'")
                     (ws,) = await cur.fetchone()  # type: ignore[misc]
-                    other = {"op": "delete", "node": None, "path": "notes/old.md", "workspaceId": str(ws)}
-                    await conn.execute("SELECT pg_notify(%s, %s)", (EVENTS_CHANNEL, json.dumps(other)))
+                    other = {
+                        "op": "delete",
+                        "node": None,
+                        "path": "notes/old.md",
+                        "workspaceId": str(ws),
+                    }
+                    await conn.execute(
+                        "SELECT pg_notify(%s, %s)", (EVENTS_CHANNEL, json.dumps(other))
+                    )
                 async with asyncio.timeout(10):
                     while len(alice) < 3:
                         await asyncio.sleep(0.02)
                 for reader in readers:
                     reader.cancel()
         assert alice[0] == ": watching"
-        written = {"op": "write", "node": None, "path": "notes/w.md", "sha256": info["sha256"], "author": "user"}
+        written = {
+            "op": "write",
+            "node": None,
+            "path": "notes/w.md",
+            "sha256": info["sha256"],
+            "author": "user",
+        }
         assert alice[1:] == [
             "data: " + json.dumps(written, separators=(",", ":")),
             'data: {"op":"delete","node":null,"path":"notes/old.md"}',

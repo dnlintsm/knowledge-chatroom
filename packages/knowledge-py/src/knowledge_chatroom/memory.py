@@ -37,7 +37,9 @@ def call_tool(base_url: str, token: str, tool: str, arguments: dict, timeout: fl
     except urllib.error.HTTPError as err:
         raise MemoryError_(f"Memory isn't available ({err.code}): {_reason(err)}") from err
     except (urllib.error.URLError, TimeoutError) as err:
-        raise MemoryError_(f"The chatroom's memory API at {base_url} isn't reachable: {err}") from err
+        raise MemoryError_(
+            f"The chatroom's memory API at {base_url} isn't reachable: {err}"
+        ) from err
     if result.get("isError"):
         raise MemoryError_(result.get("text") or "The memory tool failed")
     return result.get("text", "")

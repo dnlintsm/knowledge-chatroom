@@ -4,7 +4,6 @@ import base64
 import json
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 from knowledge_chatroom import identity
 
 # The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",
@@ -44,9 +43,15 @@ def test_identity_accepts_the_agents_token_for_this_server_only():
 
 def test_identity_refuses_expired_tampered_and_local_tokens():
     key = TEST_KEY.public_key()
-    assert identity.verify(sign({"sub": "a", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab").sub == "a"
+    assert (
+        identity.verify(sign({"sub": "a", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab").sub
+        == "a"
+    )
     assert identity.verify(sign({"sub": "a", "exp": 1, "aud": "mcp:lab"}), key, "mcp:lab") is None
-    assert identity.verify(sign({"sub": "local", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab") is None
+    assert (
+        identity.verify(sign({"sub": "local", "exp": 4102444800, "aud": "mcp:lab"}), key, "mcp:lab")
+        is None
+    )
     head, payload, signature = FOR_LAB.split(".")
     assert identity.verify(f"{head}.e30.{signature}", PUBLIC_KEY, "mcp:lab") is None
     # The old HMAC format isn't accepted here: it needs the shared secret.

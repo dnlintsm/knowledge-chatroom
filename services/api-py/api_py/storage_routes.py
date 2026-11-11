@@ -230,7 +230,10 @@ def agent_refusal(request: Request) -> str | None:
         if first_param(request, "node"):
             return "Claude's writes in a knowledge node are proposals: add ?propose"
         try:
-            skill = kind_for_path(normalize_path("/".join(decode_component(p) for p in sub.split("/")))) == "skill"
+            skill = (
+                kind_for_path(normalize_path("/".join(decode_component(p) for p in sub.split("/"))))
+                == "skill"
+            )
         except (_MalformedPath, InvalidPathError):
             return None  # the file route answers bad paths itself
         return "Claude's changes to skills are proposals: add ?propose" if skill else None
@@ -238,9 +241,7 @@ def agent_refusal(request: Request) -> str | None:
         return None if method == "POST" and sub == "" else "Claude doesn't rename or delete nodes"
     if section == "experiments":
         if method == "POST" and sub == "upload":
-            return (
-                "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload"
-            )
+            return "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload"
         if method == "POST" and sub in ("", "runs"):
             return None
         if method == "PATCH" and sub != "" and "/" not in sub:
@@ -249,7 +250,11 @@ def agent_refusal(request: Request) -> str | None:
             return None
         return "Claude doesn't delete experiments or move folders into them"
     if section == "proposals":
-        return None if method == "POST" and sub == "" else "Claude doesn't accept, reject or withdraw proposals"
+        return (
+            None
+            if method == "POST" and sub == ""
+            else "Claude doesn't accept, reject or withdraw proposals"
+        )
     if section == "access":
         return "Claude doesn't manage access"
     return "Claude can't do that with a storage token"
@@ -399,7 +404,9 @@ async def handle_access(request: Request, session: Session) -> Response:
                 parent_id = optional_id(body.get("parentId")) if body else None
                 if not body or not isinstance(body.get("name"), str) or parent_id is False:
                     return error(400, "Expected {parentId: string | null, name: string}")
-                return json_response(201, {"id": await session.create_group(parent_id, body["name"])})  # type: ignore[arg-type]
+                return json_response(
+                    201, {"id": await session.create_group(parent_id, body["name"])}
+                )  # type: ignore[arg-type]
         elif not sub:
             if method == "PATCH":
                 body = await read_json(request)
@@ -413,7 +420,9 @@ async def handle_access(request: Request, session: Session) -> Response:
 
     if section == "grants":
         if not ident and method == "GET":
-            return json_response(200, {"grants": await session.grants(first_param(request, "node") or None)})
+            return json_response(
+                200, {"grants": await session.grants(first_param(request, "node") or None)}
+            )
         if not ident and method == "POST":
             body = await read_json(request)
             node = optional_id(body.get("node")) if body else None
@@ -425,9 +434,12 @@ async def handle_access(request: Request, session: Session) -> Response:
                 or body.get("role") not in ROLES
             ):
                 return error(
-                    400, 'Expected {node: string | null, principalType: "user" | "group", principalId, role}'
+                    400,
+                    'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
                 )
-            grant_id = await session.set_grant(node, body["principalType"], body["principalId"], body["role"])  # type: ignore[arg-type]
+            grant_id = await session.set_grant(
+                node, body["principalType"], body["principalId"], body["role"]
+            )  # type: ignore[arg-type]
             return json_response(200, {"id": grant_id})
         if ident and method == "DELETE":
             return done(await session.revoke(ident))
@@ -435,14 +447,18 @@ async def handle_access(request: Request, session: Session) -> Response:
     if section == "audit" and not ident and method == "GET":
         limit = parse_int(first_param(request, "limit") or "100")
         kinds = [k for k in request.query_params.getlist("kind") if k]
-        return json_response(200, {"entries": await session.audit_log(100 if limit is None else limit, kinds)})
+        return json_response(
+            200, {"entries": await session.audit_log(100 if limit is None else limit, kinds)}
+        )
 
     return not_found()
 
 
 async def handle_files(request: Request, session: Session) -> Response:
     try:
-        path = "/".join(decode_component(p) for p in re.sub(r"^/files/?", "", raw_path(request)).split("/"))
+        path = "/".join(
+            decode_component(p) for p in re.sub(r"^/files/?", "", raw_path(request)).split("/")
+        )
     except _MalformedPath:
         return error(400, "Malformed path encoding")
     method = request.method
@@ -465,7 +481,11 @@ async def handle_files(request: Request, session: Session) -> Response:
     if method == "GET":
         if "versions" in request.query_params:
             versions = await files.history(path)
-            return error(404, "Not found") if versions is None else json_response(200, {"versions": versions})
+            return (
+                error(404, "Not found")
+                if versions is None
+                else json_response(200, {"versions": versions})
+            )
         # Binary files come straight from the object store when it is reachable
         # from browsers: a short-lived link, made after the access check above.
         # Text stays here, since the UI fetches it from this origin.
@@ -475,7 +495,9 @@ async def handle_files(request: Request, session: Session) -> Response:
                 info["sha256"], info["mime"], info["path"].split("/")[-1]
             )
             if link:
-                return Response(status_code=302, headers={"Location": link, "Cache-Control": "no-store"})
+                return Response(
+                    status_code=302, headers={"Location": link, "Cache-Control": "no-store"}
+                )
         found = await files.read(path) if info else None
         if not found:
             return error(404, "Not found")
@@ -506,11 +528,17 @@ async def handle_files(request: Request, session: Session) -> Response:
         mime = header if header and header != "application/octet-stream" else None
         if "propose" in request.query_params:
             if experiment:
-                return error(400, "An experiment's files change directly; promote it to propose them")
+                return error(
+                    400, "An experiment's files change directly; promote it to propose them"
+                )
             note = first_param(request, "note")
-            return json_response(201, await session.propose(files.node_id, path, content, mime=mime, note=note))
+            return json_response(
+                201, await session.propose(files.node_id, path, content, mime=mime, note=note)
+            )
         create_only = js_trim(request.headers.get("if-none-match", "")) == "*"
-        return json_response(200, await files.write(path, content, mime=mime, create_only=create_only))
+        return json_response(
+            200, await files.write(path, content, mime=mime, create_only=create_only)
+        )
 
     if method == "PATCH":
         body = await read_json(request)
@@ -533,8 +561,12 @@ EXPERIMENT_EXPECTED = (
 )
 # Sharing or archiving an experiment changes who sees it: the user's call, not
 # an outside service's, so storage tokens (principal.via) leave status alone.
-STATUS_REFUSED = "Claude doesn't share or archive experiments with a storage token: leave out status"
-INPUTS_EXPECTED = "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}"
+STATUS_REFUSED = (
+    "Claude doesn't share or archive experiments with a storage token: leave out status"
+)
+INPUTS_EXPECTED = (
+    "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}"
+)
 # Most a run's caller-given provenance may hold, as JSON.
 MAX_PROVENANCE_BYTES = 16 * 1024
 RUN_EXPECTED = (
@@ -620,7 +652,9 @@ def caller_provenance(provenance: dict[str, Any]) -> dict[str, Any] | None:
         and _absent_or(skill, "sha256", str)
     ):
         return None
-    if tools is not None and not (isinstance(tools, dict) and all(isinstance(v, str) for v in tools.values())):
+    if tools is not None and not (
+        isinstance(tools, dict) and all(isinstance(v, str) for v in tools.values())
+    ):
         return None
     return kept
 
@@ -653,7 +687,13 @@ def run_request(body: dict[str, Any]) -> dict[str, Any] | None:
     fields = experiment_input(rest)
     if fields is None:
         return None
-    return {"nodeId": node_id, "inputs": inputs, "rerunOf": rerun_of, "provenance": given, "input": fields}
+    return {
+        "nodeId": node_id,
+        "inputs": inputs,
+        "rerunOf": rerun_of,
+        "provenance": given,
+        "input": fields,
+    }
 
 
 UPLOAD_META = (
@@ -673,7 +713,9 @@ async def read_upload(request: Request) -> dict[str, Any]:
         raise uploads.UploadError(
             415, 'Send the experiment as multipart/form-data: a "meta" part and one part per file'
         )
-    found = await uploads.read_parts(content_type, request.stream(), request.app.state.settings.max_upload_bytes)
+    found = await uploads.read_parts(
+        content_type, request.stream(), request.app.state.settings.max_upload_bytes
+    )
     meta: Any = None
     if found.meta is not None:
         try:
@@ -690,7 +732,12 @@ async def read_upload(request: Request) -> dict[str, Any]:
     else:
         names = None
     given = experiment_input(meta)
-    if not isinstance(meta.get("id"), str) or names is None or given is None or not isinstance(meta.get("title"), str):
+    if (
+        not isinstance(meta.get("id"), str)
+        or names is None
+        or given is None
+        or not isinstance(meta.get("title"), str)
+    ):
         raise uploads.UploadError(400, UPLOAD_META)
     return {"id": meta["id"], "path": names, "input": given, "files": found.files}
 
@@ -706,8 +753,16 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         if method == "POST":
             body = await read_json(request)
             given = experiment_input(body) if body is not None else None
-            if body is None or "nodeId" not in body or not _string_or_null(body["nodeId"]) or given is None:
-                return error(400, f"Expected {{nodeId: string|null, title: string, …}}; {EXPERIMENT_EXPECTED}")
+            if (
+                body is None
+                or "nodeId" not in body
+                or not _string_or_null(body["nodeId"])
+                or given is None
+            ):
+                return error(
+                    400,
+                    f"Expected {{nodeId: string|null, title: string, …}}; {EXPERIMENT_EXPECTED}",
+                )
             if refuses_status(session, given):
                 return error(403, STATUS_REFUSED)
             return json_response(201, await session.create_experiment(body["nodeId"], given))
@@ -722,7 +777,10 @@ async def handle_experiments(request: Request, session: Session) -> Response:
             return error(err.status, str(err))
         # Like POST /experiments: a new experiment is a draft whatever status says.
         return json_response(
-            201, await session.upload_experiment(upload["id"], upload["path"], upload["input"], upload["files"])
+            201,
+            await session.upload_experiment(
+                upload["id"], upload["path"], upload["input"], upload["files"]
+            ),
         )
 
     if experiment_id == "runs":
@@ -741,7 +799,9 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         if not run["input"].get("title"):
             return error(400, "A new run needs a title (or rerunOf)")
         node_id = None if run["nodeId"] is _NOT_GIVEN else run["nodeId"]
-        return json_response(201, await session.start_run(node_id, run["input"], run["inputs"], run["provenance"]))
+        return json_response(
+            201, await session.start_run(node_id, run["input"], run["inputs"], run["provenance"])
+        )
 
     finish_of = re.fullmatch(r"([^/]+)/finish", experiment_id)
     if finish_of:
@@ -810,10 +870,15 @@ async def handle_proposals(request: Request, session: Session) -> Response:
             if (
                 body is None
                 or not isinstance(body.get("experimentId"), str)
-                or ("paths" in body and not (isinstance(paths, list) and all(isinstance(p, str) for p in paths)))
+                or (
+                    "paths" in body
+                    and not (isinstance(paths, list) and all(isinstance(p, str) for p in paths))
+                )
                 or ("note" in body and not isinstance(body["note"], str))
             ):
-                return error(400, "Expected {experimentId: string, paths?: string[], note?: string}")
+                return error(
+                    400, "Expected {experimentId: string, paths?: string[], note?: string}"
+                )
             promoted = await session.promote(body["experimentId"], paths, body.get("note"))
             return json_response(201, {"proposals": promoted})
         return error(405, "Method not allowed")
@@ -836,7 +901,11 @@ async def handle_proposals(request: Request, session: Session) -> Response:
         proposal, content = await session.proposal_content(proposal_id)
         return Response(
             content,
-            headers={"Content-Type": proposal["mime"], "Cache-Control": "no-cache", **STORED_CONTENT_HEADERS},
+            headers={
+                "Content-Type": proposal["mime"],
+                "Cache-Control": "no-cache",
+                **STORED_CONTENT_HEADERS,
+            },
         )
     if action in DECISIONS:
         if method != "POST":

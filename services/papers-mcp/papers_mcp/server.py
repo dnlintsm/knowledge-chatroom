@@ -26,12 +26,11 @@ import posixpath
 from typing import Annotated, Literal
 
 import anyio
+from knowledge_chatroom import identity, storage
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
-
-from knowledge_chatroom import identity, storage
 
 from . import arxiv, fulltext, net, openalex
 from .models import PaperDetails, PaperSearchResult, PaperText, SavedPaper, parse_id, slug
@@ -40,7 +39,11 @@ from .models import PaperDetails, PaperSearchResult, PaperText, SavedPaper, pars
 SERVER_NAME = os.environ.get("PAPERS_NAME", "papers")
 # The chatroom's public key (agent GET /identity/public-key) when login is on;
 # unset = no login. Never give this server AUTH_SECRET.
-PUBLIC_KEY = identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
+PUBLIC_KEY = (
+    identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"])
+    if os.environ.get("KNOWLEDGE_PUBLIC_KEY")
+    else None
+)
 # The chatroom's agent server (LOCAL_AGENT_URL), whose storage API save_paper writes through.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
@@ -55,9 +58,16 @@ save when the user asks, and ask before saving more than 5 papers at once."""
 mcp = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS)
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
-WRITES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+WRITES = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+)
 
-PaperId = Annotated[str, Field(description='A paper id from search_papers: "openalex:W…", "doi:10.…" or "arxiv:2401.01234".')]
+PaperId = Annotated[
+    str,
+    Field(
+        description='A paper id from search_papers: "openalex:W…", "doi:10.…" or "arxiv:2401.01234".'
+    ),
+]
 
 
 def require_user(ctx: Context) -> identity.User:
@@ -87,7 +97,7 @@ def lookup(paper_id: str) -> PaperDetails:
     except net.SourceError as err:
         arxiv_id = bare if scheme == "arxiv" else None
         if scheme == "doi" and bare.lower().startswith("10.48550/arxiv."):
-            arxiv_id = bare[len("10.48550/arxiv."):]
+            arxiv_id = bare[len("10.48550/arxiv.") :]
         if arxiv_id and str(err).startswith("Not found"):
             return arxiv.get(arxiv_id)
         raise
@@ -95,16 +105,28 @@ def lookup(paper_id: str) -> PaperDetails:
 
 @mcp.tool(annotations=READ_ONLY)
 async def search_papers(
-    query: Annotated[str, Field(description="What to look for, in words: a topic, a method, a title.")],
+    query: Annotated[
+        str, Field(description="What to look for, in words: a topic, a method, a title.")
+    ],
     ctx: Context,
     year_from: Annotated[int | None, Field(description="Only papers from this year on.")] = None,
     year_to: Annotated[int | None, Field(description="Only papers up to this year.")] = None,
-    authors: Annotated[list[str] | None, Field(description="Only papers by all of these authors (names).")] = None,
-    venue: Annotated[str | None, Field(description="Only papers in this journal or conference (name).")] = None,
-    open_access_only: Annotated[bool, Field(description="Only papers with free full text.")] = False,
-    sort: Annotated[Literal["relevance", "recent", "citations"], Field(description="Result order.")] = "relevance",
+    authors: Annotated[
+        list[str] | None, Field(description="Only papers by all of these authors (names).")
+    ] = None,
+    venue: Annotated[
+        str | None, Field(description="Only papers in this journal or conference (name).")
+    ] = None,
+    open_access_only: Annotated[
+        bool, Field(description="Only papers with free full text.")
+    ] = False,
+    sort: Annotated[
+        Literal["relevance", "recent", "citations"], Field(description="Result order.")
+    ] = "relevance",
     limit: Annotated[int, Field(ge=1, le=25, description="How many papers to return.")] = 8,
-    cursor: Annotated[str | None, Field(description="next_cursor from the previous call, for more results.")] = None,
+    cursor: Annotated[
+        str | None, Field(description="next_cursor from the previous call, for more results.")
+    ] = None,
 ) -> PaperSearchResult:
     """Search academic papers. Returns titles, authors, year, venue, citation counts, links and
     shortened abstracts. Use get_paper for a paper's whole abstract and read_paper for its text."""
@@ -135,7 +157,9 @@ async def get_paper(id: PaperId, ctx: Context) -> PaperDetails:
 def _read(paper_id: str, offset: int, limit: int) -> PaperText:
     paper = lookup(paper_id)
     if not paper.pdf_url:
-        raise ToolError(f"{paper.title} has no open-access full text; use its abstract (get_paper) instead.")
+        raise ToolError(
+            f"{paper.title} has no open-access full text; use its abstract (get_paper) instead."
+        )
     lines = fulltext.lines_for(paper.pdf_url)
     if offset > len(lines):
         raise ToolError(f"The paper has {len(lines)} lines; offset {offset} is past the end.")
@@ -178,7 +202,9 @@ async def related_papers(
     ctx: Context,
     kind: Annotated[
         Literal["cites", "cited_by", "similar"],
-        Field(description="cites: the papers it references; cited_by: papers that cite it; similar: related work."),
+        Field(
+            description="cites: the papers it references; cited_by: papers that cite it; similar: related work."
+        ),
     ] = "similar",
     limit: Annotated[int, Field(ge=1, le=25, description="How many papers to return.")] = 8,
 ) -> PaperSearchResult:
@@ -192,7 +218,8 @@ def note_markdown(paper: PaperDetails, pdf_path: str | None = None) -> str:
     meta = {
         "paper": paper.id,
         "title": paper.title,
-        "authors": [a.name for a in paper.authors] + (["et al."] if paper.author_count > len(paper.authors) else []),
+        "authors": [a.name for a in paper.authors]
+        + (["et al."] if paper.author_count > len(paper.authors) else []),
         "year": paper.year,
         "venue": paper.venue,
         "doi": paper.doi,
@@ -202,7 +229,11 @@ def note_markdown(paper: PaperDetails, pdf_path: str | None = None) -> str:
         "citations": paper.citation_count,
         "saved": datetime.date.today().isoformat(),
     }
-    front = "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in meta.items() if value is not None)
+    front = "\n".join(
+        f"{key}: {json.dumps(value, ensure_ascii=False)}"
+        for key, value in meta.items()
+        if value is not None
+    )
     byline = " · ".join(
         str(part)
         for part in (
@@ -233,7 +264,12 @@ def _clean_path(path: str) -> str:
 
 
 def _save(
-    paper_id: str, path: str | None, node: str | None, experiment: str | None, include_pdf: bool, token: str | None
+    paper_id: str,
+    path: str | None,
+    node: str | None,
+    experiment: str | None,
+    include_pdf: bool,
+    token: str | None,
 ) -> SavedPaper:
     paper = lookup(paper_id)
     target = _clean_path(path) if path else f"papers/{slug(paper.title)}.md"
@@ -248,7 +284,14 @@ def _save(
             raise ToolError(f"{paper.pdf_url} isn't a PDF; save it without include_pdf.")
         pdf_path = target.removesuffix(".md") + ".pdf"
         proposed = storage.write(
-            STORAGE_URL, pdf_path, data, "application/pdf", token, node=node, experiment=experiment, note=note
+            STORAGE_URL,
+            pdf_path,
+            data,
+            "application/pdf",
+            token,
+            node=node,
+            experiment=experiment,
+            note=note,
         )
     proposed = (
         storage.write(
@@ -269,7 +312,9 @@ def _save(
         experiment=experiment,
         pdf_path=pdf_path,
         proposed=proposed,
-        note="An editor of the node has to accept it before it shows in the node's files." if proposed else None,
+        note="An editor of the node has to accept it before it shows in the node's files."
+        if proposed
+        else None,
     )
 
 
@@ -278,11 +323,18 @@ async def save_paper(
     id: PaperId,
     ctx: Context,
     path: Annotated[
-        str | None, Field(description="Where to save the note; default papers/<title>.md in the place.")
+        str | None,
+        Field(description="Where to save the note; default papers/<title>.md in the place."),
     ] = None,
-    node: Annotated[str | None, Field(description="Knowledge node id to save in (the user's currentNode).")] = None,
-    experiment: Annotated[str | None, Field(description="Experiment id to save in (the user's currentExperiment).")] = None,
-    include_pdf: Annotated[bool, Field(description="Also save the open-access PDF next to the note.")] = False,
+    node: Annotated[
+        str | None, Field(description="Knowledge node id to save in (the user's currentNode).")
+    ] = None,
+    experiment: Annotated[
+        str | None, Field(description="Experiment id to save in (the user's currentExperiment).")
+    ] = None,
+    include_pdf: Annotated[
+        bool, Field(description="Also save the open-access PDF next to the note.")
+    ] = False,
 ) -> SavedPaper:
     """Save a paper into the user's workspace as a markdown note (details, abstract, BibTeX and room for notes),
     at the workspace root, in a knowledge node (as a proposal an editor accepts) or in an experiment.
@@ -290,7 +342,9 @@ async def save_paper(
     require_user(ctx)
     token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
     if PUBLIC_KEY and not token:
-        raise ToolError('Saving needs "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.')
+        raise ToolError(
+            'Saving needs "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.'
+        )
     return await _run(_save, id, path, node, experiment, include_pdf, token)
 
 

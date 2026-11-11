@@ -11,7 +11,6 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
-
 from api_py.app import create_app
 from api_py.config import Settings
 from api_py.proxy import client
@@ -25,7 +24,12 @@ def anyio_backend():
 
 
 def settings(**overrides) -> Settings:
-    base = {"ts_agent_url": "http://ts", "database_url": None, "auth_secret": None, "migrations_dir": Path(".")}
+    base = {
+        "ts_agent_url": "http://ts",
+        "database_url": None,
+        "auth_secret": None,
+        "migrations_dir": Path("."),
+    }
     return Settings(**{**base, **overrides})
 
 
@@ -107,7 +111,12 @@ async def test_drops_hop_by_hop_headers_both_ways():
 
     async with through(upstream) as api:
         answer = await api.get(
-            "/access/me", headers={"connection": "x-private-hop", "x-private-hop": "1", "keep-alive": "timeout=5"}
+            "/access/me",
+            headers={
+                "connection": "x-private-hop",
+                "x-private-hop": "1",
+                "keep-alive": "timeout=5",
+            },
         )
     assert answer.status_code == 200
     assert "x-upstream-hop" not in answer.headers
@@ -120,7 +129,11 @@ async def test_keeps_status_repeated_headers_and_bytes():
     async def upstream(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             201,
-            headers=[("set-cookie", "a=1"), ("set-cookie", "b=2"), ("content-type", "application/octet-stream")],
+            headers=[
+                ("set-cookie", "a=1"),
+                ("set-cookie", "b=2"),
+                ("content-type", "application/octet-stream"),
+            ],
             content=payload,
         )
 
@@ -176,7 +189,6 @@ async def test_health_reports_the_typescript_server():
     assert answer.json() == {"status": "degraded", "upstream": "down", "database": "off"}
 
 
-
 async def test_long_watches_do_not_hold_back_other_requests():
     """More open watches than httpx's default pool (100) still leave room for other requests."""
     release = asyncio.Event()
@@ -184,13 +196,21 @@ async def test_long_watches_do_not_hold_back_other_requests():
     async def ts_app(scope, receive, send):
         if scope["type"] != "http":
             return
-        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
         if scope["path"] == "/files":
             await send({"type": "http.response.body", "body": b": open\n\n", "more_body": True})
             await release.wait()
         await send({"type": "http.response.body", "body": b"ok"})
 
-    ts = uvicorn.Server(uvicorn.Config(ts_app, host="127.0.0.1", port=0, log_level="warning", lifespan="off"))
+    ts = uvicorn.Server(
+        uvicorn.Config(ts_app, host="127.0.0.1", port=0, log_level="warning", lifespan="off")
+    )
     serving = asyncio.create_task(ts.serve())
     while not ts.started:
         await asyncio.sleep(0.01)
@@ -201,7 +221,9 @@ async def test_long_watches_do_not_hold_back_other_requests():
         # With a capped pool the 101st request waits forever, so this times out.
         async with asyncio.timeout(15):
             for _ in range(110):
-                watches.append(await http.send(http.build_request("GET", "/files?watch=1"), stream=True))
+                watches.append(
+                    await http.send(http.build_request("GET", "/files?watch=1"), stream=True)
+                )
             other = await http.get("/nodes")
         assert other.content == b"ok"
     finally:

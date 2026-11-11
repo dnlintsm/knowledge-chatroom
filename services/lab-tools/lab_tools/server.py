@@ -18,10 +18,9 @@ import csv
 import io
 import os
 
+from knowledge_chatroom import identity, memory, storage
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-
-from knowledge_chatroom import identity, memory, storage
 
 from . import stats
 
@@ -29,7 +28,11 @@ from . import stats
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
 # The chatroom's public key (agent GET /identity/public-key) when login is on;
 # unset = no login. Never give this server AUTH_SECRET.
-PUBLIC_KEY = identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
+PUBLIC_KEY = (
+    identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"])
+    if os.environ.get("KNOWLEDGE_PUBLIC_KEY")
+    else None
+)
 # The chatroom's agent server (LOCAL_AGENT_URL): its storage API for workspace
 # files, and /memory/agent for the user's memory.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
@@ -62,7 +65,9 @@ def describe_metric(values: list[float], ctx: Context) -> dict:
 
 
 @mcp.tool()
-def compare_runs(baseline: list[float], candidate: list[float], ctx: Context, higher_is_better: bool = True) -> dict:
+def compare_runs(
+    baseline: list[float], candidate: list[float], ctx: Context, higher_is_better: bool = True
+) -> dict:
     """Compare a metric between a baseline run and a candidate run.
 
     Returns both summaries, the difference of means, the percent change, Welch's t
@@ -88,7 +93,9 @@ def describe_column(
     require_user(ctx)
     token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
     if PUBLIC_KEY and not token:
-        raise ToolError('Workspace files need "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.')
+        raise ToolError(
+            'Workspace files need "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.'
+        )
     try:
         content = storage.read_text(STORAGE_URL, path, token, node=node, experiment=experiment)
     except storage.WorkspaceError as err:

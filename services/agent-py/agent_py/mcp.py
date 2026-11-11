@@ -42,7 +42,11 @@ IDENTITY_HEADER = "X-Knowledge-User"
 MEMORY_HEADER = "X-Knowledge-Memory"
 Kind = Literal["identity", "storage", "memory"]
 # Which header each kind of token goes in.
-HEADERS: dict[Kind, str] = {"identity": IDENTITY_HEADER, "storage": STORAGE_HEADER, "memory": MEMORY_HEADER}
+HEADERS: dict[Kind, str] = {
+    "identity": IDENTITY_HEADER,
+    "storage": STORAGE_HEADER,
+    "memory": MEMORY_HEADER,
+}
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -120,7 +124,11 @@ def _server(name: str, raw: Any, env: Mapping[str, str]) -> McpServer:
         raise ValueError("must be an object")
     kinds: tuple[Kind, ...] = tuple(
         kind
-        for kind, key in (("identity", "forwardIdentity"), ("storage", "storageAccess"), ("memory", "memoryAccess"))
+        for kind, key in (
+            ("identity", "forwardIdentity"),
+            ("storage", "storageAccess"),
+            ("memory", "memoryAccess"),
+        )
         if raw.get(key) is True
     )
     kind = raw.get("type", "http")
@@ -128,10 +136,14 @@ def _server(name: str, raw: Any, env: Mapping[str, str]) -> McpServer:
         command, args = raw.get("command"), raw.get("args")
         if not isinstance(command, str) or not command:
             raise ValueError("stdio needs a command")
-        if args is not None and not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
+        if args is not None and not (
+            isinstance(args, list) and all(isinstance(a, str) for a in args)
+        ):
             raise ValueError("args must be a list of strings")
         if kinds or raw.get("ui") is not None:
-            raise ValueError("forwardIdentity, storageAccess, memoryAccess and ui need an http or sse server")
+            raise ValueError(
+                "forwardIdentity, storageAccess, memoryAccess and ui need an http or sse server"
+            )
         config: dict[str, Any] = {"type": "stdio", "command": command}
         if args:
             config["args"] = args
@@ -146,7 +158,9 @@ def _server(name: str, raw: Any, env: Mapping[str, str]) -> McpServer:
     headers = _strings(raw.get("headers"), env, f"{name}.headers")
     for header in HEADERS.values():
         if headers and any(h.lower() == header.lower() for h in headers):
-            raise ValueError(f"{header} is set by the agent (forwardIdentity, storageAccess, memoryAccess)")
+            raise ValueError(
+                f"{header} is set by the agent (forwardIdentity, storageAccess, memoryAccess)"
+            )
     # alwaysLoad: the run has no tool search, so tools must not be deferred.
     config = {"type": kind, "url": url, "alwaysLoad": True}
     if headers:
@@ -182,7 +196,9 @@ def chips_from(input_data: RunAgentInput, servers: Mapping[str, McpServer]) -> l
     tools = chatroom_props(input_data).get("tools")
     if not isinstance(tools, list):
         return []
-    return list(dict.fromkeys(t for t in tools if isinstance(t, str) and t in servers and servers[t].ui))
+    return list(
+        dict.fromkeys(t for t in tools if isinstance(t, str) and t in servers and servers[t].ui)
+    )
 
 
 def chip_prompt(chips: Sequence[str], servers: Mapping[str, McpServer]) -> str:
@@ -205,9 +221,13 @@ async def trade_tokens(
     wanted = {name: list(s.kinds) for name, s in servers.items() if s.kinds}
     if not wanted or not (storage.token or memory_token):
         return {}
-    headers = {k: v for k, v in ((STORAGE_HEADER, storage.token), (MEMORY_HEADER, memory_token)) if v}
+    headers = {
+        k: v for k, v in ((STORAGE_HEADER, storage.token), (MEMORY_HEADER, memory_token)) if v
+    }
     try:
-        data = await storage.json("POST", "/identity/mcp-tokens", json_body={"servers": wanted}, headers=headers)
+        data = await storage.json(
+            "POST", "/identity/mcp-tokens", json_body={"servers": wanted}, headers=headers
+        )
     except (WorkspaceError, ValueError) as err:
         logger.warning("couldn't get the MCP servers' tokens; they get no user: %s", err)
         return {}
@@ -225,7 +245,9 @@ def run_servers(
             continue
         config = dict(server.config)
         given = tokens.get(name) or {}
-        added = {HEADERS[kind]: given[kind] for kind in server.kinds if isinstance(given.get(kind), str)}
+        added = {
+            HEADERS[kind]: given[kind] for kind in server.kinds if isinstance(given.get(kind), str)
+        }
         if added:
             config["headers"] = {**config.get("headers", {}), **added}
         configs[name] = config

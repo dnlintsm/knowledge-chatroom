@@ -83,7 +83,9 @@ class EditError(ValueError):
 
 def apply_edit(content: str, old_text: str, new_text: str, replace_all: bool = False) -> Edit:
     if not old_text:
-        raise EditError("oldText is empty. To create a file or replace all of it, write the whole file instead.")
+        raise EditError(
+            "oldText is empty. To create a file or replace all of it, write the whole file instead."
+        )
     if old_text == new_text:
         raise EditError("oldText and newText are the same; nothing to change.")
     # Reads split lines on any line ending: match a CRLF file too, keeping its endings.
@@ -111,7 +113,11 @@ def apply_edit(content: str, old_text: str, new_text: str, replace_all: bool = F
             f"oldText occurs {count} times. Include more of the surrounding lines so it matches only "
             "the place you mean, or set replaceAll to change every occurrence."
         )
-    updated = content.replace(find, put) if replace_all else content[:first] + put + content[first + len(find) :]
+    updated = (
+        content.replace(find, put)
+        if replace_all
+        else content[:first] + put + content[first + len(find) :]
+    )
     start = _line_at(updated, first)
     end = _line_at(updated, first + max(len(put) - 1, 0))
     return Edit(updated, count if replace_all else 1, (start, end))

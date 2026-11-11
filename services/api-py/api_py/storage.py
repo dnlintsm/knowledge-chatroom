@@ -29,10 +29,10 @@ logger = logging.getLogger("api_py")
 EVENTS_CHANNEL = "workspace_files"
 
 # What prepareRowSecurity() in db.ts grants APP_ROLE.
-_READ = (
-    "workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals"
+_READ = "workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals"
+_WRITE = (
+    "blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals"
 )
-_WRITE = "blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals"
 _MEMORY = (
     "memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, "
     "memory_learned_chats, shared_memories, shared_memory_versions, shared_memory_proposals, shared_memory_settings"
@@ -52,7 +52,9 @@ class Storage:
 
     async def notify(self, conn: AsyncConnection, event: dict[str, Any]) -> None:
         """Tells every process about a change, when `conn`'s transaction commits."""
-        payload = json.dumps({**event, "workspaceId": self.workspace_id}, separators=(",", ":"), ensure_ascii=False)
+        payload = json.dumps(
+            {**event, "workspaceId": self.workspace_id}, separators=(",", ":"), ensure_ascii=False
+        )
         await conn.execute("SELECT pg_notify(%s, %s)", (EVENTS_CHANNEL, payload))
 
 

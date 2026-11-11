@@ -22,7 +22,10 @@ SERVERS = {
             "memoryAccess": True,
             "ui": {"label": "Lab tools", "chip": "Lab", "mode": "manual"},
         },
-        "papers": {"url": "http://papers:9100/mcp", "ui": {"label": "Search papers", "chip": "Papers"}},
+        "papers": {
+            "url": "http://papers:9100/mcp",
+            "ui": {"label": "Search papers", "chip": "Papers"},
+        },
         "local": {"type": "stdio", "command": "python", "args": ["tools.py"]},
     }
 }
@@ -43,7 +46,9 @@ class AgentServer:
             return httpx.Response(200, json={"skills": []})
         if path == "/memory/agent":
             if not self.memory_on:
-                return httpx.Response(403, json={"error": "Memory is off in this chat (incognito, or turned off)"})
+                return httpx.Response(
+                    403, json={"error": "Memory is off in this chat (incognito, or turned off)"}
+                )
             return httpx.Response(200, json={"prompt": "- Memory: ...", "tools": []})
         if path == "/identity/mcp-tokens":
             if self.tokens_status != 200:
@@ -72,7 +77,11 @@ def agent_server() -> AgentServer:
 
 @pytest.fixture
 def client(claude, agent_server, tmp_path):
-    env = {"AGENT_PY_WORKDIR": str(tmp_path), "MCP_SERVERS": json.dumps(SERVERS), "LAB_TOKEN": "s3cret"}
+    env = {
+        "AGENT_PY_WORKDIR": str(tmp_path),
+        "MCP_SERVERS": json.dumps(SERVERS),
+        "LAB_TOKEN": "s3cret",
+    }
     adapter = make_adapter(env, transport=httpx.MockTransport(agent_server.handle))
     with TestClient(create_app(env=env, adapter=adapter)) as c:
         yield c
@@ -87,14 +96,25 @@ def run_input(chips: list[str], thread: str = "t1") -> dict[str, Any]:
         "tools": [],
         "context": [],
         "forwardedProps": {
-            "knowledge_chatroom": {"version": 2, "user": {"id": "local"}, "storage": "server", "tools": chips}
+            "knowledge_chatroom": {
+                "version": 2,
+                "user": {"id": "local"},
+                "storage": "server",
+                "tools": chips,
+            }
         },
     }
 
 
 def post(client, body, headers: dict[str, str] | None = None):
     response = client.post(
-        "/agent/report", json=body, headers={"X-Knowledge-Storage": "storage-tok", "X-Knowledge-Memory": "memory-tok", **(headers or {})}
+        "/agent/report",
+        json=body,
+        headers={
+            "X-Knowledge-Storage": "storage-tok",
+            "X-Knowledge-Memory": "memory-tok",
+            **(headers or {}),
+        },
     )
     assert response.status_code == 200, response.text
     return response
@@ -141,11 +161,17 @@ def test_a_run_gets_the_servers_with_the_users_tokens_and_its_chips(client, clau
     assert "headers" not in options.mcp_servers["papers"]
     for name in ("lab", "papers", "local"):
         assert f"mcp__{name}" in options.allowed_tools
-    assert '- The user turned on "Lab" (Lab tools) for this chat: answer with the mcp__lab__ tools' in options.system_prompt
+    assert (
+        '- The user turned on "Lab" (Lab tools) for this chat: answer with the mcp__lab__ tools'
+        in options.system_prompt
+    )
     assert "Papers" not in options.system_prompt  # its chip is off
     (trade,) = agent_server.trades()
     assert json.loads(trade.content) == {"servers": {"lab": ["identity", "storage", "memory"]}}
-    assert trade.headers["x-knowledge-storage"] == "storage-tok" and trade.headers["x-knowledge-memory"] == "memory-tok"
+    assert (
+        trade.headers["x-knowledge-storage"] == "storage-tok"
+        and trade.headers["x-knowledge-memory"] == "memory-tok"
+    )
 
 
 def test_a_manual_server_is_left_out_without_its_chip(client, claude):
@@ -165,4 +191,6 @@ def test_without_memory_in_the_chat_no_memory_token_is_asked_for(client, claude,
 def test_when_the_trade_fails_the_servers_get_no_user(client, claude, agent_server):
     agent_server.tokens_status = 401
     post(client, run_input(["lab"]))
-    assert claude.created[0].options.mcp_servers["lab"]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert claude.created[0].options.mcp_servers["lab"]["headers"] == {
+        "Authorization": "Bearer s3cret"
+    }

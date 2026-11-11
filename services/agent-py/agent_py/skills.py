@@ -59,7 +59,15 @@ async def fetch_skills(storage: Storage, thread: str) -> list[RunSkill]:
         if not _NAME.match(s.get("name", "")) or s.get("mode") not in ("auto", "manual"):
             continue
         files = tuple((f["path"], base64.b64decode(f["content"])) for f in s.get("files", []))
-        skills.append(RunSkill(s["name"], s["mode"], s.get("source", "builtin"), bool(s.get("userInvocable", True)), files))
+        skills.append(
+            RunSkill(
+                s["name"],
+                s["mode"],
+                s.get("source", "builtin"),
+                bool(s.get("userInvocable", True)),
+                files,
+            )
+        )
     return skills
 
 
@@ -115,7 +123,9 @@ def slash_command(text: str, skills: Sequence[RunSkill]) -> tuple[str, RunSkill 
     return (text, skill) if skill else (f" {text}", None)
 
 
-def skill_options(skills: Sequence[RunSkill], on_use: Callable[[str, Trigger], None]) -> dict[str, Any]:
+def skill_options(
+    skills: Sequence[RunSkill], on_use: Callable[[str, Trigger], None]
+) -> dict[str, Any]:
     """ClaudeAgentOptions fields for a run with these skills; `on_use` hears each one Claude picks."""
 
     async def picked(input_data: Any, _tool_use_id: str | None, _context: Any) -> dict[str, Any]:
@@ -130,7 +140,9 @@ def skill_options(skills: Sequence[RunSkill], on_use: Callable[[str, Trigger], N
         "skills": [s.name for s in skills],
         "settings": json.dumps(
             {
-                "skillOverrides": {s.name: "on" if s.mode == "auto" else "user-invocable-only" for s in skills},
+                "skillOverrides": {
+                    s.name: "on" if s.mode == "auto" else "user-invocable-only" for s in skills
+                },
                 "disableSkillShellExecution": True,
             }
         ),

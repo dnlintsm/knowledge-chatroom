@@ -62,13 +62,16 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
         return True
 
 
-async def _serve_storage_when_ready(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> None:
+async def _serve_storage_when_ready(
+    app: FastAPI, pool: AsyncConnectionPool, settings: Settings
+) -> None:
     """Follows the database until the storage routes can be served (or it turns out newer than this server)."""
     while not await _try_storage(app, pool, settings):
         found = app.state.schema
         if found and found.state is db.SchemaState.AHEAD:
             logger.error(
-                "the database has migrations this server doesn't know (%s); update api-py", ", ".join(found.unknown)
+                "the database has migrations this server doesn't know (%s); update api-py",
+                ", ".join(found.unknown),
             )
             return
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
@@ -90,7 +93,9 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             # TypeScript server has migrated is already served here.
             if app.state.storage is not None:
                 return True
-            if not app.state.pool or (app.state.schema and app.state.schema.state is db.SchemaState.AHEAD):
+            if not app.state.pool or (
+                app.state.schema and app.state.schema.state is db.SchemaState.AHEAD
+            ):
                 return False
             return await _try_storage(app, app.state.pool, settings)
 
@@ -113,7 +118,9 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 )
             app.state.schema = found
             if found and found.state is not db.SchemaState.READY:
-                logger.info("waiting for the TypeScript server to apply %s", ", ".join(found.missing))
+                logger.info(
+                    "waiting for the TypeScript server to apply %s", ", ".join(found.missing)
+                )
             watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
         try:
             yield
@@ -129,7 +136,11 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 await app.state.pool.close()
 
     app = FastAPI(
-        title="knowledge-chatroom API (Python)", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
+        title="knowledge-chatroom API (Python)",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     @app.get("/health")
@@ -143,8 +154,12 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         found: db.Schema | None = request.app.state.schema
         database = "off" if not settings.database_url else found.state.value if found else "down"
         if upstream == "ok" and database in ("off", "ready", "behind"):
-            return JSONResponse({"status": "ok"})  # the spec's answer (getHealth), as the TypeScript server gives it
-        return JSONResponse({"status": "degraded", "upstream": upstream, "database": database}, status_code=503)
+            return JSONResponse(
+                {"status": "ok"}
+            )  # the spec's answer (getHealth), as the TypeScript server gives it
+        return JSONResponse(
+            {"status": "degraded", "upstream": upstream, "database": database}, status_code=503
+        )
 
     for router in ROUTERS:
         app.include_router(router)
@@ -169,7 +184,11 @@ def main(env: Mapping[str, str] = os.environ) -> None:
     logger.info("passing routes not ported yet to %s", settings.ts_agent_url)
     # File watches never end on their own, so a stop doesn't wait for them for long.
     uvicorn.run(
-        create_app(settings), host=settings.host, port=settings.port, log_level="info", timeout_graceful_shutdown=5
+        create_app(settings),
+        host=settings.host,
+        port=settings.port,
+        log_level="info",
+        timeout_graceful_shutdown=5,
     )
 
 

@@ -61,7 +61,9 @@ class Session:
                 raise NodeNotFoundError("Node not found")
             raise ForbiddenError("You have no access to this workspace")
         if not at_least(role, minimum):
-            raise ForbiddenError(f"You can only {ROLE_VERB[role]} here; this needs {minimum} access")
+            raise ForbiddenError(
+                f"You can only {ROLE_VERB[role]} here; this needs {minimum} access"
+            )
         return role
 
     @asynccontextmanager
@@ -122,7 +124,9 @@ class Session:
             # Whoever adds a node owns it; with row security a trigger does this.
             if not self.storage.row_security:
                 await self.access.own_new_node(conn, self.principal.user_id, node_id)
-            await self._audit("node.create", {"node": node_id, "parent": parent_id, "name": name})(conn)
+            await self._audit("node.create", {"node": node_id, "parent": parent_id, "name": name})(
+                conn
+            )
 
         async with self.scoped() as conn:
             return await nodes.create(conn, self.storage, parent_id, name, in_tx)
@@ -131,13 +135,19 @@ class Session:
         await self.need(node_id, "editor")
         async with self.scoped() as conn:
             return await nodes.rename(
-                conn, self.storage, node_id, name, self._audit("node.rename", {"node": node_id, "name": name})
+                conn,
+                self.storage,
+                node_id,
+                name,
+                self._audit("node.rename", {"node": node_id, "name": name}),
             )
 
     async def delete_node(self, node_id: str) -> bool:
         await self.need(node_id, "owner")
         async with self.scoped() as conn:
-            return await nodes.remove(conn, self.storage, node_id, self._audit("node.delete", {"node": node_id}))
+            return await nodes.remove(
+                conn, self.storage, node_id, self._audit("node.delete", {"node": node_id})
+            )
 
     # Experiments: anyone who can view a node (or the workspace root) may start
     # their own experiment there; only its author changes it (see
@@ -148,7 +158,9 @@ class Session:
         if node_id is not ANYWHERE:
             await self.need(node_id, "viewer")  # type: ignore[arg-type]
         async with self.scoped() as conn:
-            return await experiments.list_experiments(conn, self.ws, self.principal.user_id, node_id)
+            return await experiments.list_experiments(
+                conn, self.ws, self.principal.user_id, node_id
+            )
 
     async def experiment(self, experiment_id: str) -> dict[str, Any]:
         async with self.scoped() as conn:
@@ -162,10 +174,14 @@ class Session:
         title = {"title": given["title"]} if "title" in given else {}
 
         async def in_tx(conn: AsyncConnection, new_id: str) -> None:
-            await self._audit("experiment.create", {"experiment": new_id, "node": node_id, **title})(conn)
+            await self._audit(
+                "experiment.create", {"experiment": new_id, "node": node_id, **title}
+            )(conn)
 
         async with self.scoped() as conn:
-            return await experiments.create(conn, self.storage, self.principal.user_id, node_id, given, in_tx)
+            return await experiments.create(
+                conn, self.storage, self.principal.user_id, node_id, given, in_tx
+            )
 
     async def upload_experiment(
         self, raw_id: str, path: list[str], given: dict[str, Any], files: list[dict[str, Any]]
@@ -183,7 +199,9 @@ class Session:
         transaction, so a failure part way leaves nothing behind.
         """
         if not is_uuid(raw_id):
-            raise ExperimentError("An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b")
+            raise ExperimentError(
+                "An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b"
+            )
         experiment_id = raw_id.lower()
         fields = clean_input(given)
         if not fields.get("title"):
@@ -214,7 +232,9 @@ class Session:
             if await experiments.id_taken(conn, experiment_id):
                 raise ExperimentExistsError(experiment_id)
             for name in names:
-                node = await nodes.find_child(conn, self.ws, existing[-1]["id"] if existing else None, name)
+                node = await nodes.find_child(
+                    conn, self.ws, existing[-1]["id"] if existing else None, name
+                )
                 if not node:
                     break
                 existing.append(node)
@@ -244,12 +264,22 @@ class Session:
                 await self._audit("experiment.create", target)(tx)
 
             await experiments.create(
-                conn, self.storage, principal.user_id, node_id, fields, in_tx, chosen_id=experiment_id, fork=False
+                conn,
+                self.storage,
+                principal.user_id,
+                node_id,
+                fields,
+                in_tx,
+                chosen_id=experiment_id,
+                fork=False,
             )
             service = await FileService(self.storage).in_experiment(conn, experiment_id)
             assert service is not None
             for f in uploads:
-                audit = self._audit("file.write", {"experiment": experiment_id, "path": f["path"], "size": len(f["bytes"])})
+                audit = self._audit(
+                    "file.write",
+                    {"experiment": experiment_id, "path": f["path"], "size": len(f["bytes"])},
+                )
                 info = await service.write(
                     conn,
                     f["path"],
@@ -282,7 +312,9 @@ class Session:
             # With row security a trigger makes you its owner (013_node_creator_owns.sql).
             if not self.storage.row_security:
                 await self.access.own_new_node(tx, self.principal.user_id, node_id)
-            await self._audit("node.create", {"node": node_id, "parent": parent_id, "name": name})(tx)
+            await self._audit("node.create", {"node": node_id, "parent": parent_id, "name": name})(
+                tx
+            )
 
         try:
             return await nodes.create(conn, self.storage, parent_id, name, in_tx), True
@@ -318,7 +350,12 @@ class Session:
         title = {"title": given["title"]} if "title" in given else {}
 
         async def in_tx(conn: AsyncConnection, new_id: str) -> None:
-            target = {"experiment": new_id, "node": node_id, **title, "inputs": [link["path"] for link in links]}
+            target = {
+                "experiment": new_id,
+                "node": node_id,
+                **title,
+                "inputs": [link["path"] for link in links],
+            }
             await self._audit("experiment.create", target)(conn)
 
         async with self.scoped() as conn:
@@ -368,14 +405,22 @@ class Session:
             name = source["as"] if source.get("as") is not None else origin.split("/")[-1]
             path = normalize_path(f"inputs/{name}")
             if path in (taken or []):
-                raise ExperimentError(f"The run already has an input at {path}; give this one another name")
+                raise ExperimentError(
+                    f"The run already has an input at {path}; give this one another name"
+                )
             if any(link["path"] == path for link in links):
-                raise ExperimentError(f"Two inputs would both be {path}; give one of them another name")
+                raise ExperimentError(
+                    f"Two inputs would both be {path}; give one of them another name"
+                )
             links.append({"path": path, "versionId": current["id"]})
             recorded.append(
                 {
                     "path": path,
-                    "from": {"node": place.node_id, "experiment": place.experiment_id, "path": origin},
+                    "from": {
+                        "node": place.node_id,
+                        "experiment": place.experiment_id,
+                        "path": origin,
+                    },
                     "version": current["id"],
                     "sha256": current["sha256"],
                     "size": current["size"],
@@ -383,7 +428,9 @@ class Session:
             )
         return links, recorded
 
-    async def add_run_inputs(self, experiment_id: str, inputs: list[dict[str, Any]]) -> dict[str, Any]:
+    async def add_run_inputs(
+        self, experiment_id: str, inputs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """
         Adds input files to an existing run or experiment (issue #114): each is
         linked in read only under inputs/ at its current version and appended to
@@ -395,13 +442,20 @@ class Session:
         if current["status"] == "archived":
             raise ForbiddenError(ARCHIVED)
         if current["state"] in ("done", "failed"):
-            raise ExperimentError(f"This run already finished ({current['state']}); start a new run to add inputs")
+            raise ExperimentError(
+                f"This run already finished ({current['state']}); start a new run to add inputs"
+            )
         if not inputs:
             raise ExperimentError("Name at least one file to add as an input")
         before = current["provenance"].get("inputs")
-        taken = [i.get("path") if isinstance(i, dict) else None for i in (before if before is not None else [])]
+        taken = [
+            i.get("path") if isinstance(i, dict) else None
+            for i in (before if before is not None else [])
+        ]
         links, recorded = await self._resolve_inputs(inputs, taken)
-        audit = self._audit("experiment.inputs", {"experiment": experiment_id, "inputs": [x["path"] for x in links]})
+        audit = self._audit(
+            "experiment.inputs", {"experiment": experiment_id, "inputs": [x["path"] for x in links]}
+        )
         async with self.scoped() as conn:
             await experiments.add_inputs(conn, self.storage, experiment_id, links, recorded, audit)
         run = await self.experiment(experiment_id)
@@ -437,7 +491,12 @@ class Session:
                     )
                 path = item["path"]
                 pinned.append(
-                    {"path": path, "experiment": old["id"], "as": re.sub(r"^inputs/", "", path), "sha256": sha256}
+                    {
+                        "path": path,
+                        "experiment": old["id"],
+                        "as": re.sub(r"^inputs/", "", path),
+                        "sha256": sha256,
+                    }
                 )
 
         def given_or(key: str, fallback: Any) -> Any:
@@ -455,7 +514,9 @@ class Session:
             {**(provenance or {}), "rerunOf": {"id": old["id"]}},
         )
 
-    async def finish_run(self, experiment_id: str, results: dict[str, Any], state: str) -> dict[str, Any]:
+    async def finish_run(
+        self, experiment_id: str, results: dict[str, Any], state: str
+    ) -> dict[str, Any]:
         """
         Records a run's results and how it ended (done or failed), and refreshes
         the record in its report.md (creating the report if it has none). A
@@ -469,11 +530,20 @@ class Session:
         if current["state"] in ("done", "failed"):
             if current["state"] == state and same_json(current["results"], results):
                 return current
-            raise ExperimentError(f"This run already finished ({current['state']}); start a new run to try again")
-        audit = self._audit("experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]})
+            raise ExperimentError(
+                f"This run already finished ({current['state']}); start a new run to try again"
+            )
+        audit = self._audit(
+            "experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]}
+        )
         async with self.scoped() as conn:
             await experiments.update(
-                conn, self.storage, experiment_id, {"results": results, "state": state}, audit, {"finishedAt": _now()}
+                conn,
+                self.storage,
+                experiment_id,
+                {"results": results, "state": state},
+                audit,
+                {"finishedAt": _now()},
             )
         run = await self.experiment(experiment_id)
         await self._refresh_report(run, create=True)
@@ -492,7 +562,9 @@ class Session:
         if not report and not create:
             return
         # As TextDecoder reads it: a leading byte order mark dropped, bad bytes replaced.
-        before = report[1].decode("utf-8-sig", errors="replace") if report else f"# {run['title']}\n"
+        before = (
+            report[1].decode("utf-8-sig", errors="replace") if report else f"# {run['title']}\n"
+        )
         after = with_front_matter(before, report_front_matter(run))
         if after != before:
             await files.write(REPORT_PATH, after.encode())
@@ -504,7 +576,9 @@ class Session:
         archived = current["status"] == "archived" and given.get("status", "archived") == "archived"
         if archived and any(key != "status" for key in given):
             raise ForbiddenError(ARCHIVED)
-        audit = self._audit("experiment.update", {"experiment": experiment_id, "fields": list(given)})
+        audit = self._audit(
+            "experiment.update", {"experiment": experiment_id, "fields": list(given)}
+        )
         async with self.scoped() as conn:
             await experiments.update(conn, self.storage, experiment_id, given, audit)
         # The report's record follows edits made after the run started.
@@ -516,7 +590,10 @@ class Session:
         self._need_author(await self.experiment(experiment_id))
         async with self.scoped() as conn:
             return await experiments.remove(
-                conn, self.storage, experiment_id, self._audit("experiment.delete", {"experiment": experiment_id})
+                conn,
+                self.storage,
+                experiment_id,
+                self._audit("experiment.delete", {"experiment": experiment_id}),
             )
 
     @staticmethod
@@ -560,7 +637,13 @@ class Session:
         """Proposals you can see: on places you can read, and your own."""
         async with self.scoped() as conn:
             return await proposals.list_proposals(
-                conn, self.ws, self.principal.user_id, node=node, experiment=experiment, status=status, limit=limit
+                conn,
+                self.ws,
+                self.principal.user_id,
+                node=node,
+                experiment=experiment,
+                status=status,
+                limit=limit,
             )
 
     async def proposal(self, proposal_id: str) -> dict[str, Any]:
@@ -576,14 +659,22 @@ class Session:
         return proposal, await self.storage.blobs.get(proposal["sha256"])
 
     async def propose(
-        self, node_id: str | None, path: str, data: bytes, *, mime: str | None = None, note: str | None = None
+        self,
+        node_id: str | None,
+        path: str,
+        data: bytes,
+        *,
+        mime: str | None = None,
+        note: str | None = None,
     ) -> dict[str, Any]:
         """Proposes new content for a file at the root (None) or in a node; returns the proposal."""
         await self.need(node_id, "viewer")
         principal = self.principal
 
         async def in_tx(conn: AsyncConnection, proposal_id: str) -> None:
-            await self._audit("proposal.create", {"proposal": proposal_id, "node": node_id, "path": path})(conn)
+            await self._audit(
+                "proposal.create", {"proposal": proposal_id, "node": node_id, "path": path}
+            )(conn)
 
         async with self.scoped() as conn:
             proposal_id = await proposals.propose(
@@ -635,7 +726,12 @@ class Session:
             path = candidate["path"]
 
             async def in_tx(conn: AsyncConnection, proposal_id: str, path: str = path) -> None:
-                target = {"proposal": proposal_id, "node": node_id, "path": path, "experiment": experiment_id}
+                target = {
+                    "proposal": proposal_id,
+                    "node": node_id,
+                    "path": path,
+                    "experiment": experiment_id,
+                }
                 await self._audit("proposal.create", target)(conn)
 
             async with self.scoped() as conn:
@@ -715,11 +811,17 @@ class Session:
         if op == "node":
             return await self.access.sees_node(user_id, str(event.get("id")))
         if op == "experiment":
-            return await self.access.hears_experiment(user_id, str(event.get("id")), str(event.get("change")))
+            return await self.access.hears_experiment(
+                user_id, str(event.get("id")), str(event.get("change"))
+            )
         if op == "proposal":
-            return event.get("authorId") == user_id or await self.role(event.get("node")) is not None
+            return (
+                event.get("authorId") == user_id or await self.role(event.get("node")) is not None
+            )
         if event.get("experiment"):
-            return await self.access.experiment_access(user_id, str(event["experiment"])) is not None
+            return (
+                await self.access.experiment_access(user_id, str(event["experiment"])) is not None
+            )
         return await self.role(event.get("node")) is not None
 
     # The org tree and grants
@@ -739,7 +841,9 @@ class Session:
         await self.need(None, "owner")
 
         async def in_tx(conn: AsyncConnection, group_id: str) -> None:
-            await self._audit("group.create", {"group": group_id, "parent": parent_id, "name": name})(conn)
+            await self._audit(
+                "group.create", {"group": group_id, "parent": parent_id, "name": name}
+            )(conn)
 
         return await self.access.create_group(parent_id, name, in_tx)
 
@@ -751,7 +855,9 @@ class Session:
 
     async def delete_group(self, group_id: str) -> bool:
         await self.need(None, "owner")
-        return await self.access.delete_group(group_id, self._audit("group.delete", {"group": group_id}))
+        return await self.access.delete_group(
+            group_id, self._audit("group.delete", {"group": group_id})
+        )
 
     async def set_member(self, group_id: str, user_id: str, member: bool) -> bool:
         await self.need(None, "owner")
@@ -765,7 +871,9 @@ class Session:
         await self.need(node_id, "owner")
         return await self.access.grants(node_id)
 
-    async def set_grant(self, node_id: str | None, principal_type: str, principal_id: str, role: str) -> str:
+    async def set_grant(
+        self, node_id: str | None, principal_type: str, principal_id: str, role: str
+    ) -> str:
         await self.need(node_id, "owner")
         return await self.access.set_grant(
             node_id,
@@ -775,7 +883,12 @@ class Session:
             self.principal.user_id,
             self._audit(
                 "grant.set",
-                {"node": node_id, "principalType": principal_type, "principalId": principal_id, "role": role},
+                {
+                    "node": node_id,
+                    "principalType": principal_type,
+                    "principalId": principal_id,
+                    "role": role,
+                },
             ),
         )
 
@@ -788,7 +901,11 @@ class Session:
             grant_id,
             self._audit(
                 "grant.revoke",
-                {"node": grant["nodeId"], "principalType": grant["principalType"], "principalId": grant["principalId"]},
+                {
+                    "node": grant["nodeId"],
+                    "principalType": grant["principalType"],
+                    "principalId": grant["principalId"],
+                },
             ),
         )
 
@@ -846,7 +963,9 @@ class FilesSession:
         async with self.session.scoped() as conn:
             return await self.service.history(conn, path)
 
-    async def write(self, path: str, data: bytes, *, mime: str | None = None, create_only: bool = False):
+    async def write(
+        self, path: str, data: bytes, *, mime: str | None = None, create_only: bool = False
+    ):
         self._need_editor()
         principal = self.session.principal
         async with self.session.scoped() as conn:

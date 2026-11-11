@@ -12,7 +12,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 from agent_py.text import EditError, apply_edit, read_lines
 from agent_py.workspace import Storage, file_route, file_tools, format_tree
 
@@ -35,12 +34,17 @@ class FakeStorage:
         if path == "/proposals" and request.method == "GET":
             return httpx.Response(200, json={"proposals": self.proposals})
         if path.startswith("/proposals/") and path.endswith("/content"):
-            return httpx.Response(200, content=b"RF 40 W\n", headers={"content-type": "text/markdown"})
+            return httpx.Response(
+                200, content=b"RF 40 W\n", headers={"content-type": "text/markdown"}
+            )
         if path.startswith("/files/"):
             name = path[len("/files/") :]
             if request.method == "PUT":
                 if "propose" in request.url.params:
-                    return httpx.Response(201, json={"path": name, "node": request.url.params.get("node"), "isNew": True})
+                    return httpx.Response(
+                        201,
+                        json={"path": name, "node": request.url.params.get("node"), "isNew": True},
+                    )
                 self.files[name] = (request.content, "text/markdown")
                 return httpx.Response(200, json={"path": name})
             if name not in self.files:
@@ -51,12 +55,24 @@ class FakeStorage:
             return httpx.Response(200, content=data, headers={"content-type": mime})
         if path == "/experiments/runs":
             body = json.loads(request.content)
-            inputs = [{"path": f"inputs/{i['path'].rsplit('/', 1)[-1]}"} for i in body.get("inputs", [])]
-            run = {"id": "r1", "title": body.get("title", "x (rerun)"), "state": "running", "fileCount": 2}
-            return httpx.Response(201, json={**run, "provenance": {**body["provenance"], "inputs": inputs}})
+            inputs = [
+                {"path": f"inputs/{i['path'].rsplit('/', 1)[-1]}"} for i in body.get("inputs", [])
+            ]
+            run = {
+                "id": "r1",
+                "title": body.get("title", "x (rerun)"),
+                "state": "running",
+                "fileCount": 2,
+            }
+            return httpx.Response(
+                201, json={**run, "provenance": {**body["provenance"], "inputs": inputs}}
+            )
         if path.endswith("/finish"):
             body = json.loads(request.content)
-            return httpx.Response(200, json={"id": path.split("/")[2], "state": body["state"], "results": body["results"]})
+            return httpx.Response(
+                200,
+                json={"id": path.split("/")[2], "state": body["state"], "results": body["results"]},
+            )
         return httpx.Response(500, json={"error": f"unexpected {request.method} {path}"})
 
 
@@ -119,7 +135,10 @@ def test_writes_in_a_node_and_to_skills_are_proposals(api):
 
 def test_read_file_numbers_lines_and_pages(api):
     api.files["notes/a.md"] = (b"one\ntwo\nthree", "text/markdown")
-    assert call(api, "read_file", path="notes/a.md") == ("notes/a.md\n1\tone\n2\ttwo\n3\tthree", False)
+    assert call(api, "read_file", path="notes/a.md") == (
+        "notes/a.md\n1\tone\n2\ttwo\n3\tthree",
+        False,
+    )
     out, _ = call(api, "read_file", path="notes/a.md", offset=2, limit=1)
     assert out == "notes/a.md (lines 2-2 of 3; continue with offset 3)\n2\ttwo"
 
@@ -141,9 +160,18 @@ def test_edit_file_changes_part_of_a_file(api):
 
 def test_edit_file_builds_on_claudes_own_open_proposal(api):
     api.proposals = [
-        {"id": "p1", "node": NODE, "path": "notes/r.md", "author": "agent", "authorId": "u1", "status": "open"},
+        {
+            "id": "p1",
+            "node": NODE,
+            "path": "notes/r.md",
+            "author": "agent",
+            "authorId": "u1",
+            "status": "open",
+        },
     ]
-    out, failed = call(api, "edit_file", path="notes/r.md", oldText="40 W", newText="45 W", node=NODE)
+    out, failed = call(
+        api, "edit_file", path="notes/r.md", oldText="40 W", newText="45 W", node=NODE
+    )
     assert not failed and "RF 45 W" in out
     assert api.requests[-1].content == b"RF 45 W\n"
     assert "propose" in api.requests[-1].url.params
@@ -152,7 +180,14 @@ def test_edit_file_builds_on_claudes_own_open_proposal(api):
 def test_a_root_skill_edit_builds_only_on_a_root_proposal(api):
     # The same skill path proposed in a node is another proposal, not this one's base.
     api.proposals = [
-        {"id": "p1", "node": NODE, "path": "skills/s/SKILL.md", "author": "agent", "authorId": "u1", "status": "open"},
+        {
+            "id": "p1",
+            "node": NODE,
+            "path": "skills/s/SKILL.md",
+            "author": "agent",
+            "authorId": "u1",
+            "status": "open",
+        },
     ]
     out, failed = call(api, "edit_file", path="skills/s/SKILL.md", oldText="40 W", newText="45 W")
     assert failed and "No file at skills/s/SKILL.md" in out
@@ -171,8 +206,18 @@ def test_edit_file_errors_reach_claude(api):
 
 
 def test_storage_refusals_and_outages_reach_claude():
-    refuse = Storage("http://storage.test", "tok", transport=httpx.MockTransport(lambda r: httpx.Response(403, json={"error": "No"})))
-    down = Storage("http://storage.test", "tok", transport=httpx.MockTransport(lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused"))))
+    refuse = Storage(
+        "http://storage.test",
+        "tok",
+        transport=httpx.MockTransport(lambda r: httpx.Response(403, json={"error": "No"})),
+    )
+    down = Storage(
+        "http://storage.test",
+        "tok",
+        transport=httpx.MockTransport(
+            lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused"))
+        ),
+    )
     for storage, expected in ((refuse, "No"), (down, "unavailable")):
         tool = {t.name: t for t in file_tools(lambda s=storage: s)}["list_nodes"]
         result = asyncio.run(tool.handler({}))
@@ -181,12 +226,22 @@ def test_storage_refusals_and_outages_reach_claude():
 
 def test_create_experiment_starts_a_run_with_its_provenance(api):
     out, failed = call(
-        api, "create_experiment", title="Try 40 W", node=NODE, inputs=[{"path": "uploads/a.csv"}], skill="analysis"
+        api,
+        "create_experiment",
+        title="Try 40 W",
+        node=NODE,
+        inputs=[{"path": "uploads/a.csv"}],
+        skill="analysis",
     )
     assert not failed
     assert json.loads(out) == {
-        "ok": True, "id": "r1", "title": "Try 40 W", "state": "running", "files": 2,
-        "inputs": ["inputs/a.csv"], "report": "report.md",
+        "ok": True,
+        "id": "r1",
+        "title": "Try 40 W",
+        "state": "running",
+        "files": 2,
+        "inputs": ["inputs/a.csv"],
+        "report": "report.md",
     }
     body = json.loads(api.requests[-1].content)
     assert body["nodeId"] == NODE and body["inputs"] == [{"path": "uploads/a.csv"}]
@@ -215,15 +270,28 @@ def test_file_routes_encode_each_segment():
 
 def test_format_tree():
     nodes = [
-        {"id": "a", "parentId": None, "name": "Etch", "type": "tech", "fileCount": 1, "role": "editor"},
+        {
+            "id": "a",
+            "parentId": None,
+            "name": "Etch",
+            "type": "tech",
+            "fileCount": 1,
+            "role": "editor",
+        },
         {"id": "b", "parentId": "a", "name": "M3", "type": "module", "fileCount": 0, "role": None},
     ]
-    assert format_tree(nodes) == "- Etch [tech] id=a (1 file, editor)\n  - M3 [module] id=b (no access, shown as a path)"
+    assert (
+        format_tree(nodes)
+        == "- Etch [tech] id=a (1 file, editor)\n  - M3 [module] id=b (no access, shown as a path)"
+    )
 
 
 def test_read_lines_cuts_long_lines():
     out = read_lines("a.txt", "x" * 10, max_chars=4)
-    assert out == "a.txt (lines 1-1 of 1; line 1 cut before column 5; continue with offset 1 column 5)\n1\txxxx"
+    assert (
+        out
+        == "a.txt (lines 1-1 of 1; line 1 cut before column 5; continue with offset 1 column 5)\n1\txxxx"
+    )
 
 
 def test_apply_edit_keeps_crlf_and_reports_lines():

@@ -1,17 +1,17 @@
 """Settings from the environment, read as the TypeScript agent server reads them.
 
-    TS_AGENT_URL         the TypeScript agent server, which serves every route not
-                         ported yet (default http://127.0.0.1:8100)
-    API_PY_HOST / API_PY_PORT
-                         where this server listens (default 127.0.0.1:8000, the
-                         address the app and agent-py know as LOCAL_AGENT_URL)
-    DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
-    AUTH_MODE, AUTH_SECRET
-                         login, with the rules of packages/contracts/src/auth-mode.ts
-    MIGRATIONS_DIR       the SQL migrations to expect in the database
-                         (default apps/agent/src/storage/migrations in this repository)
-    S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
-    MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
+TS_AGENT_URL         the TypeScript agent server, which serves every route not
+                     ported yet (default http://127.0.0.1:8100)
+API_PY_HOST / API_PY_PORT
+                     where this server listens (default 127.0.0.1:8000, the
+                     address the app and agent-py know as LOCAL_AGENT_URL)
+DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
+AUTH_MODE, AUTH_SECRET
+                     login, with the rules of packages/contracts/src/auth-mode.ts
+MIGRATIONS_DIR       the SQL migrations to expect in the database
+                     (default apps/agent/src/storage/migrations in this repository)
+S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
+MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 """
 
 from __future__ import annotations

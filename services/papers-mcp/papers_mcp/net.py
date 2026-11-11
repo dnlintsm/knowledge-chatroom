@@ -30,7 +30,9 @@ def get(url: str, *, accept: str = "application/json", max_bytes: int | None = N
         if err.code == 404:
             raise SourceError(f"Not found: {url}") from err
         if err.code == 429:
-            raise SourceError("The paper source is rate limiting us; try again in a minute.") from err
+            raise SourceError(
+                "The paper source is rate limiting us; try again in a minute."
+            ) from err
         raise SourceError(f"{url} answered {err.code}") from err
     except (urllib.error.URLError, TimeoutError) as err:
         raise SourceError(f"Couldn't reach {url}: {getattr(err, 'reason', err)}") from err

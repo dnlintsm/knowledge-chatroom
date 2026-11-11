@@ -6,17 +6,18 @@ import os
 import time
 from typing import Any
 
+import httpx
 import pytest
+from agent_py.app import create_app, make_adapter
+from agent_py.prompt import SYSTEM_PROMPT
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
 
-import httpx
-from agent_py.app import create_app, make_adapter
-from agent_py.prompt import SYSTEM_PROMPT
-
 KEY = Ed25519PrivateKey.generate()
-PUBLIC_KEY = base64.urlsafe_b64encode(KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()
+PUBLIC_KEY = base64.urlsafe_b64encode(
+    KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+).decode()
 
 
 def b64(data: bytes) -> str:
@@ -57,7 +58,9 @@ OPEN_FILE = [{"description": "openFile", "value": '{"path": "notes/a.md", "conte
 
 def events(response) -> list[dict[str, Any]]:
     assert response.status_code == 200, response.text
-    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    return [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
 
 
 def types(evts: list[dict[str, Any]]) -> list[str]:
@@ -93,7 +96,9 @@ def test_a_run_streams_the_models_answer(client, claude):
 def test_the_session_has_the_chatrooms_options(client, claude):
     body = run_input(user=LOCAL, context=OPEN_FILE)
     # The browser can't pick the model or resume another chat's session.
-    body["forwardedProps"].update(model="claude-evil", resume="99999999-2222-3333-4444-555555555555")
+    body["forwardedProps"].update(
+        model="claude-evil", resume="99999999-2222-3333-4444-555555555555"
+    )
     events(client.post("/agent/report", json=body))
     options = claude.created[0].options
     assert options.model == "claude-sonnet-5"
@@ -113,14 +118,26 @@ def test_the_workspace_note_comes_with_the_message_when_it_changes(client, claud
     events(client.post("/agent/report", json=run_input("three", user=LOCAL, context=moved)))
     (session,) = claude.created  # one session for the whole chat
     first, second, third = session.prompts
-    assert first.startswith("<workspace>\nopenFile\n") and "notes/a.md" in first and first.endswith("\n\none")
+    assert (
+        first.startswith("<workspace>\nopenFile\n")
+        and "notes/a.md" in first
+        and first.endswith("\n\none")
+    )
     assert second == "two"
     assert "notes/b.md" in third and third.endswith("\n\nthree")
 
 
 def test_each_chat_gets_its_own_note(client, claude):
-    events(client.post("/agent/report", json=run_input("one", thread="a", user=LOCAL, context=OPEN_FILE)))
-    events(client.post("/agent/report", json=run_input("one", thread="b", user=LOCAL, context=OPEN_FILE)))
+    events(
+        client.post(
+            "/agent/report", json=run_input("one", thread="a", user=LOCAL, context=OPEN_FILE)
+        )
+    )
+    events(
+        client.post(
+            "/agent/report", json=run_input("one", thread="b", user=LOCAL, context=OPEN_FILE)
+        )
+    )
     assert all(s.prompts[0].startswith("<workspace>") for s in claude.created)
 
 
@@ -137,7 +154,9 @@ def test_a_run_for_no_one_is_refused(client, claude):
 
 
 def test_a_header_without_a_key_is_refused(client):
-    response = client.post("/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-User": ALICE})
+    response = client.post(
+        "/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-User": ALICE}
+    )
     assert response.status_code == 401
     assert "KNOWLEDGE_PUBLIC_KEY" in response.json()["detail"]
 
@@ -145,7 +164,9 @@ def test_a_header_without_a_key_is_refused(client):
 @pytest.fixture
 def login_client(claude):
     env = {"KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
-    with TestClient(create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))) as c:
+    with TestClient(
+        create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+    ) as c:
         yield c
 
 
@@ -153,18 +174,28 @@ def test_with_login_runs_need_the_apps_signature(login_client, claude):
     alice = {"id": "test|alice", "signed_in": True}
     assert login_client.post("/agent/report", json=run_input(user=alice)).status_code == 401
     forged = sign({"sub": "test|alice", "exp": time.time() + 300}, Ed25519PrivateKey.generate())
-    response = login_client.post("/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": forged})
+    response = login_client.post(
+        "/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": forged}
+    )
     assert response.status_code == 401
     expired = sign({"sub": "test|alice", "exp": time.time() - 1})
-    response = login_client.post("/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": expired})
+    response = login_client.post(
+        "/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": expired}
+    )
     assert response.status_code == 401
-    evts = events(login_client.post("/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": ALICE}))
+    evts = events(
+        login_client.post(
+            "/agent/report", json=run_input(user=alice), headers={"X-Knowledge-User": ALICE}
+        )
+    )
     assert types(evts)[-1] == "RUN_FINISHED"
 
 
 def test_with_login_the_run_must_be_for_the_signed_in_user(login_client, claude):
     bob = {"id": "test|bob", "signed_in": True}
-    response = login_client.post("/agent/report", json=run_input(user=bob), headers={"X-Knowledge-User": ALICE})
+    response = login_client.post(
+        "/agent/report", json=run_input(user=bob), headers={"X-Knowledge-User": ALICE}
+    )
     assert types(events(response)) == ["RUN_ERROR"]
     assert claude.created == []
 
@@ -181,8 +212,12 @@ def test_the_note_also_goes_in_front_of_a_message_with_parts(client, claude):
 
 def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
     env = {"LOCAL_AGENT_URL": "http://storage.test/"}
-    with TestClient(create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))) as c:
-        response = c.post("/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-Storage": "tok-1"})
+    with TestClient(
+        create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+    ) as c:
+        response = c.post(
+            "/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-Storage": "tok-1"}
+        )
         events(response)
         adapter_tokens = c.app.state.adapter._tokens
     options = claude.created[0].options

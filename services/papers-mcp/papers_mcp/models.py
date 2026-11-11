@@ -26,12 +26,16 @@ class Paper(BaseModel):
 
     id: str
     title: str
-    authors: list[Author] = Field(description="The first authors, at most 10; author_count has the total.")
+    authors: list[Author] = Field(
+        description="The first authors, at most 10; author_count has the total."
+    )
     author_count: int
     year: int | None = None
     published: str | None = Field(None, description="ISO date.")
     venue: str | None = None
-    abstract: str | None = Field(None, description="Shortened in search results; whole in get_paper.")
+    abstract: str | None = Field(
+        None, description="Shortened in search results; whole in get_paper."
+    )
     url: str = Field(description="The paper's page.")
     pdf_url: str | None = Field(None, description="An open-access PDF, when known.")
     doi: str | None = None
@@ -50,7 +54,9 @@ class PaperSearchResult(BaseModel):
     query: str
     results: list[Paper]
     total: int | None = None
-    next_cursor: str | None = Field(None, description="Pass back as `cursor` for more results; null at the end.")
+    next_cursor: str | None = Field(
+        None, description="Pass back as `cursor` for more results; null at the end."
+    )
 
 
 class Section(BaseModel):
@@ -65,7 +71,9 @@ class PaperText(BaseModel):
     offset: int
     next_offset: int | None = Field(None, description="Where to read on; null at the end.")
     total_lines: int
-    sections: list[Section] = Field(description="Headings found in the text, with their line numbers.")
+    sections: list[Section] = Field(
+        description="Headings found in the text, with their line numbers."
+    )
 
 
 class SavedPaper(BaseModel):
@@ -73,7 +81,9 @@ class SavedPaper(BaseModel):
     node: str | None = None
     experiment: str | None = None
     pdf_path: str | None = None
-    proposed: bool = Field(description="True when the save became a proposal for an editor of the node to accept.")
+    proposed: bool = Field(
+        description="True when the save became a proposal for an editor of the node to accept."
+    )
     note: str | None = None
 
 
@@ -99,7 +109,7 @@ def parse_id(value: str) -> tuple[str, str]:
         ("https://arxiv.org/pdf/", "arxiv"),
     ):
         if lowered.startswith(prefix):
-            raw, lowered = raw[len(prefix):], lowered[len(prefix):]
+            raw, lowered = raw[len(prefix) :], lowered[len(prefix) :]
             if scheme == "arxiv":
                 raw = raw.removesuffix(".pdf")
             return _checked(scheme, raw)
@@ -109,7 +119,9 @@ def parse_id(value: str) -> tuple[str, str]:
         return "doi", raw
     if ARXIV_ID.match(raw):
         return "arxiv", raw
-    raise ValueError(f"Not a paper id: {value!r}. Use openalex:W…, doi:10.… or arxiv:<id> from search_papers.")
+    raise ValueError(
+        f"Not a paper id: {value!r}. Use openalex:W…, doi:10.… or arxiv:<id> from search_papers."
+    )
 
 
 def _checked(scheme: str, bare: str) -> tuple[str, str]:
@@ -125,7 +137,7 @@ def _checked(scheme: str, bare: str) -> tuple[str, str]:
 def arxiv_from_doi(doi: str | None) -> str | None:
     """arXiv's own DOIs (10.48550/arXiv.<id>) name the arXiv paper."""
     if doi and doi.lower().startswith("10.48550/arxiv."):
-        return doi[len("10.48550/arxiv."):]
+        return doi[len("10.48550/arxiv.") :]
     return None
 
 
@@ -153,8 +165,14 @@ def slug(title: str, limit: int = 60) -> str:
 
 def bibtex(paper: Paper) -> str:
     first = paper.authors[0].name.split()[-1] if paper.authors else "anon"
-    first_word = next((w for w in re.findall(r"[a-z0-9]+", paper.title.lower()) if len(w) > 3), "paper")
-    key = re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", first).encode("ascii", "ignore").decode().lower())
+    first_word = next(
+        (w for w in re.findall(r"[a-z0-9]+", paper.title.lower()) if len(w) > 3), "paper"
+    )
+    key = re.sub(
+        r"[^a-z0-9]",
+        "",
+        unicodedata.normalize("NFKD", first).encode("ascii", "ignore").decode().lower(),
+    )
     key = f"{key or 'anon'}{paper.year or ''}{first_word}"
     authors = " and ".join(a.name for a in paper.authors)
     if paper.author_count > len(paper.authors):

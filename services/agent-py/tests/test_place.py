@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from ag_ui.core import RunAgentInput, TextInputContent, ToolMessage, UserMessage
-
 from agent_py.adapter import ChatroomAdapter, with_note
 from agent_py.model import resolve_model
 from agent_py.place import workspace_note
 
 
 def run_input(**fields) -> RunAgentInput:
-    base = {"thread_id": "t", "run_id": "r", "state": {}, "messages": [], "tools": [], "context": [], "forwarded_props": {}}
+    base = {
+        "thread_id": "t",
+        "run_id": "r",
+        "state": {},
+        "messages": [],
+        "tools": [],
+        "context": [],
+        "forwarded_props": {},
+    }
     return RunAgentInput.model_validate({**base, **fields})
 
 
@@ -59,12 +66,18 @@ def test_the_note_goes_after_a_tools_result():
 
 def continuation(context: str, *results: str) -> RunAgentInput:
     """A run that goes on after the browser ran openRun (or several tools)."""
-    calls = [{"id": f"c{i}", "type": "function", "function": {"name": "openRun", "arguments": "{}"}} for i, _ in enumerate(results)]
+    calls = [
+        {"id": f"c{i}", "type": "function", "function": {"name": "openRun", "arguments": "{}"}}
+        for i, _ in enumerate(results)
+    ]
     return run_input(
         messages=[
             {"id": "u", "role": "user", "content": "open run 2"},
             {"id": "a", "role": "assistant", "toolCalls": calls},
-            *({"id": f"t{i}", "role": "tool", "toolCallId": f"c{i}", "content": r} for i, r in enumerate(results)),
+            *(
+                {"id": f"t{i}", "role": "tool", "toolCallId": f"c{i}", "content": r}
+                for i, r in enumerate(results)
+            ),
         ],
         context=[{"description": "currentExperiment", "value": context}],
     )

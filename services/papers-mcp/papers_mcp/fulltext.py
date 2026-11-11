@@ -45,7 +45,9 @@ def pdf_lines(data: bytes) -> list[str]:
     while lines and not lines[-1]:
         lines.pop()
     if not any(lines):
-        raise net.SourceError("The PDF has no text layer (a scan?); only its abstract is available.")
+        raise net.SourceError(
+            "The PDF has no text layer (a scan?); only its abstract is available."
+        )
     return lines
 
 
@@ -55,7 +57,9 @@ def lines_for(pdf_url: str) -> list[str]:
         return _cache[pdf_url]
     data = net.get(pdf_url, accept="application/pdf", max_bytes=MAX_PDF_BYTES)
     if not data.startswith(b"%PDF"):
-        raise net.SourceError(f"{pdf_url} isn't a PDF (the publisher may want a login); use the abstract instead.")
+        raise net.SourceError(
+            f"{pdf_url} isn't a PDF (the publisher may want a login); use the abstract instead."
+        )
     lines = pdf_lines(data)
     _cache[pdf_url] = lines
     if len(_cache) > CACHE_SIZE:

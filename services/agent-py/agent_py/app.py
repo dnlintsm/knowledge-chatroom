@@ -41,7 +41,9 @@ from .workspace import STORAGE_HEADER, storage_url
 logger = logging.getLogger("agent_py")
 
 
-def make_adapter(env: Mapping[str, str], transport: httpx.AsyncBaseTransport | None = None) -> ChatroomAdapter:
+def make_adapter(
+    env: Mapping[str, str], transport: httpx.AsyncBaseTransport | None = None
+) -> ChatroomAdapter:
     timeout = float(env.get("AGENT_RUN_TIMEOUT_SECONDS") or 1800)
     # Not this server's folder: Claude Code describes its working folder (git
     # status and all) to the model. Each user works in a folder in here.
@@ -67,7 +69,10 @@ def make_adapter(env: Mapping[str, str], transport: httpx.AsyncBaseTransport | N
 
 def run_error(input_data: RunAgentInput, message: str) -> RunErrorEvent:
     return RunErrorEvent(
-        type=EventType.RUN_ERROR, thread_id=input_data.thread_id, run_id=input_data.run_id, message=message
+        type=EventType.RUN_ERROR,
+        thread_id=input_data.thread_id,
+        run_id=input_data.run_id,
+        message=message,
     )
 
 
@@ -81,7 +86,9 @@ def refusal(input_data: RunAgentInput, user: User) -> str | None:
     return None
 
 
-def create_app(env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | None = None) -> FastAPI:
+def create_app(
+    env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | None = None
+) -> FastAPI:
     env = os.environ if env is None else env
     key = public_key(env["KNOWLEDGE_PUBLIC_KEY"]) if env.get("KNOWLEDGE_PUBLIC_KEY") else None
     adapter = adapter or make_adapter(env)
@@ -100,7 +107,9 @@ def create_app(env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | 
         # no header and everyone is the local user.
         user = caller(dict(request.headers), key, audience=None)  # type: ignore[arg-type]
         if user is None:
-            raise HTTPException(401, "Sign in first" if key else "Set KNOWLEDGE_PUBLIC_KEY: login is on")
+            raise HTTPException(
+                401, "Sign in first" if key else "Set KNOWLEDGE_PUBLIC_KEY: login is on"
+            )
         encoder = EventEncoder(accept=request.headers.get("accept"))
         reason = refusal(input_data, user)
 

@@ -52,7 +52,9 @@ def _to_info(row: tuple[Any, ...]) -> dict[str, Any]:
 class FileService:
     """One place's files: the workspace root (node_id None), a knowledge node, or an experiment."""
 
-    def __init__(self, storage: Storage, node_id: str | None = None, experiment_id: str | None = None) -> None:
+    def __init__(
+        self, storage: Storage, node_id: str | None = None, experiment_id: str | None = None
+    ) -> None:
         self.storage = storage
         # None for the workspace root, and for an experiment's files.
         self.node_id = node_id
@@ -68,7 +70,8 @@ class FileService:
             if not is_uuid(node_id):
                 return None
             cur = await conn.execute(
-                "SELECT 1 FROM nodes WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL", (node_id, self.ws)
+                "SELECT 1 FROM nodes WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL",
+                (node_id, self.ws),
             )
             if not await cur.fetchone():
                 return None
@@ -98,12 +101,16 @@ class FileService:
         if self.experiment_id is not None:
             return "f.workspace_id = %s AND f.experiment_id = %s", (self.ws, self.experiment_id)
         if self.node_id is None:
-            return "f.workspace_id = %s AND f.node_id IS NULL AND f.experiment_id IS NULL", (self.ws,)
+            return "f.workspace_id = %s AND f.node_id IS NULL AND f.experiment_id IS NULL", (
+                self.ws,
+            )
         return "f.workspace_id = %s AND f.node_id = %s", (self.ws, self.node_id)
 
     async def list(self, conn: AsyncConnection) -> list[dict[str, Any]]:
         here, args = self._here()
-        cur = await conn.execute(f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path", args)  # type: ignore[arg-type]
+        cur = await conn.execute(
+            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path", args
+        )  # type: ignore[arg-type]
         return [_to_info(row) for row in await cur.fetchall()]
 
     async def stat(self, conn: AsyncConnection, raw_path: str) -> dict[str, Any] | None:
@@ -116,7 +123,9 @@ class FileService:
         row = await cur.fetchone()
         return _to_info(row) if row else None
 
-    async def read(self, conn: AsyncConnection, raw_path: str) -> tuple[dict[str, Any], bytes] | None:
+    async def read(
+        self, conn: AsyncConnection, raw_path: str
+    ) -> tuple[dict[str, Any], bytes] | None:
         info = await self.stat(conn, raw_path)
         if not info:
             return None
@@ -157,7 +166,8 @@ class FileService:
         here, args = self._here()
         async with conn.transaction():
             await conn.execute(
-                "INSERT INTO blobs (sha256, size) VALUES (%s, %s) ON CONFLICT (sha256) DO NOTHING", (sha256, len(data))
+                "INSERT INTO blobs (sha256, size) VALUES (%s, %s) ON CONFLICT (sha256) DO NOTHING",
+                (sha256, len(data)),
             )
             await self._lock_node(conn)
             # Create the row if needed, then lock it so concurrent writers to one
@@ -223,7 +233,13 @@ class FileService:
             return True
 
     async def rename(
-        self, conn: AsyncConnection, raw_from: str, raw_to: str, *, author: str = "user", in_tx: InTx | None = None
+        self,
+        conn: AsyncConnection,
+        raw_from: str,
+        raw_to: str,
+        *,
+        author: str = "user",
+        in_tx: InTx | None = None,
     ) -> dict[str, Any] | None:
         """
         Moves a file to another path in the same place, keeping its history.
@@ -266,7 +282,13 @@ class FileService:
                     await self.storage.notify(conn, {"op": "delete", **self.place, "path": source})
                     await self.storage.notify(
                         conn,
-                        {"op": "write", **self.place, "path": target, "sha256": sha256, "author": author},
+                        {
+                            "op": "write",
+                            **self.place,
+                            "path": target,
+                            "sha256": sha256,
+                            "author": author,
+                        },
                     )
         except errors.UniqueViolation as err:
             # Someone else took the name between the check and the update.

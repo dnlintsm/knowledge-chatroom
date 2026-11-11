@@ -51,7 +51,10 @@ def client(upstream: str, transport: httpx.AsyncBaseTransport | None = None) -> 
 def end_to_end(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
     """`headers` without hop-by-hop ones, including any that Connection names."""
     named = {
-        token.strip().lower() for name, value in headers if name.lower() == b"connection" for token in value.split(b",")
+        token.strip().lower()
+        for name, value in headers
+        if name.lower() == b"connection"
+        for token in value.split(b",")
     }
     return [(n, v) for n, v in headers if n.lower() not in HOP_BY_HOP and n.lower() not in named]
 
@@ -72,10 +75,14 @@ async def forward(request: Request, http: httpx.AsyncClient) -> Response:
     try:
         upstream = await http.send(upstream_request, stream=True)
     except httpx.HTTPError as err:
-        logger.warning("the TypeScript server didn't answer %s %s: %s", request.method, request.url.path, err)
+        logger.warning(
+            "the TypeScript server didn't answer %s %s: %s", request.method, request.url.path, err
+        )
         return JSONResponse({"error": "The agent server isn't reachable"}, status_code=502)
     response = StreamingResponse(
-        upstream.aiter_raw(), status_code=upstream.status_code, background=BackgroundTask(upstream.aclose)
+        upstream.aiter_raw(),
+        status_code=upstream.status_code,
+        background=BackgroundTask(upstream.aclose),
     )
     # The upstream's headers as they are (repeated ones, encodings), without hop-by-hop ones.
     response.raw_headers = end_to_end(list(upstream.headers.raw))

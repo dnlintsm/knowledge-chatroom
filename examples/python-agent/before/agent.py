@@ -50,7 +50,9 @@ async def describe_metric(args: dict) -> dict:
     {"baseline": list[float], "candidate": list[float], "higher_is_better": bool},
 )
 async def compare_runs(args: dict) -> dict:
-    return _json(stats.compare_runs(args["baseline"], args["candidate"], args.get("higher_is_better", True)))
+    return _json(
+        stats.compare_runs(args["baseline"], args["candidate"], args.get("higher_is_better", True))
+    )
 
 
 # 3. The in-process server and allowed tools → become MCP_SERVERS in the chatroom.

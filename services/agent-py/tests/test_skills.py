@@ -39,8 +39,22 @@ class AgentServer:
                 "needsExecution": False,
                 "files": [{"path": "SKILL.md", "content": b64(SKILL_MD)}],
             },
-            {"name": "quiet", "mode": "auto", "source": "builtin", "userInvocable": False, "needsExecution": False, "files": []},
-            {"name": "later", "mode": "manual", "source": "hub", "userInvocable": True, "needsExecution": False, "files": []},
+            {
+                "name": "quiet",
+                "mode": "auto",
+                "source": "builtin",
+                "userInvocable": False,
+                "needsExecution": False,
+                "files": [],
+            },
+            {
+                "name": "later",
+                "mode": "manual",
+                "source": "hub",
+                "userInvocable": True,
+                "needsExecution": False,
+                "files": [],
+            },
         ]
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -49,7 +63,9 @@ class AgentServer:
             return httpx.Response(200, json={"skills": self.skills})
         if request.url.path == "/skills/used":
             return httpx.Response(200, json=json.loads(request.content))
-        return httpx.Response(500, json={"error": f"unexpected {request.method} {request.url.path}"})
+        return httpx.Response(
+            500, json={"error": f"unexpected {request.method} {request.url.path}"}
+        )
 
     def uses(self) -> list[dict[str, Any]]:
         return [json.loads(r.content) for r in self.requests if r.url.path == "/skills/used"]
@@ -68,7 +84,9 @@ def client(claude, agent_server, tmp_path):
         yield c
 
 
-def run_input(text: str, thread: str = "t1", context: list[dict[str, str]] | None = None) -> dict[str, Any]:
+def run_input(
+    text: str, thread: str = "t1", context: list[dict[str, str]] | None = None
+) -> dict[str, Any]:
     return {
         "threadId": thread,
         "runId": f"r-{time.monotonic_ns()}",
@@ -76,13 +94,17 @@ def run_input(text: str, thread: str = "t1", context: list[dict[str, str]] | Non
         "messages": [{"id": "m1", "role": "user", "content": text}],
         "tools": [],
         "context": context or [],
-        "forwardedProps": {"knowledge_chatroom": {"version": 2, "user": {"id": "local"}, "storage": "server"}},
+        "forwardedProps": {
+            "knowledge_chatroom": {"version": 2, "user": {"id": "local"}, "storage": "server"}
+        },
     }
 
 
 def events(response) -> list[dict[str, Any]]:
     assert response.status_code == 200, response.text
-    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    return [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
 
 
 def wait_for(check, seconds: float = 2.0):
@@ -97,14 +119,26 @@ def test_fetch_skills_asks_for_the_chats_skills_with_the_runs_token(agent_server
     agent_server.skills.append({"name": "off-one", "mode": "off", "source": "hub", "files": []})
     storage = Storage("http://agent.test", "tok", httpx.MockTransport(agent_server.handle))
     skills = asyncio.run(fetch_skills(storage, "t1"))
-    assert [s.name for s in skills] == ["demo", "quiet", "later"]  # bad names and off ones are left out
+    assert [s.name for s in skills] == [
+        "demo",
+        "quiet",
+        "later",
+    ]  # bad names and off ones are left out
     assert skills[0].files == (("SKILL.md", SKILL_MD),)
     request = agent_server.requests[-1]
-    assert dict(request.url.params) == {"thread": "t1"} and request.headers["x-knowledge-storage"] == "tok"
+    assert (
+        dict(request.url.params) == {"thread": "t1"}
+        and request.headers["x-knowledge-storage"] == "tok"
+    )
 
 
 def test_materialize_writes_each_users_skills_once_per_set(tmp_path: Path):
-    demo = RunSkill("demo", "auto", "workspace", files=(("SKILL.md", b"v1"), ("ref/a.md", b"a"), ("../../x", b"no")))
+    demo = RunSkill(
+        "demo",
+        "auto",
+        "workspace",
+        files=(("SKILL.md", b"v1"), ("ref/a.md", b"a"), ("../../x", b"no")),
+    )
     cwd = materialize(tmp_path, "alice", [demo])
     skills = cwd / ".claude" / "skills"
     assert (skills / "demo" / "SKILL.md").read_bytes() == b"v1"
@@ -112,7 +146,9 @@ def test_materialize_writes_each_users_skills_once_per_set(tmp_path: Path):
     assert not (tmp_path / "x").exists() and not (cwd / ".claude" / "x").exists()
     marker = (skills / ".fingerprint").stat().st_mtime_ns
     assert materialize(tmp_path, "alice", [demo]) == cwd
-    assert (skills / ".fingerprint").stat().st_mtime_ns == marker  # unchanged set: not written again
+    assert (
+        skills / ".fingerprint"
+    ).stat().st_mtime_ns == marker  # unchanged set: not written again
     other = RunSkill("other", "manual", "hub", files=(("SKILL.md", b"o"),))
     assert materialize(tmp_path, "alice", [other]) == cwd
     assert sorted(p.name for p in skills.iterdir()) == [".fingerprint", "other"]
@@ -121,7 +157,10 @@ def test_materialize_writes_each_users_skills_once_per_set(tmp_path: Path):
 
 
 def test_only_slash_commands_for_the_runs_own_skills_stay_commands():
-    skills = [RunSkill("demo", "auto", "workspace"), RunSkill("quiet", "auto", "builtin", user_invocable=False)]
+    skills = [
+        RunSkill("demo", "auto", "workspace"),
+        RunSkill("quiet", "auto", "builtin", user_invocable=False),
+    ]
     assert slash_command("/demo now", skills) == ("/demo now", skills[0])
     assert slash_command("/clear", skills) == (" /clear", None)
     assert slash_command("/quiet", skills) == (" /quiet", None)  # user-invocable: false
@@ -143,12 +182,20 @@ def test_the_session_gets_the_runs_skills_in_the_users_folder(client, claude, ag
 
 
 def test_a_slash_command_stays_first_and_is_reported(client, claude, agent_server):
-    context = [{"description": "openFile", "value": '{"path": "notes/a.md", "content": "1\\thello"}'}]
+    context = [
+        {"description": "openFile", "value": '{"path": "notes/a.md", "content": "1\\thello"}'}
+    ]
     evts = events(client.post("/agent/report", json=run_input("/demo go", context=context)))
     (prompt,) = claude.created[0].prompts
     assert prompt.startswith("/demo go\n\n<workspace>")  # its note goes after it
     used = [e for e in evts if e.get("name") == "skill_used"]
-    assert used == [{"type": "CUSTOM", "name": "skill_used", "value": {"skill": "demo", "source": "workspace", "trigger": "slash"}}]
+    assert used == [
+        {
+            "type": "CUSTOM",
+            "name": "skill_used",
+            "value": {"skill": "demo", "source": "workspace", "trigger": "slash"},
+        }
+    ]
     assert evts.index(used[0]) == 1  # right after RUN_STARTED
     assert wait_for(agent_server.uses) == [{"thread": "t1", "skill": "demo", "trigger": "slash"}]
 
@@ -180,7 +227,9 @@ def test_a_skill_claude_picks_is_reported(client, claude, agent_server, monkeypa
 
 def test_without_the_agent_server_the_run_goes_on_without_skills(claude, tmp_path):
     env = {"AGENT_PY_WORKDIR": str(tmp_path)}
-    down = httpx.MockTransport(lambda r: httpx.Response(503, json={"error": "Storage is not available"}))
+    down = httpx.MockTransport(
+        lambda r: httpx.Response(503, json={"error": "Storage is not available"})
+    )
     with TestClient(create_app(env=env, adapter=make_adapter(env, transport=down))) as c:
         evts = events(c.post("/agent/report", json=run_input("/demo")))
     assert evts[-1]["type"] == "RUN_FINISHED"
@@ -190,23 +239,38 @@ def test_without_the_agent_server_the_run_goes_on_without_skills(claude, tmp_pat
 
 
 # The chat always sends its browser tools (apps/web/src/components/workspace/agent-bridge.tsx).
-BROWSER_TOOLS = [{"name": "openTaskBoard", "description": "Open the task board", "parameters": {"type": "object", "properties": {}}}]
+BROWSER_TOOLS = [
+    {
+        "name": "openTaskBoard",
+        "description": "Open the task board",
+        "parameters": {"type": "object", "properties": {}},
+    }
+]
 
 
 def test_a_mode_changed_mid_chat_reaches_the_next_run(client, claude, agent_server, monkeypatch):
     sessions: list[tuple[str, str | None]] = []
     # The adapter resumes the chat's session from the user's folder; the fake has no transcript.
-    monkeypatch.setattr(claude_agent_sdk, "get_session_info", lambda sid, directory=None: sessions.append((sid, directory)) or {})
+    monkeypatch.setattr(
+        claude_agent_sdk,
+        "get_session_info",
+        lambda sid, directory=None: sessions.append((sid, directory)) or {},
+    )
     first = run_input("one")
     first["tools"] = BROWSER_TOOLS
     events(client.post("/agent/report", json=first))
     agent_server.skills[0]["mode"] = "manual"  # the user turns demo to manual in the chat
     second = run_input("two")
     second["tools"] = BROWSER_TOOLS
-    second["messages"] = [{"id": "m1", "role": "user", "content": "one"}, {"id": "m2", "role": "user", "content": "two"}]
+    second["messages"] = [
+        {"id": "m1", "role": "user", "content": "one"},
+        {"id": "m2", "role": "user", "content": "two"},
+    ]
     events(client.post("/agent/report", json=second))
     # A run with the browser's tools gets its options built again, resuming the same session.
-    before, after = (json.loads(c.options.settings)["skillOverrides"]["demo"] for c in claude.created)
+    before, after = (
+        json.loads(c.options.settings)["skillOverrides"]["demo"] for c in claude.created
+    )
     assert (before, after) == ("on", "user-invocable-only")
     assert claude.created[1].options.resume == "11111111-2222-3333-4444-555555555555"
     # ...found in the same user folder the first run used.

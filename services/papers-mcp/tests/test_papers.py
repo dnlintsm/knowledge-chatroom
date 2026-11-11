@@ -9,10 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from knowledge_chatroom import identity, storage
 from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError
-
-from knowledge_chatroom import identity, storage
 from papers_mcp import fulltext, models, net, openalex, server
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -55,12 +54,23 @@ def tiny_pdf(lines: list[str]) -> bytes:
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
     return out
 
 
-PAPER_LINES = ["Retrieval-Augmented Generation", "Abstract", "We combine retrieval and generation.",
-               "1 Introduction", "Models store knowledge.", "2 Methods", "We retrieve passages.", "References"]
+PAPER_LINES = [
+    "Retrieval-Augmented Generation",
+    "Abstract",
+    "We combine retrieval and generation.",
+    "1 Introduction",
+    "Models store knowledge.",
+    "2 Methods",
+    "We retrieve passages.",
+    "References",
+]
 
 
 class FakeWeb:
@@ -80,7 +90,13 @@ class FakeWeb:
             name = "arxiv_entry.xml" if query["id_list"] == ["2611.00001"] else "arxiv_error.xml"
             return (FIXTURES / name).read_bytes()
         if parsed.path == "/authors":
-            return json.dumps({"results": [{"id": "https://openalex.org/A0"}] if "lewis" in query["search"][0].lower() else []}).encode()
+            return json.dumps(
+                {
+                    "results": [{"id": "https://openalex.org/A0"}]
+                    if "lewis" in query["search"][0].lower()
+                    else []
+                }
+            ).encode()
         if parsed.path == "/sources":
             return json.dumps({"results": []}).encode()
         if parsed.path == "/works":
@@ -126,7 +142,10 @@ def test_ids_in_every_form():
     assert models.parse_id("https://openalex.org/w3027879771") == ("openalex", "W3027879771")
     assert models.parse_id("W3027879771") == ("openalex", "W3027879771")
     assert models.parse_id("doi:10.1162/tacl_a_00276") == ("doi", "10.1162/tacl_a_00276")
-    assert models.parse_id("https://doi.org/10.1162/tacl_a_00276") == ("doi", "10.1162/tacl_a_00276")
+    assert models.parse_id("https://doi.org/10.1162/tacl_a_00276") == (
+        "doi",
+        "10.1162/tacl_a_00276",
+    )
     assert models.parse_id("10.1162/tacl_a_00276") == ("doi", "10.1162/tacl_a_00276")
     assert models.parse_id("arxiv:2005.11401v4") == ("arxiv", "2005.11401v4")
     assert models.parse_id("https://arxiv.org/pdf/2005.11401.pdf") == ("arxiv", "2005.11401")
@@ -180,8 +199,14 @@ def test_tools_need_a_caller_signed_for_this_server(web, ctx):
 def test_search_papers_sends_filters_and_pages(web, ctx):
     result = run(
         server.search_papers(
-            "retrieval augmented generation", ctx, year_from=2019, year_to=2021, authors=["Patrick Lewis"],
-            open_access_only=True, sort="citations", limit=2,
+            "retrieval augmented generation",
+            ctx,
+            year_from=2019,
+            year_to=2021,
+            authors=["Patrick Lewis"],
+            open_access_only=True,
+            sort="citations",
+            limit=2,
         )
     )
     assert [p.id for p in result.results] == ["openalex:W3027879771", "openalex:W2963403868"]
@@ -191,7 +216,11 @@ def test_search_papers_sends_filters_and_pages(web, ctx):
     assert works["filter"] == [
         "from_publication_date:2019-01-01,to_publication_date:2021-12-31,authorships.author.id:A0,open_access.is_oa:true"
     ]
-    assert works["sort"] == ["cited_by_count:desc"] and works["per-page"] == ["2"] and works["cursor"] == ["*"]
+    assert (
+        works["sort"] == ["cited_by_count:desc"]
+        and works["per-page"] == ["2"]
+        and works["cursor"] == ["*"]
+    )
     # A last page has no cursor.
     assert run(server.search_papers("rag", ctx, limit=5)).next_cursor is None
 
@@ -204,7 +233,10 @@ def test_search_with_an_unknown_author_finds_nothing(web, ctx):
 def test_get_paper_by_any_id(web, ctx):
     for paper_id in ("openalex:W3027879771", "doi:10.48550/arxiv.2005.11401", "arxiv:2005.11401v4"):
         paper = run(server.get_paper(paper_id, ctx))
-        assert paper.title.startswith("Retrieval-Augmented Generation") and paper.references_count == 59
+        assert (
+            paper.title.startswith("Retrieval-Augmented Generation")
+            and paper.references_count == 59
+        )
     with pytest.raises(ToolError, match="Not a paper id"):
         run(server.get_paper("cats", ctx))
 
@@ -223,10 +255,17 @@ def test_new_arxiv_papers_come_from_arxiv(web, ctx):
 def test_read_paper_pages_with_line_numbers_and_sections(web, ctx):
     first = run(server.read_paper("openalex:W3027879771", ctx, offset=1, limit=3))
     assert first.total_lines == len(PAPER_LINES)
-    assert first.text.splitlines() == ["1  Retrieval-Augmented Generation", "2  Abstract", "3  We combine retrieval and generation."]
+    assert first.text.splitlines() == [
+        "1  Retrieval-Augmented Generation",
+        "2  Abstract",
+        "3  We combine retrieval and generation.",
+    ]
     assert first.next_offset == 4
     assert [(s.title, s.line) for s in first.sections] == [
-        ("Abstract", 2), ("1 Introduction", 4), ("2 Methods", 6), ("References", 8),
+        ("Abstract", 2),
+        ("1 Introduction", 4),
+        ("2 Methods", 6),
+        ("References", 8),
     ]
     last = run(server.read_paper("openalex:W3027879771", ctx, offset=6, limit=50))
     assert last.next_offset is None and last.text.splitlines()[0] == "6  2 Methods"
@@ -247,22 +286,31 @@ def test_read_paper_without_open_text(web, ctx):
 def test_related_papers_rank_every_reference_not_just_the_first(web, ctx, monkeypatch):
     refs = [f"https://openalex.org/W{i}" for i in range(1, 151)]
     monkeypatch.setitem(RAG, "referenced_works", refs)
-    answers = iter([
-        {"results": [dict(NQ, id="https://openalex.org/W7", cited_by_count=10)]},
-        {"results": [dict(NQ, id="https://openalex.org/W140", cited_by_count=900)]},
-    ])
+    answers = iter(
+        [
+            {"results": [dict(NQ, id="https://openalex.org/W7", cited_by_count=10)]},
+            {"results": [dict(NQ, id="https://openalex.org/W140", cited_by_count=900)]},
+        ]
+    )
     real = web.get_json
-    monkeypatch.setattr(net, "get_json", lambda url: next(answers) if "ids.openalex" in url else real(url))
+    monkeypatch.setattr(
+        net, "get_json", lambda url: next(answers) if "ids.openalex" in url else real(url)
+    )
     result = run(server.related_papers("openalex:W3027879771", ctx, kind="cites", limit=1))
     assert [p.id for p in result.results] == ["openalex:W140"]
 
 
 def test_related_papers(web, ctx):
-    for kind, expected in (("cites", "ids.openalex:W2963403868|W2896457183"), ("similar", "ids.openalex:W2963403868"),
-                           ("cited_by", "cites:W3027879771")):
+    for kind, expected in (
+        ("cites", "ids.openalex:W2963403868|W2896457183"),
+        ("similar", "ids.openalex:W2963403868"),
+        ("cited_by", "cites:W3027879771"),
+    ):
         result = run(server.related_papers("arxiv:2005.11401", ctx, kind=kind, limit=5))
         assert [p.id for p in result.results] == ["openalex:W2963403868"]
-        assert urllib.parse.parse_qs(urllib.parse.urlparse(web.asked[-1]).query)["filter"] == [expected]
+        assert urllib.parse.parse_qs(urllib.parse.urlparse(web.asked[-1]).query)["filter"] == [
+            expected
+        ]
 
 
 # --- saving -----------------------------------------------------------------------
@@ -282,12 +330,14 @@ def storage_api(monkeypatch):
                 self.end_headers()
                 self.wfile.write(b'{"error": "Bad storage token"}')
                 return
-            written.append({
-                "path": urllib.parse.unquote(parsed.path.removeprefix("/files/")),
-                "query": urllib.parse.parse_qs(parsed.query, keep_blank_values=True),
-                "type": self.headers["Content-Type"],
-                "body": body,
-            })
+            written.append(
+                {
+                    "path": urllib.parse.unquote(parsed.path.removeprefix("/files/")),
+                    "query": urllib.parse.parse_qs(parsed.query, keep_blank_values=True),
+                    "type": self.headers["Content-Type"],
+                    "body": body,
+                }
+            )
             self.send_response(201)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -311,20 +361,31 @@ def test_save_paper_writes_a_note_at_the_root(web, ctx, storage_api):
     [note] = storage_api
     assert note["path"] == saved.path and note["query"] == {} and note["type"] == "text/markdown"
     text = note["body"].decode()
-    assert text.startswith('---\npaper: "openalex:W3027879771"\ntitle: "Retrieval-Augmented Generation')
-    assert '"et al."' in text and "## Abstract\n\nLarge pre-trained" in text and "```bibtex\n@misc{" in text
+    assert text.startswith(
+        '---\npaper: "openalex:W3027879771"\ntitle: "Retrieval-Augmented Generation'
+    )
+    assert (
+        '"et al."' in text
+        and "## Abstract\n\nLarge pre-trained" in text
+        and "```bibtex\n@misc{" in text
+    )
     assert "[PDF](https://arxiv.org/pdf/2005.11401)" in text
 
 
 def test_save_paper_in_a_node_is_a_proposal_and_in_an_experiment_is_not(web, ctx, storage_api):
     ctx.headers[storage.STORAGE_HEADER] = "alice-storage-token"
-    saved = run(server.save_paper("openalex:W3027879771", ctx, node="n1", include_pdf=True, path="lit/rag"))
+    saved = run(
+        server.save_paper("openalex:W3027879771", ctx, node="n1", include_pdf=True, path="lit/rag")
+    )
     assert saved.proposed and saved.path == "lit/rag.md" and saved.pdf_path == "lit/rag.pdf"
     pdf, note = storage_api
     assert pdf["type"] == "application/pdf" and pdf["body"].startswith(b"%PDF")
     assert note["query"]["node"] == ["n1"] and "propose" in note["query"]
     body = note["body"].decode()
-    assert "[PDF](https://arxiv.org/pdf/2005.11401)" in body and "PDF saved next to this note: `rag.pdf`" in body
+    assert (
+        "[PDF](https://arxiv.org/pdf/2005.11401)" in body
+        and "PDF saved next to this note: `rag.pdf`" in body
+    )
     storage_api.clear()
     saved = run(server.save_paper("openalex:W3027879771", ctx, node="n1", experiment="e1"))
     assert not saved.proposed and storage_api[0]["query"] == {"node": ["n1"], "experiment": ["e1"]}
@@ -349,12 +410,31 @@ def test_save_paper_refusals(web, ctx, storage_api):
 
 def test_tool_list_is_the_contract():
     tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
-    assert set(tools) == {"search_papers", "get_paper", "read_paper", "related_papers", "save_paper"}
+    assert set(tools) == {
+        "search_papers",
+        "get_paper",
+        "read_paper",
+        "related_papers",
+        "save_paper",
+    }
     assert all(tools[name].annotations.read_only_hint for name in tools if name != "save_paper")
     assert not tools["save_paper"].annotations.read_only_hint
     paper_fields = set(tools["search_papers"].output_schema["$defs"]["Paper"]["properties"])
-    assert {"id", "title", "authors", "author_count", "year", "venue", "abstract", "url", "pdf_url", "doi",
-            "citation_count", "open_access", "source"} <= paper_fields
+    assert {
+        "id",
+        "title",
+        "authors",
+        "author_count",
+        "year",
+        "venue",
+        "abstract",
+        "url",
+        "pdf_url",
+        "doi",
+        "citation_count",
+        "open_access",
+        "source",
+    } <= paper_fields
     assert tools["search_papers"].input_schema["properties"]["limit"]["maximum"] == 25
 
 

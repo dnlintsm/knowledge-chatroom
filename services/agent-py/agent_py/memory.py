@@ -65,7 +65,9 @@ async def fetch_memory(storage: Storage, token: str, run_id: str) -> RunMemory |
             logger.debug("no memory for this run: %s", err)
             return None
         raise
-    tools = [t for t in data.get("tools", []) if isinstance(t, dict) and isinstance(t.get("name"), str)]
+    tools = [
+        t for t in data.get("tools", []) if isinstance(t, dict) and isinstance(t.get("name"), str)
+    ]
     return RunMemory(token=token, run_id=run_id, prompt=str(data.get("prompt") or ""), tools=tools)
 
 
@@ -86,7 +88,10 @@ def memory_tools(
                 answer = await storage().json(
                     "POST",
                     f"/memory/agent/tools/{urllib.parse.quote(name, safe='')}",
-                    params={"tainted": "1" if memory.tainted else "0", "run": memory.run_id or None},
+                    params={
+                        "tainted": "1" if memory.tainted else "0",
+                        "run": memory.run_id or None,
+                    },
                     json_body=args,
                     headers={MEMORY_HEADER: memory.token},
                 )
@@ -101,7 +106,9 @@ def memory_tools(
             for event in answer.get("events") or []:
                 if isinstance(event, dict):
                     on_event(event)
-            result: ToolResult = {"content": [{"type": "text", "text": str(answer.get("text", ""))}]}
+            result: ToolResult = {
+                "content": [{"type": "text", "text": str(answer.get("text", ""))}]
+            }
             if answer.get("isError"):
                 result["is_error"] = True
             return result
@@ -109,9 +116,11 @@ def memory_tools(
         return handler
 
     return [
-        tool(t["name"], str(t.get("description", "")), t.get("inputSchema") or {"type": "object", "properties": {}})(
-            make(t["name"])
-        )
+        tool(
+            t["name"],
+            str(t.get("description", "")),
+            t.get("inputSchema") or {"type": "object", "properties": {}},
+        )(make(t["name"]))
         for t in spec.tools
     ]
 
@@ -125,7 +134,12 @@ def taint_hook(current: Callable[[], RunMemory | None]) -> HookMatcher:
     async def mark(input_data: Any, _tool_use_id: str | None, _context: Any) -> dict[str, Any]:
         name = input_data.get("tool_name")
         memory = current()
-        if memory and isinstance(name, str) and not is_memory_tool(name) and name not in NEUTRAL_TOOLS:
+        if (
+            memory
+            and isinstance(name, str)
+            and not is_memory_tool(name)
+            and name not in NEUTRAL_TOOLS
+        ):
             memory.tainted = True
         return {}
 
