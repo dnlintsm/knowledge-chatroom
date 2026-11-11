@@ -1,9 +1,9 @@
 """/files served by api-py, against a migrated Postgres and an S3-compatible store.
 
 Needs TEST_DATABASE_URL (as test_storage_routes.py) and S3_ENDPOINT, with
-S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY when the store wants them; each test
-gets a bucket of its own. The conformance suite and the storage e2e run the
-same routes against the spec and the app.
+S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY when the store wants them; the tests
+share one new bucket. The conformance suite and the storage e2e run the same
+routes against the spec and the app.
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ pytestmark = [
     pytest.mark.anyio,
     pytest.mark.skipif(not URL or not S3_ENDPOINT, reason="TEST_DATABASE_URL and S3_ENDPOINT are not set"),
 ]
+# One bucket for the whole run: blobs are keyed by their content, so tests can share it,
+# and some S3-compatible stores (SeaweedFS in CI) set aside volumes for every new bucket.
+BUCKET = f"api-py-test-{uuid.uuid4().hex[:12]}"
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
 
 
@@ -38,7 +41,7 @@ def s3(public_url: str | None = None) -> S3Settings:
     return S3Settings(
         endpoint=S3_ENDPOINT,
         region=os.environ.get("S3_REGION") or "us-east-1",
-        bucket=f"api-py-test-{uuid.uuid4().hex[:12]}",
+        bucket=BUCKET,
         access_key_id=os.environ.get("S3_ACCESS_KEY_ID") or "test",
         secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY") or "test",
         public_url=public_url,
