@@ -206,6 +206,16 @@ class AccessService:
             )
             return {str(node): role for node, role in await cur.fetchall()}
 
+    async def user(self, user_id: str) -> dict[str, Any] | None:
+        """One user's id, subject, email and name, or None."""
+        if not is_uuid(user_id):
+            return None
+        async with self.pool.connection() as conn:
+            cur = conn.cursor(row_factory=dict_row)
+            await cur.execute("SELECT id, subject, email, name FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+        return {**row, "id": str(row["id"])} if row else None
+
     async def users(self) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)

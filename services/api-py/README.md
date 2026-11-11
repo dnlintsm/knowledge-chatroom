@@ -18,6 +18,7 @@ What it serves itself so far:
 | 1 | `GET /health`: `{"status":"ok"}` when the TypeScript server answers and the database is fine, 503 with what isn't | `app.py` |
 | 2 | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
 | 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). An experiment's files (`?experiment=`) and `?propose` still go to the TypeScript server until step 4 | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
+| 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`). `/experiments/upload` and proposals (`/proposals`, `?propose`) still go to the TypeScript server until step 4b | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
 
 Behind them:
 
@@ -37,6 +38,10 @@ Behind them:
   background indexer still embeds them for search by meaning). Path rules follow
   `packages/contracts/src/files.ts` (`paths.py`). Binary files get a five-minute signed
   link when `S3_PUBLIC_URL` is set.
+- **Experiments and runs** (`experiments.py`, `run_report.py`). Only an experiment's
+  author changes it or its files, and an archived one is read only. A run's `report.md`
+  front matter is written as `JSON.stringify` writes it, numbers included, so a report
+  reads the same whichever server last refreshed it.
 - **Change events** go out and come in on the same `LISTEN/NOTIFY` channel (`events.py`),
   so each server's file watch tells browsers about changes made on either, each to the
   people who may see it.

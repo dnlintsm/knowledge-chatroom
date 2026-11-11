@@ -28,6 +28,11 @@
   and proposed versions (`?propose`) still go to the agent server until step 4. api-py now
   reads the same `S3_*` and `MAX_UPLOAD_BYTES` settings as the agent server, so give both
   the same values; the demo compose file does.
+- api-py now serves `/experiments` and an experiment's files too (issue #190, step 4a):
+  creating and forking experiments, runs with their inputs, finishing and rerunning them,
+  status changes and deletes, with each run's `report.md` front matter written byte for
+  byte as the agent server writes it. Proposals (`/proposals`, `?propose`) and
+  `/experiments/upload` still go to the agent server until step 4b.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
