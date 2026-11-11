@@ -27,6 +27,10 @@ function port(name: string, fallback: number) {
 const UI_PORT = port("E2E_UI_PORT", 3000);
 const AGENT_PORT = port("E2E_AGENT_PORT", 8000);
 const STORAGE_PORT = port("E2E_STORAGE_PORT", 8001);
+// The TypeScript agent server behind api-py (services/api-py, issue #190), which
+// serves storage at STORAGE_PORT; E2E_API_PY=off serves it from TypeScript alone.
+const TS_STORAGE_PORT = port("E2E_TS_STORAGE_PORT", 8002);
+const withApiPy = process.env.E2E_API_PY !== "off";
 const OIDC_PORT = port("E2E_OIDC_PORT", 9400);
 const PY_AGENT_PORT = port("E2E_PY_AGENT_PORT", 9300);
 const MODEL_PORT = port("E2E_MODEL_PORT", 9500);
@@ -81,9 +85,18 @@ const agentServers = useRealAgent
             {
               // Scripts on only shows them as runnable, and memory only shows its API:
               // chat goes to the mock agent.
-              command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
-              url: `http://localhost:${STORAGE_PORT}/health`,
+              command: `AGENT_PORT=${withApiPy ? TS_STORAGE_PORT : STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
+              url: `http://localhost:${withApiPy ? TS_STORAGE_PORT : STORAGE_PORT}/health`,
             },
+            ...(withApiPy
+              ? [
+                  {
+                    // In front of it, as in `pnpm dev` and compose: the routes moved to Python so far.
+                    command: `cd services/api-py && TS_AGENT_URL=http://localhost:${TS_STORAGE_PORT} API_PY_PORT=${STORAGE_PORT} uv run --locked python -m api_py.app`,
+                    url: `http://localhost:${STORAGE_PORT}/health`,
+                  },
+                ]
+              : []),
           ]
         : []),
       {

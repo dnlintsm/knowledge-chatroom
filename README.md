@@ -98,9 +98,11 @@ Use **Node 22** (`.nvmrc`) and pnpm (`corepack enable` picks the version in
 ```bash
 cp .env.example .env
 pnpm install                   # the UI, the agent and packages/ from one lockfile
-pnpm dev                       # UI :3000, agent :8000
+pnpm dev                       # UI :3000, API :8000 (services/api-py) and agent server :8100
 ```
 
+`pnpm dev` needs [uv](https://docs.astral.sh/uv/) for the Python API server, which is taking
+over the agent server's routes (issue #190). `pnpm dev:ts` runs without it.
 `pnpm dev:python` also starts the Python chat agent (`services/agent-py`, :9300, needs
 [uv](https://docs.astral.sh/uv/)) and sends the chat there.
 
@@ -164,6 +166,7 @@ changed and how you validated it.
 | `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
 | `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
+| `services/api-py` | The agent server's HTTP API in Python, in front of it at `LOCAL_AGENT_URL` while routes move (issue #190) |
 | `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (issue #176) |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `services/lab-tools` | The Python agent sample's tools as an MCP server |

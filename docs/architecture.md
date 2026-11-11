@@ -6,6 +6,10 @@ With `AGENT_URL` set, the chat goes to a remote backend's `/agent/report` instea
 ([Remote agent backend](remote-agent.md)), and each run carries the user and their
 place in `forwardedProps.knowledge_chatroom`.
 The agent also hosts storage HTTP routes and per-user file/node/experiment tools.
+Those routes are moving to Python one group at a time (issue #190): the Python API
+server (`services/api-py`) sits in front of the agent at `LOCAL_AGENT_URL`, serves the
+groups moved so far, and passes every other request to the agent unchanged. Both use
+the same database, migrations, row-level security and object store.
 `apps/web/src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
 when login is enabled. Browser state and authenticated storage access meet in
 `apps/web/src/components/workspace/store.tsx`; pane commands live in `workbench.tsx`.
@@ -13,7 +17,9 @@ when login is enabled. Browser state and authenticated storage access meet in
 ```mermaid
 flowchart LR
   Browser --> Next[Next.js UI and API proxy]
-  Next --> Agent[AG-UI agent and storage HTTP]
+  Next --> Api[Python API server]
+  Api -->|routes not moved yet| Agent[AG-UI agent and storage HTTP]
+  Api --> PG
   Next -.->|AGENT_URL| Remote[Remote chat backend]
   Agent --> Claude[Claude SDK]
   Agent --> MCP[Outside MCP servers]

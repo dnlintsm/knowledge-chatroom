@@ -5,7 +5,8 @@ The chatroom's chat agent in Python, on the
 (`ag_ui_claude_sdk`) and FastAPI. The app reaches it through `AGENT_URL`, as any
 remote backend ([docs/remote-agent.md](../../docs/remote-agent.md)); this repo's
 TypeScript agent server (`apps/agent`) keeps serving storage, skills and memory on
-`LOCAL_AGENT_URL`.
+`LOCAL_AGENT_URL`, through the Python API server in front of it (`services/api-py`,
+issue #190).
 
 It is phase 2 of moving the backend to Python (issue #169), built in steps under
 issue #176. So far it chats with the app's own tools (task board, workbench panes,
@@ -22,8 +23,8 @@ profile and an e2e run with the app came last (step 7).
 Python 3.11+ and [uv](https://docs.astral.sh/uv/). With the app, from the repository root:
 
 ```bash
-uv sync --package agent-py
-pnpm dev:python                      # UI :3000, agent server :8000, this agent :9300
+uv sync --all-packages
+pnpm dev:python                      # UI :3000, API :8000 (agent server :8100), this agent :9300
 ```
 
 `pnpm dev:python` reads the repository's `.env` for this agent too and sets the app's

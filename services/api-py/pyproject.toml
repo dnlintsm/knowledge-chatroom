@@ -1,0 +1,30 @@
+[project]
+name = "api-py"
+version = "0.2.3"
+description = "The agent server's HTTP API in Python, in front of the TypeScript server while routes move over (issue #190)"
+requires-python = ">=3.11"
+dependencies = [
+    "knowledge-chatroom",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    # The pass-through to the TypeScript server, streamed both ways.
+    "httpx>=0.27",
+    # Postgres, with the same migrations and row-level security as the TypeScript server.
+    "psycopg[binary,pool]>=3.2",
+    # Signing and checking identity tokens (tokens.py).
+    "cryptography>=42",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# A server run from its folder (python -m api_py.app), not a library.
+package = false
+
+[tool.uv.sources]
+knowledge-chatroom = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

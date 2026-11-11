@@ -4,6 +4,18 @@
 
 ### Added
 
+- The Python API server, `services/api-py` (issue #190, phase 3 of #169). It sits in front
+  of the agent server at `LOCAL_AGENT_URL`, and the agent's routes move to it one group at a
+  time. For now it passes every request through unchanged, SSE included, and checks that the
+  database has exactly the migrations it knows. It refuses to start on a newer database. The
+  agent server still applies the migrations. `pnpm dev` runs it on :8000 with the agent server
+  on :8100, so `pnpm dev` now needs [uv](https://docs.astral.sh/uv/). `pnpm dev:ts` runs the UI
+  and the agent server alone, as before. The demo compose file has a new `api` service, and the
+  app, `agent-py`, `lab-tools` and `papers` reach the agent through `http://api:8000`. The
+  conformance suite and the storage and login e2e run through it (`CONFORMANCE_TARGET=ts` and
+  `E2E_API_PY=off` test the agent alone). A deployment without it keeps working while it only
+  passes requests through ([Deployment](docs/deployment.md)).
+
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

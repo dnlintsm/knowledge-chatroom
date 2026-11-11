@@ -11,6 +11,7 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "uv.lock"
+      - "services/api-py/**"
       - "scripts/ci-*.mjs"
       - "docker-compose.yml"
       - "infra/**"
@@ -84,24 +85,35 @@ jobs:
 
       - name: Test
         run: node scripts/ci-tests.mjs run "Storage integration" tap -- pnpm -C apps/agent test:integration
-      # The agent's HTTP answers against packages/contracts/openapi/storage.yaml (issue #169).
+      # api-py (services/api-py, issue #190) sits in front of the agent in the conformance run.
+      - uses: astral-sh/setup-uv@v6
+        if: always()
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install api-py
+        if: always()
+        run: uv sync --all-packages --locked
+      # The agent's HTTP answers against packages/contracts/openapi/storage.yaml (issue #169),
+      # through api-py as `pnpm dev` and compose run it.
       - name: Storage API conformance
         if: always()
         env:
           # Every request and answer that matched the spec, for the Python models below.
           CONFORMANCE_SAMPLES: ${{ runner.temp }}/api-samples.jsonl
         run: node scripts/ci-tests.mjs run "Storage API conformance" tap -- pnpm -C apps/agent test:conformance
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.11.32"
-          python-version: "3.12"
-          enable-cache: true
       # The generated pydantic models (packages/knowledge-py) parse that real traffic.
       - name: Python models parse the agent's traffic
         working-directory: packages/knowledge-py
         env:
           API_SAMPLES: ${{ runner.temp }}/api-samples.jsonl
         run: uv run --locked pytest -q tests/test_api.py
+      # Its migration check and row-security transaction, on real Postgres.
+      - name: api-py against Postgres
+        if: always()
+        working-directory: services/api-py
+        run: uv run --locked pytest -q
       - name: Summarize test suites
         if: always()
         run: node scripts/ci-tests.mjs summary "Storage integration" "Storage API conformance"

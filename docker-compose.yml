@@ -103,13 +103,35 @@ services:
       retries: 20
     # The agent port stays private: the UI forwards to it and signs identities.
 
+  # The agent server's HTTP API in Python (services/api-py, issue #190), in
+  # front of the agent above: it serves the routes moved to Python so far and
+  # passes every other request to the agent, so everything else talks to it.
+  api:
+    profiles: [demo]
+    build:
+      context: .
+      dockerfile: services/api-py/Dockerfile
+    environment:
+      AUTH_MODE: local
+      TS_AGENT_URL: http://agent:8000
+      DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Private like the agent port: the UI forwards to it and signs identities.
+
   app:
     profiles: [demo]
     build:
       context: .
       target: app
     environment:
-      LOCAL_AGENT_URL: http://agent:8000
+      LOCAL_AGENT_URL: http://api:8000
       # A remote backend for the chat (docs/remote-agent.md); empty = the agent above.
       AGENT_URL: ${AGENT_URL:-}
       AUTH_MODE: local
@@ -118,13 +140,13 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      agent:
+      api:
         condition: service_healthy
 
   # --- The chat on the Python agent (services/agent-py, issue #176) ---
   # With the demo, and the app's chat pointed at it (docs/remote-agent.md):
   #   AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build
-  # It reaches storage, skills and memory on the agent server above, and gets
+  # It reaches storage, skills and memory through the api service above, and gets
   # the same model settings and MCP_SERVERS.
   agent-py:
     profiles: [python-agent]
@@ -139,12 +161,12 @@ services:
       CLAUDE_CODE_AUTO_COMPACT_WINDOW:
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
       MCP_SERVERS: ${MCP_SERVERS:-}
-      LOCAL_AGENT_URL: http://agent:8000
+      LOCAL_AGENT_URL: http://api:8000
       # The demo has no login. With login, give it the agent server's public
       # key (GET /identity/public-key), never AUTH_SECRET.
       KNOWLEDGE_PUBLIC_KEY: ""
     depends_on:
-      agent:
+      api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9300/health')"]
@@ -164,7 +186,7 @@ services:
     environment:
       LAB_TOOLS_NAME: lab
       # Workspace files, read through the storage API as the calling user.
-      KNOWLEDGE_STORAGE_URL: http://agent:8000
+      KNOWLEDGE_STORAGE_URL: http://api:8000
       # The demo has no login, so every call is the local user. With login, give
       # this server the agent's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).
@@ -181,7 +203,7 @@ services:
     environment:
       PAPERS_NAME: papers
       # save_paper writes through the storage API as the calling user.
-      KNOWLEDGE_STORAGE_URL: http://agent:8000
+      KNOWLEDGE_STORAGE_URL: http://api:8000
       # The demo has no login, so every call is the local user. With login, give
       # this server the agent's public key, never AUTH_SECRET.
       KNOWLEDGE_PUBLIC_KEY: ""

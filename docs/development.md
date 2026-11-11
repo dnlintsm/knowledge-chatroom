@@ -7,9 +7,13 @@ Add a dependency with `pnpm -C apps/agent add <name>` (or `apps/web`), and commi
 lockfile. `.env` stays at the repository root; the UI and the agent both read it.
 
 Copy `.env.example` to `.env`. For real chat set `ANTHROPIC_API_KEY`;
-`CLAUDE_MODEL` defaults to `claude-sonnet-5`. `pnpm dev` starts the UI on 3000
-and the agent on 8000. `pnpm dev:ui` and `pnpm dev:agent` run them separately.
-Check the agent with `curl http://localhost:8000/health`; storage can still be
+`CLAUDE_MODEL` defaults to `claude-sonnet-5`. `pnpm dev` starts the UI on 3000, and on
+8000 the Python API server (`services/api-py`, which needs [uv](https://docs.astral.sh/uv/))
+in front of the agent server on 8100. The agent's routes are moving to Python one group at
+a time (issue #190), and api-py passes the rest to the agent server, so 8000 is the address
+to use. `pnpm dev:ts` runs the UI and the agent server alone on 8000, as before.
+`pnpm dev:ui`, `pnpm dev:agent` and `pnpm dev:api` run them separately.
+Check it with `curl http://localhost:8000/health`. Storage can still be
 migrating after this health endpoint answers.
 
 After an upgrade, `pnpm env:check` compares `.env` with `.env.example`: settings a
@@ -216,7 +220,7 @@ where they are in `forwardedProps.knowledge_chatroom`. What the backend receives
 must do is in [Remote agent backend](remote-agent.md).
 
 This repo's own Python backend, `services/agent-py`, runs beside the others with
-`pnpm dev:python` (it needs [uv](https://docs.astral.sh/uv/)): the UI, the agent server and
+`pnpm dev:python` (it needs [uv](https://docs.astral.sh/uv/)): the UI, api-py, the agent server and
 the Python agent on `http://127.0.0.1:9300`, with `AGENT_URL` pointing there. With login
 on, give it the agent server's public key as `KNOWLEDGE_PUBLIC_KEY` in `.env` (the agent
 server prints it at startup). See its [README](../services/agent-py/README.md).

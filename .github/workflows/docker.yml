@@ -40,6 +40,8 @@ jobs:
         run: docker build --target app -t knowledge-chatroom-app .
       - name: Build the agent image
         run: docker build --target agent -t knowledge-chatroom-agent .
+      - name: Build the Python API server image
+        run: docker build -f services/api-py/Dockerfile -t knowledge-chatroom-api-py .
       - name: Build the Python chat agent image
         run: docker build -f services/agent-py/Dockerfile -t knowledge-chatroom-agent-py .
       - name: Build the sample Python tools image
