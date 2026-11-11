@@ -9,7 +9,7 @@
 members = ["services/*", "packages/knowledge-py"]
 
 [dependency-groups]
-dev = ["ruff==0.17.4"]
+dev = ["ruff==0.17.4", "pyrefly==1.4.1"]
 
 [tool.ruff]
 target-version = "py312"
@@ -18,3 +18,23 @@ extend-exclude = ["packages/knowledge-py/src/knowledge_chatroom/api.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
+
+[tool.pyrefly]
+python-version = "3.12"
+project-includes = [
+    "packages/knowledge-py/src",
+    "services/agent-py/agent_py",
+    "services/api-py/api_py",
+    "services/lab-tools/lab_tools",
+    "services/papers-mcp/papers_mcp",
+]
+project-excludes = ["packages/knowledge-py/src/knowledge_chatroom/api.py"]
+search-path = [
+    "packages/knowledge-py/src",
+    "services/agent-py",
+    "services/api-py",
+    "services/lab-tools",
+    "services/papers-mcp",
+]
+baseline = "pyrefly-baseline.json"
+baseline-matching-mode = "column-ordered"

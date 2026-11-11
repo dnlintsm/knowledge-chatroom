@@ -67,6 +67,8 @@ jobs:
         run: |
           uv run --locked --no-sync ruff check packages/knowledge-py services examples/python-agent
           uv run --locked --no-sync ruff format --check packages/knowledge-py services examples/python-agent
+      - name: Python type check
+        run: uv run --locked --no-sync pyrefly check --error-stale-baseline
       # src/knowledge_chatroom/api.py must match packages/contracts/openapi/storage.yaml.
       - name: Python models match the OpenAPI spec
         working-directory: packages/knowledge-py
