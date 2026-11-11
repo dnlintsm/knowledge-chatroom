@@ -50,6 +50,11 @@ router = APIRouter()
 ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 MAX_JSON_BYTES = 64 * 1024
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
+# The prefixes as sent. Starlette routes on the decoded path, so /%61ccess or
+# /access%2Fusers reach these routes too, but the TypeScript server reads the raw
+# path and serves those as files. They go to it, so a storage token's limits
+# (agent_refusal) always see the section the handlers act on.
+_OWN_PATH = re.compile(r"^/(access|nodes)(/|$)")
 
 
 class _MalformedPath(Exception):
@@ -145,7 +150,7 @@ async def _session(request: Request) -> Session | Response:
 
 
 async def _serve(request: Request, handler) -> Response:
-    if not await request.app.state.storage_ready():
+    if not _OWN_PATH.match(raw_path(request)) or not await request.app.state.storage_ready():
         return await forward(request, request.app.state.http)
     try:
         session = await _session(request)

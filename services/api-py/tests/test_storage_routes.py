@@ -64,7 +64,7 @@ forwarded: list[str] = []
 
 
 async def typescript(request: httpx.Request) -> httpx.Response:
-    forwarded.append(f"{request.method} {request.url.path}")
+    forwarded.append(f"{request.method} {request.url.raw_path.decode().split('?')[0]}")  # as sent
 
     async def body() -> AsyncIterator[bytes]:  # streamed, as a real connection answers
         yield b'{"from":"typescript"}'
@@ -256,6 +256,12 @@ async def test_storage_tokens_act_as_claude_for_the_user(api):
     # A storage token must name who it is for, and a user token is no storage token.
     assert (await api.get("/nodes", headers=storage_token("kc|alice", via=None))).status_code == 401
     assert (await api.get("/nodes", headers={tokens.STORAGE_HEADER: ALICE[tokens.IDENTITY_HEADER]})).status_code == 401
+    # An encoded prefix is no way around those limits: the TypeScript server reads
+    # /%61ccess/users as a file path, so it goes there, as do the other spellings.
+    for path in ("/%61ccess/users", "/access%2Fusers", "/%6Eodes/x"):
+        assert (await api.get(path, headers=claude)).json() == {"from": "typescript"}
+    assert forwarded == ["GET /%61ccess/users", "GET /access%2Fusers", "GET /%6Eodes/x"]
+    forwarded.clear()
 
 
 async def test_passes_through_until_the_database_is_migrated():
