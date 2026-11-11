@@ -18,6 +18,12 @@ Optional profiles start sample MCP servers next to the demo: `papers`
 the profile and the matching `MCP_SERVERS` line from `docker-compose.yml` to `.env`, using
 service names such as `http://papers:9200/mcp` rather than localhost.
 
+The `python-agent` profile serves the chat from the Python agent (`services/agent-py`)
+instead of the agent server's own: add it with `AGENT_URL=http://agent-py:9300`, as in
+`AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build`.
+It gets the same model settings and `MCP_SERVERS`, and reaches storage, skills and memory
+on the agent server.
+
 ## Production
 
 Use Node 22 for build and runtime. Install with `pnpm install --frozen-lockfile`, run `pnpm check`,

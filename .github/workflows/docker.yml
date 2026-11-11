@@ -35,11 +35,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the compose file
-        run: docker compose --profile demo --profile python-sample --profile papers config --quiet
+        run: docker compose --profile demo --profile python-agent --profile python-sample --profile papers config --quiet
       - name: Build the UI image
         run: docker build --target app -t knowledge-chatroom-app .
       - name: Build the agent image
         run: docker build --target agent -t knowledge-chatroom-agent .
+      - name: Build the Python chat agent image
+        run: docker build -f services/agent-py/Dockerfile -t knowledge-chatroom-agent-py .
       - name: Build the sample Python tools image
         run: docker build -f services/lab-tools/Dockerfile -t knowledge-chatroom-lab-tools .
       - name: Build the paper search image

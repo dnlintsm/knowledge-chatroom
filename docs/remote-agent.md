@@ -15,11 +15,14 @@ backend has to do.
 With `AGENT_URL` set:
 
 - **Chat**: runs go to the backend (`apps/web/src/lib/agent-target.ts`, `apps/web/src/agent.ts`).
-- **Follow-up chips**: off. This repo's `/suggest` isn't used, so the chat keeps its
-  first-round chips.
+- **Follow-up chips**: still from this repo's agent server. After each reply the app
+  posts the conversation to `${LOCAL_AGENT_URL}/suggest`, which needs only the messages,
+  so the backend doesn't have to write them. That server needs a model for it (its
+  `ANTHROPIC_API_KEY`, or `SUGGESTIONS_MODEL` behind a gateway); `CHAT_SUGGESTIONS=static`
+  on the app keeps the first-round chips instead.
 - **This repo's agent server**: when it sees `AGENT_URL` too (in development both read the
-  same `.env`), it turns its own chat routes off (`POST /` and `POST /suggest` answer 404) and
-  serves storage and skills only.
+  same `.env`), it turns its own chat route off (`POST /` answers 404) and serves storage,
+  skills and the follow-up chips.
 - **Skills**: the Skills view and the `/` menu still list this repo's skills, but they
   reach the backend only if it asks for them: `GET ${LOCAL_AGENT_URL}/skills/run?thread=<id>`
   with the run's `X-Knowledge-Storage` token returns the skills that run gets, with their
@@ -338,3 +341,9 @@ Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 `AGENT_PORT=9000 node e2e/mock-agent.mjs` and set `AGENT_URL=http://localhost:9000` for
 the UI. After a message, `curl localhost:9000/last-run` shows the run input, with
 `forwardedProps.knowledge_chatroom` in it.
+
+To test a backend built on the Claude Agent SDK without a key, point its
+`ANTHROPIC_BASE_URL` at `e2e/mock-anthropic.mjs` (`MOCK_MODEL_PORT`, default 9500): it
+streams scripted turns, and `GET /last-request` shows what the engine sent the model.
+`pnpm test:e2e:python` runs the chat this way against `services/agent-py`
+([Testing](testing.md)).

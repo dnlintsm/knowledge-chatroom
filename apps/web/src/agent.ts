@@ -51,13 +51,14 @@ export function createDefaultAgent(): HttpAgent {
 
 /**
  * The chat's follow-up chips after a reply: this repo's agent server's
- * `/suggest` answers with one small-model call (apps/agent/src/suggest.ts).
+ * `/suggest` answers with one small-model call (apps/agent/src/suggest.ts),
+ * also when a remote backend (AGENT_URL) serves the chat.
  */
 export function createSuggesterAgent(): HttpAgent {
   return new ChatroomAgent({ url: `${localAgentUrl()}/suggest` });
 }
 
-/** Follow-up chips from the suggester: off with AGENT_URL or CHAT_SUGGESTIONS=static. */
+/** Follow-up chips from the suggester: off with CHAT_SUGGESTIONS=static. */
 export function dynamicSuggestions(): boolean {
   return localSuggester();
 }

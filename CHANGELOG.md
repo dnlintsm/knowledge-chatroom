@@ -4,6 +4,12 @@
 
 ### Added
 
+- The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
+  the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
+  builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the
+  chat against it with a real Claude Code engine and a scripted model
+  (`e2e/mock-anthropic.mjs`), so it needs no key (issue #176).
+
 - Start, rerun and finish runs over the storage API, as the agent's own run tools do:
   `POST /experiments/runs` (`{nodeId?, title?, hypothesis?, params?, inputs?, rerunOf?,
   provenance?}`) starts a run in state running with its inputs linked read-only and a
@@ -68,6 +74,10 @@
 
 ### Changed
 
+- Follow-up chips work with a remote backend (`AGENT_URL`): the app keeps asking this
+  repo's agent server's `POST /suggest`, which needs only the messages, instead of
+  keeping the first-round chips. The agent server no longer answers 404 there when it
+  sees `AGENT_URL` (issue #176).
 - Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
   file (a node's or the root's editors, an experiment's author while it isn't archived), the
   same as for everything else. A run's generated `models/general_rules.md` is now an ordinary

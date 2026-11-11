@@ -1,14 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Mode is explicit: adding credentials must not change required mock coverage.
-// Direct `playwright test` defaults to the browser-only mock suite.
+// Direct `playwright test` defaults to the browser-only mock suite. "python"
+// sends the chat to services/agent-py (AGENT_URL) running a real Claude Code
+// engine against a scripted model (e2e/mock-anthropic.mjs); it needs uv.
 const mode = process.env.E2E_MODE ?? "browser";
-if (!["browser", "storage", "login", "live"].includes(mode)) {
+if (!["browser", "storage", "login", "live", "python"].includes(mode)) {
   throw new Error(`Unknown E2E_MODE: ${mode}`);
 }
 const useRealAgent = mode === "live";
 const withStorage = mode === "storage" || mode === "login" || (useRealAgent && Boolean(process.env.DATABASE_URL));
 const withLogin = mode === "login";
+const withPython = mode === "python";
 if (useRealAgent && !process.env.ANTHROPIC_API_KEY) {
   throw new Error("Live smoke tests require ANTHROPIC_API_KEY.");
 }
@@ -25,10 +28,13 @@ const UI_PORT = port("E2E_UI_PORT", 3000);
 const AGENT_PORT = port("E2E_AGENT_PORT", 8000);
 const STORAGE_PORT = port("E2E_STORAGE_PORT", 8001);
 const OIDC_PORT = port("E2E_OIDC_PORT", 9400);
+const PY_AGENT_PORT = port("E2E_PY_AGENT_PORT", 9300);
+const MODEL_PORT = port("E2E_MODEL_PORT", 9500);
 const baseURL = `http://localhost:${UI_PORT}`;
 process.env.LOCAL_AGENT_URL = `http://localhost:${AGENT_PORT}`;
-// The chat goes to this repo's agent (or the mock), never a remote backend.
-process.env.AGENT_URL = "";
+// The chat goes to this repo's agent (or the mock), or in "python" mode to
+// services/agent-py; never a remote backend from the environment.
+process.env.AGENT_URL = withPython ? `http://localhost:${PY_AGENT_PORT}` : "";
 process.env.AGENT_PORT = String(AGENT_PORT);
 if (!useRealAgent) {
   process.env.ANTHROPIC_API_KEY = "";
@@ -47,9 +53,29 @@ if (withLogin) {
   process.env.APP_URL = baseURL;
 }
 
+// The Python chat agent with a real Claude Code engine and a scripted model;
+// skills, follow-up chips and the "+" menu come from the mock agent server.
+const pythonAgent = [
+  "ANTHROPIC_API_KEY=mock-key",
+  `ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}`,
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+  "CLAUDE_MODEL= ANTHROPIC_MODEL= KNOWLEDGE_PUBLIC_KEY= MCP_SERVERS=",
+  `LOCAL_AGENT_URL=http://localhost:${AGENT_PORT}`,
+  `AGENT_PY_PORT=${PY_AGENT_PORT}`,
+].join(" ");
+
 const agentServers = useRealAgent
   ? [{ command: "pnpm -C apps/agent start", url: `http://localhost:${AGENT_PORT}/health` }]
-  : [
+  : withPython
+    ? [
+        { command: "node e2e/mock-agent.mjs", url: `http://localhost:${AGENT_PORT}/health` },
+        { command: `MOCK_MODEL_PORT=${MODEL_PORT} node e2e/mock-anthropic.mjs`, url: `http://localhost:${MODEL_PORT}/health` },
+        {
+          command: `cd services/agent-py && ${pythonAgent} uv run --locked python -m agent_py.app`,
+          url: `http://localhost:${PY_AGENT_PORT}/health`,
+        },
+      ]
+    : [
       ...(withStorage
         ? [
             {
@@ -74,7 +100,18 @@ export default defineConfig({
     ? { testMatch: "login.spec.ts" }
     : mode === "storage"
       ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts"] }
-      : { testIgnore: ["login.spec.ts", "knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts"] }),
+      : withPython
+        ? { testMatch: "python-agent.spec.ts" }
+        : {
+            testIgnore: [
+              "login.spec.ts",
+              "knowledge.spec.ts",
+              "runs.spec.ts",
+              "sync-storage.spec.ts",
+              "chat-history.spec.ts",
+              "python-agent.spec.ts",
+            ],
+          }),
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const [mode = "browser", ...args] = process.argv.slice(2);
-if (!["browser", "storage", "login", "live"].includes(mode)) {
+if (!["browser", "storage", "login", "live", "python"].includes(mode)) {
   console.error(`Unknown E2E mode: ${mode}`);
   process.exit(1);
 }

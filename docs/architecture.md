@@ -292,7 +292,8 @@ would run a whole turn with file tools, so the agent's `POST /suggest` (`apps/ag
 makes one Messages API call on a small model with the conversation and the workspace context,
 and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
 the first-round chips once the chat starts, since any change would reload the follow-ups.
-`CHAT_SUGGESTIONS=static` on the UI leaves the suggester out.
+`CHAT_SUGGESTIONS=static` on the UI leaves the suggester out. With a remote backend
+(`AGENT_URL`) the suggester stays on this repo's agent server, since it needs only the messages.
 
 ### Agent steps in the chat
 
