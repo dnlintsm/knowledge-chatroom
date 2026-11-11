@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,9 +10,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+import uvicorn
 
 from api_py.app import create_app
 from api_py.config import Settings
+from api_py.proxy import client
 
 pytestmark = pytest.mark.anyio
 
@@ -171,3 +174,40 @@ async def test_health_reports_the_typescript_server():
         answer = await api.get("/health")
     assert answer.status_code == 503
     assert answer.json() == {"status": "degraded", "upstream": "down", "database": "off"}
+
+
+
+async def test_long_watches_do_not_hold_back_other_requests():
+    """More open watches than httpx's default pool (100) still leave room for other requests."""
+    release = asyncio.Event()
+
+    async def ts_app(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+        if scope["path"] == "/files":
+            await send({"type": "http.response.body", "body": b": open\n\n", "more_body": True})
+            await release.wait()
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    ts = uvicorn.Server(uvicorn.Config(ts_app, host="127.0.0.1", port=0, log_level="warning", lifespan="off"))
+    serving = asyncio.create_task(ts.serve())
+    while not ts.started:
+        await asyncio.sleep(0.01)
+    port = ts.servers[0].sockets[0].getsockname()[1]
+    http = client(f"http://127.0.0.1:{port}")
+    watches: list[httpx.Response] = []
+    try:
+        # With a capped pool the 101st request waits forever, so this times out.
+        async with asyncio.timeout(15):
+            for _ in range(110):
+                watches.append(await http.send(http.build_request("GET", "/files?watch=1"), stream=True))
+            other = await http.get("/nodes")
+        assert other.content == b"ok"
+    finally:
+        release.set()
+        for watch in watches:
+            await watch.aclose()
+        await http.aclose()
+        ts.should_exit = True
+        await serving

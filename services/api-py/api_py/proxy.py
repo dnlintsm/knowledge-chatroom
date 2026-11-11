@@ -35,9 +35,16 @@ HOP_BY_HOP = frozenset(
 
 
 def client(upstream: str, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
-    # No read timeout: watches and chat runs stay open as long as they need.
     return httpx.AsyncClient(
-        base_url=upstream, transport=transport, timeout=httpx.Timeout(None, connect=10.0), follow_redirects=False
+        base_url=upstream,
+        transport=transport,
+        # No read timeout: watches and chat runs stay open as long as they need.
+        timeout=httpx.Timeout(None, connect=10.0, pool=30.0),
+        # No cap on open connections: every tab holds a file watch open, and a
+        # capped pool would leave other requests (and /health) waiting behind
+        # them. The TypeScript server sees one connection per request, as before.
+        limits=httpx.Limits(max_connections=None, max_keepalive_connections=20),
+        follow_redirects=False,
     )
 
 
