@@ -341,3 +341,9 @@ Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 `AGENT_PORT=9000 node e2e/mock-agent.mjs` and set `AGENT_URL=http://localhost:9000` for
 the UI. After a message, `curl localhost:9000/last-run` shows the run input, with
 `forwardedProps.knowledge_chatroom` in it.
+
+To test a backend built on the Claude Agent SDK without a key, point its
+`ANTHROPIC_BASE_URL` at `e2e/mock-anthropic.mjs` (`MOCK_MODEL_PORT`, default 9500): it
+streams scripted turns, and `GET /last-request` shows what the engine sent the model.
+`pnpm test:e2e:python` runs the chat this way against `services/agent-py`
+([Testing](testing.md)).

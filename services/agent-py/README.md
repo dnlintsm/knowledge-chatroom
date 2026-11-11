@@ -14,22 +14,34 @@ where the user is on every run, and works on the workspace's files on the server
 through the storage API (step 2), including starting and finishing runs, with the
 user's skills (step 3), their memory (step 4), and the outside MCP servers and tool
 chips (step 5). The follow-up chips after each reply come from the agent server's
-`/suggest` (step 6), so this agent doesn't write them.
+`/suggest` (step 6), so this agent doesn't write them. `pnpm dev:python`, a compose
+profile and an e2e run with the app came last (step 7).
 
 ## Run it
 
-Python 3.11+ and [uv](https://docs.astral.sh/uv/), from the repository root:
+Python 3.11+ and [uv](https://docs.astral.sh/uv/). With the app, from the repository root:
 
 ```bash
 uv sync --package agent-py
+pnpm dev:python                      # UI :3000, agent server :8000, this agent :9300
+```
+
+`pnpm dev:python` reads the repository's `.env` for this agent too and sets the app's
+`AGENT_URL` to it. To run it on its own (`pnpm dev:agent-py` does the same with the
+`.env`):
+
+```bash
 cd services/agent-py
 uv run python -m agent_py.app        # http://127.0.0.1:9300
 ```
 
-Then, in the repository's `.env`, point the app at it and restart `pnpm dev`:
+and point the app at it in `.env` (`AGENT_URL=http://127.0.0.1:9300`) before `pnpm dev`.
+
+With Docker, the `python-agent` profile builds `services/agent-py/Dockerfile` and runs it
+beside the demo (the Claude Agent SDK brings its own Claude Code, so no Node.js):
 
 ```bash
-AGENT_URL=http://127.0.0.1:9300
+AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build
 ```
 
 Claude Code needs credentials as usual (`ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL`
@@ -105,3 +117,8 @@ uv run --package agent-py pytest services/agent-py
 ```
 
 They swap Claude Code for a fake (`tests/conftest.py`), so they need no key.
+
+`pnpm test:e2e:python`, from the repository root, runs the chat in the browser against
+this agent with the real Claude Code and a scripted model (`e2e/mock-anthropic.mjs`):
+a reply, a browser tool and its result, a `/tldr` skill and the follow-up chips
+(`e2e/python-agent.spec.ts`, [Testing](../../docs/testing.md)). CI runs it too.

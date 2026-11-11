@@ -116,9 +116,28 @@ jobs:
         if: always()
         run: node scripts/ci-tests.mjs run "Login E2E" playwright -- pnpm test:e2e:login --output test-results-login --reporter=list,json
 
+      # The chat on the Python agent (services/agent-py, issue #176): a real
+      # Claude Code engine with a scripted model, so it needs no API key.
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        if: always()
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - name: Install the Python agent
+        if: always()
+        run: uv sync --package agent-py --locked
+      - name: Test the chat on the Python agent
+        id: python
+        if: always()
+        run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json
+
       - name: Summarize test suites
         if: always()
-        run: node scripts/ci-tests.mjs summary "Browser E2E" "Storage E2E" "Login E2E"
+        run: node scripts/ci-tests.mjs summary "Browser E2E" "Storage E2E" "Login E2E" "Python agent E2E"
 
       - name: Upload preview artifact
         id: artifact
@@ -177,7 +196,7 @@ jobs:
         env:
           IMAGE_BASE: ${{ steps.publish.outputs.base }}
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
-          TEST_OUTCOME: ${{ steps.playwright.outcome == 'success' && steps.storage.outcome == 'success' && steps.login.outcome == 'success' && 'success' || 'failure' }}
+          TEST_OUTCOME: ${{ steps.playwright.outcome == 'success' && steps.storage.outcome == 'success' && steps.login.outcome == 'success' && steps.python.outcome == 'success' && 'success' || 'failure' }}
         with:
           script: |
             const fs = require("fs");
