@@ -241,16 +241,22 @@ class _Reader:
                 raise UploadError(400, "Name each file part by its path in the experiment")
             if part.size > (MAX_META_BYTES if part.name == "meta" else self.max_file_bytes):
                 raise self._too_large(part.name)
+        elif part.size > MAX_META_BYTES:
+            # Refused now, with the answer its end would get, so a large field is never held.
+            self._check_field(part)
+            raise self._too_large("meta")
         part.chunks.append(data[start:end])
+
+    @staticmethod
+    def _check_field(part: _Part) -> None:
+        if part.name != "meta":
+            name = "undefined" if part.name is None else part.name
+            raise UploadError(400, f'"{name}" isn\'t a file: put everything but files in the "meta" part')
 
     def _end(self) -> None:
         part = self.part
         if part.kind == "field":
-            if part.name != "meta":
-                name = "undefined" if part.name is None else part.name
-                raise UploadError(400, f'"{name}" isn\'t a file: put everything but files in the "meta" part')
-            if part.size > MAX_META_BYTES:
-                raise self._too_large("meta")
+            self._check_field(part)
             self._set_meta(b"".join(part.chunks).decode(part.charset, errors="replace"))
         elif part.kind == "file":
             if part.name is None:

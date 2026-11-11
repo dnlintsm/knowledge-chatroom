@@ -354,3 +354,19 @@ async def test_upload_reads_bodies_as_busboy_does(api):
     assert made.status_code == 201, made.text
     assert [f["path"] for f in made.json()["files"]] == ["data.json"]
     assert made.json()["files"][0]["mime"] == "application/json"  # octet-stream: picked from the path
+
+
+async def test_large_text_fields_are_refused_while_they_stream():
+    from api_py.uploads import MAX_META_BYTES, UploadError, read_parts
+
+    async def body(name: str):
+        yield f'--b\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
+        for _ in range(64):  # 4 MiB, never ended
+            yield b"x" * (64 * 1024)
+        raise AssertionError("read past the limit")
+
+    for name, status in (("meta", 413), ("note", 400)):
+        with pytest.raises(UploadError) as refused:
+            await read_parts("multipart/form-data; boundary=b", body(name), 1024)
+        assert refused.value.status == status
+    assert MAX_META_BYTES == 256 * 1024
