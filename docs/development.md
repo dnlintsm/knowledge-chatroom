@@ -209,9 +209,9 @@ mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 
 The chat can use an agent from a separate backend instead of this repo's own:
 set `AGENT_URL` to its base URL, and every chat run goes to
-`${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage and
-skills at `LOCAL_AGENT_URL` (default `http://localhost:8000`, which `pnpm dev`
-starts), and turns its own chat off. Each run tells the backend who the user is and
+`${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage,
+skills and the follow-up chips at `LOCAL_AGENT_URL` (default `http://localhost:8000`,
+which `pnpm dev` starts), and turns its own chat off. Each run tells the backend who the user is and
 where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
 must do is in [Remote agent backend](remote-agent.md).
 

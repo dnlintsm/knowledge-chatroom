@@ -69,7 +69,8 @@ import type { RunTokens } from "./mcp";
 
 const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 // AGENT_URL set: the app's chat goes to a remote backend (docs/remote-agent.md),
-// so this server keeps storage, skills and the hub, and its own chat is off.
+// so this server keeps storage, skills, the hub and the follow-up chips
+// (/suggest), and its own chat is off.
 const REMOTE_CHAT = Boolean(process.env.AGENT_URL?.trim());
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
@@ -265,7 +266,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (REMOTE_CHAT && req.method === "POST" && (pathname === "/" || pathname === "/suggest")) {
+  if (REMOTE_CHAT && req.method === "POST" && pathname === "/") {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Chat is served by the remote backend at AGENT_URL." }));
     return;
@@ -392,7 +393,7 @@ server.listen(PORT, HOST, () => {
     `[agent] Claude Agent SDK (TypeScript) starter listening on http://${HOST}:${PORT}`,
   );
   if (REMOTE_CHAT) {
-    console.log("[agent] AGENT_URL is set: chat goes to that backend; this server serves storage and skills.");
+    console.log("[agent] AGENT_URL is set: chat goes to that backend; this server serves storage, skills and follow-up chips.");
   }
   if (publicKey) console.log(`[agent] Identity tokens verify with KNOWLEDGE_PUBLIC_KEY=${publicKey}`);
 });
