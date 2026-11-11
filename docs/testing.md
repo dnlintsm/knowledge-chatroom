@@ -34,6 +34,9 @@ cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
 uv run pytest -q
 ```
 
+The 3.12 CI run also reports coverage of handwritten Python source. It has no
+percentage gate yet; use the report to identify important untested behavior.
+
 Pyrefly checks the handwritten package and service source at the minimum supported Python
 version. Existing findings are recorded in `pyrefly-baseline.json`; resolve them over time,
 then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated models and
