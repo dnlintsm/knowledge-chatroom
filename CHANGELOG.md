@@ -15,6 +15,12 @@
   conformance suite and the storage and login e2e run through it (`CONFORMANCE_TARGET=ts` and
   `E2E_API_PY=off` test the agent alone). A deployment without it keeps working while it only
   passes requests through ([Deployment](docs/deployment.md)).
+- api-py now serves `/access` and `/nodes` itself (issue #190, step 2): people, groups,
+  grants, the admin panel's lists, the audit log and the knowledge tree, with the same
+  answers, refusals, audit entries, row-level security and change events as the agent
+  server. It passes them through until the database has the migrations it knows. Run
+  api-py in front of the agent server from this release on: without it these routes still
+  work on the agent server alone, which keeps them until phase 4.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile

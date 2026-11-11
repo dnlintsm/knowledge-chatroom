@@ -65,8 +65,11 @@ async def schema(pool: AsyncConnectionPool, directory: Path) -> Schema:
 
 
 def open_pool(database_url: str) -> AsyncConnectionPool:
-    """A small pool, opened by the app's lifespan (await pool.open())."""
-    return AsyncConnectionPool(database_url, min_size=1, max_size=10, open=False)
+    """
+    A small pool, opened by the app's lifespan (await pool.open()). Statements
+    outside `conn.transaction()` commit on their own, as with postgres.js.
+    """
+    return AsyncConnectionPool(database_url, min_size=1, max_size=10, open=False, kwargs={"autocommit": True})
 
 
 @asynccontextmanager

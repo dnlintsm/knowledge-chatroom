@@ -25,31 +25,52 @@ from psycopg_pool import AsyncConnectionPool
 from . import db
 from .config import ConfigError, Settings, settings_from_env
 from .proxy import client, forward
-from .routes import ROUTERS
+from .routes import ROUTERS, STORAGE_PREFIXES
+from .storage import open_storage
 
 logger = logging.getLogger("api_py")
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 SCHEMA_POLL_SECONDS = 2.0
 
 
-async def _wait_for_schema(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> None:
-    """Follows the database until it has the migrations this server knows (the TypeScript server applies them)."""
-    while True:
+async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
+    """
+    Opens the storage routes moved to Python once the database has exactly the
+    migrations this server knows (the TypeScript server applies them). Returns
+    whether they are served; until then they pass through to the TypeScript server.
+    """
+    if app.state.storage is not None:
+        return True
+    async with app.state.storage_lock:
+        if app.state.storage is not None:
+            return True
         try:
             found = await db.schema(pool, settings.migrations_dir)
         except Exception as err:  # noqa: BLE001 - a database that is down is reported, not fatal
             app.state.schema = None
             logger.warning("can't read the database's migrations yet: %s", err)
-        else:
-            app.state.schema = found
-            if found.state is db.SchemaState.READY:
-                return
-            if found.state is db.SchemaState.AHEAD:
-                logger.error(
-                    "the database has migrations this server doesn't know (%s); update api-py",
-                    ", ".join(found.unknown),
-                )
-                return
+            return False
+        app.state.schema = found
+        if found.state is not db.SchemaState.READY:
+            return False
+        try:
+            app.state.storage = await open_storage(pool)
+        except Exception as err:  # noqa: BLE001 - tried again, as the database may still be settling
+            logger.warning("can't open storage yet: %s", err)
+            return False
+        logger.info("serving storage routes: %s", ", ".join(STORAGE_PREFIXES))
+        return True
+
+
+async def _serve_storage_when_ready(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> None:
+    """Follows the database until the storage routes can be served (or it turns out newer than this server)."""
+    while not await _try_storage(app, pool, settings):
+        found = app.state.schema
+        if found and found.state is db.SchemaState.AHEAD:
+            logger.error(
+                "the database has migrations this server doesn't know (%s); update api-py", ", ".join(found.unknown)
+            )
+            return
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
 
 
@@ -57,8 +78,23 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.http = client(settings.ts_agent_url, transport)
+        app.state.settings = settings
         app.state.pool = None
         app.state.schema = None
+        # The ported storage routes; None while they pass through (no database, or not ready yet).
+        app.state.storage = None
+        app.state.storage_lock = asyncio.Lock()
+
+        async def storage_ready() -> bool:
+            # A request in between polls checks too, so the first one after the
+            # TypeScript server has migrated is already served here.
+            if app.state.storage is not None:
+                return True
+            if not app.state.pool or (app.state.schema and app.state.schema.state is db.SchemaState.AHEAD):
+                return False
+            return await _try_storage(app, app.state.pool, settings)
+
+        app.state.storage_ready = storage_ready
         watcher = None
         if settings.database_url:
             pool = db.open_pool(settings.database_url)
@@ -76,10 +112,9 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                     "update api-py to the TypeScript server's version"
                 )
             app.state.schema = found
-            if not found or found.state is not db.SchemaState.READY:
-                if found:
-                    logger.info("waiting for the TypeScript server to apply %s", ", ".join(found.missing))
-                watcher = asyncio.create_task(_wait_for_schema(app, pool, settings))
+            if found and found.state is not db.SchemaState.READY:
+                logger.info("waiting for the TypeScript server to apply %s", ", ".join(found.missing))
+            watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
         try:
             yield
         finally:
