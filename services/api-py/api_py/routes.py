@@ -9,4 +9,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-ROUTERS: list[APIRouter] = []
+from . import storage_routes
+
+# Step 2: /access and /nodes (storage_routes.py).
+ROUTERS: list[APIRouter] = [storage_routes.router]
+# The storage API's sections served here once the database is ready.
+STORAGE_PREFIXES = ("/access", "/nodes")

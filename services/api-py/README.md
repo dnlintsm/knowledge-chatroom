@@ -11,25 +11,36 @@ So the app, the Python chat agent and the MCP servers keep one address while rou
 move. The URLs and `packages/contracts/openapi/storage.yaml` stay the contract, and
 the conformance suite runs through api-py.
 
-Step 1 is the skeleton, and every route still passes through. It has:
+What it serves itself so far:
 
-- `GET /health`, which answers `{"status":"ok"}` when the TypeScript server answers
-  and the database is fine, and 503 with what isn't;
-- the database pool, and `db.as_user()`, the row-security transaction
-  (`SET LOCAL ROLE knowledge_user` plus `app.user_id`, as `asUser()` in
-  `apps/agent/src/storage/db.ts`);
-- identity tokens (`api_py/tokens.py`), signed and checked byte for byte as
-  `packages/contracts/src/identity-token.ts` does them;
-- the migration check described below.
+| Step | Routes | Code |
+| --- | --- | --- |
+| 1 | `GET /health`: `{"status":"ok"}` when the TypeScript server answers and the database is fine, 503 with what isn't | `app.py` |
+| 2 | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
+
+Behind them:
+
+- **Who is asking** (`identity.py`). The local user without login. With login, the
+  `X-Knowledge-User` token, or an `X-Knowledge-Storage` token for Claude acting through
+  an outside service, with the same limits as on the TypeScript server. Tokens are signed
+  and checked byte for byte as `packages/contracts/src/identity-token.ts` does
+  (`tokens.py`), and the first person to sign in owns the workspace.
+- **The permission core** (`session.py`). Roles come from `effective_role` in SQL, and
+  `need()` refuses with the same messages: a node you can't see is "not found", and too
+  low a role is "You can only view here; this needs editor access".
+- **Row-level security** (`db.as_user()`). Node queries run as `knowledge_user` with
+  `app.user_id` set, as `asUser()` in `apps/agent/src/storage/db.ts` does them.
+- **Change events** go out on the same `LISTEN/NOTIFY` channel, so the TypeScript
+  server's file watch tells browsers about node changes made here.
 
 ## Migrations
 
 The TypeScript server still applies the SQL migrations (`apps/agent/src/storage/migrations`)
 until the last step of #190. api-py only checks the database:
 
-- **The same migrations:** it serves.
-- **Some not applied yet:** it serves, and waits for the TypeScript server to apply
-  them as it starts.
+- **The same migrations:** it serves its routes.
+- **Some not applied yet:** it passes its routes through to the TypeScript server, which
+  applies them as it starts, and serves them itself from the first request after that.
 - **Migrations it doesn't know:** the database is newer than this server, so it
   refuses to start.
 

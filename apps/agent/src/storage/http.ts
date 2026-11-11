@@ -154,6 +154,10 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *   Chats are their user's alone (017_chats.sql): workspace owners don't see
  *   them, and storage tokens can't reach them.
  *
+ *   /access and /nodes are also served by the Python API server in front of
+ *   this one (services/api-py/api_py/storage_routes.py, issue #190): change
+ *   them in both until phase 4 retires these.
+ *
  *   GET    /access                  {me, rootRole}
  *   GET    /access/users            everyone who has signed in
  *   GET    /access/people           the same, with sign-up and last-active

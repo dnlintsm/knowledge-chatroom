@@ -41,8 +41,9 @@ Run the Python API server (`services/api-py`, [README](../services/api-py/README
 front of the agent, with `TS_AGENT_URL` pointing at the agent and the same `DATABASE_URL`,
 `AUTH_MODE` and `AUTH_SECRET`. Point `LOCAL_AGENT_URL` and the MCP servers'
 `KNOWLEDGE_STORAGE_URL` at the API server. The agent's routes are moving to it one group
-at a time (issue #190). Until a release says otherwise it passes every route through, so
-an install without it keeps working.
+at a time (issue #190). It serves `/access` and `/nodes` itself and passes the rest
+through. The agent keeps serving every route too until phase 4, so an install without
+the API server keeps working, but new work lands in Python.
 
 Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
 and `AGENT_URL` only when the chat uses a remote backend
