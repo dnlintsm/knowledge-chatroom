@@ -1,0 +1,42 @@
+name: Python dependency audit
+
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "packages/knowledge-py/pyproject.toml"
+      - "services/**/pyproject.toml"
+      - ".github/workflows/python-audit.yml"
+  schedule:
+    - cron: "37 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - name: Install the locked audit tool
+        run: uv sync --locked --no-default-groups --group security
+      - name: Export locked workspace runtime dependencies
+        run: uv export --locked --all-packages --no-dev --no-emit-workspace --no-hashes --format requirements-txt > "$RUNNER_TEMP/python-requirements.txt"
+      - name: Audit dependencies
+        run: uv run --locked --no-sync pip-audit --no-deps -r "$RUNNER_TEMP/python-requirements.txt"
