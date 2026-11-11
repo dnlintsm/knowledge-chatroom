@@ -63,6 +63,8 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     AGENT_PORT: String(port),
     // Full-text search is enough here; search by meaning has its own tests.
     EMBEDDING_MODEL: "off",
+    // api-py in front runs the search indexer (issue #190, step 5).
+    ...(apiPort && { SEARCH_INDEXER: "off" }),
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "conformance-no-model-calls",
   },
   stdio: ["ignore", "inherit", "inherit"],
@@ -82,6 +84,7 @@ const api = apiPort
         AUTH_SECRET: authSecret,
         TS_AGENT_URL: `http://127.0.0.1:${port}`,
         API_PY_PORT: String(apiPort),
+        EMBEDDING_MODEL: "off",
       },
       stdio: ["ignore", "inherit", "inherit"],
     })

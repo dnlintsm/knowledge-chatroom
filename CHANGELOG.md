@@ -38,6 +38,14 @@
   proposer), rejecting and withdrawing them, promoting an experiment's changes to its node,
   and the multipart `POST /experiments/upload`, read part by part as the agent server reads
   it. With this, all of step 4 is in Python.
+- api-py now serves `/search` and runs the search indexer (issue #190, step 5): words and
+  meaning ranked as the agent server ranks them, indexing files stored before search
+  existed, and embedding passages with the same local model (through ONNX Runtime) or
+  `EMBEDDING_*` API, giving the same vectors, so nothing is re-embedded. Start the agent
+  server with the new `SEARCH_INDEXER=off` so only api-py indexes (`pnpm dev`, the e2e and
+  the compose file do), and give api-py the same `EMBEDDING_*` and `SEARCH_MIN_SIMILARITY`
+  settings and a writable `EMBEDDING_CACHE_DIR`. The compose `api` service caches its model
+  in a new `api-models` volume.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile

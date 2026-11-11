@@ -22,6 +22,8 @@ from .access import AccessService
 from .blobs import BlobStore, S3Settings
 from .db import APP_ROLE
 from .events import EventHub
+from .search import SearchService
+from .semantic import SemanticIndex
 
 logger = logging.getLogger("api_py")
 
@@ -49,6 +51,12 @@ class Storage:
     # The blob store and change events, for /files; None in tests that leave them out.
     blobs: BlobStore | None = None
     events: EventHub | None = None
+    # Search by meaning, when an embedding model is set (semantic.py).
+    semantic: SemanticIndex | None = None
+
+    @property
+    def search(self) -> SearchService:
+        return SearchService(self.workspace_id, self.blobs, self.semantic)
 
     async def notify(self, conn: AsyncConnection, event: dict[str, Any]) -> None:
         """Tells every process about a change, when `conn`'s transaction commits."""
