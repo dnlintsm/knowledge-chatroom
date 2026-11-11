@@ -15,6 +15,8 @@ dependencies = [
     "cryptography>=42",
     # The S3-compatible blob store, as @aws-sdk/client-s3 is for the TypeScript server.
     "boto3>=1.36",
+    # POST /experiments/upload's multipart body, read part by part (uploads.py).
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

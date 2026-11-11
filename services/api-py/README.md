@@ -17,8 +17,9 @@ What it serves itself so far:
 | --- | --- | --- |
 | 1 | `GET /health`: `{"status":"ok"}` when the TypeScript server answers and the database is fine, 503 with what isn't | `app.py` |
 | 2 | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
-| 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). An experiment's files (`?experiment=`) and `?propose` still go to the TypeScript server until step 4 | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
-| 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`). `/experiments/upload` and proposals (`/proposals`, `?propose`) still go to the TypeScript server until step 4b | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
+| 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
+| 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`) | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
+| 4b | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
 
 Behind them:
 

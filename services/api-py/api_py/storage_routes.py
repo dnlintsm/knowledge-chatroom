@@ -1,4 +1,4 @@
-"""The storage API's /access, /nodes, /files and /experiments in Python (issue #190), as apps/agent/src/storage/http.ts.
+"""The storage API's /access, /nodes, /files, /experiments and /proposals in Python (issue #190), as storage/http.ts.
 
     GET    /access                  {me, rootRole}
     GET    /access/users            everyone who has signed in
@@ -26,7 +26,8 @@
     GET    /files?watch             change events (server-sent), those this user may see
     GET    /files/<path>?node=      the content (a signed store link for binary files
                                     when S3_PUBLIC_URL is set); ?versions: its history
-    PUT    /files/<path>?node=      write it (If-None-Match: * only creates)
+    PUT    /files/<path>?node=      write it (If-None-Match: * only creates); ?propose
+                                    (&note=): propose it instead (201)
     PATCH  /files/<path>?node=      {path} -> rename
     DELETE /files/<path>?node=      soft delete
 
@@ -41,9 +42,18 @@
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
     POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
     POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
+    POST   /experiments/upload      multipart: a "meta" part {id, path, title, ...} and
+                                    one part per file -> {experiment, lineage, created,
+                                    files} (201)
 
-Proposed versions (?propose, /proposals) and /experiments/upload still go to
-the TypeScript server until they move (step 4b).
+    GET    /proposals?node=&experiment=&status=   proposals you can see (status:
+                                    open (default), accepted, rejected, withdrawn, all)
+    POST   /proposals               {experimentId, paths?, note?} -> promote an
+                                    experiment's changes (201)
+    GET    /proposals/promotable?experiment=<id>  what promoting would propose
+    GET    /proposals/<id>          one proposal
+    GET    /proposals/<id>/content  its proposed bytes
+    POST   /proposals/<id>/accept|reject|withdraw
 
 Until the database has the migrations this server knows (the TypeScript
 server applies them as it starts), these pass through to the TypeScript
@@ -67,6 +77,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from . import uploads
 from .access import ROLES, AccessError, ForbiddenError
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError
 from .files import FileExistsError_
@@ -80,6 +91,7 @@ from .paths import (
     normalize_path,
     utf16_len,
 )
+from .proposals import EVERYWHERE, ProposalError
 from .proxy import forward
 from .run_report import js_json, js_number
 from .session import Session
@@ -93,7 +105,7 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too, but the TypeScript server reads the raw
 # path and serves those as files. They go to it, so a storage token's limits
 # (agent_refusal) always see the section the handlers act on.
-_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
 # Stored bytes are served from the app's origin, so a file opened as a page (an
@@ -175,19 +187,22 @@ def _js_float(text: str) -> float | None:
     return None if math.isinf(value) else value
 
 
+def _refuse(constant: str) -> None:
+    raise ValueError(constant)  # NaN and Infinity aren't JSON
+
+
+def parse_json(text: str) -> Any:
+    """JSON.parse: numbers read as JavaScript reads them; ValueError when it isn't JSON."""
+    return json.loads(text, parse_constant=_refuse, parse_int=_js_int, parse_float=_js_float)
+
+
 async def read_json(request: Request) -> dict[str, Any] | None:
     """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
     body = await read_body(request, MAX_JSON_BYTES)
     if body is None:
         return None
-
-    def refuse(constant: str) -> None:
-        raise ValueError(constant)  # NaN and Infinity aren't JSON
-
     try:
-        value = json.loads(
-            body.decode("utf-8", errors="replace"), parse_constant=refuse, parse_int=_js_int, parse_float=_js_float
-        )
+        value = parse_json(body.decode("utf-8", errors="replace"))
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
@@ -233,6 +248,8 @@ def agent_refusal(request: Request) -> str | None:
         if method == "POST" and re.fullmatch(r"[^/]+/(inputs|finish)", sub):
             return None
         return "Claude doesn't delete experiments or move folders into them"
+    if section == "proposals":
+        return None if method == "POST" and sub == "" else "Claude doesn't accept, reject or withdraw proposals"
     if section == "access":
         return "Claude doesn't manage access"
     return "Claude can't do that with a storage token"
@@ -273,7 +290,7 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(409, str(err), exists=True)
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
-    except (NodeError, AccessError, InvalidPathError, ExperimentError) as err:
+    except (NodeError, AccessError, InvalidPathError, ExperimentError, ProposalError) as err:
         return error(400, str(err))
     except Exception:
         logger.exception("[storage] request failed")
@@ -292,15 +309,15 @@ async def access_route(request: Request) -> Response:
     return await _serve(request, handle_access)
 
 
-def _typescript_files(request: Request) -> bool:
-    """Proposals, which the TypeScript server serves until step 4b, or no blob store here."""
-    return "propose" in request.query_params or request.app.state.storage.blobs is None
+def _no_blob_store(request: Request) -> bool:
+    """File content needs the blob store; without one here, the TypeScript server answers."""
+    return request.app.state.storage.blobs is None
 
 
 @router.api_route("/files", methods=ALL_METHODS, include_in_schema=False)
 @router.api_route("/files/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def files_route(request: Request) -> Response:
-    return await _serve(request, handle_files, _typescript_files)
+    return await _serve(request, handle_files, _no_blob_store)
 
 
 def _experiment_path(request: Request) -> str:
@@ -308,20 +325,16 @@ def _experiment_path(request: Request) -> str:
     return decode_component(re.sub(r"^/experiments/?", "", raw_path(request)))
 
 
-def _typescript_experiments(request: Request) -> bool:
-    """/experiments/upload (multipart), which the TypeScript server serves until step 4b, or no blob store here."""
-    if request.app.state.storage.blobs is None:
-        return True
-    try:
-        return _experiment_path(request) == "upload"
-    except _MalformedPath:
-        return False
-
-
 @router.api_route("/experiments", methods=ALL_METHODS, include_in_schema=False)
 @router.api_route("/experiments/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def experiments_route(request: Request) -> Response:
-    return await _serve(request, handle_experiments, _typescript_experiments)
+    return await _serve(request, handle_experiments, _no_blob_store)
+
+
+@router.api_route("/proposals", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/proposals/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def proposals_route(request: Request) -> Response:
+    return await _serve(request, handle_proposals, _no_blob_store)
 
 
 async def handle_nodes(request: Request, session: Session) -> Response:
@@ -491,6 +504,11 @@ async def handle_files(request: Request, session: Session) -> Response:
             return error(413, f"File exceeds {limit} bytes")
         header = js_trim(request.headers.get("content-type", "").split(";")[0])
         mime = header if header and header != "application/octet-stream" else None
+        if "propose" in request.query_params:
+            if experiment:
+                return error(400, "An experiment's files change directly; promote it to propose them")
+            note = first_param(request, "note")
+            return json_response(201, await session.propose(files.node_id, path, content, mime=mime, note=note))
         create_only = js_trim(request.headers.get("if-none-match", "")) == "*"
         return json_response(200, await files.write(path, content, mime=mime, create_only=create_only))
 
@@ -638,6 +656,45 @@ def run_request(body: dict[str, Any]) -> dict[str, Any] | None:
     return {"nodeId": node_id, "inputs": inputs, "rerunOf": rerun_of, "provenance": given, "input": fields}
 
 
+UPLOAD_META = (
+    'Expected a "meta" part with {id: uuid, path: "Tech/Module/Loop/Process" | string[], title: string, '
+    "hypothesis?: string, params?, results?: object, state?: ready|running|done|failed}"
+)
+
+
+async def read_upload(request: Request) -> dict[str, Any]:
+    """
+    The parts of a POST /experiments/upload (readUpload in http.ts): its "meta"
+    JSON and its files, each named by its field. The form is read whole before
+    anything is written, so a broken upload changes nothing.
+    """
+    content_type = request.headers.get("content-type", "")
+    if not re.match(r"multipart/form-data\s*;", content_type, re.IGNORECASE):
+        raise uploads.UploadError(
+            415, 'Send the experiment as multipart/form-data: a "meta" part and one part per file'
+        )
+    found = await uploads.read_parts(content_type, request.stream(), request.app.state.settings.max_upload_bytes)
+    meta: Any = None
+    if found.meta is not None:
+        try:
+            meta = parse_json(found.meta)
+        except ValueError as err:
+            raise uploads.UploadError(400, f'The "meta" part isn\'t JSON. {UPLOAD_META}') from err
+    if not isinstance(meta, dict):
+        raise uploads.UploadError(400, UPLOAD_META)
+    path = meta.get("path")
+    if isinstance(path, str):
+        names: list[str] | None = path.split("/")
+    elif isinstance(path, list) and all(p is None or isinstance(p, str) for p in path):
+        names = ["" if p is None else p for p in path]
+    else:
+        names = None
+    given = experiment_input(meta)
+    if not isinstance(meta.get("id"), str) or names is None or given is None or not isinstance(meta.get("title"), str):
+        raise uploads.UploadError(400, UPLOAD_META)
+    return {"id": meta["id"], "path": names, "input": given, "files": found.files}
+
+
 async def handle_experiments(request: Request, session: Session) -> Response:
     experiment_id = _experiment_path(request)
     method = request.method
@@ -655,6 +712,18 @@ async def handle_experiments(request: Request, session: Session) -> Response:
                 return error(403, STATUS_REFUSED)
             return json_response(201, await session.create_experiment(body["nodeId"], given))
         return error(405, "Method not allowed")
+
+    if experiment_id == "upload":
+        if method != "POST":
+            return error(405, "Method not allowed")
+        try:
+            upload = await read_upload(request)
+        except uploads.UploadError as err:
+            return error(err.status, str(err))
+        # Like POST /experiments: a new experiment is a draft whatever status says.
+        return json_response(
+            201, await session.upload_experiment(upload["id"], upload["path"], upload["input"], upload["files"])
+        )
 
     if experiment_id == "runs":
         if method != "POST":
@@ -712,6 +781,68 @@ async def handle_experiments(request: Request, session: Session) -> Response:
             return json_response(200, {"deleted": experiment_id})
         return error(404, "Experiment not found")
     return error(405, "Method not allowed")
+
+
+PROPOSAL_STATUSES = ("open", "accepted", "rejected", "withdrawn", "all")
+DECISIONS = ("accept", "reject", "withdraw")
+
+
+async def handle_proposals(request: Request, session: Session) -> Response:
+    parts = [decode_component(p) for p in raw_path(request).split("/")[2:]]  # after /proposals
+    proposal_id = parts[0] if parts else ""
+    action = parts[1] if len(parts) > 1 else ""
+    method = request.method
+
+    if not proposal_id:
+        if method == "GET":
+            node = first_param(request, "node")
+            status = first_param(request, "status")
+            status = "open" if status is None else status
+            if status not in PROPOSAL_STATUSES:
+                return error(400, f"status must be one of {', '.join(PROPOSAL_STATUSES)}")
+            where = EVERYWHERE if node is None else None if node in ("root", "") else node
+            experiment = first_param(request, "experiment") or None
+            found = await session.proposals(node=where, experiment=experiment, status=status)
+            return json_response(200, {"proposals": found})
+        if method == "POST":
+            body = await read_json(request)
+            paths = body.get("paths") if body else None
+            if (
+                body is None
+                or not isinstance(body.get("experimentId"), str)
+                or ("paths" in body and not (isinstance(paths, list) and all(isinstance(p, str) for p in paths)))
+                or ("note" in body and not isinstance(body["note"], str))
+            ):
+                return error(400, "Expected {experimentId: string, paths?: string[], note?: string}")
+            promoted = await session.promote(body["experimentId"], paths, body.get("note"))
+            return json_response(201, {"proposals": promoted})
+        return error(405, "Method not allowed")
+
+    if proposal_id == "promotable" and not action:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        experiment = first_param(request, "experiment")
+        if not experiment:
+            return error(400, "Expected ?experiment=<id>")
+        return json_response(200, {"files": await session.promotable(experiment)})
+
+    if not action:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.proposal(proposal_id))
+    if action == "content":
+        if method != "GET":
+            return error(405, "Method not allowed")
+        proposal, content = await session.proposal_content(proposal_id)
+        return Response(
+            content,
+            headers={"Content-Type": proposal["mime"], "Cache-Control": "no-cache", **STORED_CONTENT_HEADERS},
+        )
+    if action in DECISIONS:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.decide(proposal_id, action))
+    return error(404, "Not found")
 
 
 async def watch(session: Session) -> Response:

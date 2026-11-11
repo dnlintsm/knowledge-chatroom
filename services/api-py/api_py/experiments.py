@@ -247,6 +247,14 @@ async def create(
     return created
 
 
+async def id_taken(conn: AsyncConnection, experiment_id: str) -> bool:
+    """Whether any experiment, in any workspace and even a deleted one, has this id (run as the server)."""
+    if not is_uuid(experiment_id):
+        return False
+    cur = await conn.execute("SELECT 1 FROM experiments WHERE id = %s", (experiment_id,))
+    return await cur.fetchone() is not None
+
+
 async def _copy_node_files(conn: AsyncConnection, workspace_id: str, node_id: str, experiment_id: str) -> None:
     """The node's live files into the experiment, each at its current version; bytes are shared."""
     await conn.execute(
