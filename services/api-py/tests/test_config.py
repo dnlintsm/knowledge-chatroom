@@ -31,3 +31,28 @@ def test_login_follows_the_typescript_rules():
             auth_secret(env)
     with pytest.raises(ConfigError):
         settings_from_env({"API_PY_PORT": "eighty"})
+
+
+def test_the_blob_store_reads_the_typescript_settings():
+    s3 = settings_from_env({}).s3
+    assert s3 is not None
+    assert (s3.endpoint, s3.region, s3.bucket, s3.force_path_style, s3.public_url) == (
+        None,
+        "us-east-1",
+        "knowledge",
+        True,
+        None,
+    )
+    env = {"S3_ENDPOINT": "http://s3:8333", "S3_FORCE_PATH_STYLE": "false", "S3_PUBLIC_URL": "https://files.example"}
+    s3 = settings_from_env(env).s3
+    assert s3 is not None and (s3.endpoint, s3.force_path_style, s3.public_url) == (
+        "http://s3:8333",
+        False,
+        "https://files.example",
+    )
+    assert settings_from_env({}).max_upload_bytes == 50 * 1024 * 1024
+    # Number.parseInt, as the TypeScript server reads it.
+    assert settings_from_env({"MAX_UPLOAD_BYTES": " 1048576 bytes"}).max_upload_bytes == 1048576
+    for bad in ("lots", "0", "-5"):
+        with pytest.raises(ConfigError):
+            settings_from_env({"MAX_UPLOAD_BYTES": bad})

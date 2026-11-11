@@ -154,6 +154,47 @@ class AccessService:
             (role,) = await cur.fetchone()  # type: ignore[misc]
         return role
 
+    async def sees_node(self, user_id: str, node_id: str) -> bool:
+        """Whether the user sees the node or anything below it (a node event's audience)."""
+        if not is_uuid(node_id):
+            return False
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT bool_or(effective_role(%(ws)s, %(user)s, d.id) IS NOT NULL)
+                FROM nodes n JOIN nodes d ON d.path <@ n.path AND d.workspace_id = n.workspace_id
+                WHERE n.id = %(node)s AND n.workspace_id = %(ws)s""",
+                {"ws": self.workspace_id, "user": user_id, "node": node_id},
+            )
+            row = await cur.fetchone()
+        return bool(row and row[0])
+
+    async def experiment_access(self, user_id: str, experiment_id: str) -> str | None:
+        """What the user may do with an experiment's files ("writer", "reader"), or None (ExperimentService.access)."""
+        if not is_uuid(experiment_id):
+            return None
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT experiment_access(%s, %s::uuid)", (user_id, experiment_id))
+            (found,) = await cur.fetchone()  # type: ignore[misc]
+        return found
+
+    async def hears_experiment(self, user_id: str, experiment_id: str, change: str) -> bool:
+        """Whether the user hears about this change to an experiment (ExperimentService.hears)."""
+        if not is_uuid(experiment_id):
+            return False
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT e.author_id = %(user)s
+                    OR ((e.status <> 'draft' OR %(change)s = 'status')
+                        AND effective_role(e.workspace_id, %(user)s, e.node_id) IS NOT NULL)
+                FROM experiments e
+                WHERE e.id = %(id)s AND e.workspace_id = %(ws)s""",
+                {"user": user_id, "change": change, "id": experiment_id, "ws": self.workspace_id},
+            )
+            row = await cur.fetchone()
+        return bool(row and row[0])
+
     async def node_roles(self, user_id: str) -> dict[str, Role | None]:
         """The user's role on every live node, keyed by node id."""
         async with self.pool.connection() as conn:

@@ -21,6 +21,17 @@
     PATCH  /nodes/<id>              {name} -> rename
     DELETE /nodes/<id>              soft delete, with everything below it
 
+    GET    /files?node=             the files at the root or in a node
+    GET    /files?watch             change events (server-sent), those this user may see
+    GET    /files/<path>?node=      the content (a signed store link for binary files
+                                    when S3_PUBLIC_URL is set); ?versions: its history
+    PUT    /files/<path>?node=      write it (If-None-Match: * only creates)
+    PATCH  /files/<path>?node=      {path} -> rename
+    DELETE /files/<path>?node=      soft delete
+
+An experiment's files (?experiment=) and proposed versions (?propose) still go
+to the TypeScript server until experiments and proposals move (step 4).
+
 Until the database has the migrations this server knows (the TypeScript
 server applies them as it starts), these pass through to the TypeScript
 server, which answers as it does while storage starts or when it is off.
@@ -30,18 +41,29 @@ stays inside its segment, as the TypeScript server reads them.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from datetime import datetime
+from email.utils import format_datetime
 from typing import Any
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .access import ROLES, AccessError, ForbiddenError
+from .files import FileExistsError_
 from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
+from .paths import (
+    InvalidPathError,
+    is_text_file,
+    js_trim,
+    kind_for_path,
+    normalize_path,
+)
 from .proxy import forward
 from .session import Session
 
@@ -54,7 +76,13 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too, but the TypeScript server reads the raw
 # path and serves those as files. They go to it, so a storage token's limits
 # (agent_refusal) always see the section the handlers act on.
-_OWN_PATH = re.compile(r"^/(access|nodes)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files)(/|$)")
+# A file watch's keep-alive comment, so idle connections are not cut.
+HEARTBEAT_SECONDS = 25.0
+# Stored bytes are served from the app's origin, so a file opened as a page (an
+# HTML file, an SVG with a script) must not run as the app: no scripts, no
+# same-origin access, and no sniffing past the declared type.
+STORED_CONTENT_HEADERS = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
 
 
 class _MalformedPath(Exception):
@@ -95,21 +123,29 @@ def parse_int(value: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-async def read_json(request: Request) -> dict[str, Any] | None:
-    """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
+async def read_body(request: Request, limit: int) -> bytes | None:
+    """The body, or None when it is over `limit` bytes (readBody in http.ts)."""
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > MAX_JSON_BYTES:
+        if size > limit:
             return None
         chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def read_json(request: Request) -> dict[str, Any] | None:
+    """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
+    body = await read_body(request, MAX_JSON_BYTES)
+    if body is None:
+        return None
 
     def refuse(constant: str) -> None:
         raise ValueError(constant)  # NaN and Infinity aren't JSON
 
     try:
-        value = json.loads(b"".join(chunks).decode("utf-8", errors="replace"), parse_constant=refuse)
+        value = json.loads(body.decode("utf-8", errors="replace"), parse_constant=refuse)
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
@@ -122,12 +158,25 @@ def optional_id(value: Any) -> str | None | bool:
     return value if isinstance(value, str) else False
 
 
-def agent_refusal(method: str, path: str) -> str | None:
+def agent_refusal(request: Request) -> str | None:
     """Why Claude, through a storage token, may not make this request (agentRefusal in http.ts, for these routes)."""
-    section, *rest = path.split("/")[1:]
+    method = request.method
+    section, *rest = raw_path(request).split("/")[1:]
     sub = "/".join(rest)
     if method in ("GET", "HEAD"):
         return "Claude doesn't manage access" if section == "access" and sub != "" else None
+    if section == "files":
+        if method != "PUT":
+            return "Claude doesn't rename or delete files"
+        if "propose" in request.query_params or first_param(request, "experiment"):
+            return None
+        if first_param(request, "node"):
+            return "Claude's writes in a knowledge node are proposals: add ?propose"
+        try:
+            skill = kind_for_path(normalize_path("/".join(decode_component(p) for p in sub.split("/")))) == "skill"
+        except (_MalformedPath, InvalidPathError):
+            return None  # the file route answers bad paths itself
+        return "Claude's changes to skills are proposals: add ?propose" if skill else None
     if section == "nodes":
         return None if method == "POST" and sub == "" else "Claude doesn't rename or delete nodes"
     if section == "access":
@@ -143,14 +192,19 @@ async def _session(request: Request) -> Session | Response:
     if principal is None:
         return error(401, "Sign in to use the workspace")
     if principal.via:
-        refusal = agent_refusal(request.method, raw_path(request))
+        refusal = agent_refusal(request)
         if refusal:
             return error(403, refusal)
     return Session(storage, storage.access, principal)
 
 
-async def _serve(request: Request, handler) -> Response:
-    if not _OWN_PATH.match(raw_path(request)) or not await request.app.state.storage_ready():
+async def _serve(request: Request, handler, typescript_serves=None) -> Response:
+    """Serves a request with `handler`, or passes it on while it is the TypeScript server's (`typescript_serves`)."""
+    if (
+        not _OWN_PATH.match(raw_path(request))
+        or not await request.app.state.storage_ready()
+        or (typescript_serves and typescript_serves(request))
+    ):
         return await forward(request, request.app.state.http)
     try:
         session = await _session(request)
@@ -161,7 +215,9 @@ async def _serve(request: Request, handler) -> Response:
         return error(404, str(err))
     except ForbiddenError as err:
         return error(403, str(err))
-    except (NodeError, AccessError) as err:
+    except FileExistsError_ as err:
+        return error(412, str(err), exists=True)
+    except (NodeError, AccessError, InvalidPathError) as err:
         return error(400, str(err))
     except Exception:
         logger.exception("[storage] request failed")
@@ -178,6 +234,21 @@ async def nodes_route(request: Request) -> Response:
 @router.api_route("/access/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def access_route(request: Request) -> Response:
     return await _serve(request, handle_access)
+
+
+def _typescript_files(request: Request) -> bool:
+    """Experiment files and proposals, which the TypeScript server serves until step 4, or no blob store here."""
+    return (
+        bool(first_param(request, "experiment"))
+        or "propose" in request.query_params
+        or request.app.state.storage.blobs is None
+    )
+
+
+@router.api_route("/files", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/files/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def files_route(request: Request) -> Response:
+    return await _serve(request, handle_files, _typescript_files)
 
 
 async def handle_nodes(request: Request, session: Session) -> Response:
@@ -281,3 +352,126 @@ async def handle_access(request: Request, session: Session) -> Response:
         return json_response(200, {"entries": await session.audit_log(100 if limit is None else limit, kinds)})
 
     return not_found()
+
+
+async def handle_files(request: Request, session: Session) -> Response:
+    try:
+        path = "/".join(decode_component(p) for p in re.sub(r"^/files/?", "", raw_path(request)).split("/"))
+    except _MalformedPath:
+        return error(400, "Malformed path encoding")
+    method = request.method
+
+    if path == "" and method == "GET" and "watch" in request.query_params:
+        return await watch(session)
+
+    files = await session.files(first_param(request, "node") or None)
+
+    if path == "":
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(200, {"files": await files.list()})
+
+    if method == "GET":
+        if "versions" in request.query_params:
+            versions = await files.history(path)
+            return error(404, "Not found") if versions is None else json_response(200, {"versions": versions})
+        # Binary files come straight from the object store when it is reachable
+        # from browsers: a short-lived link, made after the access check above.
+        # Text stays here, since the UI fetches it from this origin.
+        info = await files.stat(path)
+        if info and not is_text_file(info["path"], info["mime"]):
+            link = await session.storage.blobs.download_url(  # type: ignore[union-attr]
+                info["sha256"], info["mime"], info["path"].split("/")[-1]
+            )
+            if link:
+                return Response(status_code=302, headers={"Location": link, "Cache-Control": "no-store"})
+        found = await files.read(path) if info else None
+        if not found:
+            return error(404, "Not found")
+        info, content = found
+        etag = f'"{info["sha256"]}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        modified = datetime.fromisoformat(info["updatedAt"])
+        return Response(
+            content,
+            headers={
+                # As given, without the charset Starlette would add to text/*.
+                "Content-Type": info["mime"],
+                "ETag": etag,
+                "Last-Modified": format_datetime(modified.replace(microsecond=0), usegmt=True),
+                "X-File-Author": info["author"],
+                "Cache-Control": "no-cache",
+                **STORED_CONTENT_HEADERS,
+            },
+        )
+
+    if method == "PUT":
+        limit = request.app.state.settings.max_upload_bytes
+        content = await read_body(request, limit)
+        if content is None:
+            return error(413, f"File exceeds {limit} bytes")
+        header = js_trim(request.headers.get("content-type", "").split(";")[0])
+        mime = header if header and header != "application/octet-stream" else None
+        create_only = js_trim(request.headers.get("if-none-match", "")) == "*"
+        return json_response(200, await files.write(path, content, mime=mime, create_only=create_only))
+
+    if method == "PATCH":
+        body = await read_json(request)
+        if not body or not isinstance(body.get("path"), str):
+            return error(400, "Expected {path: string}")
+        info = await files.rename(path, body["path"])
+        return json_response(200, info) if info else error(404, "Not found")
+
+    if method == "DELETE":
+        if await files.remove(path):
+            return json_response(200, {"deleted": path})
+        return error(404, "Not found")
+
+    return error(405, "Method not allowed")
+
+
+async def watch(session: Session) -> Response:
+    """
+    The changes this principal may see, as server-sent events, in order: each is
+    checked before the next. Subscribes before answering, so a failure still
+    gets a normal error answer.
+    """
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    unsubscribe = await session.storage.events.subscribe(queue.put_nowait)  # type: ignore[union-attr]
+
+    async def stream():
+        loop = asyncio.get_running_loop()
+        next_ping = loop.time() + HEARTBEAT_SECONDS
+        waiting: asyncio.Task[dict[str, Any]] | None = None
+        try:
+            # A comment line first so proxies flush the headers.
+            yield b": watching\n\n"
+            while True:
+                waiting = waiting or asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait({waiting}, timeout=max(0.0, next_ping - loop.time()))
+                if not done:
+                    yield b": ping\n\n"
+                    next_ping += HEARTBEAT_SECONDS
+                    continue
+                event, waiting = waiting.result(), None
+                try:
+                    if await session.can_see(event):
+                        data = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+                        yield f"data: {data}\n\n".encode()
+                except Exception:
+                    logger.exception("[storage] watch")
+        finally:
+            if waiting:
+                waiting.cancel()
+            unsubscribe()
+
+    return StreamingResponse(
+        stream(),
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

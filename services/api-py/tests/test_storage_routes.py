@@ -12,110 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import time
 import uuid
-from collections.abc import AsyncIterator
 
-import httpx
 import psycopg
 import pytest
 from psycopg import conninfo
+from support import ALICE, BOB, SECRET, URL, Client, forwarded, storage_token
 
-from api_py import db, tokens
-from api_py.app import create_app
-from api_py.config import DEFAULT_MIGRATIONS_DIR, Settings
+from api_py import tokens
 from api_py.storage import EVENTS_CHANNEL
 
-URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = [pytest.mark.anyio, pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")]
-SECRET = "0123456789abcdef0123456789abcdef"
-
-
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
-async def migrate(url: str) -> None:
-    """What migrate() in apps/agent/src/storage/db.ts does: every migration, recorded."""
-    async with await psycopg.AsyncConnection.connect(url, autocommit=True) as conn:
-        await conn.execute("CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz DEFAULT now())")
-        for name in db.known_migrations(DEFAULT_MIGRATIONS_DIR):
-            async with conn.transaction():
-                await conn.execute((DEFAULT_MIGRATIONS_DIR / name).read_text())  # type: ignore[arg-type]
-                await conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
-
-
-@pytest.fixture
-async def database() -> AsyncIterator[str]:
-    name = f"api_py_routes_{uuid.uuid4().hex[:12]}"
-    async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:
-        await admin.execute(f'CREATE DATABASE "{name}"')
-        try:
-            url = conninfo.make_conninfo(URL, dbname=name)
-            await migrate(url)
-            yield url
-        finally:
-            await admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
-
-
-forwarded: list[str] = []
-
-
-async def typescript(request: httpx.Request) -> httpx.Response:
-    forwarded.append(f"{request.method} {request.url.raw_path.decode().split('?')[0]}")  # as sent
-
-    async def body() -> AsyncIterator[bytes]:  # streamed, as a real connection answers
-        yield b'{"from":"typescript"}'
-
-    return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
-
-
-@pytest.fixture
-async def api(database) -> AsyncIterator[httpx.AsyncClient]:
-    async with _client(database, SECRET) as (client, _app):
-        yield client
-
-
-class _client:
-    def __init__(self, url: str, secret: str | None) -> None:
-        self.app = create_app(
-            Settings(ts_agent_url="http://ts", database_url=url, auth_secret=secret, migrations_dir=DEFAULT_MIGRATIONS_DIR),
-            transport=httpx.MockTransport(typescript),
-        )
-
-    async def __aenter__(self):
-        forwarded.clear()
-        self._life = self.app.router.lifespan_context(self.app)
-        await self._life.__aenter__()
-        self._http = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://api")
-        return self._http, self.app
-
-    async def __aexit__(self, *exc):
-        await self._http.aclose()
-        await self._life.__aexit__(*exc)
-        assert not forwarded, f"ported routes reached the TypeScript server: {forwarded}"
-
-
-def user(sub: str, name: str) -> dict[str, str]:
-    claims = {"sub": sub, "email": f"{name.lower()}@example.com", "name": name, "exp": int(time.time()) + 3600}
-    return {tokens.IDENTITY_HEADER: tokens.sign(claims, SECRET)}
-
-
-def storage_token(sub: str, via: str | None = "mcp:lab") -> dict[str, str]:
-    claims: dict = {"sub": sub, "exp": int(time.time()) + 3600, "aud": tokens.STORAGE_AUDIENCE}
-    if via:
-        claims["via"] = via
-    return {tokens.STORAGE_HEADER: tokens.sign(claims, SECRET)}
-
-
-ALICE = user("kc|alice", "Alice")
-BOB = user("kc|bob", "Bob")
 
 
 async def test_without_login_everything_is_the_local_user(database):
-    async with _client(database, None) as (api, _):
+    async with Client(database, None) as (api, _):
         me = (await api.get("/access")).json()
         assert me["rootRole"] == "owner"
         assert me["me"]["subject"] == "local"
@@ -269,7 +180,7 @@ async def test_passes_through_until_the_database_is_migrated():
     async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:
         await admin.execute(f'CREATE DATABASE "{name}"')
         try:
-            client = _client(conninfo.make_conninfo(URL, dbname=name), SECRET)
+            client = Client(conninfo.make_conninfo(URL, dbname=name), SECRET)
             async with client as (api, _):
                 assert (await api.get("/nodes")).json() == {"from": "typescript"}
                 forwarded.clear()
@@ -280,7 +191,7 @@ async def test_passes_through_until_the_database_is_migrated():
 @pytest.mark.parametrize("row_security", [True, False])
 async def test_whoever_adds_a_node_owns_it(database, row_security):
     """By the trigger as the restricted role, or by own_new_node() without row security."""
-    async with _client(database, SECRET) as (api, app):
+    async with Client(database, SECRET) as (api, app):
         await api.get("/access", headers=ALICE)
         bob = (await api.get("/access", headers=BOB)).json()["me"]["id"]
         assert await app.state.storage_ready()

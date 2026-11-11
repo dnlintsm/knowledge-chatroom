@@ -19,7 +19,9 @@ from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from .access import AccessService
+from .blobs import BlobStore, S3Settings
 from .db import APP_ROLE
+from .events import EventHub
 
 logger = logging.getLogger("api_py")
 
@@ -44,6 +46,9 @@ class Storage:
     # Whether users' queries also run as APP_ROLE, so Postgres checks access too.
     row_security: bool
     access: AccessService
+    # The blob store and change events, for /files; None in tests that leave them out.
+    blobs: BlobStore | None = None
+    events: EventHub | None = None
 
     async def notify(self, conn: AsyncConnection, event: dict[str, Any]) -> None:
         """Tells every process about a change, when `conn`'s transaction commits."""
@@ -87,8 +92,8 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
         return True
 
 
-async def open_storage(pool: AsyncConnectionPool) -> Storage:
-    """The storage of the default workspace; the database must be migrated."""
+async def open_storage(pool: AsyncConnectionPool, s3: S3Settings | None = None) -> Storage:
+    """The storage of the default workspace; the database must be migrated. Without `s3`, no file routes."""
     async with pool.connection() as conn:
         row_security = await prepare_row_security(conn)
         cur = await conn.execute("SELECT id FROM workspaces WHERE slug = 'default'")
@@ -102,6 +107,15 @@ async def open_storage(pool: AsyncConnectionPool) -> Storage:
             APP_ROLE,
         )
     workspace_id = str(row[0])
+    blobs = None
+    if s3 is not None:
+        blobs = BlobStore(s3)
+        await blobs.ensure_bucket()
     return Storage(
-        pool=pool, workspace_id=workspace_id, row_security=row_security, access=AccessService(pool, workspace_id)
+        pool=pool,
+        workspace_id=workspace_id,
+        row_security=row_security,
+        access=AccessService(pool, workspace_id),
+        blobs=blobs,
+        events=EventHub(pool.conninfo, workspace_id, EVENTS_CHANNEL),
     )

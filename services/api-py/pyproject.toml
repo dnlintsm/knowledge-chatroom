@@ -13,6 +13,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     # Signing and checking identity tokens (tokens.py).
     "cryptography>=42",
+    # The S3-compatible blob store, as @aws-sdk/client-s3 is for the TypeScript server.
+    "boto3>=1.36",
 ]
 
 [dependency-groups]

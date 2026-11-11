@@ -18,6 +18,7 @@ from psycopg import AsyncConnection
 from . import nodes
 from .access import AccessService, ForbiddenError, Principal, Role, at_least
 from .db import as_user
+from .files import FileService
 from .nodes import NodeNotFoundError
 from .storage import Storage
 
@@ -123,6 +124,32 @@ class Session:
         async with self.scoped() as conn:
             return await nodes.remove(conn, self.storage, node_id, self._audit("node.delete", {"node": node_id}))
 
+    # Files
+
+    async def files(self, node_id: str | None) -> FilesSession:
+        """Files at the workspace root (None) or in a node."""
+        role = await self.need(node_id, "viewer")
+        async with self.storage.pool.connection() as conn:
+            service = await FileService(self.storage).in_node(conn, node_id)
+        if not service:
+            raise NodeNotFoundError("Node not found")
+        return FilesSession(self, service, role)
+
+    async def can_see(self, event: dict[str, Any]) -> bool:
+        """Whether this principal may hear about a change."""
+        user_id = self.principal.user_id
+        op = event.get("op")
+        # Hidden nodes stay hidden: not even their ids go out.
+        if op == "node":
+            return await self.access.sees_node(user_id, str(event.get("id")))
+        if op == "experiment":
+            return await self.access.hears_experiment(user_id, str(event.get("id")), str(event.get("change")))
+        if op == "proposal":
+            return event.get("authorId") == user_id or await self.role(event.get("node")) is not None
+        if event.get("experiment"):
+            return await self.access.experiment_access(user_id, str(event["experiment"])) is not None
+        return await self.role(event.get("node")) is not None
+
     # The org tree and grants
 
     async def users(self) -> list[dict[str, Any]]:
@@ -196,3 +223,74 @@ class Session:
     async def audit_log(self, limit: int, kinds: list[str]) -> list[dict[str, Any]]:
         await self.need(None, "owner")
         return await self.access.audit_log(limit, kinds)
+
+
+class FilesSession:
+    """
+    One place's files, as one principal (FilesSession in session.ts). Reads need
+    viewer; writes and deletes need editor, like in a shared folder (a deleted
+    file keeps its history, so nothing is lost).
+    """
+
+    def __init__(self, session: Session, service: FileService, role: Role) -> None:
+        self.session = session
+        self.service = service
+        self.role = role
+
+    @property
+    def node_id(self) -> str | None:
+        return self.service.node_id
+
+    def _need_editor(self) -> None:
+        if not at_least(self.role, "editor"):
+            raise ForbiddenError(f"You can only {ROLE_VERB[self.role]} here; this needs editor access")
+
+    def _audit(self, action: str, target: dict[str, Any]):
+        return self.session._audit(action, {"node": self.node_id, **target})
+
+    async def list(self) -> list[dict[str, Any]]:
+        async with self.session.scoped() as conn:
+            return await self.service.list(conn)
+
+    async def stat(self, path: str) -> dict[str, Any] | None:
+        async with self.session.scoped() as conn:
+            return await self.service.stat(conn, path)
+
+    async def read(self, path: str) -> tuple[dict[str, Any], bytes] | None:
+        async with self.session.scoped() as conn:
+            return await self.service.read(conn, path)
+
+    async def history(self, path: str) -> list[dict[str, Any]] | None:
+        async with self.session.scoped() as conn:
+            return await self.service.history(conn, path)
+
+    async def write(self, path: str, data: bytes, *, mime: str | None = None, create_only: bool = False):
+        self._need_editor()
+        principal = self.session.principal
+        async with self.session.scoped() as conn:
+            return await self.service.write(
+                conn,
+                path,
+                data,
+                mime=mime,
+                create_only=create_only,
+                author=principal.actor,
+                author_id=principal.user_id,
+                in_tx=self._audit("file.write", {"path": path, "size": len(data)}),
+            )
+
+    async def rename(self, source: str, target: str) -> dict[str, Any] | None:
+        self._need_editor()
+        async with self.session.scoped() as conn:
+            return await self.service.rename(
+                conn,
+                source,
+                target,
+                author=self.session.principal.actor,
+                in_tx=self._audit("file.rename", {"path": source, "to": target}),
+            )
+
+    async def remove(self, path: str) -> bool:
+        self._need_editor()
+        async with self.session.scoped() as conn:
+            return await self.service.remove(conn, path, self._audit("file.delete", {"path": path}))

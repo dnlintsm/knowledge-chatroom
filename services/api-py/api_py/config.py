@@ -10,18 +10,25 @@
                          login, with the rules of packages/contracts/src/auth-mode.ts
     MIGRATIONS_DIR       the SQL migrations to expect in the database
                          (default apps/agent/src/storage/migrations in this repository)
+    S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
+    MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from .blobs import S3Settings
+from .paths import JS_SPACE
 
 DEFAULT_TS_AGENT_URL = "http://127.0.0.1:8100"
 # services/api-py/api_py/config.py -> the repository root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MIGRATIONS_DIR = REPO_ROOT / "apps" / "agent" / "src" / "storage" / "migrations"
+DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SECRET_HINT = "(at least 32 characters, e.g. openssl rand -hex 32)"
 
 
@@ -63,6 +70,9 @@ class Settings:
     migrations_dir: Path
     host: str = "127.0.0.1"
     port: int = 8000
+    # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
+    s3: S3Settings | None = None
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -77,4 +87,15 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),
         host=env.get("API_PY_HOST") or "127.0.0.1",
         port=int(port),
+        s3=S3Settings.from_env(env),
+        max_upload_bytes=max_upload_bytes(env),
     )
+
+
+def max_upload_bytes(env: Mapping[str, str]) -> int:
+    """MAX_UPLOAD_BYTES as config.ts reads it: a positive whole number of bytes."""
+    raw = env.get("MAX_UPLOAD_BYTES") or str(DEFAULT_MAX_UPLOAD_BYTES)
+    match = re.match(rf"[{JS_SPACE}]*([+-]?\d+)", raw)  # Number.parseInt
+    if not match or int(match.group(1)) <= 0:
+        raise ConfigError(f"MAX_UPLOAD_BYTES must be a number of bytes, not {raw!r}")
+    return int(match.group(1))

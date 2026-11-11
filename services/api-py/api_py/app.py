@@ -54,7 +54,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
         if found.state is not db.SchemaState.READY:
             return False
         try:
-            app.state.storage = await open_storage(pool)
+            app.state.storage = await open_storage(pool, settings.s3)
         except Exception as err:  # noqa: BLE001 - tried again, as the database may still be settling
             logger.warning("can't open storage yet: %s", err)
             return False
@@ -123,6 +123,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 with contextlib.suppress(asyncio.CancelledError):
                     await watcher
             await app.state.http.aclose()
+            if app.state.storage and app.state.storage.events:
+                await app.state.storage.events.close()
             if app.state.pool:
                 await app.state.pool.close()
 
@@ -165,7 +167,10 @@ def main(env: Mapping[str, str] = os.environ) -> None:
     except ConfigError as err:
         raise SystemExit(f"[api-py] {err}") from err
     logger.info("passing routes not ported yet to %s", settings.ts_agent_url)
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, log_level="info")
+    # File watches never end on their own, so a stop doesn't wait for them for long.
+    uvicorn.run(
+        create_app(settings), host=settings.host, port=settings.port, log_level="info", timeout_graceful_shutdown=5
+    )
 
 
 if __name__ == "__main__":
