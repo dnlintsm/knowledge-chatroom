@@ -57,6 +57,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from datetime import datetime
 from email.utils import format_datetime
@@ -80,7 +81,7 @@ from .paths import (
     utf16_len,
 )
 from .proxy import forward
-from .run_report import js_json
+from .run_report import js_json, js_number
 from .session import Session
 
 logger = logging.getLogger("api_py")
@@ -151,6 +152,29 @@ async def read_body(request: Request, limit: int) -> bytes | None:
     return b"".join(chunks)
 
 
+def _js_int(text: str) -> int | float | None:
+    """
+    A JSON integer as JSON.parse reads it, a double: past 2**53 it is rounded as
+    JavaScript rounds it, so what is stored is what the TypeScript server would
+    store and what a run's report shows. Too large for a double: null, as
+    JSON.stringify writes Infinity.
+    """
+    if len(text.lstrip("-")) <= 15:
+        return int(text)
+    value = float(text)
+    if math.isinf(value):
+        return None
+    if abs(value) < 2**53:
+        return int(text)
+    # The digits JSON.stringify would send on, e.g. 12345678901234567000.
+    return value if abs(value) >= 1e21 else int(js_number(value))  # type: ignore[return-value]
+
+
+def _js_float(text: str) -> float | None:
+    value = float(text)
+    return None if math.isinf(value) else value
+
+
 async def read_json(request: Request) -> dict[str, Any] | None:
     """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
     body = await read_body(request, MAX_JSON_BYTES)
@@ -161,7 +185,9 @@ async def read_json(request: Request) -> dict[str, Any] | None:
         raise ValueError(constant)  # NaN and Infinity aren't JSON
 
     try:
-        value = json.loads(body.decode("utf-8", errors="replace"), parse_constant=refuse)
+        value = json.loads(
+            body.decode("utf-8", errors="replace"), parse_constant=refuse, parse_int=_js_int, parse_float=_js_float
+        )
     except ValueError:
         return None
     return value if isinstance(value, dict) else None

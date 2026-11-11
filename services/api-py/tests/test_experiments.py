@@ -263,6 +263,15 @@ async def test_runs_record_inputs_finish_and_rerun(api):
     assert files == {"data/a.csv", "inputs/a.csv", "report.md"}
     report = (await api.get(f"/files/report.md?experiment={run['id']}", headers=ALICE)).text
     assert report == report_front_matter(run) + "\n# Etch rate\n"
+    # Integers past 2**53 are read as JSON.parse reads them, so the record and its report agree.
+    big = await api.post(
+        "/experiments/runs",
+        headers=ALICE,
+        content=b'{"nodeId": null, "title": "Big", "params": {"n": 9007199254740993, "m": 12345678901234567890}}',
+    )
+    assert big.json()["params"] == {"m": 12345678901234567000, "n": 9007199254740992}
+    big_report = (await api.get(f"/files/report.md?experiment={big.json()['id']}", headers=ALICE)).text
+    assert 'params: {"m":12345678901234567000,"n":9007199254740992}\n' in big_report
     assert 'params: {"temp":60}\n' in report and 'started_by: "Alice"\n' in report
 
     # More inputs, from the root this time.
