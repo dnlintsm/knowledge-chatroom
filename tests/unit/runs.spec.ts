@@ -58,6 +58,10 @@ test("the list scope round-trips through the URL, apart from the experiment", ()
   // All is no parameter at all, so root links stay as they were.
   expect(searchWithListScope(scoped, ALL_EXPERIMENTS)).toBe("?experiment=e1");
   expect(searchWithListScope("?list=loop&direct=1", ALL_EXPERIMENTS)).toBe("");
+  // All chosen on a node stays in the URL, so a reload keeps it.
+  const all = searchWithListScope("?list=loop&direct=1", ALL_EXPERIMENTS, true);
+  expect(all).toBe("?list=all");
+  expect(listScopeFromSearch(all)).toEqual(ALL_EXPERIMENTS);
   // Opening another experiment keeps the scope.
   expect(listScopeFromSearch(searchWithExperiment(scoped, "e2"))).toEqual({ node: "loop", descendants: false });
 });

@@ -21,19 +21,20 @@ function subscribe(onChange: () => void) {
 
 const search = () => window.location.search;
 
-export function writeListScope(scope: ListScope) {
+/** `keepAll`: all experiments was the user's choice, so it stays in the URL. */
+export function writeListScope(scope: ListScope, keepAll = false) {
   const { pathname, hash } = window.location;
-  window.history.replaceState(window.history.state, "", pathname + searchWithListScope(search(), scope) + hash);
+  window.history.replaceState(window.history.state, "", pathname + searchWithListScope(search(), scope, keepAll) + hash);
   window.dispatchEvent(new Event(CHANGED));
 }
 
 /** The scope in the URL (all experiments when it has none yet) and a setter. */
-export function useListScope(): [ListScope, (scope: ListScope) => void] {
+export function useListScope(): [ListScope, (scope: ListScope, keepAll?: boolean) => void] {
   const current = useSyncExternalStore(subscribe, search, () => "");
   const scope = listScopeFromSearch(current) ?? ALL_EXPERIMENTS;
-  const set = useCallback((next: ListScope) => writeListScope(next), []);
+  const set = useCallback((next: ListScope, keepAll?: boolean) => writeListScope(next, keepAll), []);
   return [scope, set];
 }
 
-/** Whether the URL names a node for the list (without one it shows them all). */
+/** Whether the URL sets the list's scope (a node, or all chosen on purpose). */
 export const hasListScope = () => listScopeFromSearch(search()) !== null;

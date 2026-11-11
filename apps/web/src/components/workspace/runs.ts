@@ -69,10 +69,13 @@ export function listScopeFromSearch(search: string): ListScope | null {
 }
 
 /** The query string with the list scope set, keeping other parameters. */
-export function searchWithListScope(search: string, scope: ListScope): string {
+export function searchWithListScope(search: string, scope: ListScope, keepAll = false): string {
   const params = new URLSearchParams(search);
   params.delete("list");
   params.delete("direct");
+  // All is no parameter, unless the user chose it on a node: then it says so,
+  // so a reload there doesn't narrow the list to the node again.
+  if (scope.node === null && keepAll) params.set("list", "all");
   if (scope.node !== null) params.set("list", scope.node);
   if (scope.node !== null && !scope.descendants) params.set("direct", "1");
   const query = params.toString();

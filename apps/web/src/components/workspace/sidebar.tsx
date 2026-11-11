@@ -1015,7 +1015,7 @@ function RunList() {
  * What the experiment list shows: every experiment, or a node's, as a chip
  * whose ✕ goes back to all of them.
  */
-function ScopeChip({ scope, onChange }: { scope: ListScope; onChange: (scope: ListScope) => void }) {
+function ScopeChip({ scope, onChange }: { scope: ListScope; onChange: (scope: ListScope, keepAll?: boolean) => void }) {
   const ws = useWorkspace();
   if (scope.node === null) {
     return (
@@ -1039,7 +1039,7 @@ function ScopeChip({ scope, onChange }: { scope: ListScope; onChange: (scope: Li
           type="button"
           aria-label="Show all experiments"
           title="Show all experiments"
-          onClick={() => onChange(ALL_EXPERIMENTS)}
+          onClick={() => onChange(ALL_EXPERIMENTS, true)}
           className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-[var(--background)] cursor-pointer"
         >
           <X className="size-3" />

@@ -167,6 +167,9 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await expect(scope).toHaveText("In Scope etch");
     await expect(rows).toHaveCount(1);
     await page.reload();
+    // The linked experiment is entered again before the next one opens, so
+    // that one gets its own history entry.
+    await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Root scope check");
     await showView(page, "Experiments");
     await expect(scope).toHaveText("In Scope etch");
     await expect(rows).toHaveCount(1);
@@ -182,7 +185,18 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await page.getByRole("button", { name: "Show all experiments" }).click();
     await expect(scope).toHaveText("All experiments");
     await expect(rows).toHaveCount(3);
-    await expect(page).not.toHaveURL(/[?&]list=/);
+    await expect(page).toHaveURL(/[?&]list=all/);
+
+    // On a node, All chosen with ✕ survives a reload too.
+    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
+    await showView(page, "Experiments");
+    await expect(scope).toContainText("In Scope etch");
+    await page.getByRole("button", { name: "Show all experiments" }).click();
+    await page.reload();
+    await showView(page, "Experiments");
+    await expect(scope).toHaveText("All experiments");
+    await expect(rows).toHaveCount(3);
   } finally {
     await request.delete(`/api/nodes/${chamber}`);
     await request.delete(`/api/nodes/${etch}`);
