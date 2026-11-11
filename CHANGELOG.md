@@ -4,6 +4,12 @@
 
 ### Added
 
+- The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
+  the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
+  builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the
+  chat against it with a real Claude Code engine and a scripted model
+  (`e2e/mock-anthropic.mjs`), so it needs no key (issue #176).
+
 - Start, rerun and finish runs over the storage API, as the agent's own run tools do:
   `POST /experiments/runs` (`{nodeId?, title?, hypothesis?, params?, inputs?, rerunOf?,
   provenance?}`) starts a run in state running with its inputs linked read-only and a

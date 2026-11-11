@@ -215,6 +215,12 @@ which `pnpm dev` starts), and turns its own chat off. Each run tells the backend
 where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
 must do is in [Remote agent backend](remote-agent.md).
 
+This repo's own Python backend, `services/agent-py`, runs beside the others with
+`pnpm dev:python` (it needs [uv](https://docs.astral.sh/uv/)): the UI, the agent server and
+the Python agent on `http://127.0.0.1:9300`, with `AGENT_URL` pointing there. With login
+on, give it the agent server's public key as `KNOWLEDGE_PUBLIC_KEY` in `.env` (the agent
+server prints it at startup). See its [README](../services/agent-py/README.md).
+
 `AGENT_URL` used to be the address of this repo's agent server. If your `.env` still
 has `AGENT_URL=http://localhost:8000`, remove it, or rename it to `LOCAL_AGENT_URL`.
 

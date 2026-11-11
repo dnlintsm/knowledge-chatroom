@@ -12,6 +12,7 @@ The default test command runs only fast units; integration and E2E are explicit.
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
 | `pnpm test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `pnpm test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
+| `pnpm test:e2e:python` | Chromium + uv (`uv sync --package agent-py`) | The chat on the Python agent (`services/agent-py`, `AGENT_URL`) with a real Claude Code engine and a scripted model: replies, a browser tool, a skill, follow-up chips |
 | `pnpm test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
@@ -101,8 +102,15 @@ All required modes ignore ambient Anthropic/Intelligence keys and launch mock
 chat explicitly. Missing storage prerequisites fails instead of skipping cases.
 
 The runner owns its servers and refuses existing ones. Defaults: UI 3000, mock
-agent 8000, storage agent 8001, test OIDC 9400. Override `E2E_UI_PORT`,
-`E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT` to isolate local runs.
+agent 8000, storage agent 8001, test OIDC 9400, Python agent 9300, scripted model
+9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT`,
+`E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs.
+
+The Python mode runs `services/agent-py` with Claude Code pointed at
+`e2e/mock-anthropic.mjs`, a stand-in for the Messages API that streams scripted turns
+(a reply, a `writeWorkspaceFile` call, a TL;DR for `/tldr`), so the whole path from the
+browser through the AG-UI adapter and the engine runs without a key. The mock agent
+server hands that run its skills (`GET /skills/run`) and writes the follow-up chips.
 `PLAYWRIGHT_CHROMIUM_PATH` selects an already installed Chromium.
 
 CI builds first and serves that build. Locally the runner starts development

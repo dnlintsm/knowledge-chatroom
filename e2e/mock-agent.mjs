@@ -20,7 +20,8 @@
  * A message starting with "/<skill>" runs that skill: the run reports it with
  * a "skill_used" event (as the real agent does), so the preview shows the
  * skills status bar. Without STORAGE_URL, /skills answers with the built-in
- * skills and keeps their modes in memory.
+ * skills and keeps their modes in memory, and GET /skills/run hands a remote
+ * backend's run (services/agent-py) the skills it gets, with a SKILL.md each.
  *
  * A message starting with "Remember" saves it as a memory note (reply-style),
  * as Claude would with its memory tools, and reports it with a "memory" event,
@@ -173,6 +174,16 @@ const SKILLS = [
   },
 ].map((s) => ({ needsExecution: false, ...s, source: "builtin", path: null, userInvocable: true }));
 
+/** A skill's SKILL.md, base64 as GET /skills/run sends it; tldr's says how to answer. */
+function skillFile(skill) {
+  const body =
+    skill.name === "tldr"
+      ? "Reply with one TL;DR line, then a few bullets, about the open file or the user's selection."
+      : `Follow the ${skill.name} workflow.`;
+  const text = `---\nname: ${skill.name}\ndescription: ${JSON.stringify(skill.description)}\n---\n\n${body}\n`;
+  return { path: "SKILL.md", content: Buffer.from(text).toString("base64") };
+}
+
 // Modes chosen for everyone, by the (one) user, and per chat: name → mode.
 const skillModes = { workspace: new Map(), user: new Map(), chat: new Map() };
 
@@ -199,6 +210,18 @@ async function handleSkills(req, res, url) {
   if (req.method === "GET" && !name) {
     const thread = url.searchParams.get("thread");
     return json({ skills: SKILLS.map((s) => skillInfo(s, thread)), canSetDefaults: true });
+  }
+  // A remote backend's run (services/agent-py): the skills it gets, with files.
+  if (req.method === "GET" && name === "run") {
+    const thread = url.searchParams.get("thread");
+    const skills = SKILLS.map((s) => skillInfo(s, thread))
+      .filter((s) => s.mode !== "off")
+      .map((s) => ({ name: s.name, mode: s.mode, source: s.source, userInvocable: s.userInvocable, files: [skillFile(s)] }));
+    return json({ skills });
+  }
+  if (req.method === "POST" && name === "used") {
+    for await (const chunk of req) void chunk;
+    return json({ ok: true });
   }
   const skill = SKILLS.find((s) => s.name === name);
   if (req.method === "PUT" && skill) {

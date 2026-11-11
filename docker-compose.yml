@@ -121,6 +121,38 @@ services:
       agent:
         condition: service_healthy
 
+  # --- The chat on the Python agent (services/agent-py, issue #176) ---
+  # With the demo, and the app's chat pointed at it (docs/remote-agent.md):
+  #   AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build
+  # It reaches storage, skills and memory on the agent server above, and gets
+  # the same model settings and MCP_SERVERS.
+  agent-py:
+    profiles: [python-agent]
+    build:
+      context: .
+      dockerfile: services/agent-py/Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS:
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
+      MCP_SERVERS: ${MCP_SERVERS:-}
+      LOCAL_AGENT_URL: http://agent:8000
+      # The demo has no login. With login, give it the agent server's public
+      # key (GET /identity/public-key), never AUTH_SECRET.
+      KNOWLEDGE_PUBLIC_KEY: ""
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9300/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Like the agent port, it stays private: only the app calls it.
+
   # --- Sample Python tools (services/lab-tools, from examples/python-agent) ---
   # Add `--profile python-sample` and, in .env,
   # MCP_SERVERS={"mcpServers":{"lab":{"url":"http://lab-tools:9100/mcp","forwardIdentity":true,"storageAccess":true,"memoryAccess":true}}}

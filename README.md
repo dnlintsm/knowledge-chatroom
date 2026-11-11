@@ -87,6 +87,8 @@ starts over. There is no login: one built-in user owns everything.
 Two optional profiles add sample MCP servers: `--profile papers` (paper search) and
 `--profile python-sample` (the Python agent's tools). Each also needs the `MCP_SERVERS`
 line from the comment above its service in `docker-compose.yml`, copied into `.env`.
+`--profile python-agent` with `AGENT_URL=http://agent-py:9300` serves the chat from the
+Python chat agent (`services/agent-py`) instead.
 
 ### Run from source
 
@@ -98,6 +100,9 @@ cp .env.example .env
 pnpm install                   # the UI, the agent and packages/ from one lockfile
 pnpm dev                       # UI :3000, agent :8000
 ```
+
+`pnpm dev:python` also starts the Python chat agent (`services/agent-py`, :9300, needs
+[uv](https://docs.astral.sh/uv/)) and sends the chat there.
 
 Open <http://localhost:3000>. Without server storage, files stay in your browser. Runs,
 the knowledge tree, sharing and memory need it: `docker compose up -d` starts
@@ -159,7 +164,7 @@ changed and how you validated it.
 | `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
 | `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
-| `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (in progress, issue #176) |
+| `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (issue #176) |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `services/lab-tools` | The Python agent sample's tools as an MCP server |
 | `packages/knowledge-py` | `knowledge_chatroom`: identity, storage and memory clients shared by the Python services |
