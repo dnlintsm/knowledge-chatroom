@@ -3,10 +3,12 @@
 ## Demo stack
 
 `docker compose --profile demo up --build` builds the UI and agent images from the
-root `Dockerfile` (targets `app` and `agent`) and starts them with PostgreSQL and
-SeaweedFS. The UI (3000), the object store (8333, for signed binary downloads) and
-PostgreSQL (5432, for local development) are published on the host; the agent stays on
-the compose network. It runs without login, with the local storage credentials from
+root `Dockerfile` (targets `app` and `agent`), and the Python API server from
+`services/api-py/Dockerfile` (the `api` service). It starts them with PostgreSQL and
+SeaweedFS. The app and the Python services reach the agent's routes through `api`, which
+serves the ones moved to Python so far and passes the rest to `agent` (issue #190). The UI (3000), the object store (8333, for signed binary downloads) and
+PostgreSQL (5432, for local development) are published on the host. The agent and the API
+server stay on the compose network. It runs without login, with the local storage credentials from
 `infra/seaweedfs/s3.json`, and reads `ANTHROPIC_API_KEY` and the optional model, memory,
 embedding and `MCP_SERVERS` settings from `.env` (the `agent` and `app` services in
 `docker-compose.yml` list them). The search model downloads into the `models` volume on
@@ -22,7 +24,7 @@ The `python-agent` profile serves the chat from the Python agent (`services/agen
 instead of the agent server's own: add it with `AGENT_URL=http://agent-py:9300`, as in
 `AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build`.
 It gets the same model settings and `MCP_SERVERS`, and reaches storage, skills and memory
-on the agent server.
+through the API server.
 
 ## Production
 
@@ -35,7 +37,14 @@ separately with its dependencies and `packages/contracts`
 (`pnpm --filter ./apps/agent deploy <dir>`, or `pnpm install --filter "./apps/agent..."`)
 and run `pnpm -C apps/agent start`. Both read `.env` from the repository root.
 
-Configure `LOCAL_AGENT_URL` on Next.js to reach the agent over a private network,
+Run the Python API server (`services/api-py`, [README](../services/api-py/README.md)) in
+front of the agent, with `TS_AGENT_URL` pointing at the agent and the same `DATABASE_URL`,
+`AUTH_MODE` and `AUTH_SECRET`. Point `LOCAL_AGENT_URL` and the MCP servers'
+`KNOWLEDGE_STORAGE_URL` at the API server. The agent's routes are moving to it one group
+at a time (issue #190). Until a release says otherwise it passes every route through, so
+an install without it keeps working.
+
+Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
 and `AGENT_URL` only when the chat uses a remote backend
 ([Remote agent backend](remote-agent.md)); the agent then still serves storage and
 skills. Expose

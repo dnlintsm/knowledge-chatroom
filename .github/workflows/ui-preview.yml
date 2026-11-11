@@ -104,6 +104,21 @@ jobs:
           command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           scripts/preview-gif.sh preview/walkthrough.gif
 
+      # The Python services: api-py in front of the agent server in the storage and
+      # login runs (issue #190), and the Python chat agent below.
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        if: always()
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - name: Install the Python services
+        if: always()
+        run: uv sync --all-packages --locked
+
       - name: Test server storage and knowledge tree
         id: storage
         if: always()
@@ -118,18 +133,6 @@ jobs:
 
       # The chat on the Python agent (services/agent-py, issue #176): a real
       # Claude Code engine with a scripted model, so it needs no API key.
-      - uses: actions/setup-python@v5
-        if: always()
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-        if: always()
-        with:
-          version: "0.11.32"
-          enable-cache: true
-      - name: Install the Python agent
-        if: always()
-        run: uv sync --package agent-py --locked
       - name: Test the chat on the Python agent
         id: python
         if: always()

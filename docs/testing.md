@@ -55,13 +55,15 @@ avoids reserving separate SeaweedFS volume collections for each suite. Test blob
 are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testing;
 integration does not fall back to `DATABASE_URL`.
 
-`pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values: it resets the
-database, starts the agent on it with a throwaway `AUTH_SECRET`, and runs
-`packages/contracts/conformance/storage.test.ts`. That suite calls every operation in
+`pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values. It resets the
+database and starts the agent on it with a throwaway `AUTH_SECRET`. In front of the agent
+it starts the Python API server (`services/api-py`, which needs uv), as `pnpm dev` does.
+Then it runs `packages/contracts/conformance/storage.test.ts` through the API server
+(`CONFORMANCE_TARGET=ts` runs it against the agent alone). That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
 operation was never called. It only speaks HTTP, so it can check any backend that
-serves the storage API (a Python one later, issue #169):
+serves the storage API:
 `STORAGE_URL=http://localhost:8010 AUTH_SECRET=... pnpm -C packages/contracts test:conformance`,
 with the backend on a fresh database, since the suite's first user must become the
 workspace owner, with `HUB_ADMINS=conformance|alice`, since that user also moderates
@@ -102,9 +104,10 @@ All required modes ignore ambient Anthropic/Intelligence keys and launch mock
 chat explicitly. Missing storage prerequisites fails instead of skipping cases.
 
 The runner owns its servers and refuses existing ones. Defaults: UI 3000, mock
-agent 8000, storage agent 8001, test OIDC 9400, Python agent 9300, scripted model
-9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT`,
-`E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs.
+agent 8000, storage 8001 (the Python API server, in front of the storage agent on 8002), test OIDC 9400, Python agent 9300, scripted model
+9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_TS_STORAGE_PORT`, `E2E_OIDC_PORT`,
+`E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs. The storage and login
+modes need uv for the API server. `E2E_API_PY=off` serves storage from the agent alone.
 
 The Python mode runs `services/agent-py` with Claude Code pointed at
 `e2e/mock-anthropic.mjs`, a stand-in for the Messages API that streams scripted turns

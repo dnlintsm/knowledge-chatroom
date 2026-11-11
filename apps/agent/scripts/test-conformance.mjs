@@ -1,6 +1,8 @@
 // Runs the storage API conformance suite (packages/contracts/conformance) against
-// this agent: resets the test database, starts the agent on it, waits for storage,
-// runs the suite, and stops the agent.
+// this agent: resets the test database, starts the agent on it with the Python
+// API server (services/api-py, issue #190) in front, as `pnpm dev` and compose
+// run them, waits for storage, runs the suite through api-py, and stops both.
+// CONFORMANCE_TARGET=ts runs it against the TypeScript server alone.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -26,13 +28,22 @@ await reset`DROP SCHEMA public CASCADE`;
 await reset`CREATE SCHEMA public`;
 await reset.end();
 
-const port = await new Promise((resolve) => {
-  const probe = createServer().listen(0, () => {
-    const { port } = probe.address();
-    probe.close(() => resolve(port));
+const target = process.env.CONFORMANCE_TARGET || "api-py";
+if (!["api-py", "ts"].includes(target)) {
+  console.error(`CONFORMANCE_TARGET must be "api-py" or "ts", not "${target}".`);
+  process.exit(1);
+}
+
+const freePort = () =>
+  new Promise((resolve) => {
+    const probe = createServer().listen(0, () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
   });
-});
-const base = `http://127.0.0.1:${port}`;
+const port = await freePort();
+const apiPort = target === "api-py" ? await freePort() : null;
+const base = `http://127.0.0.1:${apiPort ?? port}`;
 const authSecret = randomBytes(32).toString("hex");
 
 const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
@@ -59,10 +70,32 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
 let agentExited = false;
 agent.once("exit", () => { agentExited = true; });
 
+const servicesDir = fileURLToPath(new URL("../../../services/", import.meta.url));
+const api = apiPort
+  ? spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
+      cwd: join(servicesDir, "api-py"),
+      env: {
+        ...process.env,
+        DATABASE_URL: process.env.TEST_DATABASE_URL,
+        AUTH_MODE: "oidc",
+        AUTH_SECRET: authSecret,
+        TS_AGENT_URL: `http://127.0.0.1:${port}`,
+        API_PY_PORT: String(apiPort),
+      },
+      stdio: ["ignore", "inherit", "inherit"],
+    })
+  : null;
+api?.once("exit", () => { agentExited = true; });
+api?.once("error", (err) => {
+  console.error(`Couldn't start api-py (${err.message}): it needs uv (https://docs.astral.sh/uv/).`);
+  agentExited = true;
+});
+
 async function waitForStorage() {
   const end = Date.now() + 60_000;
   while (Date.now() < end && !agentExited) {
-    // 401 once storage is up; 503 while it starts; no answer before the server listens.
+    // 401 once storage is up; 503 while it starts (502 from api-py before the
+    // agent listens); no answer before the server listens.
     const status = await fetch(`${base}/nodes`).then((r) => r.status, () => 0);
     if (status === 401) return true;
     await new Promise((r) => setTimeout(r, 250));
@@ -80,7 +113,8 @@ if (await waitForStorage()) {
   if (result.error) console.error(result.error.message);
   status = result.status ?? 1;
 } else {
-  console.error(agentExited ? "The agent exited before storage was ready." : "Storage didn't start within 60 s.");
+  console.error(agentExited ? "The agent or api-py exited before storage was ready." : "Storage didn't start within 60 s.");
 }
+api?.kill("SIGTERM");
 agent.kill("SIGTERM");
 process.exit(status);
