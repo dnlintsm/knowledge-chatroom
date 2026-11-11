@@ -17,6 +17,7 @@ What it serves itself so far:
 | --- | --- | --- |
 | 1 | `GET /health`: `{"status":"ok"}` when the TypeScript server answers and the database is fine, 503 with what isn't | `app.py` |
 | 2 | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
+| 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). An experiment's files (`?experiment=`) and `?propose` still go to the TypeScript server until step 4 | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
 
 Behind them:
 
@@ -30,8 +31,15 @@ Behind them:
   low a role is "You can only view here; this needs editor access".
 - **Row-level security** (`db.as_user()`). Node queries run as `knowledge_user` with
   `app.user_id` set, as `asUser()` in `apps/agent/src/storage/db.ts` does them.
-- **Change events** go out on the same `LISTEN/NOTIFY` channel, so the TypeScript
-  server's file watch tells browsers about node changes made here.
+- **Files** (`files.py`, `blobs.py`). Bytes go to the same S3-compatible bucket, keyed by
+  their sha256, and each write adds a version and the full-text index of its text
+  (`text_index.py`, cut into the same chunks as the TypeScript server cuts them; its
+  background indexer still embeds them for search by meaning). Path rules follow
+  `packages/contracts/src/files.ts` (`paths.py`). Binary files get a five-minute signed
+  link when `S3_PUBLIC_URL` is set.
+- **Change events** go out and come in on the same `LISTEN/NOTIFY` channel (`events.py`),
+  so each server's file watch tells browsers about changes made on either, each to the
+  people who may see it.
 
 ## Migrations
 
@@ -63,6 +71,8 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `DATABASE_URL` | unset | The same Postgres as the TypeScript server. Unset means no storage. |
 | `AUTH_MODE`, `AUTH_SECRET` | | Login, with the TypeScript server's rules and the same secret. |
 | `MIGRATIONS_DIR` | `apps/agent/src/storage/migrations` | The migrations to expect. |
+| `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | as the TypeScript server | The blob store; give both servers the same values. |
+| `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
 
 `pnpm dev` reads the repository's `.env`. As with the agent server, keep its port private.
 
@@ -77,6 +87,8 @@ TEST_DATABASE_URL=postgres://knowledge:knowledge@localhost:5432/postgres uv run 
 ```
 
 The second form also runs the database tests. They need a Postgres where the test may
-create and drop databases. `pnpm test:conformance` and `pnpm test:e2e:storage` and
+create and drop databases. The file tests also need an S3-compatible store: add
+`S3_ENDPOINT` (and `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`); each test makes a bucket
+of its own. `pnpm test:conformance` and `pnpm test:e2e:storage` and
 `:login` run through api-py. Use `CONFORMANCE_TARGET=ts` or `E2E_API_PY=off` to test
 the TypeScript server alone.

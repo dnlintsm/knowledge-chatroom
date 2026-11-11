@@ -77,6 +77,7 @@ const api = apiPort
       env: {
         ...process.env,
         DATABASE_URL: process.env.TEST_DATABASE_URL,
+        S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
         AUTH_MODE: "oidc",
         AUTH_SECRET: authSecret,
         TS_AGENT_URL: `http://127.0.0.1:${port}`,

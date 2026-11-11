@@ -21,6 +21,13 @@
   server. It passes them through until the database has the migrations it knows. Run
   api-py in front of the agent server from this release on: without it these routes still
   work on the agent server alone, which keeps them until phase 4.
+- api-py now serves `/files` too (issue #190, step 3): listing, reading, versions, writes,
+  renames and deletes at the workspace root and in knowledge nodes, signed store links for
+  binary files, the full-text index a write adds, and the `?watch` event stream, which
+  hears changes from both servers through Postgres. An experiment's files (`?experiment=`)
+  and proposed versions (`?propose`) still go to the agent server until step 4. api-py now
+  reads the same `S3_*` and `MAX_UPLOAD_BYTES` settings as the agent server, so give both
+  the same values; the demo compose file does.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
