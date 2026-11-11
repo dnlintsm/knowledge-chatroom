@@ -2,8 +2,8 @@
 
 Every write adds an immutable version; reads return the current one. Bytes go
 to the blob store first, so a crash can leave an unreferenced blob (harmless,
-collectable later) but never a dangling row. An experiment's files are served
-by the TypeScript server until experiments move here (issue #190, step 4).
+collectable later) but never a dangling row. An experiment's files are their own
+place: an experiment's files change on their own, apart from its node's.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from psycopg import AsyncConnection, errors
 
 from .access import is_uuid, iso
 from .blobs import sha256_hex
+from .experiments import lock_live_experiment
 from .nodes import NodeNotFoundError
 from .paths import kind_for_path, mime_for_path, normalize_path
 from .storage import Storage
@@ -49,11 +50,13 @@ def _to_info(row: tuple[Any, ...]) -> dict[str, Any]:
 
 
 class FileService:
-    """One place's files: the workspace root (node_id None) or a knowledge node."""
+    """One place's files: the workspace root (node_id None), a knowledge node, or an experiment."""
 
-    def __init__(self, storage: Storage, node_id: str | None = None) -> None:
+    def __init__(self, storage: Storage, node_id: str | None = None, experiment_id: str | None = None) -> None:
         self.storage = storage
+        # None for the workspace root, and for an experiment's files.
         self.node_id = node_id
+        self.experiment_id = experiment_id
 
     @property
     def ws(self) -> str:
@@ -71,8 +74,29 @@ class FileService:
                 return None
         return FileService(self.storage, node_id)
 
+    async def in_experiment(self, conn: AsyncConnection, experiment_id: str) -> FileService | None:
+        """An experiment's files, or None if it doesn't exist (see experiments.py)."""
+        if not is_uuid(experiment_id):
+            return None
+        cur = await conn.execute(
+            "SELECT 1 FROM experiments WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL",
+            (experiment_id, self.ws),
+        )
+        if not await cur.fetchone():
+            return None
+        return FileService(self.storage, None, experiment_id)
+
+    @property
+    def place(self) -> dict[str, Any]:
+        """Where change events say this place's files are."""
+        if self.experiment_id is not None:
+            return {"node": None, "experiment": self.experiment_id}
+        return {"node": self.node_id}
+
     def _here(self) -> tuple[str, tuple[Any, ...]]:
         """WHERE condition for files in this place."""
+        if self.experiment_id is not None:
+            return "f.workspace_id = %s AND f.experiment_id = %s", (self.ws, self.experiment_id)
         if self.node_id is None:
             return "f.workspace_id = %s AND f.node_id IS NULL AND f.experiment_id IS NULL", (self.ws,)
         return "f.workspace_id = %s AND f.node_id = %s", (self.ws, self.node_id)
@@ -99,7 +123,10 @@ class FileService:
         return info, await self.storage.blobs.get(info["sha256"])
 
     async def _lock_node(self, conn: AsyncConnection) -> None:
-        """Holds the node until commit, so it can't be deleted under a write (NodeService.lockLive)."""
+        """Holds the node or experiment until commit, so it can't be deleted under a write (NodeService.lockLive)."""
+        if self.experiment_id is not None:
+            await lock_live_experiment(conn, self.ws, self.experiment_id)
+            return
         if self.node_id is None:
             return
         cur = await conn.execute(
@@ -138,9 +165,9 @@ class FileService:
             created = await conn.execute(
                 """
                 INSERT INTO files (workspace_id, node_id, experiment_id, path, kind, mime)
-                VALUES (%s, %s, NULL, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING""",
-                (self.ws, self.node_id, path, kind_for_path(path), mime),
+                (self.ws, self.node_id, self.experiment_id, path, kind_for_path(path), mime),
             )
             cur = await conn.execute(
                 f"""
@@ -171,7 +198,7 @@ class FileService:
                     await in_tx(conn)
                 await self.storage.notify(
                     conn,
-                    {"op": "write", "node": self.node_id, "path": path, "sha256": sha256, "author": author},
+                    {"op": "write", **self.place, "path": path, "sha256": sha256, "author": author},
                 )
         info = await self.stat(conn, path)
         assert info is not None
@@ -192,7 +219,7 @@ class FileService:
             await conn.execute("UPDATE files SET deleted_at = now() WHERE id = %s", (row[0],))
             if in_tx:
                 await in_tx(conn)
-            await self.storage.notify(conn, {"op": "delete", "node": self.node_id, "path": path})
+            await self.storage.notify(conn, {"op": "delete", **self.place, "path": path})
             return True
 
     async def rename(
@@ -236,10 +263,10 @@ class FileService:
                     )
                     if in_tx:
                         await in_tx(conn)
-                    await self.storage.notify(conn, {"op": "delete", "node": self.node_id, "path": source})
+                    await self.storage.notify(conn, {"op": "delete", **self.place, "path": source})
                     await self.storage.notify(
                         conn,
-                        {"op": "write", "node": self.node_id, "path": target, "sha256": sha256, "author": author},
+                        {"op": "write", **self.place, "path": target, "sha256": sha256, "author": author},
                     )
         except errors.UniqueViolation as err:
             # Someone else took the name between the check and the update.

@@ -9,21 +9,33 @@ enforces the same rules if a check here is ever missed.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import nodes
-from .access import AccessService, ForbiddenError, Principal, Role, at_least
+from . import experiments, nodes
+from .access import AccessService, ForbiddenError, Principal, Role, at_least, iso
 from .db import as_user
+from .experiments import ANYWHERE, ExperimentError, same_json
 from .files import FileService
 from .nodes import NodeNotFoundError
+from .paths import normalize_path
+from .run_report import REPORT_PATH, new_report, report_front_matter, with_front_matter
 from .storage import Storage
 
 # What a role lets you do, for refusals: "You can only view here; ...".
 ROLE_VERB: dict[str, str] = {"viewer": "view", "editor": "edit", "owner": "manage"}
+ARCHIVED = "This experiment is archived; restore it to change it"
+# For rerun: no node given, so the earlier run's.
+_SAME_PLACE = object()
+
+
+def _now() -> str:
+    return iso(datetime.now(UTC))  # type: ignore[return-value]
 
 
 class Session:
@@ -124,6 +136,266 @@ class Session:
         async with self.scoped() as conn:
             return await nodes.remove(conn, self.storage, node_id, self._audit("node.delete", {"node": node_id}))
 
+    # Experiments: anyone who can view a node (or the workspace root) may start
+    # their own experiment there; only its author changes it (see
+    # 005_experiments.sql). An experiment with a report.md is a run.
+
+    async def experiments(self, node_id: str | None | object = ANYWHERE) -> list[dict[str, Any]]:
+        """Experiments you can see, on one node (None: at the root) or anywhere."""
+        if node_id is not ANYWHERE:
+            await self.need(node_id, "viewer")  # type: ignore[arg-type]
+        async with self.scoped() as conn:
+            return await experiments.list_experiments(conn, self.ws, self.principal.user_id, node_id)
+
+    async def experiment(self, experiment_id: str) -> dict[str, Any]:
+        async with self.scoped() as conn:
+            found = await experiments.get(conn, self.ws, self.principal.user_id, experiment_id)
+        if not found:
+            raise NodeNotFoundError("Experiment not found")
+        return found
+
+    async def create_experiment(self, node_id: str | None, given: dict[str, Any]) -> dict[str, Any]:
+        await self.need(node_id, "viewer")
+        title = {"title": given["title"]} if "title" in given else {}
+
+        async def in_tx(conn: AsyncConnection, new_id: str) -> None:
+            await self._audit("experiment.create", {"experiment": new_id, "node": node_id, **title})(conn)
+
+        async with self.scoped() as conn:
+            return await experiments.create(conn, self.storage, self.principal.user_id, node_id, given, in_tx)
+
+    async def start_run(
+        self,
+        node_id: str | None,
+        given: dict[str, Any],
+        inputs: list[dict[str, Any]] | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Starts a run for you (issue #82): a new draft experiment like
+        create_experiment's, in state running unless `given` says otherwise,
+        with each input file linked in read only under inputs/, and a report.md
+        whose front matter holds the run's record. You need to be able to read
+        every input. `provenance` is what the caller knows (chat, model, skill,
+        tools); who started it, when, and the exact input versions are added here.
+        """
+        await self.need(node_id, "viewer")
+        user_id = self.principal.user_id
+        links, recorded = await self._resolve_inputs(inputs or [])
+        who = await self.access.user(user_id)
+        name = None if who is None else who["name"] if who["name"] is not None else who["email"]
+        record = {**(provenance or {}), "startedBy": {"id": user_id, "name": name}, "startedAt": _now(),
+                  "inputs": recorded}  # fmt: skip
+        fields = {**given, "state": given["state"] if given.get("state") is not None else "running"}
+        title = {"title": given["title"]} if "title" in given else {}
+
+        async def in_tx(conn: AsyncConnection, new_id: str) -> None:
+            target = {"experiment": new_id, "node": node_id, **title, "inputs": [link["path"] for link in links]}
+            await self._audit("experiment.create", target)(conn)
+
+        async with self.scoped() as conn:
+            run = await experiments.create(
+                conn, self.storage, user_id, node_id, fields, in_tx, inputs=links, provenance=record
+            )
+        files = await self.experiment_files(run["id"])
+        if not await files.stat(REPORT_PATH):
+            await files.write(REPORT_PATH, new_report(run).encode())
+        return await self.experiment(run["id"])
+
+    async def _resolve_inputs(
+        self, inputs: list[dict[str, Any]], taken: list[Any] | None = None
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+        """
+        Each input's version to copy under inputs/, and what the run's provenance
+        records about it: its current version, or for a pinned input (a rerun's,
+        with "sha256") the version of it with the recorded content. `taken` are
+        inputs/ paths the run already has.
+        """
+        links: list[dict[str, str]] = []
+        recorded: list[dict[str, Any]] = []
+        for source in inputs:
+            origin = normalize_path(source["path"])
+            place = (
+                await self.experiment_files(source["experiment"])
+                if source.get("experiment")
+                else await self.files(source.get("node"))
+            )
+            versions = await place.history(origin) or []
+            pinned = source.get("sha256")
+            if pinned:
+                current = next((v for v in versions if v["sha256"] == pinned), None)
+            else:
+                current = versions[0] if versions else None
+            if not current and pinned and versions:
+                raise ExperimentError(
+                    f"{origin} in the earlier experiment no longer has the content it ran with; "
+                    "pass inputs to rerun with other files or their current versions"
+                )
+            if not current:
+                raise ExperimentError(
+                    f"{origin} of the earlier experiment is gone; pass inputs to rerun with other files"
+                    if pinned
+                    else f"No file at {origin} to use as an input"
+                )
+            name = source["as"] if source.get("as") is not None else origin.split("/")[-1]
+            path = normalize_path(f"inputs/{name}")
+            if path in (taken or []):
+                raise ExperimentError(f"The run already has an input at {path}; give this one another name")
+            if any(link["path"] == path for link in links):
+                raise ExperimentError(f"Two inputs would both be {path}; give one of them another name")
+            links.append({"path": path, "versionId": current["id"]})
+            recorded.append(
+                {
+                    "path": path,
+                    "from": {"node": place.node_id, "experiment": place.experiment_id, "path": origin},
+                    "version": current["id"],
+                    "sha256": current["sha256"],
+                    "size": current["size"],
+                }
+            )
+        return links, recorded
+
+    async def add_run_inputs(self, experiment_id: str, inputs: list[dict[str, Any]]) -> dict[str, Any]:
+        """
+        Adds input files to an existing run or experiment (issue #114): each is
+        linked in read only under inputs/ at its current version and appended to
+        the inputs its provenance records, so a rerun reads them too. Only its
+        author can, while it isn't archived; a finished run stays as it ended.
+        """
+        current = await self.experiment(experiment_id)
+        self._need_author(current)
+        if current["status"] == "archived":
+            raise ForbiddenError(ARCHIVED)
+        if current["state"] in ("done", "failed"):
+            raise ExperimentError(f"This run already finished ({current['state']}); start a new run to add inputs")
+        if not inputs:
+            raise ExperimentError("Name at least one file to add as an input")
+        before = current["provenance"].get("inputs")
+        taken = [i.get("path") if isinstance(i, dict) else None for i in (before if before is not None else [])]
+        links, recorded = await self._resolve_inputs(inputs, taken)
+        audit = self._audit("experiment.inputs", {"experiment": experiment_id, "inputs": [x["path"] for x in links]})
+        async with self.scoped() as conn:
+            await experiments.add_inputs(conn, self.storage, experiment_id, links, recorded, audit)
+        run = await self.experiment(experiment_id)
+        await self._refresh_report(run)
+        return run
+
+    async def rerun(
+        self,
+        experiment_id: str,
+        given: dict[str, Any],
+        inputs: list[dict[str, Any]] | None = None,
+        node_id: str | None | object = _SAME_PLACE,
+        provenance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Runs an experiment again as a new run (issue #82): same place, parameters,
+        hypothesis and inputs unless told otherwise. The inputs are read from
+        the old run's inputs/ at the content its record names (#187), even if
+        someone edited them since; `inputs` instead reads those files at their
+        current versions. The old run stays as it is; the new one's provenance
+        names it. You need to be able to see the old run.
+        """
+        old = await self.experiment(experiment_id)
+        pinned: list[dict[str, Any]] = []
+        if inputs is None:
+            found = old["provenance"].get("inputs")
+            for item in found if found is not None else []:
+                sha256 = item.get("sha256")
+                if not isinstance(sha256, str) or not sha256:
+                    raise ExperimentError(
+                        f"The earlier experiment's record doesn't say what {item['path']} held; "
+                        "pass inputs to rerun with chosen files"
+                    )
+                path = item["path"]
+                pinned.append(
+                    {"path": path, "experiment": old["id"], "as": re.sub(r"^inputs/", "", path), "sha256": sha256}
+                )
+
+        def given_or(key: str, fallback: Any) -> Any:
+            return given[key] if given.get(key) is not None else fallback
+
+        return await self.start_run(
+            old["nodeId"] if node_id is _SAME_PLACE else node_id,  # type: ignore[arg-type]
+            {
+                "title": given_or("title", f"{old['title']} (rerun)"),
+                "hypothesis": given_or("hypothesis", old["hypothesis"]),
+                "params": given_or("params", old["params"]),
+            },
+            inputs if inputs is not None else pinned,
+            # Only the id: the old run may be a draft that viewers of this one can't see.
+            {**(provenance or {}), "rerunOf": {"id": old["id"]}},
+        )
+
+    async def finish_run(self, experiment_id: str, results: dict[str, Any], state: str) -> dict[str, Any]:
+        """
+        Records a run's results and how it ended (done or failed), and refreshes
+        the record in its report.md (creating the report if it has none). A
+        finished run stays as it ended: the same call again changes nothing,
+        and a different one is refused.
+        """
+        current = await self.experiment(experiment_id)
+        self._need_author(current)
+        if current["status"] == "archived":
+            raise ForbiddenError(ARCHIVED)
+        if current["state"] in ("done", "failed"):
+            if current["state"] == state and same_json(current["results"], results):
+                return current
+            raise ExperimentError(f"This run already finished ({current['state']}); start a new run to try again")
+        audit = self._audit("experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]})
+        async with self.scoped() as conn:
+            await experiments.update(
+                conn, self.storage, experiment_id, {"results": results, "state": state}, audit, {"finishedAt": _now()}
+            )
+        run = await self.experiment(experiment_id)
+        await self._refresh_report(run, create=True)
+        return run
+
+    async def _refresh_report(self, run: dict[str, Any], create: bool = False) -> None:
+        """
+        Brings the record in a run's report.md front matter up to date, for runs
+        Claude started (they have provenance). Makes the report when `create`
+        is set and there is none. Archived runs are read only.
+        """
+        if not run["provenance"].get("startedAt") or run["status"] == "archived":
+            return
+        files = await self.experiment_files(run["id"])
+        report = await files.read(REPORT_PATH)
+        if not report and not create:
+            return
+        # As TextDecoder reads it: a leading byte order mark dropped, bad bytes replaced.
+        before = report[1].decode("utf-8-sig", errors="replace") if report else f"# {run['title']}\n"
+        after = with_front_matter(before, report_front_matter(run))
+        if after != before:
+            await files.write(REPORT_PATH, after.encode())
+
+    async def update_experiment(self, experiment_id: str, given: dict[str, Any]) -> dict[str, Any]:
+        """Archived experiments are read only, apart from changing the status back."""
+        current = await self.experiment(experiment_id)
+        self._need_author(current)
+        archived = current["status"] == "archived" and given.get("status", "archived") == "archived"
+        if archived and any(key != "status" for key in given):
+            raise ForbiddenError(ARCHIVED)
+        audit = self._audit("experiment.update", {"experiment": experiment_id, "fields": list(given)})
+        async with self.scoped() as conn:
+            await experiments.update(conn, self.storage, experiment_id, given, audit)
+        # The report's record follows edits made after the run started.
+        updated = await self.experiment(experiment_id)
+        await self._refresh_report(updated)
+        return updated
+
+    async def delete_experiment(self, experiment_id: str) -> bool:
+        self._need_author(await self.experiment(experiment_id))
+        async with self.scoped() as conn:
+            return await experiments.remove(
+                conn, self.storage, experiment_id, self._audit("experiment.delete", {"experiment": experiment_id})
+            )
+
+    @staticmethod
+    def _need_author(experiment: dict[str, Any]) -> None:
+        if not experiment["mine"]:
+            raise ForbiddenError("Only the experiment's author can change it")
+
     # Files
 
     async def files(self, node_id: str | None) -> FilesSession:
@@ -134,6 +406,17 @@ class Session:
         if not service:
             raise NodeNotFoundError("Node not found")
         return FilesSession(self, service, role)
+
+    async def experiment_files(self, experiment_id: str) -> FilesSession:
+        """An experiment's files: its author edits them, others who may see it read them."""
+        access = await self.access.experiment_access(self.principal.user_id, experiment_id)
+        service = None
+        if access:
+            async with self.storage.pool.connection() as conn:
+                service = await FileService(self.storage).in_experiment(conn, experiment_id)
+        if not service:
+            raise NodeNotFoundError("Experiment not found")
+        return FilesSession(self, service, "editor" if access == "writer" else "viewer")
 
     async def can_see(self, event: dict[str, Any]) -> bool:
         """Whether this principal may hear about a change."""
@@ -241,12 +524,22 @@ class FilesSession:
     def node_id(self) -> str | None:
         return self.service.node_id
 
+    @property
+    def experiment_id(self) -> str | None:
+        return self.service.experiment_id
+
     def _need_editor(self) -> None:
-        if not at_least(self.role, "editor"):
-            raise ForbiddenError(f"You can only {ROLE_VERB[self.role]} here; this needs editor access")
+        if at_least(self.role, "editor"):
+            return
+        raise ForbiddenError(
+            "Only the experiment's author can change its files, and not once it is archived"
+            if self.experiment_id
+            else f"You can only {ROLE_VERB[self.role]} here; this needs editor access"
+        )
 
     def _audit(self, action: str, target: dict[str, Any]):
-        return self.session._audit(action, {"node": self.node_id, **target})
+        place = {"experiment": self.experiment_id} if self.experiment_id else {"node": self.node_id}
+        return self.session._audit(action, {**place, **target})
 
     async def list(self) -> list[dict[str, Any]]:
         async with self.session.scoped() as conn:

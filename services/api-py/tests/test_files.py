@@ -175,10 +175,10 @@ async def test_storage_tokens_write_as_claude(files):
     assert (entry["actorType"], entry["target"]["via"]) == ("agent", "mcp:lab")
 
 
-async def test_experiment_files_and_proposals_stay_with_typescript(files):
-    assert (await files.get("/files?experiment=abc", headers=ALICE)).json() == {"from": "typescript"}
+async def test_proposals_stay_with_typescript(files):
     assert (await files.put("/files/notes/a.md?propose", headers=ALICE, content=b"x")).json() == {"from": "typescript"}
-    assert forwarded == ["GET /files", "PUT /files/notes/a.md"]
+    assert (await files.put("/files/a.md?propose&experiment=x", headers=ALICE, content=b"x")).status_code == 200
+    assert forwarded == ["PUT /files/notes/a.md", "PUT /files/a.md"]
     forwarded.clear()
 
 

@@ -1,4 +1,4 @@
-"""The storage API's /access and /nodes in Python (issue #190, step 2), as apps/agent/src/storage/http.ts.
+"""The storage API's /access, /nodes, /files and /experiments in Python (issue #190), as apps/agent/src/storage/http.ts.
 
     GET    /access                  {me, rootRole}
     GET    /access/users            everyone who has signed in
@@ -21,7 +21,8 @@
     PATCH  /nodes/<id>              {name} -> rename
     DELETE /nodes/<id>              soft delete, with everything below it
 
-    GET    /files?node=             the files at the root or in a node
+    GET    /files?node=             the files at the root or in a node (?experiment=<id>:
+                                    an experiment's)
     GET    /files?watch             change events (server-sent), those this user may see
     GET    /files/<path>?node=      the content (a signed store link for binary files
                                     when S3_PUBLIC_URL is set); ?versions: its history
@@ -29,8 +30,20 @@
     PATCH  /files/<path>?node=      {path} -> rename
     DELETE /files/<path>?node=      soft delete
 
-An experiment's files (?experiment=) and proposed versions (?propose) still go
-to the TypeScript server until experiments and proposals move (step 4).
+    GET    /experiments?node=<id>   {experiments} you can see, on a node (node=root: at
+                                    the root) or anywhere
+    POST   /experiments             {nodeId|null, title, hypothesis?, params?, results?,
+                                    state?} -> a new draft (201), forked from its node
+    GET    /experiments/<id>        one experiment
+    PATCH  /experiments/<id>        {title?, hypothesis?, params?, results?, status?, state?}
+    DELETE /experiments/<id>        soft delete, with its files
+    POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?, inputs?,
+                                    rerunOf?, provenance?} -> a new run (201) with a report.md
+    POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
+    POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
+
+Proposed versions (?propose, /proposals) and /experiments/upload still go to
+the TypeScript server until they move (step 4b).
 
 Until the database has the migrations this server knows (the TypeScript
 server applies them as it starts), these pass through to the TypeScript
@@ -54,6 +67,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from .access import ROLES, AccessError, ForbiddenError
+from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError
 from .files import FileExistsError_
 from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
@@ -63,8 +77,10 @@ from .paths import (
     js_trim,
     kind_for_path,
     normalize_path,
+    utf16_len,
 )
 from .proxy import forward
+from .run_report import js_json
 from .session import Session
 
 logger = logging.getLogger("api_py")
@@ -76,7 +92,7 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too, but the TypeScript server reads the raw
 # path and serves those as files. They go to it, so a storage token's limits
 # (agent_refusal) always see the section the handlers act on.
-_OWN_PATH = re.compile(r"^/(access|nodes|files)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
 # Stored bytes are served from the app's origin, so a file opened as a page (an
@@ -179,6 +195,18 @@ def agent_refusal(request: Request) -> str | None:
         return "Claude's changes to skills are proposals: add ?propose" if skill else None
     if section == "nodes":
         return None if method == "POST" and sub == "" else "Claude doesn't rename or delete nodes"
+    if section == "experiments":
+        if method == "POST" and sub == "upload":
+            return (
+                "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload"
+            )
+        if method == "POST" and sub in ("", "runs"):
+            return None
+        if method == "PATCH" and sub != "" and "/" not in sub:
+            return None
+        if method == "POST" and re.fullmatch(r"[^/]+/(inputs|finish)", sub):
+            return None
+        return "Claude doesn't delete experiments or move folders into them"
     if section == "access":
         return "Claude doesn't manage access"
     return "Claude can't do that with a storage token"
@@ -215,9 +243,11 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(404, str(err))
     except ForbiddenError as err:
         return error(403, str(err))
+    except ExperimentExistsError as err:
+        return error(409, str(err), exists=True)
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
-    except (NodeError, AccessError, InvalidPathError) as err:
+    except (NodeError, AccessError, InvalidPathError, ExperimentError) as err:
         return error(400, str(err))
     except Exception:
         logger.exception("[storage] request failed")
@@ -237,18 +267,35 @@ async def access_route(request: Request) -> Response:
 
 
 def _typescript_files(request: Request) -> bool:
-    """Experiment files and proposals, which the TypeScript server serves until step 4, or no blob store here."""
-    return (
-        bool(first_param(request, "experiment"))
-        or "propose" in request.query_params
-        or request.app.state.storage.blobs is None
-    )
+    """Proposals, which the TypeScript server serves until step 4b, or no blob store here."""
+    return "propose" in request.query_params or request.app.state.storage.blobs is None
 
 
 @router.api_route("/files", methods=ALL_METHODS, include_in_schema=False)
 @router.api_route("/files/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def files_route(request: Request) -> Response:
     return await _serve(request, handle_files, _typescript_files)
+
+
+def _experiment_path(request: Request) -> str:
+    """What follows /experiments/, decoded as a whole (decodeURIComponent in http.ts)."""
+    return decode_component(re.sub(r"^/experiments/?", "", raw_path(request)))
+
+
+def _typescript_experiments(request: Request) -> bool:
+    """/experiments/upload (multipart), which the TypeScript server serves until step 4b, or no blob store here."""
+    if request.app.state.storage.blobs is None:
+        return True
+    try:
+        return _experiment_path(request) == "upload"
+    except _MalformedPath:
+        return False
+
+
+@router.api_route("/experiments", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/experiments/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def experiments_route(request: Request) -> Response:
+    return await _serve(request, handle_experiments, _typescript_experiments)
 
 
 async def handle_nodes(request: Request, session: Session) -> Response:
@@ -364,7 +411,12 @@ async def handle_files(request: Request, session: Session) -> Response:
     if path == "" and method == "GET" and "watch" in request.query_params:
         return await watch(session)
 
-    files = await session.files(first_param(request, "node") or None)
+    experiment = first_param(request, "experiment")
+    files = (
+        await session.experiment_files(experiment)
+        if experiment
+        else await session.files(first_param(request, "node") or None)
+    )
 
     if path == "":
         if method != "GET":
@@ -428,6 +480,211 @@ async def handle_files(request: Request, session: Session) -> Response:
             return json_response(200, {"deleted": path})
         return error(404, "Not found")
 
+    return error(405, "Method not allowed")
+
+
+EXPERIMENT_EXPECTED = (
+    "Expected {title?, hypothesis?: string, params?, results?: object, status?: draft|shared|archived, "
+    "state?: ready|running|done|failed}"
+)
+# Sharing or archiving an experiment changes who sees it: the user's call, not
+# an outside service's, so storage tokens (principal.via) leave status alone.
+STATUS_REFUSED = "Claude doesn't share or archive experiments with a storage token: leave out status"
+INPUTS_EXPECTED = "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}"
+# Most a run's caller-given provenance may hold, as JSON.
+MAX_PROVENANCE_BYTES = 16 * 1024
+RUN_EXPECTED = (
+    "Expected {nodeId?: string|null, title?: string, hypothesis?: string, params?: object, "
+    "inputs?: [{path, node?, experiment?, as?}], rerunOf?: string, provenance?: {chat?: string, model?: string, "
+    "skill?: {name, source?, version?: number, sha256?}, tools?: {[name]: version}, ...}}"
+)
+# Provenance only the server writes: who started it and when, its inputs, its source run, when it finished.
+SERVER_PROVENANCE = ("startedBy", "startedAt", "finishedAt", "inputs", "rerunOf")
+# A run request with no nodeId: rerun in the earlier run's place.
+_NOT_GIVEN = object()
+
+
+def experiment_input(body: dict[str, Any]) -> dict[str, Any] | None:
+    """The experiment fields in a request body, in the order http.ts reads them; None when one has the wrong type."""
+    given: dict[str, Any] = {}
+    for key in ("title", "hypothesis", "status", "state"):
+        if key not in body:
+            continue
+        if not isinstance(body[key], str):
+            return None
+        given[key] = body[key]
+    for key in ("params", "results"):
+        if key in body:
+            given[key] = body[key]
+    return given
+
+
+def refuses_status(session: Session, given: dict[str, Any]) -> bool:
+    return bool(session.principal.via) and "status" in given and given["status"] != "draft"
+
+
+def _string_or_null(value: Any) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def run_inputs(value: Any) -> list[dict[str, Any]] | None:
+    """A list of run inputs from a request body, or None when it isn't one."""
+    if not isinstance(value, list):
+        return None
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        path, node, experiment = item.get("path"), item.get("node"), item.get("experiment")
+        if (
+            not isinstance(path, str)
+            or not _string_or_null(node)
+            or not _string_or_null(experiment)
+            or ("as" in item and not isinstance(item["as"], str))
+        ):
+            return None
+        entry = {"path": path, "node": node, "experiment": experiment}
+        if "as" in item:
+            entry["as"] = item["as"]
+        out.append(entry)
+    return out
+
+
+def _absent_or(value: dict[str, Any], key: str, kind: type | tuple[type, ...]) -> bool:
+    """Absent, or of `kind` (null isn't; a boolean isn't a number)."""
+    if key not in value:
+        return True
+    found = value[key]
+    return isinstance(found, kind) and not (kind is not str and isinstance(found, bool))
+
+
+def caller_provenance(provenance: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    What a caller says about its run, without the server's own keys, or None
+    when a field the run panel shows (chat, model, skill, tools) has another
+    shape than it reads. Other keys are kept as they are.
+    """
+    kept = {key: value for key, value in provenance.items() if key not in SERVER_PROVENANCE}
+    chat, model, skill, tools = (kept.get(key) for key in ("chat", "model", "skill", "tools"))
+    if not _string_or_null(chat) or not _string_or_null(model):
+        return None
+    if skill is not None and not (
+        isinstance(skill, dict)
+        and isinstance(skill.get("name"), str)
+        and _absent_or(skill, "source", str)
+        and _absent_or(skill, "version", (int, float))
+        and _absent_or(skill, "sha256", str)
+    ):
+        return None
+    if tools is not None and not (isinstance(tools, dict) and all(isinstance(v, str) for v in tools.values())):
+        return None
+    return kept
+
+
+def run_request(body: dict[str, Any]) -> dict[str, Any] | None:
+    """A POST /experiments/runs body, or None when it isn't one."""
+    rest = {k: v for k, v in body.items() if k not in ("nodeId", "inputs", "rerunOf", "provenance")}
+    node_id = body.get("nodeId", _NOT_GIVEN)
+    if node_id is not _NOT_GIVEN and not _string_or_null(node_id):
+        return None
+    rerun_of = body.get("rerunOf")
+    if "rerunOf" in body and not isinstance(rerun_of, str):
+        return None
+    provenance = body.get("provenance", {})
+    if not isinstance(provenance, dict) or utf16_len(js_json(provenance)) > MAX_PROVENANCE_BYTES:
+        return None
+    given = caller_provenance(provenance)
+    if given is None:
+        return None
+    inputs = None
+    if "inputs" in body:
+        inputs = run_inputs(body["inputs"])
+        if inputs is None:
+            return None
+    # A run starts running, as a draft; finish it with /finish, share it in the app.
+    if any(key in rest for key in ("results", "status", "state")):
+        return None
+    if "params" in rest and not isinstance(rest["params"], dict):
+        return None
+    fields = experiment_input(rest)
+    if fields is None:
+        return None
+    return {"nodeId": node_id, "inputs": inputs, "rerunOf": rerun_of, "provenance": given, "input": fields}
+
+
+async def handle_experiments(request: Request, session: Session) -> Response:
+    experiment_id = _experiment_path(request)
+    method = request.method
+    if not experiment_id:
+        if method == "GET":
+            node = first_param(request, "node")
+            where = None if node == "root" else node or ANYWHERE
+            return json_response(200, {"experiments": await session.experiments(where)})
+        if method == "POST":
+            body = await read_json(request)
+            given = experiment_input(body) if body is not None else None
+            if body is None or "nodeId" not in body or not _string_or_null(body["nodeId"]) or given is None:
+                return error(400, f"Expected {{nodeId: string|null, title: string, …}}; {EXPERIMENT_EXPECTED}")
+            if refuses_status(session, given):
+                return error(403, STATUS_REFUSED)
+            return json_response(201, await session.create_experiment(body["nodeId"], given))
+        return error(405, "Method not allowed")
+
+    if experiment_id == "runs":
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        run = run_request(body) if body is not None else None
+        if run is None:
+            return error(400, RUN_EXPECTED)
+        if run["rerunOf"]:
+            place = {} if run["nodeId"] is _NOT_GIVEN else {"node_id": run["nodeId"]}
+            rerun = await session.rerun(
+                run["rerunOf"], run["input"], run["inputs"], provenance=run["provenance"], **place
+            )
+            return json_response(201, rerun)
+        if not run["input"].get("title"):
+            return error(400, "A new run needs a title (or rerunOf)")
+        node_id = None if run["nodeId"] is _NOT_GIVEN else run["nodeId"]
+        return json_response(201, await session.start_run(node_id, run["input"], run["inputs"], run["provenance"]))
+
+    finish_of = re.fullmatch(r"([^/]+)/finish", experiment_id)
+    if finish_of:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        results = body.get("results") if body else None
+        state = body.get("state") if body else None
+        state = "done" if state is None else state
+        if not isinstance(results, dict) or state not in ("done", "failed"):
+            return error(400, "Expected {results: object, state?: done|failed}")
+        return json_response(200, await session.finish_run(finish_of.group(1), results, state))
+
+    inputs_of = re.fullmatch(r"([^/]+)/inputs", experiment_id)
+    if inputs_of:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        inputs = run_inputs(body.get("inputs")) if body is not None else None
+        if inputs is None:
+            return error(400, INPUTS_EXPECTED)
+        return json_response(200, await session.add_run_inputs(inputs_of.group(1), inputs))
+
+    if method == "GET":
+        return json_response(200, await session.experiment(experiment_id))
+    if method == "PATCH":
+        body = await read_json(request)
+        given = experiment_input(body) if body is not None else None
+        if given is None:
+            return error(400, EXPERIMENT_EXPECTED)
+        # Any status change: back to draft from archived would make it writable again.
+        if session.principal.via and "status" in given:
+            return error(403, STATUS_REFUSED)
+        return json_response(200, await session.update_experiment(experiment_id, given))
+    if method == "DELETE":
+        if await session.delete_experiment(experiment_id):
+            return json_response(200, {"deleted": experiment_id})
+        return error(404, "Experiment not found")
     return error(405, "Method not allowed")
 
 

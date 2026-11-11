@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from . import storage_routes
 
-# Steps 2 and 3: /access, /nodes and /files (storage_routes.py).
+# Steps 2 to 4a: /access, /nodes, /files and /experiments (storage_routes.py).
 ROUTERS: list[APIRouter] = [storage_routes.router]
 # The storage API's sections served here once the database is ready.
-STORAGE_PREFIXES = ("/access", "/nodes", "/files")
+STORAGE_PREFIXES = ("/access", "/nodes", "/files", "/experiments")
