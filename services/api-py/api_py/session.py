@@ -17,19 +17,22 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import experiments, nodes
-from .access import AccessService, ForbiddenError, Principal, Role, at_least, iso
+from . import experiments, nodes, proposals
+from .access import AccessService, ForbiddenError, Principal, Role, at_least, is_uuid, iso
 from .db import as_user
-from .experiments import ANYWHERE, ExperimentError, same_json
+from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, clean_input, same_json
 from .files import FileService
-from .nodes import NodeNotFoundError
-from .paths import normalize_path
+from .nodes import NodeError, NodeNotFoundError
+from .paths import js_trim, normalize_path
+from .proposals import EVERYWHERE, ProposalError
 from .run_report import REPORT_PATH, new_report, report_front_matter, with_front_matter
 from .storage import Storage
 
 # What a role lets you do, for refusals: "You can only view here; ...".
 ROLE_VERB: dict[str, str] = {"viewer": "view", "editor": "edit", "owner": "manage"}
 ARCHIVED = "This experiment is archived; restore it to change it"
+# The node name an upload uses for a level its path leaves empty ("Etch/Module 3//").
+EMPTY_LEVEL_NAME = "None"
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
 
@@ -163,6 +166,131 @@ class Session:
 
         async with self.scoped() as conn:
             return await experiments.create(conn, self.storage, self.principal.user_id, node_id, given, in_tx)
+
+    async def upload_experiment(
+        self, raw_id: str, path: list[str], given: dict[str, Any], files: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """
+        Uploads an experiment made elsewhere (POST /experiments/upload): its id
+        (chosen by the caller, so a retry can't make a second copy), the names
+        of its place in the tree, one per level, its fields and its files
+        ({path, bytes, mime?}). Nodes of the path that don't exist yet are
+        added, which needs editor access where the first one goes; an existing
+        path needs viewer access, as for create_experiment.
+
+        The experiment starts with only the uploaded files, not a copy of the
+        node's. The new nodes, the experiment and its files are written in one
+        transaction, so a failure part way leaves nothing behind.
+        """
+        if not is_uuid(raw_id):
+            raise ExperimentError("An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b")
+        experiment_id = raw_id.lower()
+        fields = clean_input(given)
+        if not fields.get("title"):
+            raise ExperimentError("An experiment needs a title")
+        async with self.storage.pool.connection() as conn:
+            levels = await nodes.types(conn, self.ws)
+        if not levels:
+            raise NodeError("No knowledge levels are set up")
+        if len(path) != len(levels):
+            raise ExperimentError(
+                f"The path needs a name for each of the {len(levels)} levels "
+                f"({'/'.join(level['name'] for level in levels)}), got {len(path)}; "
+                f'leave a name empty for "{EMPTY_LEVEL_NAME}"'
+            )
+        names = [EMPTY_LEVEL_NAME if js_trim(name) == "" else name for name in path]
+        uploads = [{**f, "path": normalize_path(f["path"])} for f in files]
+        seen: set[str] = set()
+        for f in uploads:
+            if f["path"] in seen:
+                raise ExperimentError(f"Two files would both be {f['path']}")
+            seen.add(f["path"])
+
+        # The part of the path that exists already. Looked up as the server, so
+        # a node you can't see is found rather than added twice; need() below
+        # then answers "not found" for it, as everywhere else.
+        existing: list[dict[str, Any]] = []
+        async with self.storage.pool.connection() as conn:
+            if await experiments.id_taken(conn, experiment_id):
+                raise ExperimentExistsError(experiment_id)
+            for name in names:
+                node = await nodes.find_child(conn, self.ws, existing[-1]["id"] if existing else None, name)
+                if not node:
+                    break
+                existing.append(node)
+        missing = names[len(existing) :]
+        # Nodes added below one you edit are yours too, so one check covers them all.
+        await self.need(existing[-1]["id"] if existing else None, "editor" if missing else "viewer")
+
+        principal = self.principal
+        created: list[dict[str, Any]] = []
+        written: list[dict[str, Any]] = []
+        async with self.scoped() as conn:
+            node_id = existing[-1]["id"] if existing else None
+            for name in missing:
+                node, added = await self._find_or_add_node(conn, node_id, name)
+                if added:
+                    created.append(node)
+                node_id = node["id"]
+            target = {
+                "experiment": experiment_id,
+                "node": node_id,
+                "title": fields["title"],
+                "files": [f["path"] for f in uploads],
+                "upload": True,
+            }
+
+            async def in_tx(tx: AsyncConnection, _new_id: str) -> None:
+                await self._audit("experiment.create", target)(tx)
+
+            await experiments.create(
+                conn, self.storage, principal.user_id, node_id, fields, in_tx, chosen_id=experiment_id, fork=False
+            )
+            service = await FileService(self.storage).in_experiment(conn, experiment_id)
+            assert service is not None
+            for f in uploads:
+                audit = self._audit("file.write", {"experiment": experiment_id, "path": f["path"], "size": len(f["bytes"])})
+                info = await service.write(
+                    conn,
+                    f["path"],
+                    f["bytes"],
+                    mime=f.get("mime"),
+                    create_only=True,
+                    author=principal.actor,
+                    author_id=principal.user_id,
+                    in_tx=audit,
+                )
+                written.append(info)
+
+        experiment = await self.experiment(experiment_id)
+        lineage = await self.lineage(experiment["nodeId"]) if experiment["nodeId"] else []
+        return {"experiment": experiment, "lineage": lineage, "created": created, "files": written}
+
+    async def _find_or_add_node(
+        self, conn: AsyncConnection, parent_id: str | None, name: str
+    ) -> tuple[dict[str, Any], bool]:
+        """
+        The node `name` below `parent_id`, added when missing. Someone adding the
+        same node at the same moment makes the insert fail on the unique name;
+        theirs is then used.
+        """
+        found = await nodes.find_child(conn, self.ws, parent_id, name)
+        if found:
+            return found, False
+
+        async def in_tx(tx: AsyncConnection, node_id: str) -> None:
+            # With row security a trigger makes you its owner (013_node_creator_owns.sql).
+            if not self.storage.row_security:
+                await self.access.own_new_node(tx, self.principal.user_id, node_id)
+            await self._audit("node.create", {"node": node_id, "parent": parent_id, "name": name})(tx)
+
+        try:
+            return await nodes.create(conn, self.storage, parent_id, name, in_tx), True
+        except NodeError:
+            raced = await nodes.find_child(conn, self.ws, parent_id, name)
+            if raced:
+                return raced, False
+            raise
 
     async def start_run(
         self,
@@ -417,6 +545,167 @@ class Session:
         if not service:
             raise NodeNotFoundError("Experiment not found")
         return FilesSession(self, service, "editor" if access == "writer" else "viewer")
+
+    # Proposed versions (see proposals.py): anyone who can read a place may
+    # propose a change to its files, and editors there accept or reject it.
+
+    async def proposals(
+        self,
+        *,
+        node: str | None | object = EVERYWHERE,
+        experiment: str | None = None,
+        status: str = "open",
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Proposals you can see: on places you can read, and your own."""
+        async with self.scoped() as conn:
+            return await proposals.list_proposals(
+                conn, self.ws, self.principal.user_id, node=node, experiment=experiment, status=status, limit=limit
+            )
+
+    async def proposal(self, proposal_id: str) -> dict[str, Any]:
+        async with self.scoped() as conn:
+            found = await proposals.get(conn, self.ws, self.principal.user_id, proposal_id)
+        if not found:
+            raise NodeNotFoundError("Proposal not found")
+        return found
+
+    async def proposal_content(self, proposal_id: str) -> tuple[dict[str, Any], bytes]:
+        """A proposal and its proposed bytes."""
+        proposal = await self.proposal(proposal_id)
+        return proposal, await self.storage.blobs.get(proposal["sha256"])
+
+    async def propose(
+        self, node_id: str | None, path: str, data: bytes, *, mime: str | None = None, note: str | None = None
+    ) -> dict[str, Any]:
+        """Proposes new content for a file at the root (None) or in a node; returns the proposal."""
+        await self.need(node_id, "viewer")
+        principal = self.principal
+
+        async def in_tx(conn: AsyncConnection, proposal_id: str) -> None:
+            await self._audit("proposal.create", {"proposal": proposal_id, "node": node_id, "path": path})(conn)
+
+        async with self.scoped() as conn:
+            proposal_id = await proposals.propose(
+                conn,
+                self.storage,
+                node=node_id,
+                path=path,
+                content=data,
+                mime=mime,
+                author=principal.actor,
+                author_id=principal.user_id,
+                note=note,
+                in_tx=in_tx,
+            )
+        return await self.proposal(proposal_id)
+
+    async def promotable(self, experiment_id: str) -> list[dict[str, Any]]:
+        """What promoting an experiment would propose to its node."""
+        await self.experiment(experiment_id)
+        async with self.scoped() as conn:
+            return await proposals.promotable(conn, self.ws, experiment_id)
+
+    async def promote(
+        self, experiment_id: str, paths: list[str] | None = None, note: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Proposes an experiment's changed files (all of them, or those in `paths`)
+        to its node, for someone who can edit there to accept. Only its author
+        promotes it, and not once it is archived.
+        """
+        experiment = await self.experiment(experiment_id)
+        self._need_author(experiment)
+        if experiment["access"] != "writer":
+            raise ForbiddenError("This experiment is archived; restore it to propose its files")
+        candidates = await self.promotable(experiment_id)
+        chosen = [c for c in candidates if c["path"] in paths] if paths is not None else candidates
+        missing = [p for p in paths or [] if not any(c["path"] == p for c in candidates)]
+        if missing:
+            raise ProposalError(
+                f"Nothing to propose for {', '.join(missing)}: "
+                "the experiment didn't change it, or its node already has it"
+            )
+        if not chosen:
+            raise ProposalError("This experiment has no changes its node doesn't have")
+        principal = self.principal
+        node_id = experiment["nodeId"]
+        ids: list[str] = []
+        for candidate in chosen:
+            path = candidate["path"]
+
+            async def in_tx(conn: AsyncConnection, proposal_id: str, path: str = path) -> None:
+                target = {"proposal": proposal_id, "node": node_id, "path": path, "experiment": experiment_id}
+                await self._audit("proposal.create", target)(conn)
+
+            async with self.scoped() as conn:
+                file = await proposals.experiment_file(conn, self.ws, experiment_id, path)
+                if not file:
+                    raise ProposalError(f"{path} is no longer in this experiment")
+                proposal_id = await proposals.propose(
+                    conn,
+                    self.storage,
+                    node=node_id,
+                    path=path,
+                    content=file,
+                    mime=file["mime"],
+                    author=principal.actor,
+                    author_id=principal.user_id,
+                    experiment_id=experiment_id,
+                    note=note,
+                    in_tx=in_tx,
+                )
+            ids.append(proposal_id)
+        return [await self.proposal(proposal_id) for proposal_id in ids]
+
+    async def decide(self, proposal_id: str, decision: str) -> dict[str, Any]:
+        """
+        Accepts (writes it as the file's next version, credited to its proposer),
+        rejects, or withdraws a proposal. Accepting and rejecting need editor on
+        its place; withdrawing is for its proposer.
+        """
+        proposal = await self.proposal(proposal_id)
+        if proposal["status"] != "open":
+            raise ProposalError(f"This proposal was already {proposal['status']}")
+        if decision == "withdraw":
+            if not proposal["mine"]:
+                raise ForbiddenError("Only its proposer can withdraw a proposal")
+        else:
+            await self.need(proposal["node"], "editor")
+        user_id = self.principal.user_id
+        target = {"proposal": proposal_id, "node": proposal["node"], "path": proposal["path"]}
+        audit = self._audit(f"proposal.{decision}", target)
+        if decision != "accept":
+            async with self.scoped() as conn:
+                await proposals.decide(conn, self.storage, proposal_id, decision, user_id, audit)
+            return await self.proposal(proposal_id)
+        async with self.storage.pool.connection() as conn:
+            files = await FileService(self.storage).in_node(conn, proposal["node"])
+        if not files:
+            raise NodeNotFoundError("Node not found")
+        data = await self.storage.blobs.get(proposal["sha256"])
+        decided = False
+
+        async def in_tx(tx: AsyncConnection) -> None:
+            nonlocal decided
+            await proposals.decide_in(tx, self.storage, proposal_id, "accept", user_id)
+            await audit(tx)
+            decided = True
+
+        async with self.scoped() as conn:
+            await files.write(
+                conn,
+                proposal["path"],
+                data,
+                mime=proposal["mime"],
+                author=proposal["author"],
+                author_id=proposal["authorId"],
+                in_tx=in_tx,
+            )
+            # The file already had these bytes, so no version was added.
+            if not decided:
+                await proposals.decide(conn, self.storage, proposal_id, "accept", user_id, audit)
+        return await self.proposal(proposal_id)
 
     async def can_see(self, event: dict[str, Any]) -> bool:
         """Whether this principal may hear about a change."""

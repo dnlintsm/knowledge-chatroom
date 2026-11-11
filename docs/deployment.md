@@ -41,7 +41,7 @@ Run the Python API server (`services/api-py`, [README](../services/api-py/README
 front of the agent, with `TS_AGENT_URL` pointing at the agent and the same `DATABASE_URL`,
 `AUTH_MODE` and `AUTH_SECRET`. Point `LOCAL_AGENT_URL` and the MCP servers'
 `KNOWLEDGE_STORAGE_URL` at the API server. The agent's routes are moving to it one group
-at a time (issue #190). It serves `/access`, `/nodes`, `/files` and `/experiments` itself and passes the rest
+at a time (issue #190). It serves `/access`, `/nodes`, `/files`, `/experiments` and `/proposals` itself and passes the rest
 through. The agent keeps serving every route too until phase 4, so an install without
 the API server keeps working, but new work lands in Python. It serves `/files` too, so
 give it the same `S3_*` settings (including `S3_PUBLIC_URL`) and `MAX_UPLOAD_BYTES` as

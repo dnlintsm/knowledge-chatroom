@@ -21,7 +21,7 @@ import httpx
 import psycopg
 import pytest
 import uvicorn
-from support import ALICE, BOB, SECRET, URL, Client, forwarded, storage_token
+from support import ALICE, BOB, SECRET, URL, Client, storage_token
 
 from api_py.blobs import S3Settings
 from api_py.storage import EVENTS_CHANNEL
@@ -178,11 +178,12 @@ async def test_storage_tokens_write_as_claude(files):
     assert (entry["actorType"], entry["target"]["via"]) == ("agent", "mcp:lab")
 
 
-async def test_proposals_stay_with_typescript(files):
-    assert (await files.put("/files/notes/a.md?propose", headers=ALICE, content=b"x")).json() == {"from": "typescript"}
-    assert (await files.put("/files/a.md?propose&experiment=x", headers=ALICE, content=b"x")).status_code == 200
-    assert forwarded == ["PUT /files/notes/a.md", "PUT /files/a.md"]
-    forwarded.clear()
+async def test_proposals_are_served_here(files):
+    made = await files.put("/files/notes/a.md?propose", headers=ALICE, content=b"x")
+    assert (made.status_code, made.json()["path"]) == (201, "notes/a.md")
+    assert (await files.put("/files/a.md?propose&experiment=x", headers=ALICE, content=b"x")).status_code == 404
+    too_big = await files.put("/files/a.md?propose", headers=ALICE, content=b"x" * 4097)
+    assert (too_big.status_code, too_big.json()) == (413, {"error": "File exceeds 4096 bytes"})
 
 
 async def test_binary_files_get_signed_links(database):

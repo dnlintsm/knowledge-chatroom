@@ -142,6 +142,7 @@ dependencies = [
     { name = "httpx" },
     { name = "knowledge-chatroom" },
     { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "python-multipart" },
     { name = "uvicorn" },
 ]
 
@@ -158,6 +159,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "knowledge-chatroom", editable = "packages/knowledge-py" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 

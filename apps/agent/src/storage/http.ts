@@ -154,8 +154,8 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *   Chats are their user's alone (017_chats.sql): workspace owners don't see
  *   them, and storage tokens can't reach them.
  *
- *   /access, /nodes, /files (except ?propose) and /experiments (except
- *   /experiments/upload) are also served by the Python API server in front of this one
+ *   /access, /nodes, /files, /experiments and /proposals are also served by
+ *   the Python API server in front of this one
  *   (services/api-py/api_py/storage_routes.py, issue #190): change them in
  *   both until phase 4 retires these.
  *
@@ -482,6 +482,8 @@ function readParts(req: IncomingMessage, maxFileBytes: number): Promise<{ meta: 
       // One more byte than allowed, as busboy calls a part that reaches its limit too large.
       parser = busboy({
         headers: req.headers,
+        // Part names are file paths, sent as UTF-8 (busboy reads them as latin1 by default).
+        defParamCharset: "utf8",
         limits: { fileSize: maxFileBytes + 1, fieldSize: MAX_UPLOAD_META_BYTES + 1 },
       });
     } catch {

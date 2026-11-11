@@ -89,6 +89,23 @@ async def get(conn: AsyncConnection, workspace_id: str, node_id: str) -> dict[st
     return _to_node(row) if row else None
 
 
+async def find_child(
+    conn: AsyncConnection, workspace_id: str, parent_id: str | None, raw_name: str
+) -> dict[str, Any] | None:
+    """The live node named `raw_name` (any case) right below `parent_id` (None: the top level)."""
+    name = clean_name(raw_name)
+    if parent_id is not None and not is_uuid(parent_id):
+        return None
+    cur = await conn.execute(
+        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "  # type: ignore[arg-type]
+        "WHERE n.workspace_id = %s AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM %s::uuid "
+        "AND lower(n.name) = lower(%s)",
+        (workspace_id, parent_id, name),
+    )
+    row = await cur.fetchone()
+    return _to_node(row) if row else None
+
+
 async def lineage(conn: AsyncConnection, workspace_id: str, node_id: str) -> list[dict[str, Any]] | None:
     """The node and its ancestors, top level first; None if the node is missing."""
     if not is_uuid(node_id):

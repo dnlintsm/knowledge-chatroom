@@ -33,6 +33,11 @@
   status changes and deletes, with each run's `report.md` front matter written byte for
   byte as the agent server writes it. Proposals (`/proposals`, `?propose`) and
   `/experiments/upload` still go to the agent server until step 4b.
+- api-py now serves proposals and experiment uploads too (issue #190, step 4b): proposing a
+  file with `?propose`, listing proposals, accepting (the new version is credited to its
+  proposer), rejecting and withdrawing them, promoting an experiment's changes to its node,
+  and the multipart `POST /experiments/upload`, read part by part as the agent server reads
+  it. With this, all of step 4 is in Python.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
@@ -138,6 +143,8 @@
   #175 made `inputs/` editable: it no longer silently picks up an edited copy. If a recorded
   input is gone, or an old record doesn't say what it held, the rerun fails and says which;
   passing `inputs` reads those files at their current versions instead (#187).
+- `POST /experiments/upload` reads part names (the files' paths) as UTF-8. The agent server
+  read them as Latin-1, so a file named `métrics.csv` was stored under a garbled path.
 
 ### Upgrading
 

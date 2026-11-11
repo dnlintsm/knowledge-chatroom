@@ -344,9 +344,9 @@ async def test_storage_tokens(api):
 
 
 @needs_services
-async def test_upload_and_other_spellings_stay_with_typescript(api):
-    assert (await api.post("/experiments/upload", headers=ALICE)).json() == {"from": "typescript"}
-    assert (await api.get("/experiments/%75pload", headers=ALICE)).json() == {"from": "typescript"}
+async def test_other_spellings_stay_with_typescript(api):
+    # /experiments/%75pload is /experiments/upload, served here as there.
+    assert (await api.get("/experiments/%75pload", headers=ALICE)).status_code == 405
     assert (await api.get("/%65xperiments", headers=ALICE)).json() == {"from": "typescript"}
-    assert forwarded == ["POST /experiments/upload", "GET /experiments/%75pload", "GET /%65xperiments"]
+    assert forwarded == ["GET /%65xperiments"]
     forwarded.clear()
