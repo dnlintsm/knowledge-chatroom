@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
+from .memory_learn import MemoryLearner
 from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
@@ -61,6 +62,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             logger.warning("can't open storage yet: %s", err)
             return False
         _start_search(app, storage, settings)
+        _start_learner(app, settings)
         app.state.storage = storage
         logger.info("serving storage routes: %s", ", ".join(STORAGE_PREFIXES))
         return True
@@ -79,6 +81,22 @@ def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
         storage.semantic.start()
     if storage.blobs:
         app.state.jobs.append(asyncio.create_task(_index_existing(storage.search, storage.pool)))
+
+
+def _start_learner(app: FastAPI, settings: Settings) -> None:
+    """
+    With memory, learning from quiet chats, which runs here and not on the
+    TypeScript server (MEMORY_LEARN=off there; memory_learn.py).
+    """
+    if not settings.memory or not settings.memory_learn:
+        return
+    learner = MemoryLearner(
+        lambda: app.state.storage,
+        lambda: app.state.create_message,
+        settings.memory_idle_minutes,
+    )
+    app.state.learner = learner
+    app.state.jobs.append(learner.start())
 
 
 async def _index_existing(search: SearchService, pool: AsyncConnectionPool) -> None:

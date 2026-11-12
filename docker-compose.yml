@@ -64,8 +64,8 @@ services:
       # Personalized memory (experimental): MEMORY=on turns it on (.env.example).
       MEMORY: ${MEMORY:-}
       MEMORY_MODEL: ${MEMORY_MODEL:-}
-      MEMORY_LEARN: ${MEMORY_LEARN:-}
-      MEMORY_IDLE_MINUTES: ${MEMORY_IDLE_MINUTES:-10}
+      # The api service in front learns from chats (issue #190, step 8d).
+      MEMORY_LEARN: "off"
       # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       # Context window for a model the engine doesn't know, e.g. a local one
@@ -141,6 +141,9 @@ services:
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
       SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
       MEMORY_MODEL: ${MEMORY_MODEL:-}
+      # It learns from quiet chats too, in the agent's place (step 8d).
+      MEMORY_LEARN: ${MEMORY_LEARN:-}
+      MEMORY_IDLE_MINUTES: ${MEMORY_IDLE_MINUTES:-10}
     volumes:
       - api-models:/var/lib/knowledge/models
     depends_on:

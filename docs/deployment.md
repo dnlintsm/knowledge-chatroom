@@ -57,7 +57,10 @@ must then be reachable from the API server too. It serves memory (own and shared
 memory packs) when `MEMORY=on` is set for it, so give it the same `MEMORY` as the agent;
 memory packs' verify and yank follow its `HUB_ADMINS`. Importing plain-text memory asks
 the small model, so give it the agent's `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
-`ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL` too.
+`ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL` too. It also
+learns from quiet chats in the background, so start the agent with `MEMORY_LEARN=off` and
+give the API server your `MEMORY_LEARN` and `MEMORY_IDLE_MINUTES`. Without
+`MEMORY_LEARN=off` on the agent both learn from each chat, which asks the model twice.
 
 Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
 and `AGENT_URL` only when the chat uses a remote backend

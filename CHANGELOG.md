@@ -93,6 +93,11 @@
   search by meaning through api-py's embedding model when `EMBEDDING_*` is set there.
   Outside MCP servers' memory tokens (`memoryAccess`) still go to the agent server, which
   shows what they do under the chat's live reply.
+- api-py learns from quiet chats too (issue #190, step 8d): the same small model, prompt
+  and rules as the agent server's learner, with Undo in `on` mode and the inbox in Ask
+  first. Start the agent server with `MEMORY_LEARN=off` (`pnpm dev`, the compose file, the
+  e2e and conformance runs do) and give api-py your `MEMORY_LEARN` and
+  `MEMORY_IDLE_MINUTES`; without it both servers learn from each chat.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

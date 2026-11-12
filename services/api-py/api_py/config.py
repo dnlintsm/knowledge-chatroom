@@ -22,6 +22,9 @@ SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
 BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
 MEMORY               on: each user's memory (as on the TypeScript server); this
                      server serves the notes, settings, inbox and activity
+MEMORY_LEARN, MEMORY_IDLE_MINUTES
+                     with memory, learning from chats once they are quiet
+                     (memory_learn.py; MEMORY_LEARN=off on the TypeScript server)
 MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
                      the "+" menu's tool servers and their calls (tools.py); with
                      MCP_SERVERS unset, /tools stays with the TypeScript server
@@ -29,6 +32,7 @@ MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -100,6 +104,9 @@ class Settings:
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
     # Personalized memory (MEMORY=on); off leaves /memory to the TypeScript server, which answers 404.
     memory: bool = False
+    # With memory, learning from quiet chats (MEMORY_LEARN not off), and after how long (memory_learn.py).
+    memory_learn: bool = True
+    memory_idle_minutes: float = 10.0
     # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to the TypeScript server.
     tools: ToolsSettings | None = None
 
@@ -128,7 +135,25 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
                 r"(on|1|true|yes)", (env.get("MEMORY") or "").strip(f"{JS_SPACE}"), re.IGNORECASE
             )
         ),
+        memory_learn=not re.fullmatch(
+            r"(off|0|false|no)", (env.get("MEMORY_LEARN") or "").strip(f"{JS_SPACE}"), re.IGNORECASE
+        ),
+        memory_idle_minutes=idle_minutes(env.get("MEMORY_IDLE_MINUTES")),
     )
+
+
+def idle_minutes(value: str | None) -> float:
+    """MEMORY_IDLE_MINUTES as learn.ts reads it: Number(value), finite and >= 0, else 10."""
+    if value is None:
+        return 10.0
+    text = value.strip()
+    if not text:
+        return 0.0  # Number("") is 0
+    try:
+        n = float(text)
+    except ValueError:
+        return 10.0
+    return n if math.isfinite(n) and n >= 0 else 10.0
 
 
 def _tools(env: Mapping[str, str]) -> ToolsSettings | None:

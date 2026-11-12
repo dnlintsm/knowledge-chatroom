@@ -27,6 +27,10 @@ import { memoryEnabled } from "./run";
  * Runs in the agent server with MEMORY=on and storage; MEMORY_LEARN=off
  * turns just this off. The model is MEMORY_MODEL, else the chat chips'
  * small model (SUGGESTIONS_MODEL, ../suggest.ts).
+ *
+ * services/api-py/api_py/memory_learn.py learns the same way (issue #190,
+ * step 8d): with api-py in front, start this server with MEMORY_LEARN=off so
+ * only one of them learns. Keep the two in step.
  */
 
 export const LEARN_TOOL = "memory_changes";

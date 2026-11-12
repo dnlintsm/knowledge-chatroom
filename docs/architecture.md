@@ -396,7 +396,8 @@ Code's memory files and `SKILL.md`.
   contradictions and stale notes. Changes apply directly in `on` mode (with Undo, listed
   under "Recent changes by Claude") or go to the inbox in `ask` mode.
   `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
-  it off.
+  it off. With the Python API server in front, its `memory_learn.py` learns instead and the
+  agent runs with `MEMORY_LEARN=off` (issue #190, step 8d).
 - Shared memory (`020_shared_memory.sql`, `apps/agent/src/storage/shared-memory.ts`): notes for
   the workspace, a knowledge node (and everything below it) or a group (and its
   sub-groups). `shared_memory_rank` decides who reads and edits each place from the
