@@ -1,7 +1,10 @@
 """Postgres, shared with the TypeScript server (apps/agent/src/storage/db.ts).
 
-The TypeScript server applies the migrations (until #190's last step); this
-server only checks that the database has exactly the ones it was built for.
+This server applies the SQL migrations (MIGRATIONS_DIR), as migrate() in db.ts
+does and under the same lock, unless MIGRATIONS=off; the TypeScript server
+behind it then runs with MIGRATIONS=off and waits for them (issue #190, step 9).
+Either way it checks that the database has exactly the ones it was built for,
+and refuses a database with migrations it doesn't know.
 Each signed-in user's queries run in one transaction as APP_ROLE with
 `app.user_id` set, so the row-level security policies
 (004_row_security.sql) back up every access check, as asUser() does there.
@@ -25,7 +28,7 @@ _MIGRATION = re.compile(r"^\d+_.*\.sql$")
 
 class SchemaState(str, Enum):  # noqa: UP042 - preserve Enum string behavior
     READY = "ready"  # exactly the migrations this server knows
-    BEHIND = "behind"  # some not applied yet: the TypeScript server applies them at startup
+    BEHIND = "behind"  # some not applied yet: this server applies them (or, with MIGRATIONS=off, the TypeScript one)
     AHEAD = "ahead"  # migrations this server doesn't know: it is older than the database
 
 
@@ -62,6 +65,39 @@ async def applied_migrations(conn: AsyncConnection) -> set[str]:
 async def schema(pool: AsyncConnectionPool, directory: Path) -> Schema:
     async with pool.connection() as conn:
         return compare(known_migrations(directory), await applied_migrations(conn))
+
+
+# The advisory lock migrate() in db.ts takes: one process changes the schema at a time.
+MIGRATE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))"
+
+
+async def migrate(pool: AsyncConnectionPool, directory: Path) -> list[str]:
+    """
+    Applies the migrations not applied yet, in order, and records them in
+    schema_migrations, all in one transaction (as migrate() in db.ts does).
+    Returns the ones applied.
+    """
+    files = known_migrations(directory)
+    async with pool.connection() as conn, conn.transaction():
+        await conn.execute(MIGRATE_LOCK)
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              name       text PRIMARY KEY,
+              applied_at timestamptz NOT NULL DEFAULT now()
+            )"""
+        )
+        cur = await conn.execute("SELECT name FROM schema_migrations")
+        done = {name for (name,) in await cur.fetchall()}
+        applied: list[str] = []
+        for name in files:
+            if name in done:
+                continue
+            # The file's statements, as written (several at once, without parameters).
+            await conn.execute((directory / name).read_text("utf-8"))  # type: ignore[arg-type]
+            await conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+            applied.append(name)
+        return applied
 
 
 def open_pool(database_url: str) -> AsyncConnectionPool:

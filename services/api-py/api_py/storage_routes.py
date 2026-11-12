@@ -76,8 +76,8 @@
     Chats are their user's alone (017_chats.sql): workspace owners don't see
     them, and storage tokens can't reach them.
 
-Until the database has the migrations this server knows (the TypeScript
-server applies them as it starts), these pass through to the TypeScript
+Until the database has the migrations this server knows (db.py applies them
+as it starts), these pass through to the TypeScript
 server, which answers as it does while storage starts or when it is off.
 Paths are read as sent: each segment is percent-decoded on its own, so a %2F
 stays inside its segment, as the TypeScript server reads them.

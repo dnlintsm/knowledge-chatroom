@@ -485,7 +485,10 @@ the browser (see issue #4). It is optional; without
 For local setup, see [Development](development.md).
 
 - **Postgres** (15 or newer) holds the file tree, every version of every file, and who
-  wrote it (`apps/agent/src/storage/migrations`). Migrations run when the agent starts.
+  wrote it (`apps/agent/src/storage/migrations`). Migrations run when the Python API
+  server starts (`services/api-py`, which applies them under the same lock as the agent),
+  or when the agent starts without it; the agent behind the API server runs with
+  `MIGRATIONS=off` and waits for them.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.

@@ -104,6 +104,13 @@
   event stream. The chips now come from api-py's model settings, so give it the agent's
   `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`, `SUGGESTIONS_MODEL`
   and `CLAUDE_MODEL` (the compose file does).
+- api-py applies the database migrations (issue #190, step 9b), as the agent server's
+  `migrate()` does and under the same lock. The agent server takes `MIGRATIONS=off`: it then
+  waits until the database has every migration it knows before it opens storage. `pnpm dev`,
+  the compose file, the e2e and the conformance runs start it so. `MIGRATIONS=off` for
+  api-py leaves the migrations to the agent server instead. With this, the agent server's
+  work is all in api-py except its own chat (`POST /`); it still serves every route itself
+  when run alone, until phase 4.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the
@@ -213,6 +220,33 @@
 
 ### Upgrading
 
+- Run the Python API server in front of the agent server (issue #190; the
+  [Deployment](docs/deployment.md) guide and the
+  [api-py README](services/api-py/README.md) have the details). The compose file does all of
+  this; for your own deployment:
+  1. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+, or build
+     `services/api-py/Dockerfile`.
+  2. Move the agent server to another private port, and start api-py where it was, with
+     `TS_AGENT_URL` pointing at the agent server. `LOCAL_AGENT_URL` (Next.js) and the MCP
+     servers' `KNOWLEDGE_STORAGE_URL` keep pointing at the old address, now api-py's.
+  3. Give api-py the agent server's settings for what it now serves:
+     - storage: `DATABASE_URL`, `AUTH_MODE`, `AUTH_SECRET`, the `S3_*` settings and
+       `MAX_UPLOAD_BYTES`;
+     - search: `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY`, and a writable
+       `EMBEDDING_CACHE_DIR`;
+     - skills: `HUB_ADMINS` and `SKILL_SCRIPTS`;
+     - the "+" menu: `MCP_SERVERS`, `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS`;
+     - memory and the follow-up chips: `MEMORY`, `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES`,
+       `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`,
+       `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
+  4. Start the agent server with `SEARCH_INDEXER=off`, `MEMORY_LEARN=off` and
+     `MIGRATIONS=off`, so the indexer, the memory learner and the migrations run in api-py
+     alone.
+  5. Back up the database and the bucket first, as for any release with migrations: api-py
+     applies them now. On a newer database than it knows, api-py refuses to start.
+
+  The agent server alone (`pnpm dev:ts`, or without api-py) keeps working and keeps
+  migrating, but new work lands in api-py.
 - Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
   files, linked inputs, locked skill files) become ordinary files when it runs.
 - Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends

@@ -2,10 +2,10 @@
 
 It mirrors initStorage() in apps/agent/src/storage/index.ts: the one default
 workspace, whether row-level security can be used, and the change events
-that every process hears through LISTEN/NOTIFY (events.ts). The TypeScript
-server still applies the migrations; this side opens only once the database
-has exactly the ones it knows (db.py), and until then the ported routes pass
-through to the TypeScript server, which answers as it starts.
+that every process hears through LISTEN/NOTIFY (events.ts). It opens only
+once the database has exactly the migrations this server knows (db.py, which
+applies them), and until then the ported routes pass through to the
+TypeScript server, which answers as it does while its storage starts.
 """
 
 from __future__ import annotations

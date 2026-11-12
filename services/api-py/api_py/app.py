@@ -39,8 +39,9 @@ SCHEMA_POLL_SECONDS = 2.0
 async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
     """
     Opens the storage routes moved to Python once the database has exactly the
-    migrations this server knows (the TypeScript server applies them). Returns
-    whether they are served; until then they pass through to the TypeScript server.
+    migrations this server knows, applying them first (unless MIGRATIONS=off:
+    then the TypeScript server does). Returns whether they are served; until
+    then they pass through to the TypeScript server.
     """
     if app.state.storage is not None:
         return True
@@ -53,6 +54,15 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             app.state.schema = None
             logger.warning("can't read the database's migrations yet: %s", err)
             return False
+        if found.state is db.SchemaState.BEHIND and settings.migrations:
+            try:
+                applied = await db.migrate(pool, settings.migrations_dir)
+                found = await db.schema(pool, settings.migrations_dir)
+            except Exception as err:  # noqa: BLE001 - reported and tried again, as the database may be down
+                logger.error("couldn't apply the migrations: %s", err)
+                return False
+            if applied:
+                logger.info("applied migrations: %s", ", ".join(applied))
         app.state.schema = found
         if found.state is not db.SchemaState.READY:
             return False
@@ -182,7 +192,10 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             app.state.schema = found
             if found and found.state is not db.SchemaState.READY:
                 logger.info(
-                    "waiting for the TypeScript server to apply %s", ", ".join(found.missing)
+                    "applying %s"
+                    if settings.migrations
+                    else "waiting for the TypeScript server to apply %s",
+                    ", ".join(found.missing),
                 )
             watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
         try:

@@ -1,7 +1,7 @@
 import { S3BlobStore, type BlobStore } from "./blobs";
 import { storageConfigFromEnv, type StorageConfig } from "./config";
 import { AccessService, type Principal } from "./access";
-import { connect, migrate, prepareRowSecurity, type Sql } from "./db";
+import { connect, migrate, prepareRowSecurity, waitForMigrations, type Sql } from "./db";
 import { ChatService } from "./chats";
 import { EventHub } from "./events";
 import { ExperimentService } from "./experiments";
@@ -68,8 +68,9 @@ export interface Storage {
 }
 
 /**
- * Connects to Postgres and the object store, applies migrations and makes sure
- * the bucket exists. Returns null when storage isn't configured.
+ * Connects to Postgres and the object store, applies migrations (or, with
+ * MIGRATIONS=off, waits for the Python API server to) and makes sure the bucket
+ * exists. Returns null when storage isn't configured.
  */
 export async function initStorage(
   config: StorageConfig | null = storageConfigFromEnv(),
@@ -80,8 +81,13 @@ export async function initStorage(
 
   const sql = connect(config.databaseUrl);
   try {
-    const applied = await migrate(sql);
-    if (applied.length) console.log(`[storage] applied migrations: ${applied.join(", ")}`);
+    if (config.migrations === false) {
+      // The Python API server in front applies them (MIGRATIONS=off).
+      await waitForMigrations(sql);
+    } else {
+      const applied = await migrate(sql);
+      if (applied.length) console.log(`[storage] applied migrations: ${applied.join(", ")}`);
+    }
     const rowSecurity = await prepareRowSecurity(sql);
     if (!rowSecurity) {
       console.warn(

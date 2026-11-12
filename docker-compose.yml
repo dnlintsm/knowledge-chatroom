@@ -91,6 +91,8 @@ services:
       SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
       # The api service in front runs the search indexer; this one embeds only queries.
       SEARCH_INDEXER: "off"
+      # The api service in front applies the migrations; this one waits for them.
+      MIGRATIONS: "off"
     volumes:
       - models:/var/lib/knowledge/models
     depends_on:

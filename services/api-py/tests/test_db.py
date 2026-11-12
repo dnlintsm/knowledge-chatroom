@@ -6,6 +6,7 @@ TypeScript storage tests do); each test gets a new, empty database.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -107,12 +108,13 @@ async def test_as_user_sets_the_role_and_user_for_one_transaction(database):
         await pool.close()
 
 
-def settings(url: str) -> Settings:
+def settings(url: str, migrations: bool = True) -> Settings:
     return Settings(
         ts_agent_url="http://ts",
         database_url=url,
         auth_secret=None,
         migrations_dir=DEFAULT_MIGRATIONS_DIR,
+        migrations=migrations,
     )
 
 
@@ -136,7 +138,8 @@ async def test_waits_for_the_typescript_server_to_migrate(database, monkeypatch)
     from api_py import app as app_module
 
     monkeypatch.setattr(app_module, "SCHEMA_POLL_SECONDS", 0.05)
-    app = create_app(settings(database), transport=httpx.MockTransport(up))
+    # MIGRATIONS=off: the TypeScript server applies them.
+    app = create_app(settings(database, migrations=False), transport=httpx.MockTransport(up))
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
@@ -151,3 +154,54 @@ async def test_waits_for_the_typescript_server_to_migrate(database, monkeypatch)
             await anyio.sleep(0.05)
         assert app.state.schema.state is db.SchemaState.READY
         assert (await api.get("/health")).json() == {"status": "ok"}
+
+
+@pytest.mark.anyio
+@needs_postgres
+async def test_applies_the_migrations_itself(database):
+    app = create_app(settings(database), transport=httpx.MockTransport(up))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        for _ in range(200):
+            if app.state.storage is not None:
+                break
+            await anyio.sleep(0.05)
+        assert app.state.schema.state is db.SchemaState.READY
+        assert (await api.get("/health")).json() == {"status": "ok"}
+    async with await psycopg.AsyncConnection.connect(database) as conn:
+        cur = await conn.execute("SELECT name FROM schema_migrations ORDER BY name")
+        assert [name for (name,) in await cur.fetchall()] == KNOWN
+        # What 001_init.sql seeds: the default workspace.
+        cur = await conn.execute("SELECT count(*) FROM workspaces WHERE slug = 'default'")
+        assert await cur.fetchone() == (1,)
+
+
+@pytest.mark.anyio
+@needs_postgres
+async def test_migrate_applies_each_once_in_order_and_one_process_at_a_time(database, tmp_path):
+    pool = db.open_pool(database)
+    await pool.open()
+    try:
+        # Two at once, as when both servers start: the lock lets one apply them all.
+        first, second = await asyncio.gather(
+            db.migrate(pool, DEFAULT_MIGRATIONS_DIR), db.migrate(pool, DEFAULT_MIGRATIONS_DIR)
+        )
+        assert sorted([first, second], key=len) == [[], KNOWN]
+        assert await db.migrate(pool, DEFAULT_MIGRATIONS_DIR) == []
+        assert (await db.schema(pool, DEFAULT_MIGRATIONS_DIR)).state is db.SchemaState.READY
+
+        # A migration that fails leaves the database as it was: all or nothing.
+        for name in KNOWN:
+            (tmp_path / name).write_text((DEFAULT_MIGRATIONS_DIR / name).read_text())
+        (tmp_path / "900_first.sql").write_text("CREATE TABLE added_by_900 (id int);")
+        (tmp_path / "901_broken.sql").write_text("SELECT * FROM no_such_table;")
+        with pytest.raises(psycopg.Error):
+            await db.migrate(pool, tmp_path)
+        async with pool.connection() as conn:
+            cur = await conn.execute("SELECT to_regclass('added_by_900') IS NULL")
+            assert await cur.fetchone() == (True,)
+        assert (await db.schema(pool, tmp_path)).missing == ("900_first.sql", "901_broken.sql")
+    finally:
+        await pool.close()

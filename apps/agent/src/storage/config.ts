@@ -52,6 +52,13 @@ export interface StorageConfig {
    * exactly one process does.
    */
   searchIndexer: boolean;
+  /**
+   * Whether this server applies the SQL migrations at startup (the default).
+   * MIGRATIONS=off when the Python API server in front applies them
+   * (services/api-py, issue #190): this server then waits until the database
+   * has every migration it knows before it opens storage.
+   */
+  migrations?: boolean;
 }
 
 export interface EmbeddingApiConfig {
@@ -89,6 +96,7 @@ export function storageConfigFromEnv(
     embeddingCacheDir: env.EMBEDDING_CACHE_DIR || undefined,
     embeddingApi: embeddingApiFromEnv(env),
     searchIndexer: env.SEARCH_INDEXER !== "off",
+    migrations: env.MIGRATIONS !== "off",
   };
 }
 

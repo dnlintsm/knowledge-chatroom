@@ -253,11 +253,15 @@ async def test_passes_through_until_the_database_is_migrated():
     name = f"api_py_routes_{uuid.uuid4().hex[:12]}"
     async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:
         await admin.execute(f'CREATE DATABASE "{name}"')
+        url = conninfo.make_conninfo(URL, dbname=name)
         try:
-            client = Client(conninfo.make_conninfo(URL, dbname=name), SECRET)
-            async with client as (api, _):
+            # MIGRATIONS=off: the TypeScript server applies them, and answers until then.
+            async with Client(url, SECRET, migrations=False) as (api, _):
                 assert (await api.get("/nodes")).json() == {"from": "typescript"}
                 forwarded.clear()
+            # Otherwise the first request finds them applied by this server.
+            async with Client(url, SECRET) as (api, _):
+                assert (await api.get("/nodes")).json() == {"error": "Sign in to use the workspace"}
         finally:
             await admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
 

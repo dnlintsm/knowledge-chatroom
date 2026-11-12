@@ -77,14 +77,23 @@ Behind them:
 
 ## Migrations
 
-The TypeScript server still applies the SQL migrations (`apps/agent/src/storage/migrations`)
-until the last step of #190. api-py only checks the database:
+api-py applies the SQL migrations (`apps/agent/src/storage/migrations`, `MIGRATIONS_DIR`)
+as it starts (`db.migrate`, issue #190, step 9). It does what the TypeScript server's
+`migrate()` does: the ones not applied yet, in order, in one transaction, recorded in
+`schema_migrations`, under the same advisory lock, so two servers starting at once never
+both apply one. Start the TypeScript server behind it with `MIGRATIONS=off` (`pnpm dev`,
+compose, the e2e and conformance runs do): it then waits until the database has every
+migration it knows before it opens storage. Then api-py checks the database:
 
 - **The same migrations:** it serves its routes.
-- **Some not applied yet:** it passes its routes through to the TypeScript server, which
-  applies them as it starts, and serves them itself from the first request after that.
+- **Some not applied yet:** it applies them, and tries again every 2 seconds while the
+  database is down or a migration fails (the error is logged; nothing of a failed run is
+  kept). Its routes pass through to the TypeScript server until then.
 - **Migrations it doesn't know:** the database is newer than this server, so it
   refuses to start.
+
+With `MIGRATIONS=off` for api-py instead, it only waits, and the TypeScript server
+applies them as before.
 
 ## Run it
 
@@ -104,7 +113,8 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `API_PY_HOST`, `API_PY_PORT` | `127.0.0.1`, `8000` | Where it listens. |
 | `DATABASE_URL` | unset | The same Postgres as the TypeScript server. Unset means no storage. |
 | `AUTH_MODE`, `AUTH_SECRET` | | Login, with the TypeScript server's rules and the same secret. |
-| `MIGRATIONS_DIR` | `apps/agent/src/storage/migrations` | The migrations to expect. |
+| `MIGRATIONS_DIR` | `apps/agent/src/storage/migrations` | The migrations to apply and expect. |
+| `MIGRATIONS` | unset | `off`: don't apply the migrations, wait for the TypeScript server to. Otherwise api-py applies them; start the TypeScript server with `MIGRATIONS=off`. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | as the TypeScript server | The blob store; give both servers the same values. |
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run. |
