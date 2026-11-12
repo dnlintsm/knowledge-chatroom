@@ -116,7 +116,9 @@ _FIELDS = ("id", "path", "kind", "mime", "node_id", "experiment_id", "updated_at
 
 
 class SearchService:
-    def __init__(self, workspace_id: str, blobs: BlobStore | None, semantic: SemanticIndex | None = None) -> None:
+    def __init__(
+        self, workspace_id: str, blobs: BlobStore | None, semantic: SemanticIndex | None = None
+    ) -> None:
         self.workspace_id = workspace_id
         self.blobs = blobs
         # Search by meaning, when this server runs an embedding model.
@@ -135,7 +137,9 @@ class SearchService:
         row = await cur.fetchone()
         return row[0] if row else None
 
-    async def _experiment_path(self, conn: AsyncConnection, user_id: str, experiment_id: str) -> str | None:
+    async def _experiment_path(
+        self, conn: AsyncConnection, user_id: str, experiment_id: str
+    ) -> str | None:
         if not is_uuid(experiment_id):
             return None
         cur = await conn.execute(
@@ -172,7 +176,9 @@ class SearchService:
             scope_path = await self._visible_path(conn, user_id, scope)
             if scope_path is None:
                 raise SearchError("No such knowledge node to search in")
-        near_path = await self._experiment_path(conn, user_id, near_experiment) if near_experiment else None
+        near_path = (
+            await self._experiment_path(conn, user_id, near_experiment) if near_experiment else None
+        )
         if near_path is None and near:
             near_path = await self._visible_path(conn, user_id, near)
         where = _Where(
@@ -193,7 +199,12 @@ class SearchService:
         floor = self.semantic.min_similarity if self.semantic else 0.0
         merged: dict[str, dict[str, Any]] = {}
         for row in by_words:
-            merged[row["id"]] = {**row, "words": float(row["score"]), "meaning": 0.0, "passage": row["body"]}
+            merged[row["id"]] = {
+                **row,
+                "words": float(row["score"]),
+                "meaning": 0.0,
+                "passage": row["body"],
+            }
         for row in by_meaning:
             meaning = (float(row["similarity"]) - floor) / (1 - floor)
             seen = merged.get(row["id"])
@@ -202,7 +213,12 @@ class SearchService:
                 if seen["passage"] is None:
                     seen["passage"] = row["body"]
             else:
-                merged[row["id"]] = {**row, "words": 0.0, "meaning": meaning, "passage": row["body"]}
+                merged[row["id"]] = {
+                    **row,
+                    "words": 0.0,
+                    "meaning": meaning,
+                    "passage": row["body"],
+                }
 
         def rank(c: dict[str, Any]) -> tuple[float, float, str]:
             score = (c["words"] + MEANING_WEIGHT * c["meaning"]) / (1 + 0.25 * c["distance"])
@@ -232,7 +248,9 @@ class SearchService:
         return {"ws": self.workspace_id, "user": where.user_id, "near": where.near, "working_in": where.working_in,
                 "scope": where.scope, **extra}  # fmt: skip
 
-    async def _by_words(self, conn: AsyncConnection, query: str, where: _Where) -> list[dict[str, Any]]:
+    async def _by_words(
+        self, conn: AsyncConnection, query: str, where: _Where
+    ) -> list[dict[str, Any]]:
         """
         Files whose whole text satisfies the query (so -word and words in
         different passages count across the file), whose text contains the
@@ -284,11 +302,17 @@ class SearchService:
             SELECT {", ".join(_FIELDS)}, body, score FROM hits
             ORDER BY score / (1 + 0.25 * distance) DESC, updated_at DESC, path
             LIMIT %(limit)s""",  # type: ignore[arg-type]
-            self._params(where, query=query, any=any_words(query), pattern=pattern, limit=CANDIDATES),
+            self._params(
+                where, query=query, any=any_words(query), pattern=pattern, limit=CANDIDATES
+            ),
         )
-        return [dict(zip((*_FIELDS, "body", "score"), row, strict=True)) for row in await cur.fetchall()]
+        return [
+            dict(zip((*_FIELDS, "body", "score"), row, strict=True)) for row in await cur.fetchall()
+        ]
 
-    async def _by_meaning(self, conn: AsyncConnection, query: str, where: _Where) -> list[dict[str, Any]]:
+    async def _by_meaning(
+        self, conn: AsyncConnection, query: str, where: _Where
+    ) -> list[dict[str, Any]]:
         """Files with a passage close in meaning to the query, each with its closest passage (semantic.py)."""
         semantic = self.semantic
         if not semantic or not semantic.ready:
@@ -368,11 +392,15 @@ class SearchService:
                 data = await self.blobs.get(sha256)  # type: ignore[union-attr]
             except Exception as err:  # noqa: BLE001 - tried again later
                 if not is_not_found(err):
-                    logger.warning("[search] could not read blob %s to index it, will retry: %s", sha256, err)
+                    logger.warning(
+                        "[search] could not read blob %s to index it, will retry: %s", sha256, err
+                    )
                     failed.append(sha256)
                     continue
                 # Gone from the store: recorded as no text, so it isn't retried forever.
-                logger.warning("[search] blob %s is missing from the store; indexed as empty", sha256)
+                logger.warning(
+                    "[search] blob %s is missing from the store; indexed as empty", sha256
+                )
                 data = b""
             async with pool.connection() as conn, conn.transaction():
                 await index_blob(conn, sha256, data)

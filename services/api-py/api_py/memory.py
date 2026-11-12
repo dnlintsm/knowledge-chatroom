@@ -73,7 +73,9 @@ def valid_name(name: Any) -> bool:
 
 def check_name(name: Any) -> str:
     if not valid_name(name):
-        raise MemoryError_("A memory's name is lowercase letters, digits and dashes, at most 64 (e.g. writing-style)")
+        raise MemoryError_(
+            "A memory's name is lowercase letters, digits and dashes, at most 64 (e.g. writing-style)"
+        )
     return name
 
 
@@ -98,9 +100,7 @@ def check_input(given: dict[str, Any]) -> dict[str, str]:
 
 def to_markdown(note: dict[str, Any]) -> str:
     """A note as a markdown file with front matter, as export and Claude's view show it."""
-    return (
-        f"---\nname: {note['name']}\ndescription: {note['description']}\ntype: {note['type']}\n---\n\n{note['body']}\n"
-    )
+    return f"---\nname: {note['name']}\ndescription: {note['description']}\ntype: {note['type']}\n---\n\n{note['body']}\n"
 
 
 def _note(row: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +160,9 @@ class MemoryService:
         self.ws = workspace_id
         self.user = user_id
 
-    async def _row(self, conn: AsyncConnection, name: str, lock: bool = False) -> dict[str, Any] | None:
+    async def _row(
+        self, conn: AsyncConnection, name: str, lock: bool = False
+    ) -> dict[str, Any] | None:
         return await _one(
             conn,
             f"SELECT {_COLUMNS} FROM memories WHERE workspace_id = %s AND user_id = %s AND name = %s"
@@ -214,7 +216,15 @@ class MemoryService:
             """
             INSERT INTO memory_versions (memory_id, version, description, type, body, changed_by, thread_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (nxt["id"], nxt["version"], nxt["description"], nxt["type"], nxt["body"], by, thread_id),
+            (
+                nxt["id"],
+                nxt["version"],
+                nxt["description"],
+                nxt["type"],
+                nxt["body"],
+                by,
+                thread_id,
+            ),
         )
         return nxt
 
@@ -225,7 +235,9 @@ class MemoryService:
             (self.ws, self.user),
         )
         if found and found["count"] >= MAX_NOTES:
-            raise MemoryError_(f"You have {MAX_NOTES} memories, the most there can be: delete or merge some first")
+            raise MemoryError_(
+                f"You have {MAX_NOTES} memories, the most there can be: delete or merge some first"
+            )
 
     async def list(self) -> list[dict[str, Any]]:
         """The user's notes, the ones in use first, then archived ones, newest first."""
@@ -297,7 +309,9 @@ class MemoryService:
             row = await self._row(conn, name, lock=True)
             if row and create and not row["archived_at"]:
                 raise MemoryConflictError(f"A memory named {name} already exists")
-            if if_version is not None and (not row or row["archived_at"] or row["version"] != if_version):
+            if if_version is not None and (
+                not row or row["archived_at"] or row["version"] != if_version
+            ):
                 raise MemoryConflictError(f"{name} changed meanwhile; view it again")
             if not row or row["archived_at"]:
                 await self._check_room(conn)
@@ -308,14 +322,30 @@ class MemoryService:
                     INSERT INTO memories (workspace_id, user_id, name, description, type, body, created_by, updated_by)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_COLUMNS}""",
-                    (self.ws, self.user, name, clean["description"], clean["type"], clean["body"], by, by),
+                    (
+                        self.ws,
+                        self.user,
+                        name,
+                        clean["description"],
+                        clean["type"],
+                        clean["body"],
+                        by,
+                        by,
+                    ),
                 )
                 assert created is not None
                 await conn.execute(
                     """
                     INSERT INTO memory_versions (memory_id, version, description, type, body, changed_by, thread_id)
                     VALUES (%s, 1, %s, %s, %s, %s, %s)""",
-                    (created["id"], created["description"], created["type"], created["body"], by, thread_id),
+                    (
+                        created["id"],
+                        created["description"],
+                        created["type"],
+                        created["body"],
+                        by,
+                        thread_id,
+                    ),
                 )
                 event = await self._event(conn, created, "create", run) if run else None
                 return _note(created), event
@@ -421,8 +451,12 @@ class MemoryService:
                 and (event["kind"] == "archive") == (row["archived_at"] is not None)
             )
             if not latest:
-                raise MemoryConflictError(f"{row['name']} changed since; restore an earlier version instead")
-            await conn.execute("UPDATE memory_events SET undone_at = now() WHERE id = %s", (event_id,))
+                raise MemoryConflictError(
+                    f"{row['name']} changed since; restore an earlier version instead"
+                )
+            await conn.execute(
+                "UPDATE memory_events SET undone_at = now() WHERE id = %s", (event_id,)
+            )
             if event["kind"] == "archive":
                 back = await _one(
                     conn,
@@ -440,7 +474,9 @@ class MemoryService:
                 (row["id"], row["version"] - 1),
             )
             # A note brought back from the archive goes back there.
-            nxt = await self._write(conn, row, before or {}, "user", None, archived=event["kind"] == "create")
+            nxt = await self._write(
+                conn, row, before or {}, "user", None, archived=event["kind"] == "create"
+            )
             return {"name": row["name"], "note": _note(nxt)}
 
     async def settings(self, thread_id: str | None = None) -> dict[str, Any]:
@@ -534,7 +570,8 @@ class MemoryService:
             # Back to waiting, so the user can reject it or look again.
             async with self.scoped() as conn:
                 await conn.execute(
-                    "UPDATE memory_inbox SET status = 'pending', decided_at = NULL WHERE id = %s", (item_id,)
+                    "UPDATE memory_inbox SET status = 'pending', decided_at = NULL WHERE id = %s",
+                    (item_id,),
                 )
             if isinstance(err, MemoryConflictError):
                 raise MemoryConflictError(
@@ -588,7 +625,11 @@ class MemoryService:
                 "kind": r["kind"],
                 "version": r["version"],
                 "threadId": r["thread_id"],
-                "source": "learn" if r["run_id"] == LEARN_RUN else "inbox" if r["run_id"] == "inbox" else "chat",
+                "source": "learn"
+                if r["run_id"] == LEARN_RUN
+                else "inbox"
+                if r["run_id"] == "inbox"
+                else "chat",
                 "at": iso(r["created_at"]),
                 "undone": r["undone_at"] is not None,
                 "undoable": r["undoable"],

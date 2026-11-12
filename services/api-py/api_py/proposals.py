@@ -150,7 +150,9 @@ async def list_proposals(
     return [_to_proposal(row) for row in await cur.fetchall()]
 
 
-async def get(conn: AsyncConnection, workspace_id: str, user_id: str, proposal_id: str) -> dict[str, Any] | None:
+async def get(
+    conn: AsyncConnection, workspace_id: str, user_id: str, proposal_id: str
+) -> dict[str, Any] | None:
     if not is_uuid(proposal_id):
         return None
     cur = await conn.execute(
@@ -342,7 +344,9 @@ async def decide(
             await in_tx(conn)
 
 
-async def promotable(conn: AsyncConnection, workspace_id: str, experiment_id: str) -> list[dict[str, Any]]:
+async def promotable(
+    conn: AsyncConnection, workspace_id: str, experiment_id: str
+) -> list[dict[str, Any]]:
     """
     Files an experiment changed (or added) since it forked that its node doesn't
     have as they are now: what promoting it would propose. A file the experiment

@@ -23,7 +23,7 @@ APP_ROLE = "knowledge_user"
 _MIGRATION = re.compile(r"^\d+_.*\.sql$")
 
 
-class SchemaState(str, Enum):
+class SchemaState(str, Enum):  # noqa: UP042 - preserve Enum string behavior
     READY = "ready"  # exactly the migrations this server knows
     BEHIND = "behind"  # some not applied yet: the TypeScript server applies them at startup
     AHEAD = "ahead"  # migrations this server doesn't know: it is older than the database
@@ -69,7 +69,9 @@ def open_pool(database_url: str) -> AsyncConnectionPool:
     A small pool, opened by the app's lifespan (await pool.open()). Statements
     outside `conn.transaction()` commit on their own, as with postgres.js.
     """
-    return AsyncConnectionPool(database_url, min_size=1, max_size=10, open=False, kwargs={"autocommit": True})
+    return AsyncConnectionPool(
+        database_url, min_size=1, max_size=10, open=False, kwargs={"autocommit": True}
+    )
 
 
 @asynccontextmanager

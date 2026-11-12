@@ -101,14 +101,20 @@ class LocalEmbedder:
         with contextlib.suppress(Exception):
             config = json.loads(Path(fetch("tokenizer_config.json")).read_text())
         longest = config.get("model_max_length")
-        tokenizer.enable_truncation(longest if isinstance(longest, int) and 0 < longest <= 8192 else 512)
+        tokenizer.enable_truncation(
+            longest if isinstance(longest, int) and 0 < longest <= 8192 else 512
+        )
         pad = config.get("pad_token")
         pad = pad.get("content") if isinstance(pad, dict) else pad
         pad_id = tokenizer.token_to_id(pad) if isinstance(pad, str) else None
-        tokenizer.enable_padding(pad_id=pad_id or 0, pad_token=pad if pad_id is not None else "[PAD]")
+        tokenizer.enable_padding(
+            pad_id=pad_id or 0, pad_token=pad if pad_id is not None else "[PAD]"
+        )
         options = onnxruntime.SessionOptions()
         options.log_severity_level = 3
-        session = onnxruntime.InferenceSession(fetch(ONNX_FILE), options, providers=["CPUExecutionProvider"])
+        session = onnxruntime.InferenceSession(
+            fetch(ONNX_FILE), options, providers=["CPUExecutionProvider"]
+        )
         return tokenizer, session
 
     def _run(self, texts: list[str]) -> list[list[float]]:
@@ -161,24 +167,40 @@ class ApiEmbedder:
 
     async def embed(self, texts: list[str], kind: str) -> list[list[float]]:
         prefix = e5_prefix(self.model, kind)
-        body: dict[str, Any] = {"model": self.model, "input": [prefix + t for t in texts], "encoding_format": "float"}
+        body: dict[str, Any] = {
+            "model": self.model,
+            "input": [prefix + t for t in texts],
+            "encoding_format": "float",
+        }
         if self.dimensions:
             body["dimensions"] = self.dimensions
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
-        async with httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS, transport=self._transport) as client:
+        async with httpx.AsyncClient(
+            timeout=API_TIMEOUT_SECONDS, transport=self._transport
+        ) as client:
             answer = await client.post(self.url, json=body, headers=headers)
         if answer.status_code >= 300:
-            raise RuntimeError(f"embeddings endpoint {self.url} answered {answer.status_code}: {answer.text[:500]}")
+            raise RuntimeError(
+                f"embeddings endpoint {self.url} answered {answer.status_code}: {answer.text[:500]}"
+            )
         data = answer.json().get("data") or []
         if len(data) != len(texts):
-            raise RuntimeError(f"embeddings endpoint returned {len(data)} vectors for {len(texts)} texts")
+            raise RuntimeError(
+                f"embeddings endpoint returned {len(data)} vectors for {len(texts)} texts"
+            )
         vectors = []
         for item in sorted(data, key=lambda d: d.get("index") or 0):
             embedding = item.get("embedding")
-            if not isinstance(embedding, list) or not embedding or not isinstance(embedding[0], int | float):
-                raise RuntimeError("embeddings endpoint returned a vector that isn't a list of numbers")
+            if (
+                not isinstance(embedding, list)
+                or not embedding
+                or not isinstance(embedding[0], int | float)
+            ):
+                raise RuntimeError(
+                    "embeddings endpoint returned a vector that isn't a list of numbers"
+                )
             vectors.append(unit_length([float(x) for x in embedding]))
         return vectors
 
@@ -224,7 +246,9 @@ def default_min_similarity(model: str, configured: float | None = None) -> float
 class SemanticIndex:
     """Keeps blob_chunks.embedding filled for `embedder`, and embeds queries; `ready` once the database can hold its vectors."""
 
-    def __init__(self, pool: AsyncConnectionPool, embedder: Embedder, min_similarity: float | None = None) -> None:
+    def __init__(
+        self, pool: AsyncConnectionPool, embedder: Embedder, min_similarity: float | None = None
+    ) -> None:
         self.pool = pool
         self.embedder = embedder
         self.min_similarity = default_min_similarity(embedder.model, min_similarity)
@@ -246,7 +270,9 @@ class SemanticIndex:
         model = self.embedder.source
         async with self.pool.connection() as conn, conn.transaction():
             # Same lock as the migrations: schema changes one process at a time.
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))")
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))"
+            )
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS search_embedding (
@@ -260,7 +286,9 @@ class SemanticIndex:
             if not (current and current[0] == model and current[1] == dims):
                 # Vectors from another model don't compare with this one's: start over.
                 await conn.execute("ALTER TABLE blob_chunks DROP COLUMN IF EXISTS embedding")
-                await conn.execute(f"ALTER TABLE blob_chunks ADD COLUMN embedding vector({int(dims)})")  # type: ignore[arg-type]
+                await conn.execute(  # type: ignore[arg-type]
+                    f"ALTER TABLE blob_chunks ADD COLUMN embedding vector({int(dims)})"
+                )
                 if dims <= MAX_INDEXED_DIMS:
                     await conn.execute(
                         "CREATE INDEX blob_chunks_embedding ON blob_chunks USING hnsw (embedding vector_cosine_ops)"
@@ -360,7 +388,9 @@ class SemanticIndex:
                 if not await self.prepare():
                     return  # no pgvector: nothing to retry
             except Exception:
-                logger.exception("[search] could not load %s; trying again in a minute", self.embedder.model)
+                logger.exception(
+                    "[search] could not load %s; trying again in a minute", self.embedder.model
+                )
                 await asyncio.sleep(RETRY_SECONDS)
         while True:
             try:

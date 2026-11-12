@@ -56,7 +56,7 @@ async def record(url: str, names: list[str]) -> None:
 
 def test_knows_the_typescript_migrations_in_order():
     assert KNOWN[0] == "001_init.sql"
-    assert KNOWN == sorted(KNOWN)
+    assert sorted(KNOWN) == KNOWN
     assert all(name.endswith(".sql") for name in KNOWN)
 
 
@@ -80,7 +80,9 @@ async def test_reads_the_schema_as_the_typescript_server_left_it(database):
         assert (await db.schema(pool, DEFAULT_MIGRATIONS_DIR)).state is db.SchemaState.READY
         await record(database, ["999_from_a_newer_release.sql"])
         ahead = await db.schema(pool, DEFAULT_MIGRATIONS_DIR)
-        assert ahead.state is db.SchemaState.AHEAD and ahead.unknown == ("999_from_a_newer_release.sql",)
+        assert ahead.state is db.SchemaState.AHEAD and ahead.unknown == (
+            "999_from_a_newer_release.sql",
+        )
     finally:
         await pool.close()
 
@@ -97,7 +99,8 @@ async def test_as_user_sets_the_role_and_user_for_one_transaction(database):
             assert await cur.fetchone() == (db.APP_ROLE, user)
         async with pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT current_user = %s, coalesce(current_setting('app.user_id', true), '')", (db.APP_ROLE,)
+                "SELECT current_user = %s, coalesce(current_setting('app.user_id', true), '')",
+                (db.APP_ROLE,),
             )
             assert await cur.fetchone() == (False, "")
     finally:
@@ -105,7 +108,12 @@ async def test_as_user_sets_the_role_and_user_for_one_transaction(database):
 
 
 def settings(url: str) -> Settings:
-    return Settings(ts_agent_url="http://ts", database_url=url, auth_secret=None, migrations_dir=DEFAULT_MIGRATIONS_DIR)
+    return Settings(
+        ts_agent_url="http://ts",
+        database_url=url,
+        auth_secret=None,
+        migrations_dir=DEFAULT_MIGRATIONS_DIR,
+    )
 
 
 async def up(request: httpx.Request) -> httpx.Response:
@@ -143,4 +151,3 @@ async def test_waits_for_the_typescript_server_to_migrate(database, monkeypatch)
             await anyio.sleep(0.05)
         assert app.state.schema.state is db.SchemaState.READY
         assert (await api.get("/health")).json() == {"status": "ok"}
-

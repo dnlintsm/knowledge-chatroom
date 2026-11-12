@@ -69,7 +69,10 @@ class BlobStore:
         def client(endpoint: str | None):
             # Without keys, boto3 looks for credentials as the AWS SDK does (environment, profile, instance role).
             keys = (
-                {"aws_access_key_id": settings.access_key_id, "aws_secret_access_key": settings.secret_access_key}
+                {
+                    "aws_access_key_id": settings.access_key_id,
+                    "aws_secret_access_key": settings.secret_access_key,
+                }
                 if settings.access_key_id and settings.secret_access_key
                 else {}
             )
@@ -121,7 +124,9 @@ class BlobStore:
             except Exception as err:
                 if not is_not_found(err):
                     raise
-            self._client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=mime, ContentLength=len(data))
+            self._client.put_object(
+                Bucket=self.bucket, Key=key, Body=data, ContentType=mime, ContentLength=len(data)
+            )
 
         await asyncio.to_thread(run)
 
@@ -144,4 +149,6 @@ class BlobStore:
             "ResponseContentDisposition": f"inline; filename*=UTF-8''{quote(filename, safe=_URI_COMPONENT_SAFE)}",
         }
         # Signing is local (no request), so it needn't leave the event loop.
-        return public.generate_presigned_url("get_object", Params=params, ExpiresIn=DOWNLOAD_LINK_SECONDS)
+        return public.generate_presigned_url(
+            "get_object", Params=params, ExpiresIn=DOWNLOAD_LINK_SECONDS
+        )

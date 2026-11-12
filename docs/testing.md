@@ -27,6 +27,8 @@ which CI runs too:
 
 ```bash
 uv sync --all-packages
+uv run --locked --no-sync ruff check packages/knowledge-py services examples/python-agent
+uv run --locked --no-sync ruff format --check packages/knowledge-py services examples/python-agent
 cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
 uv run pytest -q
 ```

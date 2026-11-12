@@ -63,7 +63,9 @@ def _explain(err: errors.Error) -> Exception:
 
 
 async def types(conn: AsyncConnection, workspace_id: str) -> list[dict[str, Any]]:
-    cur = await conn.execute("SELECT name, depth FROM node_types WHERE workspace_id = %s ORDER BY depth", (workspace_id,))
+    cur = await conn.execute(
+        "SELECT name, depth FROM node_types WHERE workspace_id = %s ORDER BY depth", (workspace_id,)
+    )
     return [{"name": name, "depth": depth} for name, depth in await cur.fetchall()]
 
 
@@ -106,7 +108,9 @@ async def find_child(
     return _to_node(row) if row else None
 
 
-async def lineage(conn: AsyncConnection, workspace_id: str, node_id: str) -> list[dict[str, Any]] | None:
+async def lineage(
+    conn: AsyncConnection, workspace_id: str, node_id: str
+) -> list[dict[str, Any]] | None:
     """The node and its ancestors, top level first; None if the node is missing."""
     if not is_uuid(node_id):
         return None
@@ -159,7 +163,11 @@ async def create(
             )
             level = await cur.fetchone()
             if not level:
-                raise NodeError(f"Nothing can go below a {parent[1]}" if parent else "No knowledge levels are set up")
+                raise NodeError(
+                    f"Nothing can go below a {parent[1]}"
+                    if parent
+                    else "No knowledge levels are set up"
+                )
             cur = await conn.execute(
                 "INSERT INTO nodes (workspace_id, parent_id, type_id, name) VALUES (%s, %s, %s, %s) RETURNING id",
                 (ws, parent_id, level[0], name),

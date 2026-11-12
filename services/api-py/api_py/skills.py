@@ -127,7 +127,9 @@ class SkillService:
     async def for_run(self, user_id: str, thread_id: str | None = None) -> list[tuple[Skill, str]]:
         """The skills a run for this user (in this chat) gets: everything not off, with its mode."""
         skills, layers = await asyncio.gather(self.skills(user_id), self.layers(user_id, thread_id))
-        run = [(skill, effective_mode(skill, chosen_mode(layers.get(skill.name)))) for skill in skills]
+        run = [
+            (skill, effective_mode(skill, chosen_mode(layers.get(skill.name)))) for skill in skills
+        ]
         return [(skill, mode) for skill, mode in run if mode != "off"]
 
     async def set_mode(
@@ -135,7 +137,9 @@ class SkillService:
     ) -> dict[str, Any]:
         """Sets a skill's mode at one level; None clears it there. Returns the skill as this user now sees it."""
         if mode is not None and mode not in SKILL_MODES:
-            raise InvalidModeError(f"mode must be one of {', '.join(SKILL_MODES)}, or null to clear it")
+            raise InvalidModeError(
+                f"mode must be one of {', '.join(SKILL_MODES)}, or null to clear it"
+            )
         if not isinstance(scope, str) or scope not in MODE_SCOPES:
             raise InvalidModeError(f"scope must be one of {', '.join(MODE_SCOPES)}")
         if scope == "chat" and not (thread_id and utf16_len(thread_id) <= 200):
@@ -185,7 +189,9 @@ class SkillService:
         layers = await self.layers(user_id, thread_id if scope == "chat" else None)
         return describe(skill, layers.get(name))
 
-    async def record(self, user_id: str, thread_id: str, run_id: str, skill: str, source: str, trigger: str) -> None:
+    async def record(
+        self, user_id: str, thread_id: str, run_id: str, skill: str, source: str, trigger: str
+    ) -> None:
         """Notes that a turn used a skill; history for later (best effort)."""
         try:
             async with self.storage.pool.connection() as conn:
@@ -286,7 +292,9 @@ class SkillService:
             files = await self._session(user_id).files(None)
         except ForbiddenError:
             return []  # No access to the workspace root: no workspace skills.
-        infos = [f for f in await files.list() if f["path"].startswith("skills/") and f["size"] <= _MB]
+        infos = [
+            f for f in await files.list() if f["path"].startswith("skills/") and f["size"] <= _MB
+        ]
 
         async def read(info: dict[str, Any]) -> tuple[str, bytes] | None:
             data = self._blobs.get(info["sha256"])
@@ -409,7 +417,13 @@ class SkillHub:
                     (row["id"],),
                 )
                 open_reports = [
-                    {"id": id_, "version": v, "reason": reason, "reporter": reporter, "createdAt": iso(created)}
+                    {
+                        "id": id_,
+                        "version": v,
+                        "reason": reason,
+                        "reporter": reporter,
+                        "createdAt": iso(created),
+                    }
                     for id_, v, reason, created, reporter in await cur.fetchall()
                 ]
         return {
@@ -436,7 +450,9 @@ class SkillHub:
             "openReports": open_reports,
         }
 
-    async def diff(self, user_id: str, name: str, before_version: int, after_version: int) -> dict[str, Any]:
+    async def diff(
+        self, user_id: str, name: str, before_version: int, after_version: int
+    ) -> dict[str, Any]:
         """What changed between two versions, file by file (for reviewing an update)."""
         await self._open(user_id, "viewer")
         async with self.storage.pool.connection() as conn:
@@ -509,14 +525,18 @@ class SkillHub:
             await self._audit(conn, user_id, action, {"name": name, "version": version})
         return {"name": name, "version": version, "verified": verified}
 
-    async def yank(self, user_id: str, name: str, version: int, yanked: bool, reason: str | None) -> dict[str, Any]:
+    async def yank(
+        self, user_id: str, name: str, version: int, yanked: bool, reason: str | None
+    ) -> dict[str, Any]:
         """Yanks a version (its publisher or a hub admin): it can no longer be installed. False restores it."""
         await self._open(user_id, "viewer")
         why = js_trim(reason or "")
         if utf16_len(why) > 500:
             raise HubError("Keep the reason under 500 characters")
         async with self.storage.pool.connection() as conn:
-            cur = await conn.execute("SELECT owner_id::text FROM hub_skills WHERE name = %s", (name,))
+            cur = await conn.execute(
+                "SELECT owner_id::text FROM hub_skills WHERE name = %s", (name,)
+            )
             hub = await cur.fetchone()
         if hub is None:
             raise HubNotFoundError(f"No skill named {name} on the hub")
@@ -529,15 +549,27 @@ class SkillHub:
                 SET yanked_at = CASE WHEN %s THEN now() END, yanked_by = %s, yank_reason = %s
                 FROM hub_skills h
                 WHERE v.hub_skill_id = h.id AND h.name = %s AND v.version = %s""",
-                (yanked, user_id if yanked else None, why if yanked and why else None, name, version),
+                (
+                    yanked,
+                    user_id if yanked else None,
+                    why if yanked and why else None,
+                    name,
+                    version,
+                ),
             )
             if not cur.rowcount:
                 raise HubNotFoundError(f"{name} has no version {version} on the hub")
-            target: dict[str, Any] = {"name": name, "version": version, **({"reason": why} if yanked and why else {})}
+            target: dict[str, Any] = {
+                "name": name,
+                "version": version,
+                **({"reason": why} if yanked and why else {}),
+            }
             await self._audit(conn, user_id, "skill.yank" if yanked else "skill.unyank", target)
         return {"name": name, "version": version, "yanked": yanked}
 
-    async def report(self, user_id: str, name: str, reason: Any, version: int | None = None) -> dict[str, Any]:
+    async def report(
+        self, user_id: str, name: str, reason: Any, version: int | None = None
+    ) -> dict[str, Any]:
         """Reports a hub skill to its publisher and the hub admins; reporting again replaces your open report."""
         await self._open(user_id, "viewer")
         why = js_trim(reason) if isinstance(reason, str) else ""
@@ -590,7 +622,9 @@ class SkillHub:
             )
             if not cur.rowcount:
                 raise HubNotFoundError("No such open report")
-            await self._audit(conn, user_id, "skill.report.dismiss", {"name": name, "id": report_id})
+            await self._audit(
+                conn, user_id, "skill.report.dismiss", {"name": name, "id": report_id}
+            )
         return {"id": report_id, "dismissed": True}
 
     async def publish(self, user_id: str, name: str) -> dict[str, Any]:
@@ -614,7 +648,11 @@ class SkillHub:
         files_here = await self.skills._session(user_id).files(None)
         listed = [f for f in await files_here.list() if f["path"].startswith(folder)]
         total = sum(f["size"] for f in listed)
-        if len(listed) > MAX_FILES or total > MAX_SKILL_BYTES or any(f["size"] > MAX_SKILL_FILE_BYTES for f in listed):
+        if (
+            len(listed) > MAX_FILES
+            or total > MAX_SKILL_BYTES
+            or any(f["size"] > MAX_SKILL_FILE_BYTES for f in listed)
+        ):
             raise HubError(
                 f"{name} is too big to publish: a skill may have at most {MAX_FILES} files and "
                 f"{MAX_SKILL_BYTES // _MB} MB, each file {MAX_SKILL_FILE_BYTES // _MB} MB"
@@ -628,9 +666,12 @@ class SkillHub:
 
         async with self.storage.pool.connection() as conn, conn.transaction():
             await conn.execute(
-                "INSERT INTO hub_skills (name, owner_id) VALUES (%s, %s) ON CONFLICT (name) DO NOTHING", (name, user_id)
+                "INSERT INTO hub_skills (name, owner_id) VALUES (%s, %s) ON CONFLICT (name) DO NOTHING",
+                (name, user_id),
             )
-            cur = await conn.execute("SELECT id, owner_id::text FROM hub_skills WHERE name = %s FOR UPDATE", (name,))
+            cur = await conn.execute(
+                "SELECT id, owner_id::text FROM hub_skills WHERE name = %s FOR UPDATE", (name,)
+            )
             hub_id, owner = await cur.fetchone()  # type: ignore[misc]
             if owner != user_id:
                 raise SkillForbiddenError(f"{name} on the hub was published by someone else")
@@ -662,7 +703,9 @@ class SkillHub:
 
     async def install(self, user_id: str, name: str, version: int | None = None) -> dict[str, Any]:
         """Installs (or moves the workspace's install to) a version, by default the newest that isn't yanked."""
-        await self._open(user_id, "editor", "Installing skills needs editor access to the workspace")
+        await self._open(
+            user_id, "editor", "Installing skills needs editor access to the workspace"
+        )
         pinned = "" if version is None else "AND v.version = %s"
         async with self.storage.pool.connection() as conn:
             cur = await conn.execute(
@@ -678,7 +721,9 @@ class SkillHub:
             row = await cur.fetchone()
         if row is None:
             raise HubNotFoundError(
-                f"No skill named {name} on the hub" if version is None else f"{name} has no version {version}"
+                f"No skill named {name} on the hub"
+                if version is None
+                else f"{name} has no version {version}"
             )
         hub_id, version_id, found, yanked, yank_reason, current = row
         if yanked and current != version_id:
@@ -766,12 +811,16 @@ class SkillHub:
             stem = re.sub(r"\.zip\Z", "", filename or "", flags=re.IGNORECASE | re.ASCII).lower()
             folder = re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9-]+", "-", stem))
             files = entries
-        elif len(folders) == 1 and any(e.path == f"{next(iter(folders))}/SKILL.md" for e in entries):
+        elif len(folders) == 1 and any(
+            e.path == f"{next(iter(folders))}/SKILL.md" for e in entries
+        ):
             folder = next(iter(folders))
             files = [SkillFile(e.path[len(folder) + 1 :], e.data) for e in entries]
         else:
             raise HubError("The zip needs a SKILL.md, at its top or in a single folder")
-        skill = skill_from_files(folder if is_skill_name(folder) else "imported-skill", files, "workspace", None)
+        skill = skill_from_files(
+            folder if is_skill_name(folder) else "imported-skill", files, "workspace", None
+        )
         if skill is None:
             raise HubError("SKILL.md has no usable name: give it `name:` in its front matter")
         await self._write_skill(user_id, skill.name, files, replace=replace)
@@ -791,13 +840,16 @@ class SkillHub:
         prefix = skill.path[: -len("SKILL.md")]
         main = f"{prefix}SKILL.md"
         files = sorted(
-            (f for f in await session.list() if f["path"].startswith(prefix)), key=lambda f: f["path"] == main
+            (f for f in await session.list() if f["path"].startswith(prefix)),
+            key=lambda f: f["path"] == main,
         )
         for file in files:
             await session.remove(file["path"])
         return {"name": name, "deleted": len(files)}
 
-    async def _write_skill(self, user_id: str, name: str, files: list[SkillFile], *, replace: bool) -> None:
+    async def _write_skill(
+        self, user_id: str, name: str, files: list[SkillFile], *, replace: bool
+    ) -> None:
         """Writes a skill's files to skills/<name>/ as the user."""
         session: FilesSession = await self.skills._session(user_id, "user").files(None)
         prefix = f"skills/{name}/"
@@ -829,7 +881,11 @@ class SkillHub:
         if user is None:
             return False
         subject, email = user
-        return subject == "local" or subject.lower() in self.admins or bool(email and email.lower() in self.admins)
+        return (
+            subject == "local"
+            or subject.lower() in self.admins
+            or bool(email and email.lower() in self.admins)
+        )
 
     async def _scanned(self, rows: list[dict[str, Any]]) -> None:
         """Scans versions published before scanning existed (flags NULL), and keeps the result."""
@@ -839,7 +895,8 @@ class SkillHub:
             row["flags"] = scan_skill(await self.skills.files_of(row["files"]))
             async with self.storage.pool.connection() as conn:
                 await conn.execute(
-                    "UPDATE hub_skill_versions SET flags = %s WHERE id = %s", (Jsonb(row["flags"]), row["version_id"])
+                    "UPDATE hub_skill_versions SET flags = %s WHERE id = %s",
+                    (Jsonb(row["flags"]), row["version_id"]),
                 )
 
     async def _listings(self, where: str, params: tuple) -> list[dict[str, Any]]:

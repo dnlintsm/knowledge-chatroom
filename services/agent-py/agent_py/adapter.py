@@ -107,18 +107,27 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._tokens: OrderedDict[str, str | None] = OrderedDict()
 
     def build_options(
-        self, input_data: RunAgentInput | None = None, thread_id: str | None = None, *args: Any, **kwargs: Any
+        self,
+        input_data: RunAgentInput | None = None,
+        thread_id: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
         run = self._runs.get(thread_id or "")
         memory = run.memory if run else None
         servers = run.servers if run else None
         options.system_prompt = "\n".join(
-            part for part in (self._system_prompt, memory and memory.prompt, servers and servers.prompt) if part
+            part
+            for part in (self._system_prompt, memory and memory.prompt, servers and servers.prompt)
+            if part
         )
         if servers and servers.configs:
             options.mcp_servers = {**(options.mcp_servers or {}), **servers.configs}
-            options.allowed_tools = [*(options.allowed_tools or []), *(f"mcp__{name}" for name in servers.configs)]
+            options.allowed_tools = [
+                *(options.allowed_tools or []),
+                *(f"mcp__{name}" for name in servers.configs),
+            ]
         if self._storage_url and thread_id:
             tools = file_tools(
                 lambda: self._storage(thread_id or ""),
@@ -135,12 +144,17 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
         if memory:
             hooks = dict(options.hooks or {})
-            hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), taint_hook(lambda: self._memory(thread_id or ""))]
+            hooks["PreToolUse"] = [
+                *hooks.get("PreToolUse", []),
+                taint_hook(lambda: self._memory(thread_id or "")),
+            ]
             options.hooks = hooks
         if run and run.cwd:
             options.cwd = str(run.cwd)
         if run and run.skills:
-            extra = skill_options(run.skills, lambda name, trigger: self._used(thread_id or "", name, trigger))
+            extra = skill_options(
+                run.skills, lambda name, trigger: self._used(thread_id or "", name, trigger)
+            )
             hook = extra.pop("pre_tool_use")
             for key, value in extra.items():
                 setattr(options, key, value)
@@ -174,17 +188,25 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 run.cwd = materialize(self._skills_root, user, ())
         if memory_token and self._storage_url:
             try:
-                run.memory = await fetch_memory(self._storage(thread_id), memory_token, input_data.run_id)
+                run.memory = await fetch_memory(
+                    self._storage(thread_id), memory_token, input_data.run_id
+                )
             except (WorkspaceError, ValueError) as err:
                 logger.warning("couldn't load memory; running without it: %s", err)
             # After a browser tool (its result is the last message) the turn has
             # used another tool already: changes wait in the inbox from the start.
-            if run.memory and input_data.messages and isinstance(input_data.messages[-1], ToolMessage):
+            if (
+                run.memory
+                and input_data.messages
+                and isinstance(input_data.messages[-1], ToolMessage)
+            ):
                 run.memory.tainted = True
         if self._servers:
             # Memory tokens only for runs with memory, as the TypeScript agent sends them.
             tokens = (
-                await trade_tokens(self._storage(thread_id), memory_token if run.memory else None, self._servers)
+                await trade_tokens(
+                    self._storage(thread_id), memory_token if run.memory else None, self._servers
+                )
                 if self._storage_url
                 else {}
             )
@@ -231,7 +253,9 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         skill = next((s for s in run.skills if s.name == name), None) if run else None
         if not run or not skill:
             return
-        run.pending.append(("skill_used", {"skill": skill.name, "source": skill.source, "trigger": trigger}))
+        run.pending.append(
+            ("skill_used", {"skill": skill.name, "source": skill.source, "trigger": trigger})
+        )
         if self._storage_url:
             storage = self._storage(thread_id)
             body = {"thread": thread_id, "skill": skill.name, "trigger": trigger}
@@ -239,7 +263,9 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             self._recording.add(task)
             task.add_done_callback(self._recording.discard)
 
-    def prepare(self, input_data: RunAgentInput, skills: Sequence[RunSkill] = ()) -> tuple[RunAgentInput, RunSkill | None]:
+    def prepare(
+        self, input_data: RunAgentInput, skills: Sequence[RunSkill] = ()
+    ) -> tuple[RunAgentInput, RunSkill | None]:
         """This run's input as the session should see it, and the skill its /name runs, if any."""
         messages = list(input_data.messages or [])
         thread_id = input_data.thread_id
@@ -254,7 +280,8 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         # After a browser tool, only the result it answers with: earlier ones
         # are history the adapter checks against the session's transcript.
         carrier = isinstance(last, UserMessage) or (
-            isinstance(last, ToolMessage) and not (len(messages) > 1 and isinstance(messages[-2], ToolMessage))
+            isinstance(last, ToolMessage)
+            and not (len(messages) > 1 and isinstance(messages[-2], ToolMessage))
         )
         if note and carrier and (fresh or self._notes.get(thread_id) != note):
             # A /name command must stay at the start of the prompt: its note goes after it.
@@ -271,7 +298,9 @@ async def _record(storage: Storage, body: dict[str, str]) -> None:
         logger.warning("couldn't record a skill use: %s", err)
 
 
-def guard_slash(message: UserMessage, skills: Sequence[RunSkill]) -> tuple[UserMessage, RunSkill | None]:
+def guard_slash(
+    message: UserMessage, skills: Sequence[RunSkill]
+) -> tuple[UserMessage, RunSkill | None]:
     """The message with its first text guarded (skills.slash_command), and the skill it runs."""
     content = message.content
     if isinstance(content, str):
@@ -287,7 +316,6 @@ def guard_slash(message: UserMessage, skills: Sequence[RunSkill]) -> tuple[UserM
     return message, None
 
 
-
 def remember(cache: OrderedDict[str, Any], key: str, value: Any, size: int) -> None:
     """Sets `key`, keeping only the `size` most recent keys."""
     cache[key] = value
@@ -296,7 +324,9 @@ def remember(cache: OrderedDict[str, Any], key: str, value: Any, size: int) -> N
         cache.popitem(last=False)
 
 
-def with_note(message: UserMessage | ToolMessage, note: str, after: bool = False) -> UserMessage | ToolMessage:
+def with_note(
+    message: UserMessage | ToolMessage, note: str, after: bool = False
+) -> UserMessage | ToolMessage:
     """The user's message with `note` in front of it (or after it), or a tool's result with `note` after it."""
     content = message.content
     after = after or isinstance(message, ToolMessage)

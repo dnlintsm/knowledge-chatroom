@@ -31,7 +31,8 @@ from api_py.skills_routes import js_to_number, version
 
 pytestmark = [pytest.mark.anyio]
 needs_storage = pytest.mark.skipif(
-    not URL or not os.environ.get("S3_ENDPOINT"), reason="TEST_DATABASE_URL and S3_ENDPOINT are not set"
+    not URL or not os.environ.get("S3_ENDPOINT"),
+    reason="TEST_DATABASE_URL and S3_ENDPOINT are not set",
 )
 
 
@@ -53,7 +54,12 @@ def test_front_matter_and_skills_from_files():
     assert parse_front_matter("no front matter") == {}
     skill = skill_from_files(
         "Folder",
-        [SkillFile("SKILL.md", b"---\nname: Not Valid\nallowed-tools: Read, Bash\n---\n\n## Plan the day\n")],
+        [
+            SkillFile(
+                "SKILL.md",
+                b"---\nname: Not Valid\nallowed-tools: Read, Bash\n---\n\n## Plan the day\n",
+            )
+        ],
         "workspace",
         "skills/x/SKILL.md",
     )
@@ -62,7 +68,8 @@ def test_front_matter_and_skills_from_files():
         "plan",
         [
             SkillFile(
-                "SKILL.md", b"---\nuser-invocable: FALSE\ndisable-model-invocation: true\n---\n\n## Plan the day\n"
+                "SKILL.md",
+                b"---\nuser-invocable: FALSE\ndisable-model-invocation: true\n---\n\n## Plan the day\n",
             ),
             SkillFile("big.bin", b"x" * (1024 * 1024 + 1)),
             SkillFile("tools/run.PY", b"print(1)"),
@@ -78,7 +85,12 @@ def test_front_matter_and_skills_from_files():
     )
     assert skill.needs_execution and [f.path for f in skill.files] == ["SKILL.md", "tools/run.PY"]
     info = describe(skill, {"user": "auto"})
-    assert (info["mode"], info["defaultMode"], info["userMode"], info["chatMode"]) == ("off", "manual", "auto", None)
+    assert (info["mode"], info["defaultMode"], info["userMode"], info["chatMode"]) == (
+        "off",
+        "manual",
+        "auto",
+        None,
+    )
 
 
 def test_workspace_and_merged_skills_sort_as_javascript_does():
@@ -91,9 +103,24 @@ def test_workspace_and_merged_skills_sort_as_javascript_does():
     ]
     skills = workspace_skills(files)
     # localeCompare puts "A" before "b", so its folder wins the name.
-    assert [(s.name, s.path) for s in skills] == [("same", "skills/A/SKILL.md"), ("zeta", "skills/zeta/SKILL.md")]
+    assert [(s.name, s.path) for s in skills] == [
+        ("same", "skills/A/SKILL.md"),
+        ("zeta", "skills/zeta/SKILL.md"),
+    ]
     names = ["b-2", "b2", "B", "a_b", "a-b", "ab", "10", "9", "Ab", "é", "f"]
-    assert sorted(names, key=collation_key) == ["10", "9", "a_b", "a-b", "ab", "Ab", "B", "b-2", "b2", "é", "f"]
+    assert sorted(names, key=collation_key) == [
+        "10",
+        "9",
+        "a_b",
+        "a-b",
+        "ab",
+        "Ab",
+        "B",
+        "b-2",
+        "b2",
+        "é",
+        "f",
+    ]
     # Beyond ASCII too, as Node's ICU sorts them (#206 review): "ø" goes with "o", before "z".
     others = ["z", "ø", "o", "p", "Ø", "oz", "–", "-", "€", "0", "α", "中", "“", '"', "ł", "m"]
     assert sorted(others, key=collation_key) == [
@@ -114,10 +141,14 @@ def test_workspace_and_merged_skills_sort_as_javascript_does():
         "α",
         "中",
     ]
-    picked = workspace_skills([("skills/z/SKILL.md", md("tidy")), ("skills/ø/SKILL.md", md("tidy"))])
+    picked = workspace_skills(
+        [("skills/z/SKILL.md", md("tidy")), ("skills/ø/SKILL.md", md("tidy"))]
+    )
     assert [s.path for s in picked] == ["skills/ø/SKILL.md"]
     builtins = builtin_skills(DEFAULT_BUILTIN_SKILLS_DIR)
-    assert {"analysis", "tldr"} <= {s.name for s in builtins} and all(s.source == "builtin" for s in builtins)
+    assert {"analysis", "tldr"} <= {s.name for s in builtins} and all(
+        s.source == "builtin" for s in builtins
+    )
     merged = merge_skills(builtins, [s for s in skills if s.name == "zeta"])
     assert [s.name for s in merged] == sorted(s.name for s in merged)
 
@@ -139,7 +170,12 @@ def test_scan_flags():
     )
     assert [(f["kind"], f["path"], f["line"], f["detail"]) for f in flags] == [
         ("binary", "blob.bin", None, "not text, so not checked"),
-        ("scripts", "scripts/go.sh", None, "a script file; it runs only where scripts are on, in a sandbox"),
+        (
+            "scripts",
+            "scripts/go.sh",
+            None,
+            "a script file; it runs only where scripts are on, in a sandbox",
+        ),
         ("scripts", "SKILL.md", None, "asks for Bash in allowed-tools"),
         ("network", "SKILL.md", 4, "links to docs.example.com:8443"),
         ("hidden-text", "SKILL.md", 5, "invisible characters"),
@@ -153,7 +189,10 @@ def test_scan_flags():
 
 def test_zips_versions_and_admins():
     assert [
-        f.path for f in read_zip(zipped({"x/SKILL.md": b"a", "x/": b"", "__MACOSX/x": b"", "x/.DS_Store": b""}))
+        f.path
+        for f in read_zip(
+            zipped({"x/SKILL.md": b"a", "x/": b"", "__MACOSX/x": b"", "x/.DS_Store": b""})
+        )
     ] == ["x/SKILL.md"]
     for bad, message in [
         (b"\1\2\3", "That isn't a readable .zip file"),
@@ -163,7 +202,14 @@ def test_zips_versions_and_admins():
     ]:
         with pytest.raises(HubError, match=message):
             read_zip(bad)
-    assert [js_to_number(v) for v in (" 2 ", "0x10", "1e1", True, [3], ["4"])] == [2, 16, 10, 1, 3, 4]
+    assert [js_to_number(v) for v in (" 2 ", "0x10", "1e1", True, [3], ["4"])] == [
+        2,
+        16,
+        10,
+        1,
+        3,
+        4,
+    ]
     assert version(None) is None and version("") is None and version("3") == 3 and version(2.0) == 2
     for bad in ("1.5", "0", "-1", "two", [1, 2], {}, "Infinity", False):
         with pytest.raises(HubError, match="version must be a positive whole number"):
@@ -173,19 +219,29 @@ def test_zips_versions_and_admins():
 
 @pytest.fixture
 async def skills_api(database) -> AsyncIterator[httpx.AsyncClient]:
-    async with Client(database, SECRET, s3=s3(), hub_admins="kc|alice", skill_scripts=True) as (client, _app):
+    async with Client(database, SECRET, s3=s3(), hub_admins="kc|alice", skill_scripts=True) as (
+        client,
+        _app,
+    ):
         yield client
 
 
 @needs_storage
 async def test_skills_modes_runs_and_zips(skills_api):
     api = skills_api
-    assert (await api.put("/files/skills/tidy/SKILL.md", headers=ALICE, content=md("tidy"))).status_code == 200
+    assert (
+        await api.put("/files/skills/tidy/SKILL.md", headers=ALICE, content=md("tidy"))
+    ).status_code == 200
     await api.get("/access", headers=BOB)  # Bob signs in, with no role at the root
     listed = await api.get("/skills", headers=ALICE)
     assert listed.headers["cache-control"] == "no-store"
     body = listed.json()
-    assert (body["canSetDefaults"], body["canPublish"], body["hub"], body["scripts"]) == (True, True, True, True)
+    assert (body["canSetDefaults"], body["canPublish"], body["hub"], body["scripts"]) == (
+        True,
+        True,
+        True,
+        True,
+    )
     tidy = next(s for s in body["skills"] if s["name"] == "tidy")
     assert (tidy["source"], tidy["path"], tidy["mode"], tidy["hub"]) == (
         "workspace",
@@ -200,7 +256,9 @@ async def test_skills_modes_runs_and_zips(skills_api):
     assert (put.json()["mode"], put.json()["userMode"]) == ("manual", "manual")
     chat = {"mode": "off", "scope": "chat", "thread": "t1"}
     assert (await api.put("/skills/tidy", headers=ALICE, json=chat)).json()["chatMode"] == "off"
-    workspace = await api.put("/skills/tidy", headers=ALICE, json={"mode": "auto", "scope": "workspace"})
+    workspace = await api.put(
+        "/skills/tidy", headers=ALICE, json={"mode": "auto", "scope": "workspace"}
+    )
     assert (workspace.json()["workspaceMode"], workspace.json()["mode"]) == ("auto", "manual")
     in_chat = (await api.get("/skills?thread=t1", headers=ALICE)).json()
     assert next(s for s in in_chat["skills"] if s["name"] == "tidy")["mode"] == "off"
@@ -234,15 +292,26 @@ async def test_skills_modes_runs_and_zips(skills_api):
          refusal(403, "Importing skills needs editor access to the workspace")),
     ]  # fmt: skip
     for answer, expected in cases:
-        assert expected(answer), (answer.request.method, answer.request.url, answer.status_code, answer.text)
+        assert expected(answer), (
+            answer.request.method,
+            answer.request.url,
+            answer.status_code,
+            answer.text,
+        )
 
     # What an outside agent's run gets, with the run's storage token.
-    await api.put("/skills/tidy", headers=ALICE, json={"mode": "manual", "scope": "chat", "thread": "run-1"})
-    run = (await api.get("/skills/run?thread=run-1", headers=storage_token("kc|alice"))).json()["skills"]
+    await api.put(
+        "/skills/tidy", headers=ALICE, json={"mode": "manual", "scope": "chat", "thread": "run-1"}
+    )
+    run = (await api.get("/skills/run?thread=run-1", headers=storage_token("kc|alice"))).json()[
+        "skills"
+    ]
     mine = next(s for s in run if s["name"] == "tidy")
     assert (mine["mode"], mine["source"], mine["needsExecution"]) == ("manual", "workspace", False)
     assert base64.b64decode(mine["files"][0]["content"]) == md("tidy")
-    assert "tidy" not in {s["name"] for s in (await api.get("/skills/run?thread=t1", headers=ALICE)).json()["skills"]}
+    assert "tidy" not in {
+        s["name"] for s in (await api.get("/skills/run?thread=t1", headers=ALICE)).json()["skills"]
+    }
     used = await api.post(
         "/skills/used/",
         headers=storage_token("kc|alice"),
@@ -260,14 +329,18 @@ async def test_skills_modes_runs_and_zips(skills_api):
         {"error": "The workspace already has a skill folder skills/tidy/"},
     )
     replaced = await api.post(
-        "/skills/import?replace=1", headers=ALICE, content=zipped({"tidy/SKILL.md": md("tidy", "New.")})
+        "/skills/import?replace=1",
+        headers=ALICE,
+        content=zipped({"tidy/SKILL.md": md("tidy", "New.")}),
     )
     assert (replaced.status_code, replaced.json()) == (
         201,
         {"name": "tidy", "path": "skills/tidy/SKILL.md", "files": 1},
     )
     flat = await api.post(
-        "/skills/import?filename=My%20Notes.ZIP", headers=ALICE, content=zipped({"SKILL.md": b"# Notes", "a.md": b"x"})
+        "/skills/import?filename=My%20Notes.ZIP",
+        headers=ALICE,
+        content=zipped({"SKILL.md": b"# Notes", "a.md": b"x"}),
     )
     assert flat.json() == {"name": "my-notes", "path": "skills/my-notes/SKILL.md", "files": 2}
     deleted = await api.delete("/skills/my-notes", headers=ALICE)
@@ -281,10 +354,16 @@ async def test_skills_modes_runs_and_zips(skills_api):
 @needs_storage
 async def test_the_hub(skills_api, database):
     api = skills_api
-    await api.put("/files/skills/tidy/SKILL.md", headers=ALICE, content=md("tidy", "First version."))
+    await api.put(
+        "/files/skills/tidy/SKILL.md", headers=ALICE, content=md("tidy", "First version.")
+    )
     await api.get("/access", headers=BOB)
-    assert (await api.get("/hub", headers=BOB)).json() == {"error": "The hub needs access to the workspace"}
-    assert (await api.post("/hub", headers=ALICE, json={})).json() == {"error": "Say which skill: {skill}"}
+    assert (await api.get("/hub", headers=BOB)).json() == {
+        "error": "The hub needs access to the workspace"
+    }
+    assert (await api.post("/hub", headers=ALICE, json={})).json() == {
+        "error": "Say which skill: {skill}"
+    }
     assert (await api.post("/hub", headers=ALICE, json={"skill": "tldr"})).json() == {
         "error": "tldr is built in; only the workspace's own skills can be published"
     }
@@ -293,7 +372,9 @@ async def test_the_hub(skills_api, database):
     again = await api.post("/hub", headers=ALICE, json={"skill": "tidy"})
     assert again.json() == {"name": "tidy", "version": 1, "unchanged": True}
     await api.put(
-        "/files/skills/tidy/SKILL.md", headers=ALICE, content=md("tidy", "Second, see https://example.com/x.")
+        "/files/skills/tidy/SKILL.md",
+        headers=ALICE,
+        content=md("tidy", "Second, see https://example.com/x."),
     )
     await api.put("/files/skills/tidy/scripts/go.sh", headers=ALICE, content=b"echo hi")
     assert (await api.post("/hub", headers=ALICE, json={"skill": "tidy"})).json()["version"] == 2
@@ -310,9 +391,16 @@ async def test_the_hub(skills_api, database):
     assert (detail["version"], detail["skillMd"], detail["canModerate"], detail["openReports"]) == (
         1, md("tidy", "First version.").decode(), True, [],
     )  # fmt: skip
-    assert [(v["version"], v["files"], v["flags"] != []) for v in detail["versions"]] == [(2, 2, True), (1, 1, False)]
-    assert (await api.get("/hub/tidy?version=9", headers=ALICE)).json() == {"error": "tidy has no version 9"}
-    assert (await api.get("/hub/nope", headers=ALICE)).json() == {"error": "No skill named nope on the hub"}
+    assert [(v["version"], v["files"], v["flags"] != []) for v in detail["versions"]] == [
+        (2, 2, True),
+        (1, 1, False),
+    ]
+    assert (await api.get("/hub/tidy?version=9", headers=ALICE)).json() == {
+        "error": "tidy has no version 9"
+    }
+    assert (await api.get("/hub/nope", headers=ALICE)).json() == {
+        "error": "No skill named nope on the hub"
+    }
 
     diff = (await api.get("/hub/tidy/diff?from=1&to=2", headers=ALICE)).json()
     assert [(f["path"], f["change"], f["binary"]) for f in diff["files"]] == [
@@ -331,40 +419,72 @@ async def test_the_hub(skills_api, database):
     assert (await api.post("/hub/tidy/reports", headers=ALICE, json={"reason": "  "})).json() == {
         "error": "Say what's wrong with it"
     }
-    report = await api.post("/hub/tidy/reports", headers=ALICE, json={"reason": "Odd", "version": "2"})
+    report = await api.post(
+        "/hub/tidy/reports", headers=ALICE, json={"reason": "Odd", "version": "2"}
+    )
     assert report.status_code == 201
     shown = (await api.get("/hub/tidy", headers=ALICE)).json()["openReports"]
     assert [(r["id"], r["version"], r["reason"], r["reporter"]) for r in shown] == [
         (report.json()["id"], 2, "Odd", "Alice")
     ]
-    assert (await api.delete("/hub/tidy/reports?id=nope", headers=ALICE)).json() == {"error": "No such report"}
+    assert (await api.delete("/hub/tidy/reports?id=nope", headers=ALICE)).json() == {
+        "error": "No such report"
+    }
     dismissed = await api.delete(f"/hub/tidy/reports?id={report.json()['id']}", headers=ALICE)
     assert dismissed.json() == {"id": report.json()["id"], "dismissed": True}
     assert (await api.post("/hub/tidy/verify", headers=ALICE, json={"version": 1})).json() == {
         "name": "tidy", "version": 1, "verified": True,
     }  # fmt: skip
-    assert (await api.post("/hub/tidy/yank", headers=ALICE, json={})).json() == {"error": "Say which version"}
-    yank = await api.post("/hub/tidy/yank", headers=ALICE, json={"version": 2, "reason": " Broken "})
+    assert (await api.post("/hub/tidy/yank", headers=ALICE, json={})).json() == {
+        "error": "Say which version"
+    }
+    yank = await api.post(
+        "/hub/tidy/yank", headers=ALICE, json={"version": 2, "reason": " Broken "}
+    )
     assert yank.json() == {"name": "tidy", "version": 2, "yanked": True}
-    assert (await api.get("/hub", headers=ALICE)).json()["skills"][0]["latest"] == 1  # the newest not yanked
+    assert (await api.get("/hub", headers=ALICE)).json()["skills"][0][
+        "latest"
+    ] == 1  # the newest not yanked
 
     # The workspace's own folder is in the way of a fork and an install; once it's gone both work.
     assert (await api.post("/hub/tidy/fork", headers=ALICE)).status_code == 409
     assert (await api.put("/hub/tidy/install", headers=ALICE, json={})).json() == {
         "error": "The workspace already has a skill named tidy; rename or remove it to install this one"
     }
-    assert (await api.delete("/skills/tidy", headers=ALICE)).json() == {"name": "tidy", "deleted": 2}
+    assert (await api.delete("/skills/tidy", headers=ALICE)).json() == {
+        "name": "tidy",
+        "deleted": 2,
+    }
     assert (await api.put("/hub/tidy/install", headers=ALICE, json={"version": 2})).json() == {
         "error": "tidy v2 was yanked (Broken), so it can't be installed"
     }
-    assert (await api.put("/hub/tidy/install", headers=ALICE, json={})).json() == {"name": "tidy", "version": 1}
-    hub_skill = next(s for s in (await api.get("/skills", headers=ALICE)).json()["skills"] if s["name"] == "tidy")
+    assert (await api.put("/hub/tidy/install", headers=ALICE, json={})).json() == {
+        "name": "tidy",
+        "version": 1,
+    }
+    hub_skill = next(
+        s for s in (await api.get("/skills", headers=ALICE)).json()["skills"] if s["name"] == "tidy"
+    )
     assert (hub_skill["source"], hub_skill["mode"], hub_skill["path"]) == ("hub", "manual", None)
-    assert hub_skill["hub"] == {"version": 1, "latest": 1, "verified": True, "yanked": False, "yankReason": None}
-    assert (await api.delete("/hub/tidy/install", headers=ALICE)).json() == {"name": "tidy", "installed": None}
-    assert (await api.delete("/hub/tidy/install", headers=ALICE)).json() == {"error": "tidy isn't installed"}
+    assert hub_skill["hub"] == {
+        "version": 1,
+        "latest": 1,
+        "verified": True,
+        "yanked": False,
+        "yankReason": None,
+    }
+    assert (await api.delete("/hub/tidy/install", headers=ALICE)).json() == {
+        "name": "tidy",
+        "installed": None,
+    }
+    assert (await api.delete("/hub/tidy/install", headers=ALICE)).json() == {
+        "error": "tidy isn't installed"
+    }
     forked = await api.post("/hub/tidy/fork", headers=ALICE)
-    assert (forked.status_code, forked.json()) == (201, {"name": "tidy", "path": "skills/tidy/SKILL.md"})
+    assert (forked.status_code, forked.json()) == (
+        201,
+        {"name": "tidy", "path": "skills/tidy/SKILL.md"},
+    )
     got = await api.get("/files/skills/tidy/SKILL.md", headers=ALICE)
     assert got.content == md("tidy", "First version.")
 

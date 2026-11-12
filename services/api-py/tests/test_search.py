@@ -32,7 +32,9 @@ from api_py.semantic import (
 )
 
 pytestmark = [pytest.mark.anyio]
-needs_services = pytest.mark.skipif(not URL or not S3_ENDPOINT, reason="TEST_DATABASE_URL and S3_ENDPOINT are not set")
+needs_services = pytest.mark.skipif(
+    not URL or not S3_ENDPOINT, reason="TEST_DATABASE_URL and S3_ENDPOINT are not set"
+)
 
 
 def test_query_words_and_snippets():
@@ -50,19 +52,30 @@ def test_query_words_and_snippets():
 def test_embedding_settings():
     assert embedding_settings({"EMBEDDING_MODEL": "off"}) is None
     local = embedding_settings({})
-    assert (local.model, local.base_url, local.min_similarity) == (DEFAULT_EMBEDDING_MODEL, None, None)
+    assert (local.model, local.base_url, local.min_similarity) == (
+        DEFAULT_EMBEDDING_MODEL,
+        None,
+        None,
+    )
     api = embedding_settings(
         {"EMBEDDING_BASE_URL": "https://x.test/v1/", "EMBEDDING_MODEL": "m", "EMBEDDING_DIMENSIONS": "256",
          "EMBEDDING_API_KEY": "k", "SEARCH_MIN_SIMILARITY": " 0.3x"}
     )  # fmt: skip
     assert (api.dimensions, api.api_key, api.min_similarity) == (256, "k", 0.3)
     assert api.embedder().source == "m at https://x.test/v1/embeddings"
-    assert isinstance(local.embedder(), LocalEmbedder) and local.embedder().source == DEFAULT_EMBEDDING_MODEL
+    assert (
+        isinstance(local.embedder(), LocalEmbedder)
+        and local.embedder().source == DEFAULT_EMBEDDING_MODEL
+    )
     with pytest.raises(ConfigError, match="EMBEDDING_BASE_URL needs EMBEDDING_MODEL"):
         embedding_settings({"EMBEDDING_BASE_URL": "https://x.test/v1"})
     with pytest.raises(ConfigError, match="EMBEDDING_DIMENSIONS must be a positive whole number"):
         embedding_settings(
-            {"EMBEDDING_BASE_URL": "https://x.test/v1", "EMBEDDING_MODEL": "m", "EMBEDDING_DIMENSIONS": "0"}
+            {
+                "EMBEDDING_BASE_URL": "https://x.test/v1",
+                "EMBEDDING_MODEL": "m",
+                "EMBEDDING_DIMENSIONS": "0",
+            }
         )
     assert default_min_similarity("Xenova/multilingual-e5-small") == 0.82
     assert default_min_similarity("text-embedding-3-small") == 0.5
@@ -80,7 +93,9 @@ async def test_api_embedder():
         data = [{"index": i, "embedding": [3.0, 4.0]} for i in reversed(range(len(body["input"])))]
         return httpx.Response(200, json={"data": data})
 
-    embedder = ApiEmbedder("intfloat/multilingual-e5-large", "https://x.test/v1", "key", 2, httpx.MockTransport(answer))
+    embedder = ApiEmbedder(
+        "intfloat/multilingual-e5-large", "https://x.test/v1", "key", 2, httpx.MockTransport(answer)
+    )
     assert await embedder.embed(["a", "b"], "passage") == [[0.6, 0.8], [0.6, 0.8]]
     assert sent[0] == ("Bearer key", {"model": "intfloat/multilingual-e5-large", "input": ["passage: a", "passage: b"],
                                       "encoding_format": "float", "dimensions": 2})  # fmt: skip
@@ -99,8 +114,12 @@ async def api(database):
 @needs_services
 async def test_search_by_words(api):
     client, _app = api
-    etch = (await client.post("/nodes", headers=ALICE, json={"parentId": None, "name": "Etch"})).json()["id"]
-    module = (await client.post("/nodes", headers=ALICE, json={"parentId": etch, "name": "Module 3"})).json()["id"]
+    etch = (
+        await client.post("/nodes", headers=ALICE, json={"parentId": None, "name": "Etch"})
+    ).json()["id"]
+    module = (
+        await client.post("/nodes", headers=ALICE, json={"parentId": etch, "name": "Module 3"})
+    ).json()["id"]
     text = (
         "Chamber notes.\n\n"
         + "Filler paragraph about other things. " * 40
@@ -125,12 +144,16 @@ async def test_search_by_words(api):
     assert [r["path"] for r in (await client.get("/search?q=plasma", headers=ALICE)).json()["results"]] == [
         "plasma-plan.md", "notes/rate.md",
     ]  # fmt: skip
-    assert [r["path"] for r in (await client.get("/search?q=X-1234", headers=ALICE)).json()["results"]] == [
-        "data/X-1234.csv"
-    ]
+    assert [
+        r["path"] for r in (await client.get("/search?q=X-1234", headers=ALICE)).json()["results"]
+    ] == ["data/X-1234.csv"]
     excluded = (await client.get("/search?q=plasma -quarter", headers=ALICE)).json()["results"]
-    assert [r["path"] for r in excluded] == ["notes/rate.md"]  # the path doesn't hold "plasma -quarter"
-    scoped = (await client.get(f"/search?q=plasma&scope={etch}&limit=1", headers=ALICE)).json()["results"]
+    assert [r["path"] for r in excluded] == [
+        "notes/rate.md"
+    ]  # the path doesn't hold "plasma -quarter"
+    scoped = (await client.get(f"/search?q=plasma&scope={etch}&limit=1", headers=ALICE)).json()[
+        "results"
+    ]
     assert [r["path"] for r in scoped] == ["notes/rate.md"]
     # Files nearer where the user is rank higher.
     anywhere = (await client.get("/search?q=rate fell", headers=ALICE)).json()["results"]
@@ -141,16 +164,26 @@ async def test_search_by_words(api):
     # Bob can't read the root or the node: he finds nothing, and can't search in it.
     assert (await client.get("/search?q=plasma", headers=BOB)).json() == {"results": []}
     hidden = await client.get(f"/search?q=plasma&scope={etch}", headers=BOB)
-    assert (hidden.status_code, hidden.json()) == (400, {"error": "No such knowledge node to search in"})
+    assert (hidden.status_code, hidden.json()) == (
+        400,
+        {"error": "No such knowledge node to search in"},
+    )
     # Once he may read the node, he finds its files and not the root's.
     bob = (await client.get("/access/users", headers=ALICE)).json()["users"][1]["id"]
     grant = {"node": module, "principalType": "user", "principalId": bob, "role": "viewer"}
     await client.post("/access/grants", headers=ALICE, json=grant)
-    assert [r["path"] for r in (await client.get("/search?q=plasma", headers=BOB)).json()["results"]] == [
-        "notes/rate.md"
-    ]
+    assert [
+        r["path"] for r in (await client.get("/search?q=plasma", headers=BOB)).json()["results"]
+    ] == ["notes/rate.md"]
     # Claude through a storage token searches as its user.
-    assert len((await client.get("/search?q=plasma", headers=storage_token("kc|alice"))).json()["results"]) == 2
+    assert (
+        len(
+            (await client.get("/search?q=plasma", headers=storage_token("kc|alice"))).json()[
+                "results"
+            ]
+        )
+        == 2
+    )
 
 
 @needs_services
@@ -196,7 +229,11 @@ class TopicEmbedder:
         self.calls += 1
         out = []
         for text in texts:
-            vector = [float(len(re.findall(t, text.lower()))) for t in TOPICS] + [0.0] * self.extra + [0.1]
+            vector = (
+                [float(len(re.findall(t, text.lower()))) for t in TOPICS]
+                + [0.0] * self.extra
+                + [0.1]
+            )
             norm = sum(x * x for x in vector) ** 0.5
             out.append([x / norm for x in vector])
         return out
@@ -213,8 +250,14 @@ async def test_search_by_meaning(api, database):
     if not await has_pgvector(database):
         pytest.skip("this Postgres has no pgvector")
     client, app = api
-    await client.put("/files/notes/liner.md", headers=ALICE, content=b"Polymer deposition on the liner grows weekly.")
-    await client.put("/files/notes/budget.md", headers=ALICE, content=b"The quarterly budget moved.")
+    await client.put(
+        "/files/notes/liner.md",
+        headers=ALICE,
+        content=b"Polymer deposition on the liner grows weekly.",
+    )
+    await client.put(
+        "/files/notes/budget.md", headers=ALICE, content=b"The quarterly budget moved."
+    )
     await client.put("/files/notes/fab.md", headers=ALICE, content=b"Money for the new fab.")
     storage = app.state.storage
     semantic = SemanticIndex(storage.pool, TopicEmbedder())
@@ -230,7 +273,10 @@ async def test_search_by_meaning(api, database):
     assert (await client.get('/search?q="chamber wall"', headers=ALICE)).json() == {"results": []}
     # Words and meaning together: the word match comes first.
     both = (await client.get("/search?q=budget", headers=ALICE)).json()["results"]
-    assert [(r["path"], r["match"]) for r in both] == [("notes/budget.md", "words"), ("notes/fab.md", "meaning")]
+    assert [(r["path"], r["match"]) for r in both] == [
+        ("notes/budget.md", "words"),
+        ("notes/fab.md", "meaning"),
+    ]
 
     # Another model (or size) starts the vectors over; the same one keeps them.
     async with storage.pool.connection() as conn:

@@ -98,7 +98,9 @@ class AccessService:
             self._local_user = str(row[0])
         return self._local_user
 
-    async def user_for_subject(self, subject: str, email: str | None = None, name: str | None = None) -> str:
+    async def user_for_subject(
+        self, subject: str, email: str | None = None, name: str | None = None
+    ) -> str:
         """
         The user for a login identity, created on first sight. Name and email
         follow the provider. The first user to sign in to a workspace that only
@@ -111,7 +113,9 @@ class AccessService:
             if now - seen >= SEEN_EVERY_SECONDS:
                 self._subjects[subject] = (user_id, now)
                 async with self.pool.connection() as conn:
-                    await conn.execute("UPDATE users SET last_seen_at = now() WHERE id = %s", (user_id,))
+                    await conn.execute(
+                        "UPDATE users SET last_seen_at = now() WHERE id = %s", (user_id,)
+                    )
             return user_id
         async with self.pool.connection() as conn, conn.transaction():
             cur = await conn.execute(
@@ -128,7 +132,9 @@ class AccessService:
             (user_id,) = await cur.fetchone()  # type: ignore[misc]
             user_id = str(user_id)
             # Serialize first sign-ins so exactly one becomes the owner.
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))")
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))"
+            )
             await conn.execute(
                 """
                 INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
@@ -174,7 +180,9 @@ class AccessService:
         if not is_uuid(experiment_id):
             return None
         async with self.pool.connection() as conn:
-            cur = await conn.execute("SELECT experiment_access(%s, %s::uuid)", (user_id, experiment_id))
+            cur = await conn.execute(
+                "SELECT experiment_access(%s, %s::uuid)", (user_id, experiment_id)
+            )
             (found,) = await cur.fetchone()  # type: ignore[misc]
         return found
 
@@ -212,14 +220,18 @@ class AccessService:
             return None
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
-            await cur.execute("SELECT id, subject, email, name FROM users WHERE id = %s", (user_id,))
+            await cur.execute(
+                "SELECT id, subject, email, name FROM users WHERE id = %s", (user_id,)
+            )
             row = await cur.fetchone()
         return {**row, "id": str(row["id"])} if row else None
 
     async def users(self) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
-            await cur.execute("SELECT id, subject, email, name FROM users ORDER BY coalesce(name, email, subject)")
+            await cur.execute(
+                "SELECT id, subject, email, name FROM users ORDER BY coalesce(name, email, subject)"
+            )
             return [{**row, "id": str(row["id"])} for row in await cur.fetchall()]
 
     async def people(self) -> list[dict[str, Any]]:
@@ -281,7 +293,9 @@ class AccessService:
             for gid, parent, name, members in rows
         ]
 
-    async def create_group(self, parent_id: str | None, name: str, in_tx: Callable[..., Awaitable[Any]]) -> str:
+    async def create_group(
+        self, parent_id: str | None, name: str, in_tx: Callable[..., Awaitable[Any]]
+    ) -> str:
         clean = _clean_name(name, "group")
         if parent_id is not None and not is_uuid(parent_id):
             raise AccessError("Parent group not found")
@@ -320,7 +334,8 @@ class AccessService:
             return False
         async with self.pool.connection() as conn, conn.transaction():
             cur = await conn.execute(
-                "DELETE FROM groups WHERE id = %s AND workspace_id = %s", (group_id, self.workspace_id)
+                "DELETE FROM groups WHERE id = %s AND workspace_id = %s",
+                (group_id, self.workspace_id),
             )
             if not cur.rowcount:
                 return False
@@ -333,7 +348,8 @@ class AccessService:
         try:
             async with self.pool.connection() as conn, conn.transaction():
                 cur = await conn.execute(
-                    "SELECT 1 FROM groups WHERE id = %s AND workspace_id = %s", (group_id, self.workspace_id)
+                    "SELECT 1 FROM groups WHERE id = %s AND workspace_id = %s",
+                    (group_id, self.workspace_id),
                 )
                 if not await cur.fetchone():
                     return False
@@ -344,7 +360,8 @@ class AccessService:
                     )
                 else:
                     cur = await conn.execute(
-                        "DELETE FROM group_members WHERE group_id = %s AND user_id = %s", (group_id, user_id)
+                        "DELETE FROM group_members WHERE group_id = %s AND user_id = %s",
+                        (group_id, user_id),
                     )
                 if cur.rowcount:
                     await in_tx(conn)
@@ -404,7 +421,8 @@ class AccessService:
                     cur = await conn.execute("SELECT 1 FROM users WHERE id = %s", (principal_id,))
                 else:
                     cur = await conn.execute(
-                        "SELECT 1 FROM groups WHERE id = %s AND workspace_id = %s", (principal_id, self.workspace_id)
+                        "SELECT 1 FROM groups WHERE id = %s AND workspace_id = %s",
+                        (principal_id, self.workspace_id),
                     )
                 if not await cur.fetchone():
                     raise AccessError(f"Unknown {principal_type}")
@@ -442,12 +460,19 @@ class AccessService:
             return True
 
     async def _keep_an_owner(
-        self, conn: AsyncConnection, node_id: str | None, principal_type: str, principal_id: str, role: str | None
+        self,
+        conn: AsyncConnection,
+        node_id: str | None,
+        principal_type: str,
+        principal_id: str,
+        role: str | None,
     ) -> None:
         """Refuses a change that would leave the workspace without a user who owns it."""
         if node_id is not None or role == "owner":
             return
-        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))")
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))"
+        )
         # Once people sign in, the local user can't, so it doesn't count as an owner.
         local = await self.local_user_id()
         changing_local = principal_type == "user" and principal_id == local
@@ -467,7 +492,9 @@ class AccessService:
             },
         )
         if not await cur.fetchone():
-            raise AccessError("The workspace needs at least one owner; make someone else owner first")
+            raise AccessError(
+                "The workspace needs at least one owner; make someone else owner first"
+            )
 
     async def own_new_node(self, conn: AsyncConnection, user_id: str, node_id: str) -> None:
         """Makes the user owner of a node they just added (013_node_creator_owns.sql)."""
@@ -476,14 +503,18 @@ class AccessService:
             (user_id, node_id, self.workspace_id),
         )
 
-    async def audit(self, conn: AsyncConnection, principal: Principal, action: str, target: dict[str, Any]) -> None:
+    async def audit(
+        self, conn: AsyncConnection, principal: Principal, action: str, target: dict[str, Any]
+    ) -> None:
         recorded = {**target, "via": principal.via} if principal.via else target
         await conn.execute(
             "INSERT INTO audit_log (workspace_id, actor_type, actor_id, action, target) VALUES (%s, %s, %s, %s, %s)",
             (self.workspace_id, principal.actor, principal.user_id, action, Jsonb(recorded)),
         )
 
-    async def audit_log(self, limit: int = 100, kinds: list[str] | None = None) -> list[dict[str, Any]]:
+    async def audit_log(
+        self, limit: int = 100, kinds: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         """Newest first; `kinds` keeps only actions starting with those (e.g. "group" for group.*)."""
         where = "AND split_part(action, '.', 1) = ANY(%(kinds)s)" if kinds else ""
         async with self.pool.connection() as conn:

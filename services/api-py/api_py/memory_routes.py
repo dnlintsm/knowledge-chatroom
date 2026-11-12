@@ -36,7 +36,15 @@ from .proxy import forward
 from .run_report import js_json
 from .session import Session
 from .skills_routes import js_to_number
-from .storage_routes import ALL_METHODS, _MalformedPath, decode_component, first_param, parse_json, raw_path, read_body
+from .storage_routes import (
+    ALL_METHODS,
+    _MalformedPath,
+    decode_component,
+    first_param,
+    parse_json,
+    raw_path,
+    read_body,
+)
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -48,7 +56,10 @@ MAX_JSON_BYTES = 64 * 1024
 
 def send(status: int, body: Any) -> Response:
     return Response(
-        js_json(body), status_code=status, media_type="application/json", headers={"Cache-Control": "no-store"}
+        js_json(body),
+        status_code=status,
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
     )
 
 

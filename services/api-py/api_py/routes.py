@@ -14,6 +14,21 @@ from . import memory_routes, skills_routes, storage_routes, tools
 # Steps 2 to 6: /access, /nodes, /files, /experiments, /proposals, /search and /chats (storage_routes.py);
 # step 7: /skills and /hub (skills_routes.py), and /tools (tools.py; no storage needed);
 # step 8: /memory (memory_routes.py, with MEMORY=on).
-ROUTERS: list[APIRouter] = [storage_routes.router, skills_routes.router, tools.router, memory_routes.router]
+ROUTERS: list[APIRouter] = [
+    storage_routes.router,
+    skills_routes.router,
+    tools.router,
+    memory_routes.router,
+]
 # The storage API's sections served here once the database is ready.
-STORAGE_PREFIXES = ("/access", "/nodes", "/files", "/experiments", "/proposals", "/search", "/chats", "/skills", "/hub")
+STORAGE_PREFIXES = (
+    "/access",
+    "/nodes",
+    "/files",
+    "/experiments",
+    "/proposals",
+    "/search",
+    "/chats",
+    "/skills",
+    "/hub",
+)

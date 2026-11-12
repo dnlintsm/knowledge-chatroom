@@ -36,7 +36,12 @@ LAB = {
     "headers": {"Authorization": "Bearer ${LAB_KEY}"},
     "forwardIdentity": True,
     "storageAccess": True,
-    "ui": {"label": "Papers", "chip": "Paper", "icon": "book", "tools": ["search", "save", "search"]},
+    "ui": {
+        "label": "Papers",
+        "chip": "Paper",
+        "icon": "book",
+        "tools": ["search", "save", "search"],
+    },
 }
 
 
@@ -62,7 +67,9 @@ def test_mcp_servers_unset_means_typescript_keeps_tools():
 
 def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCaptureFixture):
     caplog.set_level(logging.WARNING, "api_py")
-    found = servers({"mcpServers": {"lab": LAB, "local": {"type": "stdio", "command": "lab-mcp"}}}, LAB_KEY="k1")
+    found = servers(
+        {"mcpServers": {"lab": LAB, "local": {"type": "stdio", "command": "lab-mcp"}}}, LAB_KEY="k1"
+    )
     assert list(found) == ["lab", "local"]
     lab = found["lab"]
     assert lab.headers == {"Authorization": "Bearer k1"}
@@ -86,13 +93,21 @@ def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCapture
     # A file path, and a bare map; integer-like names come first, as Object.entries gives them.
     file = tmp_path / "mcp.json"
     file.write_text(
-        json.dumps({"b": {"url": "http://b/mcp"}, "10": {"url": "http://t/mcp"}, "2": {"url": "http://t/mcp"}})
+        json.dumps(
+            {
+                "b": {"url": "http://b/mcp"},
+                "10": {"url": "http://t/mcp"},
+                "2": {"url": "http://t/mcp"},
+            }
+        )
     )
     found = servers_from_env({"MCP_SERVERS": f" {file} "})
     assert found is not None and list(found) == ["2", "10", "b"]
     assert found["b"].type == "http" and found["b"].ui is None
     # The chip defaults to the label; labels are trimmed.
-    ui = servers({"x": {"url": "https://x/mcp", "ui": {"label": "  Lab  ", "mode": "manual"}}})["x"].ui
+    ui = servers({"x": {"url": "https://x/mcp", "ui": {"label": "  Lab  ", "mode": "manual"}}})[
+        "x"
+    ].ui
     assert ui and (ui.label, ui.chip, ui.mode, ui.tools) == ("Lab", "Lab", "manual", ())
 
 
@@ -154,7 +169,11 @@ async def api(
 ) -> AsyncIterator[httpx.AsyncClient]:
     forwarded.clear()
     settings = Settings(
-        ts_agent_url="http://ts", database_url=None, auth_secret=secret, migrations_dir=Path("."), tools=tools
+        ts_agent_url="http://ts",
+        database_url=None,
+        auth_secret=secret,
+        migrations_dir=Path("."),
+        tools=tools,
     )
     app = create_app(settings, transport=httpx.MockTransport(typescript))
     if call:
@@ -181,7 +200,9 @@ class Recorder:
 
 
 def lab_tools() -> ToolsSettings:
-    return ToolsSettings(servers=servers({"lab": LAB}, LAB_KEY="k1"), timeout=7, storage_token_seconds=600)
+    return ToolsSettings(
+        servers=servers({"lab": LAB}, LAB_KEY="k1"), timeout=7, storage_token_seconds=600
+    )
 
 
 async def test_menu():
@@ -208,27 +229,49 @@ async def test_refusals():
             ("POST", "/tools/lab/search/more", 404, "Not found"),
             ("GET", "/tools/lab/search", 405, "Method not allowed"),
             ("POST", "/tools/nope/search", 404, 'No tool server "nope" in the menu'),
-            ("POST", "/tools/lab/delete", 403, "delete isn't one of lab's tools the app may call (ui.tools)"),
+            (
+                "POST",
+                "/tools/lab/delete",
+                403,
+                "delete isn't one of lab's tools the app may call (ui.tools)",
+            ),
             ("POST", "/tools/lab/search", 401, "Sign in first"),
         ]
         for method, path, status, error in cases:
             answer = await client.request(method, path, headers=ALICE if status != 401 else {})
             assert (answer.status_code, answer.json()) == (status, {"error": error}), path
-        for body in (b"[]", b"{nope", b'{"arguments": [1]}', b'{"arguments": "x"}', b"1", b"x" * (64 * 1024 + 1)):
+        for body in (
+            b"[]",
+            b"{nope",
+            b'{"arguments": [1]}',
+            b'{"arguments": "x"}',
+            b"1",
+            b"x" * (64 * 1024 + 1),
+        ):
             answer = await client.post("/tools/lab/search", headers=ALICE, content=body)
-            assert (answer.status_code, answer.json()) == (400, {"error": "Expected {arguments: {...}}"}), body[:20]
+            assert (answer.status_code, answer.json()) == (
+                400,
+                {"error": "Expected {arguments: {...}}"},
+            ), body[:20]
     assert not recorder.calls and not forwarded
 
 
 async def test_a_call_carries_the_users_tokens():
     recorder = Recorder(ToolAnswer({"hits": [1]}, '{"hits": [1]}', False))
     async with api(lab_tools(), call=recorder) as client:
-        answer = await client.post("/tools/lab/search", headers=ALICE, json={"arguments": {"q": "cells"}})
-        assert (answer.status_code, answer.json()) == (200, {"result": {"hits": [1]}, "text": '{"hits": [1]}'})
+        answer = await client.post(
+            "/tools/lab/search", headers=ALICE, json={"arguments": {"q": "cells"}}
+        )
+        assert (answer.status_code, answer.json()) == (
+            200,
+            {"result": {"hits": [1]}, "text": '{"hits": [1]}'},
+        )
         assert answer.headers["cache-control"] == "no-store"
         # No body, and {arguments: null}, are no arguments.
         assert (await client.post("/tools/lab/save", headers=ALICE)).status_code == 200
-        assert (await client.post("/tools/lab/save", headers=ALICE, json={"arguments": None})).status_code == 200
+        assert (
+            await client.post("/tools/lab/save", headers=ALICE, json={"arguments": None})
+        ).status_code == 200
     (name, tool, args, headers, timeout), *rest = recorder.calls
     assert (name, tool, args, timeout) == ("lab", "search", {"q": "cells"}, 7)
     assert [call[2] for call in rest] == [{}, {}]
@@ -251,21 +294,29 @@ async def test_without_login_no_tokens_are_sent():
 
 async def test_errors_and_unreachable_servers():
     async with api(
-        lab_tools(), call=Recorder(ToolAnswer(None, "Error executing tool search: no such paper", True))
+        lab_tools(),
+        call=Recorder(ToolAnswer(None, "Error executing tool search: no such paper", True)),
     ) as c:
         answer = await c.post("/tools/lab/search", headers=ALICE)
         assert (answer.status_code, answer.json()) == (422, {"error": "no such paper"})
     async with api(lab_tools(), call=Recorder(ToolAnswer(None, "", True))) as c:
-        assert (await c.post("/tools/lab/search", headers=ALICE)).json() == {"error": "search failed"}
+        assert (await c.post("/tools/lab/search", headers=ALICE)).json() == {
+            "error": "search failed"
+        }
     async with api(lab_tools(), call=Recorder(ConnectionError("refused"))) as c:
         answer = await c.post("/tools/lab/search", headers=ALICE)
-        assert (answer.status_code, answer.json()) == (502, {"error": "Papers isn't reachable right now"})
+        assert (answer.status_code, answer.json()) == (
+            502,
+            {"error": "Papers isn't reachable right now"},
+        )
 
 
 async def test_without_mcp_servers_typescript_answers():
     async with api(None) as client:
         assert (await client.get("/tools", headers=ALICE)).json() == {"from": "typescript"}
-        assert (await client.post("/tools/lab/search", headers=ALICE)).json() == {"from": "typescript"}
+        assert (await client.post("/tools/lab/search", headers=ALICE)).json() == {
+            "from": "typescript"
+        }
         assert (await client.get("/toolsx", headers=ALICE)).json() == {"from": "typescript"}
     assert forwarded == ["GET /tools", "POST /tools/lab/search", "GET /toolsx"]
 
@@ -300,7 +351,9 @@ async def mcp_server(transport: str) -> AsyncIterator[tuple[str, list[dict[str, 
             seen.append({k.decode(): v.decode() for k, v in scope["headers"]})
         await inner(scope, receive, send)
 
-    server = uvicorn.Server(uvicorn.Config(recording, host="127.0.0.1", port=0, log_level="warning"))
+    server = uvicorn.Server(
+        uvicorn.Config(recording, host="127.0.0.1", port=0, log_level="warning")
+    )
     serving = asyncio.create_task(server.serve())
     try:
         while not server.started:
@@ -315,10 +368,17 @@ async def mcp_server(transport: str) -> AsyncIterator[tuple[str, list[dict[str, 
 @pytest.mark.parametrize("transport", ["http", "sse"])
 async def test_a_real_mcp_server(transport: str):
     async with mcp_server(transport) as (url, seen):
-        config = {**LAB, "type": transport, "url": url, "ui": {"label": "Papers", "tools": ["search", "plain", "boom"]}}
+        config = {
+            **LAB,
+            "type": transport,
+            "url": url,
+            "ui": {"label": "Papers", "tools": ["search", "plain", "boom"]},
+        }
         tools = ToolsSettings(servers=servers({"lab": config}, LAB_KEY="k1"), timeout=10)
         async with api(tools) as client:
-            answer = await client.post("/tools/lab/search", headers=ALICE, json={"arguments": {"query": "cells"}})
+            answer = await client.post(
+                "/tools/lab/search", headers=ALICE, json={"arguments": {"query": "cells"}}
+            )
             assert answer.status_code == 200, answer.text
             assert answer.json()["result"] == {"hits": ["CELLS"]}
             plain = (await client.post("/tools/lab/plain", headers=ALICE)).json()
@@ -338,4 +398,7 @@ async def test_a_server_that_is_down():
     tools = ToolsSettings(servers=servers({"lab": config}, LAB_KEY="k1"), timeout=5)
     async with api(tools) as client:
         answer = await client.post("/tools/lab/search", headers=ALICE)
-        assert (answer.status_code, answer.json()) == (502, {"error": "Papers isn't reachable right now"})
+        assert (answer.status_code, answer.json()) == (
+            502,
+            {"error": "Papers isn't reachable right now"},
+        )

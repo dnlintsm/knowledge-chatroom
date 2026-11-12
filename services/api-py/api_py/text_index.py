@@ -26,7 +26,9 @@ def extract_text(data: bytes) -> str | None:
     """Valid UTF-8 without NUL characters (a character cut at the size limit is dropped); None otherwise."""
     try:
         # TextDecoder("utf-8", {fatal: true}).decode(..., {stream: true}): strict, BOM dropped.
-        text = codecs.getincrementaldecoder("utf-8-sig")("strict").decode(data[:MAX_INDEX_BYTES], final=False)
+        text = codecs.getincrementaldecoder("utf-8-sig")("strict").decode(
+            data[:MAX_INDEX_BYTES], final=False
+        )
     except UnicodeDecodeError:
         return None
     return None if "\x00" in text else text

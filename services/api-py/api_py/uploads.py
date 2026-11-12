@@ -229,7 +229,9 @@ class _Reader:
             part.mime = content_type[0]
             if "charset" in content_type[1]:
                 part.charset = _charset(content_type[1]["charset"]) or "utf-8"
-        part.kind = "file" if filename is not None or part.mime == "application/octet-stream" else "field"
+        part.kind = (
+            "file" if filename is not None or part.mime == "application/octet-stream" else "field"
+        )
 
     def _data(self, data: bytes, start: int, end: int) -> None:
         part = self.part
@@ -251,7 +253,9 @@ class _Reader:
     def _check_field(part: _Part) -> None:
         if part.name != "meta":
             name = "undefined" if part.name is None else part.name
-            raise UploadError(400, f'"{name}" isn\'t a file: put everything but files in the "meta" part')
+            raise UploadError(
+                400, f'"{name}" isn\'t a file: put everything but files in the "meta" part'
+            )
 
     def _end(self) -> None:
         part = self.part

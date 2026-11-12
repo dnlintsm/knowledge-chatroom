@@ -40,5 +40,7 @@ async def _user_for(access: AccessService, claims: dict) -> str:
     email = claims.get("email")
     name = claims.get("name")
     return await access.user_for_subject(
-        claims["sub"], email if isinstance(email, str) else None, name if isinstance(name, str) else None
+        claims["sub"],
+        email if isinstance(email, str) else None,
+        name if isinstance(name, str) else None,
     )

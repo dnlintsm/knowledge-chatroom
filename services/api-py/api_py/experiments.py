@@ -66,7 +66,9 @@ def clean_input(given: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ExperimentError(f'{key} must be an object, e.g. {{"temperature": 60}}')
         if utf16_len(js_json(value)) > MAX_JSON_CHARS:
-            raise ExperimentError(f"{key} is too large (at most {MAX_JSON_CHARS} characters of JSON)")
+            raise ExperimentError(
+                f"{key} is too large (at most {MAX_JSON_CHARS} characters of JSON)"
+            )
         out[key] = value
     if "status" in given:
         if given["status"] not in STATUSES:
@@ -122,7 +124,9 @@ def _to_experiment(row: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-async def lock_live_experiment(conn: AsyncConnection, workspace_id: str, experiment_id: str) -> None:
+async def lock_live_experiment(
+    conn: AsyncConnection, workspace_id: str, experiment_id: str
+) -> None:
     """Inside a file write: fails unless the experiment is live, and holds it so a concurrent delete waits."""
     cur = await conn.execute(
         "SELECT 1 FROM experiments WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL FOR SHARE",
@@ -160,7 +164,9 @@ async def list_experiments(
     return [_to_experiment(row) for row in await cur.fetchall()]
 
 
-async def get(conn: AsyncConnection, workspace_id: str, user_id: str, experiment_id: str) -> dict[str, Any] | None:
+async def get(
+    conn: AsyncConnection, workspace_id: str, user_id: str, experiment_id: str
+) -> dict[str, Any] | None:
     if not is_uuid(experiment_id):
         return None
     cur = await conn.execute(
@@ -199,7 +205,9 @@ async def create(
     if node_id is not None and not is_uuid(node_id):
         raise NodeNotFoundError("Node not found")
     if chosen_id is not None and not is_uuid(chosen_id):
-        raise ExperimentError("An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b")
+        raise ExperimentError(
+            "An experiment id must be a UUID, e.g. 0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b"
+        )
     ws = storage.workspace_id
     # Chosen here, not by the database: with row-level security the new row
     # can't be read back in the statement that adds it.
@@ -232,7 +240,9 @@ async def create(
                 await _link_inputs(conn, ws, new_id, inputs)
             if in_tx:
                 await in_tx(conn, new_id)
-            await storage.notify(conn, {"op": "experiment", "change": "create", "id": new_id, "node": node_id})
+            await storage.notify(
+                conn, {"op": "experiment", "change": "create", "id": new_id, "node": node_id}
+            )
     except errors.RaiseException as err:
         if err.diag.message_primary == "Node not found":
             raise NodeNotFoundError("Node not found") from err
@@ -255,7 +265,9 @@ async def id_taken(conn: AsyncConnection, experiment_id: str) -> bool:
     return await cur.fetchone() is not None
 
 
-async def _copy_node_files(conn: AsyncConnection, workspace_id: str, node_id: str, experiment_id: str) -> None:
+async def _copy_node_files(
+    conn: AsyncConnection, workspace_id: str, node_id: str, experiment_id: str
+) -> None:
     """The node's live files into the experiment, each at its current version; bytes are shared."""
     await conn.execute(
         """
@@ -305,7 +317,9 @@ async def _link_inputs(
         )
         file = await cur.fetchone()
         if not file:
-            raise ExperimentError(f"The run already has a file at {path}; pick another name for this input")
+            raise ExperimentError(
+                f"The run already has a file at {path}; pick another name for this input"
+            )
         cur = await conn.execute(
             """
             INSERT INTO file_versions (file_id, blob_sha256, size, mime, author_type, author_id, created_at)
@@ -348,7 +362,9 @@ async def add_inputs(
         node, state, status = before
         # Checked again under the lock: the run may have finished or been archived meanwhile.
         if state in ("done", "failed"):
-            raise ExperimentError(f"This run already finished ({state}); start a new run to add inputs")
+            raise ExperimentError(
+                f"This run already finished ({state}); start a new run to add inputs"
+            )
         if status == "archived":
             raise ExperimentError("This experiment is archived; restore it to change it")
         linked = await _link_inputs(conn, storage.workspace_id, experiment_id, inputs)
@@ -365,10 +381,19 @@ async def add_inputs(
         # Open copies of the run pick up the new files, and its record.
         for file in linked:
             await storage.notify(
-                conn, {"op": "write", "node": None, "experiment": experiment_id, **file, "author": "user"}
+                conn,
+                {
+                    "op": "write",
+                    "node": None,
+                    "experiment": experiment_id,
+                    **file,
+                    "author": "user",
+                },
             )
         node_id = str(node) if node else None
-        await storage.notify(conn, {"op": "experiment", "change": "update", "id": experiment_id, "node": node_id})
+        await storage.notify(
+            conn, {"op": "experiment", "change": "update", "id": experiment_id, "node": node_id}
+        )
         return True
 
 
@@ -412,11 +437,15 @@ async def update(
             await in_tx(conn)
         change = "status" if "status" in fields and fields["status"] != status else "update"
         node_id = str(node) if node else None
-        await storage.notify(conn, {"op": "experiment", "change": change, "id": experiment_id, "node": node_id})
+        await storage.notify(
+            conn, {"op": "experiment", "change": change, "id": experiment_id, "node": node_id}
+        )
         return True
 
 
-async def remove(conn: AsyncConnection, storage: Storage, experiment_id: str, in_tx: InTx | None = None) -> bool:
+async def remove(
+    conn: AsyncConnection, storage: Storage, experiment_id: str, in_tx: InTx | None = None
+) -> bool:
     """Soft-deletes the experiment and its files; history stays."""
     if not is_uuid(experiment_id):
         return False
@@ -435,5 +464,7 @@ async def remove(conn: AsyncConnection, storage: Storage, experiment_id: str, in
         if in_tx:
             await in_tx(conn)
         node_id = str(gone[0]) if gone[0] else None
-        await storage.notify(conn, {"op": "experiment", "change": "delete", "id": experiment_id, "node": node_id})
+        await storage.notify(
+            conn, {"op": "experiment", "change": "delete", "id": experiment_id, "node": node_id}
+        )
         return True

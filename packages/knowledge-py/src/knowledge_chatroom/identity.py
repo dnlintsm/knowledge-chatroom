@@ -45,7 +45,9 @@ def public_key(value: str) -> Ed25519PublicKey:
     return Ed25519PublicKey.from_public_bytes(_b64decode(value.strip()))
 
 
-def verify(token: str, key: Ed25519PublicKey, audience: str | None, now: float | None = None) -> User | None:
+def verify(
+    token: str, key: Ed25519PublicKey, audience: str | None, now: float | None = None
+) -> User | None:
     """The user in a token signed for `audience`; None if it is forged, expired or for someone else."""
     parts = token.split(".")
     if len(parts) != 3 or parts[0] != "v2":
@@ -68,7 +70,9 @@ def verify(token: str, key: Ed25519PublicKey, audience: str | None, now: float |
     return User(sub=sub, email=payload.get("email"), name=payload.get("name"))
 
 
-def caller(headers: dict[str, str] | None, key: Ed25519PublicKey | None, audience: str) -> User | None:
+def caller(
+    headers: dict[str, str] | None, key: Ed25519PublicKey | None, audience: str
+) -> User | None:
     """The calling user: the local user without login, None when the call can't prove one.
 
     A header without a configured key is refused, not ignored: it means login is
