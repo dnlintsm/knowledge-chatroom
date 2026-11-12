@@ -41,7 +41,7 @@ Run the Python API server (`services/api-py`, [README](../services/api-py/README
 front of the agent, with `TS_AGENT_URL` pointing at the agent and the same `DATABASE_URL`,
 `AUTH_MODE` and `AUTH_SECRET`. Point `LOCAL_AGENT_URL` and the MCP servers'
 `KNOWLEDGE_STORAGE_URL` at the API server. The agent's routes are moving to it one group
-at a time (issue #190). It serves `/access`, `/nodes`, `/files`, `/experiments`, `/proposals`, `/search`, `/chats`, `/skills`, `/hub`, `/tools` and `/memory` (all but import and `/memory/agent`) itself and passes the rest
+at a time (issue #190). It serves `/access`, `/nodes`, `/files`, `/experiments`, `/proposals`, `/search`, `/chats`, `/skills`, `/hub`, `/tools` and `/memory` (all but `/memory/agent`) itself and passes the rest
 through. The agent keeps serving every route too until phase 4, so an install without
 the API server keeps working, but new work lands in Python. It serves `/files` too, so
 give it the same `S3_*` settings (including `S3_PUBLIC_URL`) and `MAX_UPLOAD_BYTES` as
@@ -55,7 +55,9 @@ It serves the skills API and the skill hub too, so give it the same `HUB_ADMINS`
 `TOOLS_CALL_TIMEOUT_MS` and `STORAGE_TOKEN_SECONDS`, if you set them). The menu's servers
 must then be reachable from the API server too. It serves memory (own and shared notes,
 memory packs) when `MEMORY=on` is set for it, so give it the same `MEMORY` as the agent;
-memory packs' verify and yank follow its `HUB_ADMINS`.
+memory packs' verify and yank follow its `HUB_ADMINS`. Importing plain-text memory asks
+the small model, so give it the agent's `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
+`ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL` too.
 
 Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
 and `AGENT_URL` only when the chat uses a remote backend

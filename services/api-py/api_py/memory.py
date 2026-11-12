@@ -10,7 +10,8 @@ workspace owners included.
 Every change is a version. Claude's changes are also events, which the chat
 shows and the user can undo; Claude's deletes only archive.
 
-What a chat run uses (the index, reads, search, Claude's proposals) and what
+Claude's proposals go to the user's inbox (`propose`): imports always do
+(memory_import.py). What a chat run uses (the index, reads, search) and what
 the background learner uses stay on the TypeScript server until the later
 parts of #190's step 8.
 """
@@ -30,6 +31,7 @@ from psycopg.rows import dict_row
 
 from .access import iso
 from .paths import JS_SPACE, js_trim, utf16_len
+from .text_index import from_units, to_units
 
 MEMORY_TYPES = ("preference", "profile", "project", "reference", "feedback")
 # Notes per user (archived ones not counted).
@@ -40,16 +42,23 @@ MAX_DESCRIPTION = 300
 INDEX_CHARS = 6_000
 # The run id the background learner records its changes under.
 LEARN_RUN = "learn"
+# Changes waiting in a user's inbox at most.
+MAX_INBOX = 50
+INBOX_OPS = ("add", "update", "delete")
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _ID = re.compile(r"[0-9a-fA-F-]{36}")
 _SPACES = re.compile(f"[{JS_SPACE}]+")
+_INBOX_COLUMNS = "id::text AS id, op, name, description, type, body, base_version, source, thread_id, reason, created_at"
 _COLUMNS = (
     "id::text AS id, name, description, type, body, version, created_by, updated_by, "
     "archived_at, created_at, updated_at, last_used_at"
 )
 
 Scope = Callable[[], AbstractAsyncContextManager[AsyncConnection]]
+# MemoryService.list shadows the builtin in the class body's later annotations.
+Rows = list[dict[str, Any]]
+_NOT_SLUG = re.compile(r"[^a-z0-9]+")
 
 
 class MemoryError_(ValueError):
@@ -77,6 +86,41 @@ def check_name(name: Any) -> str:
             "A memory's name is lowercase letters, digits and dashes, at most 64 (e.g. writing-style)"
         )
     return name
+
+
+def slugify(text: str) -> str:
+    """A name from free text: "Writing style!" -> "writing-style"."""
+    slug = _NOT_SLUG.sub("-", text.lower()).strip("-")
+    return slug[:64].rstrip("-")
+
+
+def clean_reason(reason: Any) -> str | None:
+    """reason?.replace(/\\s+/g, " ").trim().slice(0, 500) || null."""
+    if not isinstance(reason, str):
+        return None
+    return from_units(to_units(js_trim(_SPACES.sub(" ", reason)))[:500]) or None
+
+
+def _js_string(value: Any) -> str:
+    """String(value), for a name that isn't one."""
+    if value is None:
+        return "undefined"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int | float):
+        from .run_report import js_number
+
+        return js_number(value)
+    if isinstance(value, list):
+        return ",".join("" if v is None else _js_string(v) for v in value)
+    return "[object Object]"
+
+
+def _date(value: Any) -> str:
+    """toISOString().slice(0, 10): the UTC date."""
+    return (iso(value) or "")[:10]
 
 
 def check_input(given: dict[str, Any]) -> dict[str, str]:
@@ -543,6 +587,121 @@ class MemoryService:
                 (self.ws, self.user),
             )
         return [_inbox_item(r) for r in rows]
+
+    async def propose(
+        self,
+        change: dict[str, Any],
+        source: str,
+        thread_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Puts a change in the user's inbox instead of making it: `change` is
+        {op, name, input?, reason?, baseVersion?}. A pending change to the same
+        note with the same op is replaced, so the inbox holds the latest one.
+        """
+        op, name = change.get("op"), change.get("name")
+        if op not in INBOX_OPS:
+            raise MemoryError_("op is add, update or delete")
+        if not isinstance(name, str) or not valid_name(name):
+            raise MemoryError_(f"Invalid memory name: {_js_string(name)}")
+        clean = None if op == "delete" else check_input(change.get("input") or {})
+        reason = clean_reason(change.get("reason"))
+        async with self.scoped() as conn:
+            row = await self._row(conn, name)
+            if op == "add" and row and not row["archived_at"]:
+                raise MemoryConflictError(f"A memory named {name} already exists")
+            if op != "add" and (not row or row["archived_at"]):
+                raise MemoryNotFoundError(name)
+            base_given = change.get("baseVersion")
+            if op != "add" and base_given is not None and row and row["version"] != base_given:
+                raise MemoryConflictError(f"{name} changed since")
+            base = None if op == "add" or not row else row["version"]
+            content = (
+                (clean["description"], clean["type"], clean["body"])
+                if clean
+                else (None, None, None)
+            )
+            pending = await _one(
+                conn,
+                """
+                SELECT id FROM memory_inbox
+                WHERE workspace_id = %s AND user_id = %s AND status = 'pending' AND name = %s AND op = %s
+                FOR UPDATE""",
+                (self.ws, self.user, name, op),
+            )
+            if pending:
+                item = await _one(
+                    conn,
+                    f"""
+                    UPDATE memory_inbox SET
+                      description = %s, type = %s, body = %s, base_version = %s, source = %s,
+                      thread_id = %s, reason = %s, created_at = now()
+                    WHERE id = %s RETURNING {_INBOX_COLUMNS}""",
+                    (*content, base, source, thread_id, reason, pending["id"]),
+                )
+            else:
+                counted = await _one(
+                    conn,
+                    """
+                    SELECT count(*)::int AS count FROM memory_inbox
+                    WHERE workspace_id = %s AND user_id = %s AND status = 'pending'""",
+                    (self.ws, self.user),
+                )
+                if counted and counted["count"] >= MAX_INBOX:
+                    raise MemoryError_(
+                        f"The memory inbox has {MAX_INBOX} changes waiting; review some first"
+                    )
+                item = await _one(
+                    conn,
+                    f"""
+                    INSERT INTO memory_inbox
+                      (workspace_id, user_id, op, name, description, type, body, base_version, source,
+                       thread_id, reason)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING {_INBOX_COLUMNS}""",
+                    (self.ws, self.user, op, name, *content, base, source, thread_id, reason),
+                )
+        assert item is not None
+        return _inbox_item(item)
+
+    async def notes_for_learning(self, max_chars: int = 24_000) -> tuple[str, dict[str, int]]:
+        """
+        The notes in use, in full where they fit in `max_chars`, for a model to
+        compare new memory against. The map has the notes shown in full, at the
+        version shown: only those may be changed.
+        """
+        async with self.scoped() as conn:
+            rows = await _rows(
+                conn,
+                f"""
+                SELECT {_COLUMNS} FROM memories
+                WHERE workspace_id = %s AND user_id = %s AND archived_at IS NULL
+                ORDER BY coalesce(last_used_at, updated_at) DESC, name""",
+                (self.ws, self.user),
+            )
+        parts: list[str] = []
+        versions: dict[str, int] = {}
+        size = 0
+        for row in rows:
+            used = _date(row["last_used_at"]) if row["last_used_at"] else "never"
+            head = (
+                f'<note name="{row["name"]}" type="{row["type"]}" updated="{_date(row["updated_at"])}" '
+                f'last_used="{used}">'
+            )
+            full = f"{head}\n{row['description']}\n\n{row['body']}\n</note>"
+            whole = size + utf16_len(full) <= max_chars
+            text = (
+                full
+                if whole
+                else f"{head}\n{row['description']}\n(body left out for length; leave this note as it is)\n</note>"
+            )
+            if size + utf16_len(text) > max_chars:
+                break
+            parts.append(text)
+            if whole:
+                versions[row["name"]] = row["version"]
+            size += utf16_len(text)
+        return "\n".join(parts), versions
 
     async def accept(self, item_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """

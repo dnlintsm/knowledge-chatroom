@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from psycopg_pool import AsyncConnectionPool
 
-from . import db
+from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
 from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
@@ -123,6 +123,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.http = client(settings.ts_agent_url, transport)
         app.state.settings = settings
+        # The small model's Messages API, for /memory/import (llm.py); tests swap it.
+        app.state.create_message = llm.message_creator()
         app.state.pool = None
         app.state.schema = None
         # The ported storage routes; None while they pass through (no database, or not ready yet).
