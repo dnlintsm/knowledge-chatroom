@@ -128,3 +128,4 @@ create and drop databases. The file tests also need an S3-compatible store: add
 of its own. `pnpm test:conformance` and `pnpm test:e2e:storage` and
 `:login` run through api-py. Use `CONFORMANCE_TARGET=ts` or `E2E_API_PY=off` to test
 the TypeScript server alone.
+<!-- gate test: api-py only -->
