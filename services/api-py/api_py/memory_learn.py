@@ -36,7 +36,7 @@ from .memory import (
 )
 from .session import Session
 from .storage import Storage
-from .text_index import from_units, to_units
+from .suggest import transcript
 
 logger = logging.getLogger("api_py")
 
@@ -49,9 +49,6 @@ LOOKBACK_DAYS = 3
 BATCH = 5
 SWEEP_SECONDS = 60.0
 DEFAULT_IDLE_MINUTES = 10.0
-# Enough of the conversation to learn from (suggest.ts's transcript).
-MAX_TRANSCRIPT_CHARS = 12_000
-MAX_MESSAGE_CHARS = 2_000
 
 
 SYSTEM = f"""You maintain the notes an assistant (Claude) keeps about one user across chats in Knowledge Chatroom, a workspace where Claude works on the user's files, experiment runs and knowledge tree. You get the user's current notes and one recent chat. Decide what, if anything, to change so later chats go better.
@@ -105,63 +102,6 @@ TOOL = {
         "required": ["changes"],
     },
 }
-
-
-def _clip(text: str, most: int) -> str:
-    units = to_units(text)
-    return from_units(units[:most]) + "…" if len(units) > most else text
-
-
-def _text_of(content: Any) -> str:
-    """textOf in suggest.ts: a string, or the text parts' text."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    texts = (
-        part["text"] if isinstance(part, dict) and isinstance(part.get("text"), str) else ""
-        for part in content
-    )
-    return "\n".join(t for t in texts if t)
-
-
-def _line(message: Any) -> str | None:
-    if not isinstance(message, dict):
-        return None
-    role = message.get("role")
-    if role == "user":
-        return f"User: {_clip(_text_of(message.get('content')), MAX_MESSAGE_CHARS)}"
-    if role == "assistant":
-        said = _text_of(message.get("content"))
-        calls = message.get("toolCalls") or []
-        used = [
-            str((call.get("function") or {}).get("name"))
-            for call in (calls if isinstance(calls, list) else [])
-            if isinstance(call, dict)
-        ]
-        parts = [
-            f"Claude: {_clip(said, MAX_MESSAGE_CHARS)}" if said else "",
-            f"(Claude used {', '.join(used)})" if used else "",
-        ]
-        return "\n".join(p for p in parts if p) or None
-    # Tool results, system and other messages: the calls above say enough.
-    return None
-
-
-def transcript(messages: list[Any]) -> str:
-    """The newest lines of the conversation that fit (transcript in suggest.ts)."""
-    lines: list[str] = []
-    size = 0
-    for message in reversed(messages):
-        text = _line(message)
-        if not text:
-            continue
-        length = len(to_units(text))
-        if size + length > MAX_TRANSCRIPT_CHARS and lines:
-            break
-        lines.insert(0, text)
-        size += length
-    return "\n\n".join(lines)
 
 
 async def propose_changes(

@@ -7,6 +7,9 @@
  * instead with one plain Messages API call on a small model: it reads the
  * conversation and the workspace context the browser sends and streams back
  * just that tool call as AG-UI events. Nothing is stored and no tools run.
+ *
+ * services/api-py/api_py/suggest.py answers it the same way when the Python
+ * API server is in front (issue #190, step 9); change both together.
  */
 import { randomUUID } from "node:crypto";
 

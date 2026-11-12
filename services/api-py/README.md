@@ -28,6 +28,7 @@ What it serves itself so far:
 | 8b | The memory overview (`GET /memory`), shared notes at the workspace, a node or a group (share, edit, delete, modes, proposals and their decisions), and memory packs (`/memory/packs`, `/memory/installs`: publish, install, fork, uninstall, verify, yank) | `memory_routes.py`, `shared_memory.py`, `memory_packs.py` |
 | 8c | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`, the same Messages API call and model choice as the agent server). `/memory/agent` for a remote backend's run (a memory token `via` `remote`): the prompt's memory section and the `memory_*` and `chats_*` tools, with search by meaning when the embedding model is set here; outside MCP servers' memory tokens still go to the TypeScript server | `memory_import.py`, `llm.py`, `memory_agent.py` |
 | 8d | The background learner: chats quiet for `MEMORY_IDLE_MINUTES` are read by the small model, which adds, updates or deletes notes (with Undo) or, in Ask first, proposes them; start the TypeScript server with `MEMORY_LEARN=off` | `memory_learn.py`, `app.py` |
+| 9a | `GET /identity/public-key` (the key outside services verify tokens with), `POST /identity/mcp-tokens` (a remote backend's run tokens traded for its MCP servers' tokens) and `POST /suggest` (the chat's follow-up chips: one small-model call, answered as AG-UI events) | `server_routes.py`, `mcp_tokens.py`, `suggest.py` |
 
 Behind them:
 
@@ -109,7 +110,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run. |
 | `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
 | `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off leaves `/memory` to the TypeScript server. |
-| `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | As the TypeScript server reads them: the small model that sorts imported plain-text memory into notes and learns from chats. Without a key, imported text waits in the inbox as one note, as there. |
+| `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | As the TypeScript server reads them: the small model that makes the chat's follow-up chips, sorts imported plain-text memory into notes and learns from chats. Without a key, the chips' request ends with an error (no chips), and imported text waits in the inbox as one note, as there. |
 | `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES` | unset, `10` | As the TypeScript server reads them: `MEMORY_LEARN=off` stops learning from chats, which otherwise runs here once a chat has been quiet that many minutes. Set `MEMORY_LEARN=off` on the TypeScript server. |
 | `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset leaves `/tools` to the TypeScript server. |
 | `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |

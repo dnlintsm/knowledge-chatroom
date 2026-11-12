@@ -98,6 +98,12 @@
   first. Start the agent server with `MEMORY_LEARN=off` (`pnpm dev`, the compose file, the
   e2e and conformance runs do) and give api-py your `MEMORY_LEARN` and
   `MEMORY_IDLE_MINUTES`; without it both servers learn from each chat.
+- api-py serves the agent server's own routes too (issue #190, step 9a):
+  `GET /identity/public-key`, `POST /identity/mcp-tokens` for remote backends' MCP servers,
+  and the chat's follow-up chips (`POST /suggest`), with the same tokens, prompt, model and
+  event stream. The chips now come from api-py's model settings, so give it the agent's
+  `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`, `SUGGESTIONS_MODEL`
+  and `CLAUDE_MODEL` (the compose file does).
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

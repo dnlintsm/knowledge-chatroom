@@ -296,7 +296,9 @@ After each reply CopilotKit asks a separate `suggester` agent for follow-ups. Th
 can't serve that request, because CopilotKit forces a single tool call and the Claude Agent SDK
 would run a whole turn with file tools, so the agent's `POST /suggest` (`apps/agent/src/suggest.ts`)
 makes one Messages API call on a small model with the conversation and the workspace context,
-and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
+and streams back only that tool call. Nothing is stored and no tools run. With the Python API
+server in front, it answers `/suggest` the same way (`services/api-py/api_py/suggest.py`, issue
+#190, step 9). The browser freezes
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out. With a remote backend
 (`AGENT_URL`) the suggester stays on this repo's agent server, since it needs only the messages.
