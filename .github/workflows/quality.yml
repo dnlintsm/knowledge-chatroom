@@ -14,7 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  # Which suites this change can affect (scripts/ci-changes.mjs, issue #192).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.affected.outputs.node }}
+      python: ${{ steps.affected.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge commit and its base parent, for the PR's diff.
+          fetch-depth: 2
+      - name: Find the affected suites
+        id: affected
+        run: node scripts/ci-changes.mjs
+
+  node:
+    name: node checks
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -49,6 +68,11 @@ jobs:
         run: git diff --exit-code -- pnpm-lock.yaml
 
   python:
+    # Not plain "python": a skipped matrix job reports under its bare name, which
+    # would sit next to the required `python` gate below.
+    name: python tests (${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -107,15 +131,48 @@ jobs:
           uv run --locked --no-sync coverage report
           uv run --locked --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
+  # The required checks: stable names that always report. Each passes only when
+  # its suite passed, or was skipped because the change cannot affect it.
+  checks:
+    if: ${{ always() }}
+    needs: [changes, node]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the Node checks
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          WANTED: ${{ needs.changes.outputs.node }}
+          RESULT: ${{ needs.node.result }}
+        run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::Could not decide which suites to run (changes: $CHANGES)."; exit 1
+          fi
+          if [ "$WANTED" = true ]; then expected=success; else expected=skipped; fi
+          if [ "$RESULT" != "$expected" ]; then
+            echo "::error::Expected $expected, got $RESULT."; exit 1
+          fi
+          echo "Result $RESULT, as expected."
+
   python-required:
     # Stable required-check name covering every Python matrix leg.
     name: python
     if: ${{ always() }}
-    needs: python
+    needs: [changes, python]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require all Python checks
         env:
-          PYTHON_MATRIX_RESULT: ${{ needs.python.result }}
-        run: test "$PYTHON_MATRIX_RESULT" = success
+          CHANGES: ${{ needs.changes.result }}
+          WANTED: ${{ needs.changes.outputs.python }}
+          RESULT: ${{ needs.python.result }}
+        run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::Could not decide which suites to run (changes: $CHANGES)."; exit 1
+          fi
+          if [ "$WANTED" = true ]; then expected=success; else expected=skipped; fi
+          if [ "$RESULT" != "$expected" ]; then
+            echo "::error::Expected $expected, got $RESULT."; exit 1
+          fi
+          echo "Result $RESULT, as expected."
