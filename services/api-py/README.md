@@ -21,6 +21,7 @@ What it serves itself so far:
 | 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`) | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
 | 4b | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
 | 5 | `GET /search` (words through Postgres full-text search, meaning through pgvector) and the search indexer: indexing files stored before search existed, and embedding passages with the local model (ONNX Runtime) or an `EMBEDDING_*` API | `storage_routes.py`, `search.py`, `semantic.py`, `app.py` |
+| 6 | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
 
 Behind them:
 
