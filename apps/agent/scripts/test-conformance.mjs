@@ -85,6 +85,8 @@ const api = apiPort
         TS_AGENT_URL: `http://127.0.0.1:${port}`,
         API_PY_PORT: String(apiPort),
         EMBEDDING_MODEL: "off",
+        // The same hub admins as the agent: api-py serves the skill hub (step 7).
+        HUB_ADMINS: "conformance|alice",
       },
       stdio: ["ignore", "inherit", "inherit"],
     })

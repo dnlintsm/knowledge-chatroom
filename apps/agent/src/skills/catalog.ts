@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
  * Agent Skills layout, from three sources: built-in ones shipped with the
  * agent (apps/agent/skills/), skills installed from the hub (hub.ts), and the
  * workspace's own skills/<name>/ files.
+ * The Python API server parses them the same way (services/api-py/api_py/skill_catalog.py),
+ * sort order included: change both.
  * Each has a mode the user picks (settings.ts):
  *
  *   auto    Claude may use it on its own, and /name runs it
