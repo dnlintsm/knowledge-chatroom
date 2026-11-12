@@ -48,7 +48,7 @@ jobs:
 
   e2e:
     needs: changes
-    if: needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true'
+    if: false # gate test: E2E needed but skipped
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

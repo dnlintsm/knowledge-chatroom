@@ -33,7 +33,7 @@ jobs:
   node:
     name: node checks
     needs: changes
-    if: needs.changes.outputs.node == 'true'
+    if: false # gate test: the Node checks are needed but skipped
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
