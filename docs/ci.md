@@ -56,7 +56,7 @@ Pushes to `main`, manual runs and a diff that can't be computed run everything. 
 new directory runs everything until it gets a narrower rule; add one in
 `RULES` with a case in `tests/unit/ci-changes.spec.ts`.
 
-The work runs in jobs with their own names (`node checks`, `python (…)`, `e2e`). The
+The work runs in jobs with their own names (`node checks`, `python tests (…)`, `e2e`). The
 required names are gates that always run: `checks`, `python` and `preview`
 pass when the suites they cover succeeded, or were skipped because the change
 cannot affect them. They fail when the detection job failed, or when a suite that

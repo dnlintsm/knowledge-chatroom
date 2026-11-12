@@ -68,6 +68,9 @@ jobs:
         run: git diff --exit-code -- pnpm-lock.yaml
 
   python:
+    # Not plain "python": a skipped matrix job reports under its bare name, which
+    # would sit next to the required `python` gate below.
+    name: python tests (${{ matrix.python }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
