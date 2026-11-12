@@ -17,6 +17,12 @@ dependencies = [
     "boto3>=1.36",
     # POST /experiments/upload's multipart body, read part by part (uploads.py).
     "python-multipart>=0.0.20",
+    # Search by meaning with the local embedding model (semantic.py): the ONNX file
+    # transformers.js runs in the TypeScript server, its tokenizer, and the download.
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
+    "huggingface-hub>=0.26",
+    "numpy>=1.26",
 ]
 
 [dependency-groups]

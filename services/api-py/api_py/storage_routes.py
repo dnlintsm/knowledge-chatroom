@@ -1,4 +1,4 @@
-"""The storage API's /access, /nodes, /files, /experiments and /proposals in Python (issue #190), as storage/http.ts.
+"""The storage API's routes that have moved to Python (#190), as apps/agent/src/storage/http.ts serves them.
 
     GET    /access                  {me, rootRole}
     GET    /access/users            everyone who has signed in
@@ -55,6 +55,27 @@
     GET    /proposals/<id>/content  its proposed bytes
     POST   /proposals/<id>/accept|reject|withdraw
 
+    GET    /search?q=<text>         {results}: files you can read whose text or path
+                                    matches, best first (search.py); &scope=<node id>
+                                    only there and below, &near=<node id> or
+                                    &experiment=<id> ranks files near there first,
+                                    &limit= (at most 50)
+
+    GET    /chats                   {threads, nextCursor}: your chats, most recently
+                                    active first; ?agent=<id>, &archived (include
+                                    archived ones), &limit= (at most 200), &cursor=
+    GET    /chats/<id>              {chat, messages}: one of your chats, with its
+                                    messages as of its latest run
+    GET    /chats/<id>/runs         {runs}: its runs' AG-UI events, in order
+    POST   /chats/<id>/runs         {agentId, runId, parentRunId?, events, messages,
+                                    name?} -> the chat (201): saves a finished run,
+                                    starting the chat on its first; 403 when the id
+                                    is someone else's
+    PATCH  /chats/<id>              {name?, archived?}
+    DELETE /chats/<id>              for good, with its runs
+    Chats are their user's alone (017_chats.sql): workspace owners don't see
+    them, and storage tokens can't reach them.
+
 Until the database has the migrations this server knows (the TypeScript
 server applies them as it starts), these pass through to the TypeScript
 server, which answers as it does while storage starts or when it is off.
@@ -79,6 +100,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import uploads
 from .access import ROLES, AccessError, ForbiddenError
+from .chats import ChatError, ChatTakenError
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError
 from .files import FileExistsError_
 from .identity import identify
@@ -94,6 +116,7 @@ from .paths import (
 from .proposals import EVERYWHERE, ProposalError
 from .proxy import forward
 from .run_report import js_json, js_number
+from .search import SearchError
 from .session import Session
 
 logger = logging.getLogger("api_py")
@@ -105,7 +128,7 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too, but the TypeScript server reads the raw
 # path and serves those as files. They go to it, so a storage token's limits
 # (agent_refusal) always see the section the handlers act on.
-_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals|search|chats)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
 # Stored bytes are served from the app's origin, so a file opened as a page (an
@@ -202,7 +225,8 @@ async def read_json(request: Request) -> dict[str, Any] | None:
     if body is None:
         return None
     try:
-        value = parse_json(body.decode("utf-8", errors="replace"))
+        # As TextDecoder reads it: a leading byte order mark dropped.
+        value = parse_json(body.decode("utf-8", errors="replace").removeprefix("\ufeff"))
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
@@ -220,6 +244,8 @@ def agent_refusal(request: Request) -> str | None:
     method = request.method
     section, *rest = raw_path(request).split("/")[1:]
     sub = "/".join(rest)
+    if section == "chats":
+        return "Chat history stays with its user: storage tokens can't reach it"
     if method in ("GET", "HEAD"):
         return "Claude doesn't manage access" if section == "access" and sub != "" else None
     if section == "files":
@@ -284,13 +310,13 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return await handler(request, session)
     except NodeNotFoundError as err:
         return error(404, str(err))
-    except ForbiddenError as err:
+    except (ForbiddenError, ChatTakenError) as err:
         return error(403, str(err))
     except ExperimentExistsError as err:
         return error(409, str(err), exists=True)
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
-    except (NodeError, AccessError, InvalidPathError, ExperimentError, ProposalError) as err:
+    except (NodeError, AccessError, InvalidPathError, ExperimentError, ProposalError, SearchError, ChatError) as err:
         return error(400, str(err))
     except Exception:
         logger.exception("[storage] request failed")
@@ -329,6 +355,122 @@ def _experiment_path(request: Request) -> str:
 @router.api_route("/experiments/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def experiments_route(request: Request) -> Response:
     return await _serve(request, handle_experiments, _no_blob_store)
+
+
+@router.api_route("/search", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/search/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def search_route(request: Request) -> Response:
+    return await _serve(request, handle_search)
+
+
+async def handle_search(request: Request, session: Session) -> Response:
+    if not re.fullmatch(r"/search/?", raw_path(request)):
+        return error(404, "Not found")
+    if request.method != "GET":
+        return error(405, "Method not allowed")
+    limit = parse_int(first_param(request, "limit") or "")
+    results = await session.search(
+        first_param(request, "q") or "",
+        scope=first_param(request, "scope") or None,
+        near=first_param(request, "near") or None,
+        near_experiment=first_param(request, "experiment") or None,
+        limit=limit,
+    )
+    return json_response(200, {"results": results})
+
+
+# Chat runs carry tool results and attachments, so they may be large.
+MAX_RUN_BYTES = 32 * 1024 * 1024
+RUN_SHAPE = "Expected {agentId, runId: string, parentRunId?: string, events, messages: array, name?: string}"
+
+
+@router.api_route("/chats", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/chats/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def chats_route(request: Request) -> Response:
+    return await _serve(request, handle_chats)
+
+
+def _absent_null_or_string(body: dict[str, Any], key: str) -> bool:
+    return body.get(key) is None or isinstance(body[key], str)
+
+
+async def read_run(request: Request) -> dict[str, Any] | Response:
+    """A POST /chats/<id>/runs body, or the answer refusing it."""
+    data = await read_body(request, MAX_RUN_BYTES)
+    if data is None:
+        return error(413, f"A run may be at most {MAX_RUN_BYTES} bytes")
+    try:
+        # As TextDecoder reads it: a leading byte order mark dropped.
+        body = parse_json(data.decode("utf-8", errors="replace").removeprefix("\ufeff"))
+    except ValueError:
+        body = None
+    if (
+        not isinstance(body, dict)
+        or not isinstance(body.get("agentId"), str)
+        or not isinstance(body.get("runId"), str)
+        or not isinstance(body.get("events"), list)
+        or not isinstance(body.get("messages"), list)
+        or not _absent_null_or_string(body, "parentRunId")
+        or not _absent_null_or_string(body, "name")
+    ):
+        return error(400, RUN_SHAPE)
+    return body
+
+
+async def handle_chats(request: Request, session: Session) -> Response:
+    parts = raw_path(request).split("/")[2:]  # after /chats
+    try:
+        chat_id = decode_component(parts[0]) if parts and parts[0] else None
+    except _MalformedPath:
+        return error(400, "Malformed chat id")
+    sub = "/".join(parts[1:])
+    method = request.method
+
+    if not chat_id:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(
+            200,
+            await session.chats(
+                agent_id=first_param(request, "agent") or None,
+                include_archived="archived" in request.query_params,
+                limit=parse_int(first_param(request, "limit") or ""),
+                cursor=first_param(request, "cursor") or None,
+            ),
+        )
+
+    if sub == "runs":
+        if method == "GET":
+            runs = await session.chat_runs(chat_id)
+            return json_response(200, {"runs": runs}) if runs is not None else error(404, "Chat not found")
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_run(request)
+        if isinstance(body, Response):
+            return body
+        run = {key: body.get(key) for key in ("agentId", "runId", "parentRunId", "events", "messages", "name")}
+        return json_response(201, await session.append_chat_run(chat_id, run))
+    if sub:
+        return error(404, "Not found")
+
+    if method == "GET":
+        chat = await session.chat(chat_id)
+        return json_response(200, chat) if chat else error(404, "Chat not found")
+    if method == "PATCH":
+        body = await read_json(request)
+        if (
+            body is None
+            or not _absent_null_or_string(body, "name")
+            or ("archived" in body and not isinstance(body["archived"], bool))
+        ):
+            return error(400, "Expected {name?: string, archived?: boolean}")
+        changes = {key: body[key] for key in ("name", "archived") if key in body}
+        found = await session.update_chat(chat_id, **changes)
+        return json_response(200, found) if found else error(404, "Chat not found")
+    if method == "DELETE":
+        deleted = await session.remove_chat(chat_id)
+        return json_response(200, {"deleted": chat_id}) if deleted else error(404, "Chat not found")
+    return error(405, "Method not allowed")
 
 
 @router.api_route("/proposals", methods=ALL_METHODS, include_in_schema=False)
