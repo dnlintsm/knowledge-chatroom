@@ -22,6 +22,9 @@ What it serves itself so far:
 | 4b | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
 | 5 | `GET /search` (words through Postgres full-text search, meaning through pgvector) and the search indexer: indexing files stored before search existed, and embedding passages with the local model (ONNX Runtime) or an `EMBEDDING_*` API | `storage_routes.py`, `search.py`, `semantic.py`, `app.py` |
 | 6 | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
+| 7a | `/skills` (lists, modes at three levels, `/skills/run` and `/skills/used` for outside agents, .zip export and import, delete) and the skill hub `/hub` (publish, install, fork, diff, verify, yank, reports) | `skills_routes.py`, `skills.py`, `skill_catalog.py` |
+| 7b | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
+| 8a | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
 
 Behind them:
 
@@ -54,6 +57,16 @@ Behind them:
   `~/.cache/knowledge-chatroom/models`). The TypeScript server still embeds queries for
   Claude's search tool, and searches by meaning only while the stored vectors come from its
   own model.
+- **Skills** (`skill_catalog.py`, `skills.py`). SKILL.md front matter, the file limits,
+  the publish scan and the hub's version fingerprints follow `apps/agent/src/skills`.
+  Lists sort as JavaScript's `localeCompare` sorts them (`collation.py`: the Unicode
+  Collation Algorithm with CLDR's root table, the one Node's ICU uses), so both servers
+  order skills, and fingerprint a version's files, the same way. The built-in skills are read from `apps/agent/skills`.
+- **Outside tools** (`tools.py`). `MCP_SERVERS` is read as `apps/agent/src/mcp.ts` reads
+  it, and a call goes out with the MCP Python SDK, on a connection of its own, with the
+  tokens a chat run's call would carry: the user's identity for `forwardIdentity`, signed
+  for `mcp:<server>`, and a storage token for `storageAccess`. With `MCP_SERVERS` unset
+  here, `/tools` passes through, so the TypeScript server answers with its own list.
 - **Change events** go out and come in on the same `LISTEN/NOTIFY` channel (`events.py`),
   so each server's file watch tells browsers about changes made on either, each to the
   people who may see it.
@@ -90,6 +103,11 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `MIGRATIONS_DIR` | `apps/agent/src/storage/migrations` | The migrations to expect. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | as the TypeScript server | The blob store; give both servers the same values. |
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
+| `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub, and `on` when skills' scripts run. |
+| `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
+| `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off leaves `/memory` to the TypeScript server. |
+| `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset leaves `/tools` to the TypeScript server. |
+| `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |
 
 `pnpm dev` reads the repository's `.env`. As with the agent server, keep its port private.
 
