@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import skills_routes, storage_routes
+from . import skills_routes, storage_routes, tools
 
 # Steps 2 to 6: /access, /nodes, /files, /experiments, /proposals, /search and /chats (storage_routes.py);
-# step 7: /skills and /hub (skills_routes.py).
-ROUTERS: list[APIRouter] = [storage_routes.router, skills_routes.router]
+# step 7: /skills and /hub (skills_routes.py), and /tools (tools.py; no storage needed).
+ROUTERS: list[APIRouter] = [storage_routes.router, skills_routes.router, tools.router]
 # The storage API's sections served here once the database is ready.
 STORAGE_PREFIXES = ("/access", "/nodes", "/files", "/experiments", "/proposals", "/search", "/chats", "/skills", "/hub")
