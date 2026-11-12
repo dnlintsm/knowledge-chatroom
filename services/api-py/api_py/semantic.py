@@ -286,9 +286,9 @@ class SemanticIndex:
             if not (current and current[0] == model and current[1] == dims):
                 # Vectors from another model don't compare with this one's: start over.
                 await conn.execute("ALTER TABLE blob_chunks DROP COLUMN IF EXISTS embedding")
-                await conn.execute(
+                await conn.execute(  # type: ignore[arg-type]
                     f"ALTER TABLE blob_chunks ADD COLUMN embedding vector({int(dims)})"
-                )  # type: ignore[arg-type]
+                )
                 if dims <= MAX_INDEXED_DIMS:
                     await conn.execute(
                         "CREATE INDEX blob_chunks_embedding ON blob_chunks USING hnsw (embedding vector_cosine_ops)"

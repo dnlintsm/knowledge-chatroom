@@ -182,7 +182,10 @@ function parseServer(name: string, raw: unknown, env: Env): ExternalServer {
   };
 }
 
-/** The configured servers; bad entries are logged and left out. */
+/**
+ * The configured servers; bad entries are logged and left out. api-py reads
+ * MCP_SERVERS the same way for /tools (services/api-py/api_py/tools.py).
+ */
 export function externalServersFromEnv(env: Env = process.env): ExternalServers {
   const setting = env.MCP_SERVERS?.trim();
   if (!setting) return {};
