@@ -23,7 +23,10 @@ that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a 
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
 `services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
-which CI runs too:
+which CI runs on Python 3.12 and 3.14. The `python` status check aggregates both
+matrix legs, including lint, type checking and code generation; repository rules
+should require `python` along with the existing `checks` and `preview` checks.
+To run checks locally:
 
 ```bash
 uv sync --all-packages
