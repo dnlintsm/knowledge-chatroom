@@ -26,6 +26,9 @@ import {
  * someone who can edit the place accepts or rejects. A person shares one of
  * their own notes by copying it in: directly where they can edit, else as a
  * proposal.
+ *
+ * services/api-py/api_py/shared_memory.py serves these too (issue #190, step
+ * 8b), with the same SQL and checks; keep the two in step.
  */
 
 export type SharedScope = "workspace" | "node" | "group";

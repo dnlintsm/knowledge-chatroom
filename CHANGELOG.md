@@ -74,9 +74,13 @@
   restoring, archiving and deleting notes, the memory mode and incognito chats, the inbox's
   accept and reject, Claude's recent changes and their Undo, and the .zip export, with the
   same checks, versions, answers and row-level security as the agent server. It does this
-  only with `MEMORY=on` for api-py, so give it the same `MEMORY` as the agent. The memory
-  overview (`GET /memory`), shared notes, packs, import and `/memory/agent` stay on the agent
-  server for now; chats keep using memory there.
+  only with `MEMORY=on` for api-py, so give it the same `MEMORY` as the agent. Import and
+  `/memory/agent` stay on the agent server for now; chats keep using memory there.
+- With `MEMORY=on`, api-py serves the rest of the memory page too (issue #190, step 8b):
+  the overview at `GET /memory`, shared notes for the workspace, a node or a group (sharing,
+  editing, deleting, Auto/Manual/Off for you or for everyone, and proposals with accept,
+  reject and withdraw), and memory packs (publish, install, fork, uninstall, and verify and
+  yank for `HUB_ADMINS`). Answers, checks and versions match the agent server's.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

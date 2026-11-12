@@ -1,5 +1,8 @@
-"""Each user's own memory notes (#190, step 8a), as apps/agent/src/memory/http.ts serves them.
+"""Personalized memory (#190, steps 8a and 8b), as apps/agent/src/memory/http.ts serves it.
 
+    GET    /memory?thread=&node=         {mode, incognito, notes, inbox, shared,
+                                         sharedProposals, targets, installs, types,
+                                         limits}: the overview
     PUT    /memory/settings              {mode?: on | ask | off, thread?, incognito?}
     GET    /memory/activity              Claude's recent changes, newest first
     POST   /memory/inbox/<id>/accept     makes a proposed change (409 when the note
@@ -14,27 +17,58 @@
     POST   /memory/notes/<name>/archive  {archived} archives or brings it back
     POST   /memory/events/<id>/undo      undoes one of Claude's changes
 
-Everything is the signed-in user's own: nobody reads another's notes. These
-are served here only with MEMORY=on (as on the TypeScript server) once storage
-is ready. The rest of /memory (the overview at GET /memory, shared notes,
-packs, import and /memory/agent) still passes through to the TypeScript server
-until the later parts of step 8.
+    POST   /memory/shared                {scope, nodeId?, groupId?, name, description,
+                                         type, body}: shares a copy there; {note} where
+                                         you edit, else {proposal} for its editors
+    GET    /memory/shared/<id>           {note, versions}
+    PUT    /memory/shared/<id>           {description, type, body, version?} (editors)
+    DELETE /memory/shared/<id>           deletes it for good (editors)
+    PUT    /memory/shared/<id>/mode      {mode: auto | manual | off | null, everyone?}
+    POST   /memory/shared/proposals/<id>/accept | reject | withdraw
+
+    GET    /memory/packs?q=              {packs, isAdmin}: the hub's memory packs
+    GET    /memory/packs/<name>?version= {pack}
+    POST   /memory/packs                 {scope, nodeId?, groupId?, name, description}
+    POST   /memory/packs/<name>/install  {scope, nodeId?, groupId?, version?}
+    POST   /memory/packs/<name>/verify   {version, verified} (hub admins)
+    POST   /memory/packs/<name>/yank     {version, yanked, reason?}
+    DELETE /memory/installs/<id>         uninstalls it, with its notes (editors)
+    POST   /memory/installs/<id>/fork    makes its notes the place's own
+
+A user's own notes are theirs alone; shared notes follow the grants
+(shared_memory_rank). These are served here only with MEMORY=on (as on the
+TypeScript server) once storage is ready. /memory/import and /memory/agent
+still pass through to the TypeScript server until step 8c.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from .identity import identify
-from .memory import MemoryConflictError, MemoryError_, MemoryNotFoundError, MemoryService
+from .memory import (
+    INDEX_CHARS,
+    MAX_BODY,
+    MAX_DESCRIPTION,
+    MAX_NOTES,
+    MEMORY_TYPES,
+    MemoryConflictError,
+    MemoryError_,
+    MemoryNotFoundError,
+    MemoryService,
+)
+from .memory_packs import MemoryPackHub
 from .proxy import forward
 from .run_report import js_json
 from .session import Session
+from .shared_memory import SharedMemoryService
+from .skills import parse_admins
 from .skills_routes import js_to_number
 from .storage_routes import (
     ALL_METHODS,
@@ -50,7 +84,17 @@ logger = logging.getLogger("api_py")
 router = APIRouter()
 _OWN_PATH = re.compile(r"^/memory(/|$)")
 # The sections served here; the others go to the TypeScript server.
-OWN_SECTIONS = ("settings", "activity", "inbox", "export", "notes", "events")
+OWN_SECTIONS = (
+    "settings",
+    "activity",
+    "inbox",
+    "export",
+    "notes",
+    "events",
+    "shared",
+    "packs",
+    "installs",
+)
 MAX_JSON_BYTES = 64 * 1024
 
 
@@ -89,7 +133,7 @@ def _served_here(request: Request) -> bool:
     if not _OWN_PATH.match(path):
         return False
     parts = _parts(path)
-    return bool(parts) and parts[0] in OWN_SECTIONS  # type: ignore[index]
+    return parts is not None and (not parts or parts[0] in OWN_SECTIONS)
 
 
 @router.api_route("/memory", methods=ALL_METHODS, include_in_schema=False)
@@ -104,10 +148,16 @@ async def memory_route(request: Request) -> Response:
         if principal is None:
             return send(401, {"error": "Sign in first"})
         parts = _parts(raw_path(request)) or []
-        if len(parts) > 3:
+        if len(parts) > (4 if parts and parts[0] == "shared" else 3):
             return send(404, {"error": "Not found"})
         session = Session(storage, storage.access, principal)
-        memory = MemoryService(session.scoped, session.ws, principal.user_id)
+        user = principal.user_id
+        memory = Memory(
+            own=MemoryService(session.scoped, session.ws, user),
+            shared=SharedMemoryService(session.scoped, storage.pool, session.ws, user),
+            packs=MemoryPackHub(storage.pool, session.ws, parse_admins(state.settings.hub_admins)),
+            user=user,
+        )
         return await _route(request, memory, parts)
     except MemoryError_ as err:
         return send(400, {"error": str(err)})
@@ -120,13 +170,67 @@ async def memory_route(request: Request) -> Response:
         return send(500, {"error": "Memory request failed"})
 
 
+@dataclass
+class Memory:
+    own: MemoryService
+    shared: SharedMemoryService
+    packs: MemoryPackHub
+    user: str
+
+
 def _int4(value: float) -> bool:
     return -(2**31) <= value < 2**31
 
 
-async def _route(request: Request, memory: MemoryService, parts: list[str]) -> Response:
+def _number(value: Any) -> float:
+    """Number(value) for a JSON value (null is 0)."""
+    return 0.0 if value is None else js_to_number(value)
+
+
+def _db_int(value: float) -> int:
+    """A whole number for a query; one Postgres can't take as an integer fails there, as from the TypeScript server."""
+    if not _int4(value):
+        raise OverflowError(f"{value} is out of range for an integer")
+    return int(value)
+
+
+def _given_version(given: dict[str, Any]) -> float | None:
+    """input.version === undefined ? undefined : Number(input.version)."""
+    return None if "version" not in given else _number(given["version"])
+
+
+async def _route(request: Request, m: Memory, parts: list[str]) -> Response:
     method = request.method
+    memory = m.own
     section, name, action = (parts + [None, None, None])[:3]
+    if method == "GET" and not section:
+        thread = first_param(request, "thread")
+        settings = await memory.settings(thread)
+        notes = await memory.list()
+        inbox = await memory.inbox()
+        shared = await m.shared.list()
+        proposals = await m.shared.proposals()
+        targets = await m.shared.targets(first_param(request, "node"))
+        installs = await m.packs.installs(m.user)
+        return send(
+            200,
+            {
+                **settings,
+                "notes": notes,
+                "inbox": inbox,
+                "shared": shared,
+                "sharedProposals": proposals,
+                "targets": targets,
+                "installs": installs,
+                "types": list(MEMORY_TYPES),
+                "limits": {
+                    "notes": MAX_NOTES,
+                    "body": MAX_BODY,
+                    "description": MAX_DESCRIPTION,
+                    "index": INDEX_CHARS,
+                },
+            },
+        )
     if method == "PUT" and section == "settings" and not name:
         given = await read_json(request)
         if given is None:
@@ -179,15 +283,121 @@ async def _route(request: Request, memory: MemoryService, parts: list[str]) -> R
         if action == "archive":
             note, _event = await memory.archive(name, given.get("archived") is not False)
             return send(200, {"note": note})
-        version = js_to_number(given["version"]) if "version" in given else float("nan")
+        version = _number(given["version"]) if "version" in given else float("nan")
         if not version.is_integer() or version < 1:
             return send(400, {"error": "Say which version"})
-        if not _int4(version):
-            # Postgres refuses it as an integer, as it does from the TypeScript server.
-            raise OverflowError(f"version {version} is out of range")
-        return send(200, {"note": await memory.restore(name, int(version))})
+        return send(200, {"note": await memory.restore(name, _db_int(version))})
+    if section == "shared":
+        return await _shared(request, m.shared, parts[1:])
+    if section == "packs":
+        return await _packs(request, m, parts[1:])
+    if section == "installs" and name:
+        if method == "DELETE" and not action:
+            await m.packs.uninstall(m.user, name)
+            return send(200, {"id": name, "deleted": True})
+        if method == "POST" and action == "fork":
+            return send(200, {"id": name, **(await m.packs.fork(m.user, name))})
     if method == "POST" and section == "events" and name and action == "undo":
         return send(200, await memory.undo(name))
+    return _refused(method)
+
+
+def _refused(method: str) -> Response:
     if method == "GET":
         return send(404, {"error": "Not found"})
     return send(405, {"error": "Method not allowed"})
+
+
+async def _shared(request: Request, shared: SharedMemoryService, parts: list[str]) -> Response:
+    method = request.method
+    note_id, action, decision = (parts + [None, None, None])[:3]
+    if method == "POST" and not note_id:
+        given = await read_json(request)
+        if given is None:
+            return send(400, {"error": "Invalid JSON body"})
+        return send(200, await shared.share(given, given.get("name"), given))
+    if (
+        method == "POST"
+        and note_id == "proposals"
+        and action
+        and len(parts) < 4
+        and decision in ("accept", "reject", "withdraw")
+    ):
+        return send(
+            200, {"id": action, "status": decision, **(await shared.decide(action, decision))}
+        )
+    if note_id and note_id != "proposals" and not action:
+        if method == "GET":
+            note = await shared.get(note_id)
+            return send(200, {"note": note, "versions": await shared.versions(note_id)})
+        if method == "PUT":
+            given = await read_json(request)
+            if given is None:
+                return send(400, {"error": "Invalid JSON body"})
+            version = _given_version(given)
+            if version is not None and not version.is_integer():
+                return send(400, {"error": "version is a number"})
+            return send(
+                200,
+                {
+                    "note": await shared.update(
+                        note_id, given, None if version is None else int(version)
+                    )
+                },
+            )
+        if method == "DELETE":
+            await shared.remove(note_id)
+            return send(200, {"id": note_id, "deleted": True})
+    if method == "PUT" and note_id and action == "mode" and not decision:
+        given = await read_json(request)
+        if given is None:
+            return send(400, {"error": "Invalid JSON body"})
+        return send(
+            200,
+            {
+                "note": await shared.set_mode(
+                    note_id, given.get("mode"), given.get("everyone") is True
+                )
+            },
+        )
+    return _refused(method)
+
+
+async def _packs(request: Request, m: Memory, parts: list[str]) -> Response:
+    method = request.method
+    hub = m.packs
+    name, action = (parts + [None, None])[:2]
+    if method == "GET" and not name:
+        return send(200, await hub.list(m.user, first_param(request, "q") or ""))
+    if method == "GET" and name and not action:
+        given = first_param(request, "version")
+        version = js_to_number(given) if given else None
+        if version is not None and not version.is_integer():
+            return send(400, {"error": "version is a number"})
+        return send(
+            200, {"pack": await hub.detail(m.user, name, None if version is None else int(version))}
+        )
+    if method != "POST":
+        return send(405, {"error": "Method not allowed"})
+    body = await read_json(request)
+    if body is None:
+        return send(400, {"error": "Invalid JSON body"})
+    if not name:
+        return send(200, await hub.publish(m.user, body, body.get("name"), body.get("description")))
+    version = _given_version(body)
+    if version is not None and not version.is_integer():
+        return send(400, {"error": "version is a number"})
+    if action == "install":
+        chosen = None if version is None else _db_int(version)
+        return send(200, {"install": await hub.install(m.user, body, name, chosen)})
+    if version is None:
+        return send(400, {"error": "Say which version"})
+    if action == "verify":
+        await hub.verify(m.user, name, _db_int(version), body.get("verified") is not False)
+        return send(200, {"pack": await hub.detail(m.user, name, int(version))})
+    if action == "yank":
+        await hub.yank(
+            m.user, name, _db_int(version), body.get("yanked") is not False, body.get("reason")
+        )
+        return send(200, {"pack": await hub.detail(m.user, name, int(version))})
+    return send(404, {"error": "Not found"})
