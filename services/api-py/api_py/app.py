@@ -26,7 +26,9 @@ from . import db
 from .config import ConfigError, Settings, settings_from_env
 from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
-from .storage import open_storage
+from .search import SearchService
+from .semantic import SemanticIndex
+from .storage import Storage, open_storage
 
 logger = logging.getLogger("api_py")
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -54,12 +56,51 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
         if found.state is not db.SchemaState.READY:
             return False
         try:
-            app.state.storage = await open_storage(pool, settings.s3)
+            storage = await open_storage(pool, settings.s3)
         except Exception as err:  # noqa: BLE001 - tried again, as the database may still be settling
             logger.warning("can't open storage yet: %s", err)
             return False
+        _start_search(app, storage, settings)
+        app.state.storage = storage
         logger.info("serving storage routes: %s", ", ".join(STORAGE_PREFIXES))
         return True
+
+
+def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
+    """
+    The search indexer's background work, which runs here and not on the
+    TypeScript server (SEARCH_INDEXER=off there): indexing files written before
+    search existed, and with an embedding model, embedding passages.
+    """
+    if settings.embedding:
+        storage.semantic = SemanticIndex(
+            storage.pool, settings.embedding.embedder(), settings.embedding.min_similarity
+        )
+        storage.semantic.start()
+    if storage.blobs:
+        app.state.jobs.append(asyncio.create_task(_index_existing(storage.search, storage.pool)))
+
+
+async def _index_existing(search: SearchService, pool: AsyncConnectionPool) -> None:
+    """
+    Indexes files stored before search existed. Blobs the store couldn't hand
+    over (a hiccup, not a missing object) are tried again later, waiting a
+    minute, then twice as long each time, six times at most.
+    """
+    for attempt in range(7):
+        try:
+            indexed, failed = await search.index_all(pool)
+        except Exception:
+            logger.exception("[search] indexing existing files failed")
+            return
+        if indexed:
+            logger.info("[search] indexed %d existing files", indexed)
+        if not failed or attempt == 6:
+            return
+        logger.warning(
+            "[search] %d files could not be read for search yet; trying again later", failed
+        )
+        await asyncio.sleep(60 * 2**attempt)
 
 
 async def _serve_storage_when_ready(
@@ -87,6 +128,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         # The ported storage routes; None while they pass through (no database, or not ready yet).
         app.state.storage = None
         app.state.storage_lock = asyncio.Lock()
+        # Background work started with storage (the search indexer), stopped on shutdown.
+        app.state.jobs = []
 
         async def storage_ready() -> bool:
             # A request in between polls checks too, so the first one after the
@@ -129,7 +172,13 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 watcher.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await watcher
+            for job in app.state.jobs:
+                job.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await job
             await app.state.http.aclose()
+            if app.state.storage and app.state.storage.semantic:
+                await app.state.storage.semantic.stop()
             if app.state.storage and app.state.storage.events:
                 await app.state.storage.events.close()
             if app.state.pool:

@@ -20,6 +20,8 @@ What it serves itself so far:
 | 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
 | 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`) | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
 | 4b | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
+| 5 | `GET /search` (words through Postgres full-text search, meaning through pgvector) and the search indexer: indexing files stored before search existed, and embedding passages with the local model (ONNX Runtime) or an `EMBEDDING_*` API | `storage_routes.py`, `search.py`, `semantic.py`, `app.py` |
+| 6 | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
 
 Behind them:
 
@@ -35,14 +37,23 @@ Behind them:
   `app.user_id` set, as `asUser()` in `apps/agent/src/storage/db.ts` does them.
 - **Files** (`files.py`, `blobs.py`). Bytes go to the same S3-compatible bucket, keyed by
   their sha256, and each write adds a version and the full-text index of its text
-  (`text_index.py`, cut into the same chunks as the TypeScript server cuts them; its
-  background indexer still embeds them for search by meaning). Path rules follow
+  (`text_index.py`, cut into the same chunks as the TypeScript server cuts them). Path rules follow
   `packages/contracts/src/files.ts` (`paths.py`). Binary files get a five-minute signed
   link when `S3_PUBLIC_URL` is set.
 - **Experiments and runs** (`experiments.py`, `run_report.py`). Only an experiment's
   author changes it or its files, and an archived one is read only. A run's `report.md`
   front matter is written as `JSON.stringify` writes it, numbers included, so a report
   reads the same whichever server last refreshed it.
+- **Search** (`search.py`, `semantic.py`). Words and meaning are ranked together as the
+  TypeScript server ranks them. The indexer runs here, and only here: start the TypeScript
+  server with `SEARCH_INDEXER=off` (`pnpm dev`, compose and the e2e do). Embeddings use the
+  same `EMBEDDING_*` settings and give the same vectors under the same model id, so
+  switching servers doesn't re-embed. The local model, `Xenova/multilingual-e5-small` by
+  default, is the ONNX file transformers.js loads (`onnx/model_quantized.onnx`), run with
+  ONNX Runtime and cached under `EMBEDDING_CACHE_DIR` (default
+  `~/.cache/knowledge-chatroom/models`). The TypeScript server still embeds queries for
+  Claude's search tool, and searches by meaning only while the stored vectors come from its
+  own model.
 - **Change events** go out and come in on the same `LISTEN/NOTIFY` channel (`events.py`),
   so each server's file watch tells browsers about changes made on either, each to the
   people who may see it.

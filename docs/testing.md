@@ -85,8 +85,10 @@ After changing the spec, regenerate the models with `uv run datamodel-codegen` i
 `packages/knowledge-py` (the Quality workflow runs it with `--check`).
 
 The normal integration suite tests vector search using a deterministic embedder.
-Set `EMBEDDING_TEST=1` to also run the real model-download test; it needs network
-access and caches roughly 120 MB. For local UI tests, `EMBEDDING_MODEL=off` keeps
+Set `EMBEDDING_TEST=1` to also run the real model-download test (in the agent and in
+`services/api-py`, which loads the same model through ONNX Runtime); it needs network
+access and caches roughly 120 MB for each. api-py's search tests use pgvector when the
+test database has it and skip search by meaning otherwise. For local UI tests, `EMBEDDING_MODEL=off` keeps
 keyword-search coverage without downloading the model.
 
 ## Browser, storage and login

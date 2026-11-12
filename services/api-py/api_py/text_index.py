@@ -2,8 +2,8 @@
 
 Each distinct content's text is cut into chunks of about a paragraph, once,
 inside the transaction that adds the version holding it. Search reads them,
-and the TypeScript server's background indexer embeds them for search by
-meaning. Lengths count UTF-16 code units, as JavaScript does, so both servers
+and the background indexer embeds them for search by meaning (semantic.py).
+Lengths count UTF-16 code units, as JavaScript does, so both servers
 cut a text into the same chunks.
 """
 
@@ -34,7 +34,7 @@ def extract_text(data: bytes) -> str | None:
     return None if "\x00" in text else text
 
 
-def _to_units(text: str) -> str:
+def to_units(text: str) -> str:
     """The text as UTF-16 code units, one Python character each (pairs for characters outside the BMP)."""
     if all(ord(c) <= 0xFFFF for c in text):
         return text
@@ -52,7 +52,7 @@ def _units(text: str):
             yield chr(0xDC00 + (code & 0x3FF))
 
 
-def _from_units(units: str) -> str:
+def from_units(units: str) -> str:
     """Back to text; a pair cut in two becomes U+FFFD, as TextEncoder writes it."""
     return units.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
 
@@ -66,10 +66,10 @@ def chunk_text(text: str) -> list[str]:
         nonlocal current
         piece = js_trim(current)
         if piece:
-            chunks.append(_from_units(piece))
+            chunks.append(from_units(piece))
         current = ""
 
-    for paragraph in _PARAGRAPH.split(_to_units(text)):
+    for paragraph in _PARAGRAPH.split(to_units(text)):
         if current and len(current) + len(paragraph) + 2 > CHUNK_TARGET:
             flush()
         rest = paragraph
@@ -92,7 +92,7 @@ async def index_blob(conn: AsyncConnection, sha256: str, data: bytes) -> None:
     chunks = chunk_text(text) if text else []
     cur = await conn.execute(
         "INSERT INTO blob_texts (sha256, chars) VALUES (%s, %s) ON CONFLICT (sha256) DO NOTHING RETURNING sha256",
-        (sha256, len(_to_units(text)) if text else 0),
+        (sha256, len(to_units(text)) if text else 0),
     )
     if not await cur.fetchone() or not chunks:
         return

@@ -191,10 +191,15 @@ export function startStorage(config: StorageConfig | null = storageConfigFromEnv
       current = ready;
       state = "ready";
       console.log("[storage] ready");
-      // Files written before search existed; new writes index themselves.
-      if (ready) indexExisting(ready.search);
-      // Loads the model and embeds passages in the background (semantic.ts).
-      ready?.semantic?.start();
+      if (config.searchIndexer) {
+        // Files written before search existed; new writes index themselves.
+        if (ready) indexExisting(ready.search);
+        // Loads the model and embeds passages in the background (semantic.ts).
+        ready?.semantic?.start();
+      } else {
+        // The Python API server in front runs the indexer; queries still embed here.
+        ready?.semantic?.follow();
+      }
     })
     .catch((err) => {
       state = "failed";
