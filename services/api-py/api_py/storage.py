@@ -96,7 +96,7 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
         if not row or not row[0]:
             return False
         cur = await conn.execute("SELECT current_schema()")
-        (schema,) = await cur.fetchone()  # type: ignore[misc]
+        (schema,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         role = APP_ROLE
         quoted = '"' + schema.replace('"', '""') + '"'
         grants = [
@@ -110,7 +110,7 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
             f"GRANT SELECT ON memory_pack_installs, hub_memory_packs, hub_memory_pack_versions TO {role}",
         ]
         for statement in grants:
-            await conn.execute(statement)  # type: ignore[arg-type]
+            await conn.execute(statement)  # pyrefly: ignore[no-matching-overload]
         return True
 
 

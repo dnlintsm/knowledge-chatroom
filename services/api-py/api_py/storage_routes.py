@@ -202,7 +202,7 @@ def _js_int(text: str) -> int | float | None:
     if abs(value) < 2**53:
         return int(text)
     # The digits JSON.stringify would send on, e.g. 12345678901234567000.
-    return value if abs(value) >= 1e21 else int(js_number(value))  # type: ignore[return-value]
+    return value if abs(value) >= 1e21 else int(js_number(value))
 
 
 def _js_float(text: str) -> float | None:
@@ -510,7 +510,7 @@ async def handle_nodes(request: Request, session: Session) -> Response:
             parent_id = optional_id(body.get("parentId")) if body else None
             if not body or not isinstance(body.get("name"), str) or parent_id is False:
                 return error(400, "Expected {parentId: string | null, name: string}")
-            return json_response(201, await session.create_node(parent_id, body["name"]))  # type: ignore[arg-type]
+            return json_response(201, await session.create_node(parent_id, body["name"]))  # pyrefly: ignore[bad-argument-type]
         return error(405, "Method not allowed")
 
     if method == "GET":
@@ -563,7 +563,7 @@ async def handle_access(request: Request, session: Session) -> Response:
                     return error(400, "Expected {parentId: string | null, name: string}")
                 return json_response(
                     201,
-                    {"id": await session.create_group(parent_id, body["name"])},  # type: ignore[arg-type]
+                    {"id": await session.create_group(parent_id, body["name"])},  # pyrefly: ignore[bad-argument-type]
                 )
         elif not sub:
             if method == "PATCH":
@@ -596,7 +596,7 @@ async def handle_access(request: Request, session: Session) -> Response:
                     'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
                 )
             grant_id = await session.set_grant(
-                node,  # type: ignore[arg-type]
+                node,  # pyrefly: ignore[bad-argument-type]
                 body["principalType"],
                 body["principalId"],
                 body["role"],

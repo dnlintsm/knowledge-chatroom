@@ -158,7 +158,7 @@ async def list_experiments(
             {on_node}
         ) x
         WHERE access IS NOT NULL
-        ORDER BY forked_at DESC, id""",  # type: ignore[arg-type]
+        ORDER BY forked_at DESC, id""",  # pyrefly: ignore[bad-argument-type]
         {"user": user_id, "ws": workspace_id, "node": None if node_id is ANYWHERE else node_id},
     )
     return [_to_experiment(row) for row in await cur.fetchall()]
@@ -173,7 +173,7 @@ async def get(
         f"""
         SELECT {_COLUMNS}
         FROM experiments e LEFT JOIN users u ON u.id = e.author_id
-        WHERE e.id = %(id)s AND e.workspace_id = %(ws)s AND e.deleted_at IS NULL""",  # type: ignore[arg-type]
+        WHERE e.id = %(id)s AND e.workspace_id = %(ws)s AND e.deleted_at IS NULL""",
         {"user": user_id, "ws": workspace_id, "id": experiment_id},
     )
     row = await cur.fetchone()
@@ -328,7 +328,7 @@ async def _link_inputs(
             RETURNING blob_sha256""",
             (file[0], item["versionId"]),
         )
-        (sha256,) = await cur.fetchone()  # type: ignore[misc]
+        (sha256,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         await conn.execute(
             "UPDATE files f SET current_version_id = v.id FROM file_versions v WHERE v.file_id = f.id AND f.id = %s",
             (file[0],),
@@ -425,7 +425,7 @@ async def update(
         if values:
             assignments = ", ".join(f"{column} = %s" for column in values)
             await conn.execute(
-                f"UPDATE experiments SET {assignments}, updated_at = now() WHERE id = %s",  # type: ignore[arg-type]
+                f"UPDATE experiments SET {assignments}, updated_at = now() WHERE id = %s",  # pyrefly: ignore[bad-argument-type]
                 (*values.values(), experiment_id),
             )
         if provenance:

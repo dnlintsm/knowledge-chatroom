@@ -340,12 +340,12 @@ async def mcp_call(
         return answer
 
     if server.type == "sse":
-        async with sse_client(server.url, headers=headers, timeout=timeout) as (read, write):  # type: ignore[arg-type]
+        async with sse_client(server.url, headers=headers, timeout=timeout) as (read, write):  # pyrefly: ignore[bad-argument-type]
             answer = await over(read, write)
     else:
         async with (
             create_mcp_http_client(headers=headers) as http,
-            streamable_http_client(server.url, http_client=http) as (read, write),  # type: ignore[arg-type]
+            streamable_http_client(server.url, http_client=http) as (read, write),  # pyrefly: ignore[bad-argument-type]
         ):
             answer = await over(read, write)
     text = "\n".join(

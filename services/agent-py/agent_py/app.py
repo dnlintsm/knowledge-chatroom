@@ -106,7 +106,7 @@ def create_app(
     async def report(input_data: RunAgentInput, request: Request) -> StreamingResponse:
         # The app's X-Knowledge-User has no audience. Without login there is
         # no header and everyone is the local user.
-        user = caller(dict(request.headers), key, audience=None)  # type: ignore[arg-type]
+        user = caller(dict(request.headers), key, audience=None)  # pyrefly: ignore[bad-argument-type]
         if user is None:
             raise HTTPException(
                 401, "Sign in first" if key else "Set KNOWLEDGE_PUBLIC_KEY: login is on"

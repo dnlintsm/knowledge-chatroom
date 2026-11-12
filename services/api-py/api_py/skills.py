@@ -109,7 +109,7 @@ class SkillService:
         self._blobs: dict[str, bytes] = {}
 
     def _session(self, user_id: str, actor: str = "agent") -> Session:
-        return Session(self.storage, self.storage.access, Principal(user_id=user_id, actor=actor))  # type: ignore[arg-type]
+        return Session(self.storage, self.storage.access, Principal(user_id=user_id, actor=actor))  # pyrefly: ignore[bad-argument-type]
 
     async def list(self, user_id: str, thread_id: str | None = None) -> dict[str, Any]:
         """Every skill the user can see, with its modes (with `thread_id`, that chat's too)."""
@@ -395,7 +395,7 @@ class SkillHub:
                 ORDER BY v.version DESC""",
                 (row["id"],),
             )
-            keys = [c.name for c in cur.description]  # type: ignore[union-attr]
+            keys = [c.name for c in cur.description]  # pyrefly: ignore[not-iterable]
             versions = [dict(zip(keys, r, strict=True)) for r in await cur.fetchall()]
         await self._scanned([row, *versions])
         wanted = version if version is not None else row["latest"]
@@ -601,7 +601,7 @@ class SkillHub:
                 RETURNING id::text""",
                 (hub[0], version, user_id, why),
             )
-            (report_id,) = await cur.fetchone()  # type: ignore[misc]
+            (report_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             await self._audit(conn, user_id, "skill.report", {"name": name, "version": version})
         return {"id": report_id}
 
@@ -644,7 +644,7 @@ class SkillHub:
                 else f"{name} is built in; only the workspace's own skills can be published"
             )
         # The catalog leaves out files over the limits; refuse rather than publish part of the folder.
-        folder = skill.path[: -len("SKILL.md")]  # type: ignore[index]
+        folder = skill.path[: -len("SKILL.md")]  # pyrefly: ignore[unsupported-operation]
         files_here = await self.skills._session(user_id).files(None)
         listed = [f for f in await files_here.list() if f["path"].startswith(folder)]
         total = sum(f["size"] for f in listed)
@@ -672,7 +672,7 @@ class SkillHub:
             cur = await conn.execute(
                 "SELECT id, owner_id::text FROM hub_skills WHERE name = %s FOR UPDATE", (name,)
             )
-            hub_id, owner = await cur.fetchone()  # type: ignore[misc]
+            hub_id, owner = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             if owner != user_id:
                 raise SkillForbiddenError(f"{name} on the hub was published by someone else")
             cur = await conn.execute(
@@ -715,7 +715,7 @@ class SkillHub:
                 FROM hub_skills h JOIN hub_skill_versions v ON v.hub_skill_id = h.id
                 LEFT JOIN skill_installs i ON i.hub_skill_id = h.id AND i.workspace_id = %s
                 WHERE h.name = %s {pinned}
-                ORDER BY (v.yanked_at IS NULL) DESC, v.version DESC LIMIT 1""",  # type: ignore[arg-type]
+                ORDER BY (v.yanked_at IS NULL) DESC, v.version DESC LIMIT 1""",  # pyrefly: ignore[bad-argument-type]
                 (self.ws, name) if version is None else (self.ws, name, version),
             )
             row = await cur.fetchone()
@@ -901,7 +901,7 @@ class SkillHub:
 
     async def _listings(self, where: str, params: tuple) -> list[dict[str, Any]]:
         async with self.storage.pool.connection() as conn:
-            cur = await conn.execute(_LISTINGS + where, (self.ws, *params))  # type: ignore[arg-type]
+            cur = await conn.execute(_LISTINGS + where, (self.ws, *params))  # pyrefly: ignore[bad-argument-type]
             return [dict(zip(_LISTING_KEYS, r, strict=True)) for r in await cur.fetchall()]
 
     @staticmethod

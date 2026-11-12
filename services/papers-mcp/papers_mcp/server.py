@@ -193,7 +193,7 @@ async def read_paper(
 def _related(paper_id: str, kind: str, limit: int) -> PaperSearchResult:
     scheme, bare = parse_id(paper_id)
     raw = openalex.work(scheme, bare)
-    results = openalex.related(raw, kind, limit)  # type: ignore[arg-type]
+    results = openalex.related(raw, kind, limit)  # pyrefly: ignore[bad-argument-type]
     return PaperSearchResult(query=f"{kind}: {paper_id}", results=results, total=len(results))
 
 
@@ -238,7 +238,7 @@ def note_markdown(paper: PaperDetails, pdf_path: str | None = None) -> str:
     byline = " · ".join(
         str(part)
         for part in (
-            ", ".join(meta["authors"]),  # type: ignore[arg-type]
+            ", ".join(meta["authors"]),
             paper.venue,
             paper.year,
         )
