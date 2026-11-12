@@ -17,7 +17,7 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import experiments, nodes, proposals
+from . import chats, experiments, nodes, proposals
 from .access import AccessService, ForbiddenError, Principal, Role, at_least, is_uuid, iso
 from .db import as_user
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, clean_input, same_json
@@ -706,6 +706,36 @@ class Session:
             if not decided:
                 await proposals.decide(conn, self.storage, proposal_id, "accept", user_id, audit)
         return await self.proposal(proposal_id)
+
+    # Chat history: the principal's own, whatever their role (chats.py)
+
+    async def chats(self, **options: Any) -> dict[str, Any]:
+        async with self.scoped() as conn:
+            return await chats.list_chats(conn, self.ws, self.principal.user_id, **options)
+
+    async def chat(self, chat_id: str) -> dict[str, Any] | None:
+        async with self.scoped() as conn:
+            return await chats.get_chat(conn, self.principal.user_id, chat_id)
+
+    async def chat_runs(self, chat_id: str) -> list[dict[str, Any]] | None:
+        async with self.scoped() as conn:
+            return await chats.chat_runs(conn, self.principal.user_id, chat_id)
+
+    async def append_chat_run(self, chat_id: str, run: dict[str, Any]) -> dict[str, Any]:
+        if not chats.valid_chat_id(chat_id):
+            raise chats.ChatError("Invalid chat id")
+        if not run["agentId"] or not run["runId"]:
+            raise chats.ChatError("A run needs agentId and runId")
+        async with self.scoped() as conn:
+            return await chats.append_run(conn, self.ws, self.principal.user_id, chat_id, run)
+
+    async def update_chat(self, chat_id: str, **changes: Any) -> dict[str, Any] | None:
+        async with self.scoped() as conn:
+            return await chats.update_chat(conn, self.principal.user_id, chat_id, **changes)
+
+    async def remove_chat(self, chat_id: str) -> bool:
+        async with self.scoped() as conn:
+            return await chats.remove_chat(conn, self.principal.user_id, chat_id)
 
     async def search(
         self,

@@ -46,6 +46,11 @@
   the compose file do), and give api-py the same `EMBEDDING_*` and `SEARCH_MIN_SIMILARITY`
   settings and a writable `EMBEDDING_CACHE_DIR`. The compose `api` service caches its model
   in a new `api-models` volume.
+- api-py now serves `/chats` too (issue #190, step 6): each user's chat history, listed a
+  page at a time, opened, replayed run by run, saved as each run finishes, renamed, archived
+  and deleted, with the same answers and row-level security as the agent server: a chat is
+  its user's alone, workspace owners included, and storage tokens can't reach it. Searching
+  past chats for Claude stays on the agent server with memory until step 8.
 
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
