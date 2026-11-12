@@ -8,8 +8,8 @@ Every query names its user and runs in that user's transaction (Session.scoped),
 as the restricted role when row-level security is on, so Postgres keeps chats
 private too: nobody reads another person's chats, workspace owners included.
 
-Searching past chats and reading one for Claude (ChatService.search and
-lines) stay on the TypeScript server with memory until #190's step 8.
+Claude searches past chats and reads one (search_chats, chat_lines_of) through
+/memory/agent (memory_agent.py). Incognito chats are never found or read.
 """
 
 from __future__ import annotations
@@ -22,11 +22,16 @@ from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 
 from .access import iso
+from .memory import _js_string, like_pattern, query_words
 from .paths import JS_SPACE, js_trim
 from .run_report import js_json
 from .text_index import from_units, to_units
 
 MAX_NAME = 200
+# Words searched for at most, and the characters of each line shown around them.
+MAX_WORDS = 8
+SNIPPET = 160
+_ELLIPSIS = "\u2026"
 _SPACES = re.compile(f"[{JS_SPACE}]+")
 _COLUMNS = "id, name, agent_id, archived, created_at, updated_at, last_run_at"
 
@@ -225,3 +230,143 @@ async def remove_chat(conn: AsyncConnection, user_id: str, chat_id: str) -> bool
         "DELETE FROM chats WHERE id = %s AND user_id = %s RETURNING id", (chat_id, user_id)
     )
     return await cur.fetchone() is not None
+
+
+def _text_of(part: Any) -> str:
+    """String(part.text ?? "") for a text part, else ""."""
+    if not isinstance(part, dict) or part.get("type") != "text":
+        return ""
+    value = part.get("text")
+    return "" if value is None else _js_string(value)
+
+
+def chat_lines(messages: Any) -> list[dict[str, str]]:
+    """What the user and Claude said in a chat's messages, in order (chatLines in chats.ts)."""
+    lines: list[dict[str, str]] = []
+    for message in messages if isinstance(messages, list) else []:
+        if not isinstance(message, dict):
+            continue
+        role, content = message.get("role"), message.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "\n".join(t for t in (_text_of(p) for p in content) if t)
+        else:
+            text = ""
+        if js_trim(text):
+            lines.append({"role": role, "text": text})
+    return lines
+
+
+_SEARCH = """
+    SELECT c.id, c.name, c.updated_at, c.messages, m.matched FROM chats c
+    CROSS JOIN LATERAL (
+      SELECT coalesce(c.name, '') || E'\\n' || coalesce(string_agg(
+        CASE jsonb_typeof(e->'content')
+          WHEN 'string' THEN e->>'content'
+          WHEN 'array' THEN (
+            SELECT string_agg(p->>'text', E'\\n') FROM jsonb_array_elements(e->'content') p
+            WHERE jsonb_typeof(p) = 'object' AND p->>'type' = 'text')
+        END, E'\\n'), '') AS said
+      FROM jsonb_array_elements(CASE jsonb_typeof(c.messages) WHEN 'array' THEN c.messages ELSE '[]'::jsonb END) e
+      WHERE e->>'role' IN ('user', 'assistant')
+    ) t
+    CROSS JOIN LATERAL (
+      SELECT count(*)::int AS matched FROM unnest(%s::text[]) w WHERE t.said ILIKE w
+    ) m
+    WHERE c.user_id = %s AND c.workspace_id = %s
+      AND (%s::text IS NULL OR c.id <> %s)
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_incognito_chats i
+        WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)
+      AND m.matched > 0
+    ORDER BY m.matched DESC, c.updated_at DESC
+    LIMIT %s"""
+
+
+def _snippets(lines: list[dict[str, str]], found: list[str]) -> list[str]:
+    """Up to two lines around the words found, as `role: …text…`."""
+    snippets: list[str] = []
+    for line in lines:
+        text = to_units(line["text"])
+        lower = to_units(line["text"].lower())
+        hits = [i for i in (lower.find(to_units(w)) for w in found) if i >= 0]
+        if not hits:
+            continue
+        start = max(0, min(hits) - SNIPPET // 2)
+        cut = js_trim(_SPACES.sub(" ", from_units(text[start : start + SNIPPET])))
+        before = _ELLIPSIS if start > 0 else ""
+        after = _ELLIPSIS if start + SNIPPET < len(text) else ""
+        snippets.append(f"{line['role']}: {before}{cut}{after}")
+        if len(snippets) == 2:
+            break
+    return snippets
+
+
+async def search_chats(
+    conn: AsyncConnection,
+    workspace_id: str,
+    user_id: str,
+    query: str,
+    exclude: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    The user's past chats with the query's words in their name or messages,
+    those with the most words first, then the latest. Incognito chats, and
+    `exclude` (the chat asking), are never results.
+    """
+    words = query_words(query, MAX_WORDS)
+    if not words:
+        return []
+    chosen = int(limit) if limit else 5
+    cur = await conn.execute(
+        _SEARCH,
+        (
+            [like_pattern(w) for w in words],
+            user_id,
+            workspace_id,
+            exclude or None,
+            exclude or None,
+            min(max(chosen or 5, 1), 20),
+        ),
+    )
+    hits = []
+    for id_, name, updated_at, messages, matched in await cur.fetchall():
+        lines = chat_lines(messages)
+        said = "\n".join([name or "", *(line["text"] for line in lines)]).lower()
+        found = [w for w in words if w in said]
+        hits.append(
+            {
+                "id": id_,
+                "name": name,
+                "updatedAt": iso(updated_at),
+                "matched": matched,
+                "snippets": _snippets(lines, found),
+            }
+        )
+    return hits
+
+
+async def chat_lines_of(
+    conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str
+) -> dict[str, Any] | None:
+    """
+    One of the user's chats, as what was said: {chat, lines}; None when it
+    isn't theirs, doesn't exist, or is incognito.
+    """
+    if not valid_chat_id(chat_id):
+        return None
+    cur = await conn.execute(
+        f"""
+        SELECT {_COLUMNS}, messages FROM chats c
+        WHERE c.id = %s AND c.user_id = %s AND c.workspace_id = %s
+          AND NOT EXISTS (
+            SELECT 1 FROM memory_incognito_chats i
+            WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)""",
+        (chat_id, user_id, workspace_id),
+    )
+    row = await cur.fetchone()
+    return {"chat": _summary(row), "lines": chat_lines(row[7])} if row else None

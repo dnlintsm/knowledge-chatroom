@@ -11,9 +11,9 @@ Every change is a version. Claude's changes are also events, which the chat
 shows and the user can undo; Claude's deletes only archive.
 
 Claude's proposals go to the user's inbox (`propose`): imports always do
-(memory_import.py). What a chat run uses (the index, reads, search) and what
-the background learner uses stay on the TypeScript server until the later
-parts of #190's step 8.
+(memory_import.py). What a run uses (the index, reads, search, small edits)
+serves /memory/agent (memory_agent.py). The background learner stays on the
+TypeScript server until #190's step 8d.
 """
 
 from __future__ import annotations
@@ -116,6 +116,26 @@ def _js_string(value: Any) -> str:
     if isinstance(value, list):
         return ",".join("" if v is None else _js_string(v) for v in value)
     return "[object Object]"
+
+
+def query_words(query: str, most: int) -> list[str]:
+    """[...new Set(query.toLowerCase().split(/\\s+/).filter((w) => w.length > 1))].slice(0, most)."""
+    words: list[str] = []
+    for word in _SPACES.split(query.lower()):
+        if utf16_len(word) > 1 and word not in words:
+            words.append(word)
+    return words[:most]
+
+
+def like_pattern(word: str) -> str:
+    """%word%, with ILIKE's \\ % and _ escaped."""
+    return "%" + re.sub(r"[\\%_]", lambda m: "\\" + m.group(0), word) + "%"
+
+
+def snippet(body: str, words: list[str]) -> str:
+    """The first line with one of the words, trimmed, at most 200 characters."""
+    line = next((line for line in body.split("\n") if any(w in line.lower() for w in words)), "")
+    return from_units(to_units(js_trim(line))[:200])
 
 
 def _date(value: Any) -> str:
@@ -587,6 +607,107 @@ class MemoryService:
                 (self.ws, self.user),
             )
         return [_inbox_item(r) for r in rows]
+
+    async def index(self, max_chars: int = INDEX_CHARS) -> dict[str, Any]:
+        """
+        The index Claude gets in its prompt: one line per note in use, the most
+        recently used first, within `max_chars`: {text, shown, total}.
+        """
+        async with self.scoped() as conn:
+            rows = await _rows(
+                conn,
+                """
+                SELECT name, type, description FROM memories
+                WHERE workspace_id = %s AND user_id = %s AND archived_at IS NULL
+                ORDER BY coalesce(last_used_at, updated_at) DESC, name""",
+                (self.ws, self.user),
+            )
+        lines: list[str] = []
+        size = 0
+        for row in rows:
+            line = f"- {row['name']} ({row['type']}): {row['description']}"
+            if size + utf16_len(line) + 1 > max_chars:
+                break
+            lines.append(line)
+            size += utf16_len(line) + 1
+        return {"text": "\n".join(lines), "shown": len(lines), "total": len(rows)}
+
+    async def mark_read(
+        self, name: str, run: dict[str, str]
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Records that Claude read a note in a run; None when there is no such note in use."""
+        if not valid_name(name):
+            return None
+        async with self.scoped() as conn:
+            row = await _one(
+                conn,
+                f"""
+                UPDATE memories SET last_used_at = now()
+                WHERE workspace_id = %s AND user_id = %s AND name = %s AND archived_at IS NULL
+                RETURNING {_COLUMNS}""",
+                (self.ws, self.user, name),
+            )
+            if not row:
+                return None
+            return _note(row), await self._event(conn, row, "read", run)
+
+    async def texts(self) -> Rows:
+        """Every note in use, with its text: for search by meaning (memory_agent.py)."""
+        async with self.scoped() as conn:
+            return await _rows(
+                conn,
+                """
+                SELECT name, description, type, body, version FROM memories
+                WHERE workspace_id = %s AND user_id = %s AND archived_at IS NULL
+                ORDER BY name""",
+                (self.ws, self.user),
+            )
+
+    async def search(self, query: str, limit: int = 10) -> Rows:
+        """Notes in use whose name, description or body has the query's words, best first."""
+        words = query_words(query, 12)
+        if not words:
+            return []
+        async with self.scoped() as conn:
+            rows = await _rows(
+                conn,
+                f"""
+                SELECT * FROM (
+                  SELECT {_COLUMNS}, (
+                    SELECT count(*)::int FROM unnest(%s::text[]) AS p(pattern)
+                    WHERE (m.name || ' ' || m.description || ' ' || m.body) ILIKE p.pattern
+                  ) AS score
+                  FROM memories m
+                  WHERE m.workspace_id = %s AND m.user_id = %s AND m.archived_at IS NULL
+                ) scored
+                WHERE score > 0
+                ORDER BY score DESC, updated_at DESC
+                LIMIT %s""",
+                ([like_pattern(w) for w in words], self.ws, self.user, min(max(limit, 1), 50)),
+            )
+        return [{**_summary(row), "snippet": snippet(row["body"], words)} for row in rows]
+
+    async def replace_text(
+        self, name: str, old_text: str, new_text: str, by: str, run: dict[str, str] | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Replaces the one occurrence of `old_text` in a note's body (Claude's small edits)."""
+        note = await self.get(name)
+        if not note or note["archived"]:
+            raise MemoryNotFoundError(name)
+        if not old_text:
+            raise MemoryError_("Say which text to replace")
+        count = note["body"].count(old_text)
+        if count != 1:
+            raise MemoryError_(
+                f"That text isn't in {name}; view it and copy the text exactly"
+                if count == 0
+                else f"That text is in {name} {count} times; include more around it so it's unique"
+            )
+        # Only onto the version just read, so a change made meanwhile isn't lost.
+        body = note["body"].replace(old_text, new_text, 1)
+        return await self.save(
+            name, {**note, "body": body}, by, run=run, if_version=note["version"]
+        )
 
     async def propose(
         self,

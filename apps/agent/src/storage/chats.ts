@@ -12,7 +12,8 @@ import { asUser, inTransaction, type Sql, type Tx } from "./db";
  *
  * The Python API server in front serves /chats too (services/api-py/api_py/chats.py,
  * issue #190): change both until phase 4 retires this one. search() and
- * lines() stay here with memory until #190's step 8.
+ * lines() are there too, for remote backends' chats_* tools (search_chats,
+ * chat_lines_of).
  */
 
 /** A chat in a user's history, shaped like CopilotKit's thread records. */

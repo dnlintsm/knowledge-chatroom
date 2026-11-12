@@ -26,7 +26,7 @@ What it serves itself so far:
 | 7b | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
 | 8a | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
 | 8b | The memory overview (`GET /memory`), shared notes at the workspace, a node or a group (share, edit, delete, modes, proposals and their decisions), and memory packs (`/memory/packs`, `/memory/installs`: publish, install, fork, uninstall, verify, yank) | `memory_routes.py`, `shared_memory.py`, `memory_packs.py` |
-| 8c | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`, the same Messages API call and model choice as the agent server) | `memory_import.py`, `llm.py` |
+| 8c | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`, the same Messages API call and model choice as the agent server). `/memory/agent` for a remote backend's run (a memory token `via` `remote`): the prompt's memory section and the `memory_*` and `chats_*` tools, with search by meaning when the embedding model is set here; outside MCP servers' memory tokens still go to the TypeScript server | `memory_import.py`, `llm.py`, `memory_agent.py` |
 
 Behind them:
 
