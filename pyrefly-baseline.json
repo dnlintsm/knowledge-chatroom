@@ -79,6 +79,20 @@
       "severity": "error"
     },
     {
+      "column": 30,
+      "path": "services/api-py/api_py/chats.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.connection_async.AsyncConnection.execute`",
+      "severity": "error"
+    },
+    {
+      "column": 9,
+      "path": "services/api-py/api_py/chats.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.connection_async.AsyncConnection.execute`",
+      "severity": "error"
+    },
+    {
       "column": 28,
       "path": "services/api-py/api_py/files.py",
       "name": "missing-attribute",
@@ -90,6 +104,13 @@
       "path": "services/api-py/api_py/files.py",
       "name": "missing-attribute",
       "concise_description": "Object of class `NoneType` has no attribute `put`",
+      "severity": "error"
+    },
+    {
+      "column": 35,
+      "path": "services/api-py/api_py/semantic.py",
+      "name": "no-matching-overload",
+      "concise_description": "No matching overload found for function `psycopg.connection_async.AsyncConnection.execute` called with arguments: (str)",
       "severity": "error"
     },
     {

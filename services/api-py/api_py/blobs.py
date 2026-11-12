@@ -51,7 +51,7 @@ class S3Settings:
         )
 
 
-def _not_found(err: Exception) -> bool:
+def is_not_found(err: Exception) -> bool:
     """Whether a store error means the object (or bucket) isn't there, as opposed to a failure."""
     response: dict[str, Any] = getattr(err, "response", None) or {}
     code = str(response.get("Error", {}).get("Code", ""))
@@ -108,7 +108,7 @@ class BlobStore:
             try:
                 self._client.head_bucket(Bucket=self.bucket)
             except Exception as err:
-                if not _not_found(err):
+                if not is_not_found(err):
                     raise
                 self._client.create_bucket(Bucket=self.bucket)
 
@@ -122,7 +122,7 @@ class BlobStore:
                 self._client.head_object(Bucket=self.bucket, Key=key)
                 return  # Same hash, same bytes: already stored.
             except Exception as err:
-                if not _not_found(err):
+                if not is_not_found(err):
                     raise
             self._client.put_object(
                 Bucket=self.bucket, Key=key, Body=data, ContentType=mime, ContentLength=len(data)

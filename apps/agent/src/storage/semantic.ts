@@ -144,6 +144,7 @@ export const toVector = (v: number[]) => `[${v.join(",")}]`;
 const BATCH = 16;
 const IDLE_MS = 5_000;
 const RETRY_MS = 60_000;
+const FOLLOW_MS = 30_000;
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms).unref());
@@ -273,6 +274,35 @@ export class SemanticIndex {
 
   stop(): void {
     this.stopped = true;
+  }
+
+  /**
+   * For a server whose indexer runs elsewhere (SEARCH_INDEXER=off: the Python
+   * API server in front embeds the passages, issue #190): never changes the
+   * database or embeds passages, and is `ready` for queries while the stored
+   * vectors come from this same model, checked every half minute.
+   */
+  follow(): void {
+    void (async () => {
+      while (!this.stopped) {
+        try {
+          const [current] = await this.sql<{ model: string }[]>`
+            SELECT model FROM search_embedding`;
+          const ready = current?.model === (this.embedder.source ?? this.embedder.model);
+          if (ready !== this.ready) {
+            console.log(
+              ready
+                ? `[search] searching by meaning with ${current.model}, embedded by another server`
+                : "[search] the stored vectors aren't from this server's model yet; search matches words only",
+            );
+          }
+          this.ready = ready;
+        } catch {
+          this.ready = false; // no search_embedding (or pgvector) yet
+        }
+        await sleep(FOLLOW_MS);
+      }
+    })();
   }
 
   private async run() {
