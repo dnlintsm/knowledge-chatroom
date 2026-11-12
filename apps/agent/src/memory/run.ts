@@ -43,6 +43,11 @@ import { recallFor, type MemoryRecall, type RecallHit } from "./recall";
  * Auto ones in the index, Manual ones through memory_search. Claude addresses
  * them as shared:<id>, reading one counts as outside content, and its changes
  * to them are always proposals for the people who edit them.
+ *
+ * services/api-py/api_py/memory_agent.py serves the same prompt and tools to
+ * remote backends' runs (/memory/agent, issue #190 step 8c), with the tools'
+ * schemas in api_py/data/memory-tools.json (run.test.ts checks it); keep the
+ * two in step.
  */
 
 export function memoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

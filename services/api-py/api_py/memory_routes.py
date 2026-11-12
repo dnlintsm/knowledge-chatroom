@@ -1,4 +1,4 @@
-"""Personalized memory (#190, steps 8a and 8b), as apps/agent/src/memory/http.ts serves it.
+"""Personalized memory (#190, steps 8a to 8c), as apps/agent/src/memory/http.ts serves it.
 
     GET    /memory?thread=&node=         {mode, incognito, notes, inbox, shared,
                                          sharedProposals, targets, installs, types,
@@ -35,10 +35,20 @@
     DELETE /memory/installs/<id>         uninstalls it, with its notes (editors)
     POST   /memory/installs/<id>/fork    makes its notes the place's own
 
+    POST   /memory/import                {text, label?} (pasted memory or a .md file)
+                                         or a raw application/zip body (an export):
+                                         {proposed, skipped, how}, all in the inbox
+
 A user's own notes are theirs alone; shared notes follow the grants
 (shared_memory_rank). These are served here only with MEMORY=on (as on the
-TypeScript server) once storage is ready. /memory/import and /memory/agent
-still pass through to the TypeScript server until step 8c.
+TypeScript server) once storage is ready.
+
+    GET    /memory/agent                 {prompt, tools}, and
+    POST   /memory/agent/tools/<name>    for a remote backend's run (memory_agent.py)
+
+/memory/agent is served here only for a memory token `via` "remote"; outside
+MCP servers' tokens, and missing or bad ones, pass through to the TypeScript
+server.
 """
 
 from __future__ import annotations
@@ -51,7 +61,10 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
-from .identity import identify
+from . import chats, memory_agent
+from .access import Principal
+from .identity import MemoryGrant, identify, memory_claims, memory_grant
+from .llm import CreateMessage
 from .memory import (
     INDEX_CHARS,
     MAX_BODY,
@@ -63,6 +76,8 @@ from .memory import (
     MemoryNotFoundError,
     MemoryService,
 )
+from .memory_agent import REMOTE_VIA
+from .memory_import import import_memory
 from .memory_packs import MemoryPackHub
 from .proxy import forward
 from .run_report import js_json
@@ -79,10 +94,12 @@ from .storage_routes import (
     raw_path,
     read_body,
 )
+from .text_index import from_units, to_units
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
 _OWN_PATH = re.compile(r"^/memory(/|$)")
+_AGENT_PATH = re.compile(r"^/memory/agent(/|$)")
 # The sections served here; the others go to the TypeScript server.
 OWN_SECTIONS = (
     "settings",
@@ -94,8 +111,11 @@ OWN_SECTIONS = (
     "shared",
     "packs",
     "installs",
+    "import",
 )
 MAX_JSON_BYTES = 64 * 1024
+# An import's body at most: a pasted memory, a file or a .zip export.
+MAX_IMPORT_BYTES = 2 * 1024 * 1024
 
 
 def send(status: int, body: Any) -> Response:
@@ -107,9 +127,9 @@ def send(status: int, body: Any) -> Response:
     )
 
 
-async def read_json(request: Request) -> dict[str, Any] | None:
-    """The JSON object in the body (at most 64 KiB, empty: {}), or None, as json() in http.ts."""
-    data = await read_body(request, MAX_JSON_BYTES)
+async def read_json(request: Request, limit: int = MAX_JSON_BYTES) -> dict[str, Any] | None:
+    """The JSON object in the body (at most `limit` bytes, empty: {}), or None, as json() in http.ts."""
+    data = await read_body(request, limit)
     if data is None:
         return None
     try:
@@ -140,11 +160,21 @@ def _served_here(request: Request) -> bool:
 @router.api_route("/memory/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def memory_route(request: Request) -> Response:
     state = request.app.state
-    if not state.settings.memory or not _served_here(request) or not await state.storage_ready():
+    secret = state.settings.auth_secret
+    agent = _AGENT_PATH.match(raw_path(request)) is not None
+    claims = memory_claims(request, secret) if agent else None
+    # A remote backend's run is served here; outside MCP servers' tokens (and
+    # bad ones, for the TypeScript server's 401) go through.
+    here = claims is not None and claims["via"] == REMOTE_VIA if agent else _served_here(request)
+    if not state.settings.memory or not here or not await state.storage_ready():
         return await forward(request, state.http)
     storage = state.storage
     try:
-        principal = await identify(request, storage.access, state.settings.auth_secret)
+        if claims is not None:
+            return await _agent(
+                request, storage, await memory_grant(storage.access, secret, claims)
+            )
+        principal = await identify(request, storage.access, secret)
         if principal is None:
             return send(401, {"error": "Sign in first"})
         parts = _parts(raw_path(request)) or []
@@ -157,6 +187,7 @@ async def memory_route(request: Request) -> Response:
             shared=SharedMemoryService(session.scoped, storage.pool, session.ws, user),
             packs=MemoryPackHub(storage.pool, session.ws, parse_admins(state.settings.hub_admins)),
             user=user,
+            create_message=state.create_message,
         )
         return await _route(request, memory, parts)
     except MemoryError_ as err:
@@ -170,12 +201,41 @@ async def memory_route(request: Request) -> Response:
         return send(500, {"error": "Memory request failed"})
 
 
+async def _agent(request: Request, storage: Any, grant: MemoryGrant) -> Response:
+    """/memory/agent for a remote backend's run (memory_agent.py)."""
+    session = Session(
+        storage, storage.access, Principal(user_id=grant.user_id, actor="agent", via=grant.via)
+    )
+    user = grant.user_id
+
+    async def search_chats(query: str, exclude: str | None, limit: int | None) -> list:
+        async with session.scoped() as conn:
+            return await chats.search_chats(conn, session.ws, user, query, exclude, limit)
+
+    async def read_chat(chat_id: str) -> dict[str, Any] | None:
+        async with session.scoped() as conn:
+            return await chats.chat_lines_of(conn, session.ws, user, chat_id)
+
+    given = memory_agent.AgentRequest(
+        service=MemoryService(session.scoped, session.ws, user),
+        shared_service=SharedMemoryService(session.scoped, storage.pool, session.ws, user),
+        thread=grant.thread,
+        via=grant.via,
+        node=grant.node,
+        recall=memory_agent.recall_for(storage.semantic),
+        search_chats=search_chats,
+        read_chat=read_chat,
+    )
+    return await memory_agent.serve(request, raw_path(request), given, read_json)
+
+
 @dataclass
 class Memory:
     own: MemoryService
     shared: SharedMemoryService
     packs: MemoryPackHub
     user: str
+    create_message: CreateMessage
 
 
 def _int4(value: float) -> bool:
@@ -289,6 +349,8 @@ async def _route(request: Request, m: Memory, parts: list[str]) -> Response:
         return send(200, {"note": await memory.restore(name, _db_int(version))})
     if section == "shared":
         return await _shared(request, m.shared, parts[1:])
+    if method == "POST" and section == "import" and not name:
+        return await _import(request, m)
     if section == "packs":
         return await _packs(request, m, parts[1:])
     if section == "installs" and name:
@@ -300,6 +362,28 @@ async def _route(request: Request, m: Memory, parts: list[str]) -> Response:
     if method == "POST" and section == "events" and name and action == "undo":
         return send(200, await memory.undo(name))
     return _refused(method)
+
+
+async def _import(request: Request, m: Memory) -> Response:
+    if (request.headers.get("content-type") or "").startswith("application/zip"):
+        data = await read_body(request, MAX_IMPORT_BYTES)
+        if data is None:
+            return send(413, {"error": "That file is too big to import (2 MB at most)"})
+        return send(200, await import_memory(m.own, m.create_message, zip_bytes=data))
+    given = await read_json(request, MAX_IMPORT_BYTES)
+    if given is None:
+        return send(400, {"error": "Invalid JSON body (2 MB at most)"})
+    label = given.get("label")
+    text = given.get("text")
+    return send(
+        200,
+        await import_memory(
+            m.own,
+            m.create_message,
+            text=text if isinstance(text, str) else "",
+            label=from_units(to_units(label)[:100]) if isinstance(label, str) else None,
+        ),
+    )
 
 
 def _refused(method: str) -> Response:

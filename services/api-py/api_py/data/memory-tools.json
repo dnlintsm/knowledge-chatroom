@@ -1,0 +1,181 @@
+[
+ {
+  "name": "memory_view",
+  "description": "Read one of your notes about the user (by name, from the memory index), or a shared note (shared:<id>), in full.",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The note's name: lowercase letters, digits and dashes, e.g. writing-style; or a shared note's shared:<id>"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_search",
+  "description": "Search your notes about the user, and the shared notes, by words in their name, description or text (and by meaning, when the agent has an embedding model).",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Words to look for"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_save",
+  "description": "Create a note about the user, or replace a whole note (same name). Keep it short; for a profile, preference or feedback note, add **Why:** and **How to apply:** lines. On a shared:<id>, or with scope workspace or node, it proposes the change to the people who edit shared memory.",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The note's name: lowercase letters, digits and dashes, e.g. writing-style; or a shared note's shared:<id>"
+    },
+    "description": {
+     "type": "string",
+     "description": "One line saying what the note is about; it goes in the index"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "preference",
+      "profile",
+      "project",
+      "reference",
+      "feedback"
+     ],
+     "description": "profile, preference, project, reference or feedback"
+    },
+    "body": {
+     "type": "string",
+     "description": "The note, in markdown"
+    },
+    "scope": {
+     "description": "personal (default): your notes about the user. workspace or node (the user's current node): propose a new shared note",
+     "type": "string",
+     "enum": [
+      "personal",
+      "workspace",
+      "node"
+     ]
+    }
+   },
+   "required": [
+    "name",
+    "description",
+    "type",
+    "body"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_edit",
+  "description": "Change part of a note: replaces old_text, which must appear exactly once in it, with new_text.",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The note's name: lowercase letters, digits and dashes, e.g. writing-style; or a shared note's shared:<id>"
+    },
+    "old_text": {
+     "type": "string",
+     "description": "Text in the note, copied exactly"
+    },
+    "new_text": {
+     "type": "string",
+     "description": "What it becomes (empty removes it)"
+    }
+   },
+   "required": [
+    "name",
+    "old_text",
+    "new_text"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_delete",
+  "description": "Delete a note that is wrong or no longer useful (on a shared:<id>, propose deleting it).",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "The note's name: lowercase letters, digits and dashes, e.g. writing-style; or a shared note's shared:<id>"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "chats_search",
+  "description": "Search the user's past chats with you by words in what was said, to pick up earlier work or something they told you before. Returns chats (id, name, when) with matching lines; chats_read reads one.",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Words to look for"
+    },
+    "limit": {
+     "description": "Chats at most (default 5)",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 20
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "chats_read",
+  "description": "Read one of the user's past chats (an id from chats_search): what the user and you said, in order. Long chats come in parts: pass the offset it gives to read on.",
+  "inputSchema": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The chat's id"
+    },
+    "offset": {
+     "description": "Characters to skip (from the previous part)",
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "additionalProperties": false
+  }
+ }
+]

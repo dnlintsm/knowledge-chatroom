@@ -81,6 +81,18 @@
   editing, deleting, Auto/Manual/Off for you or for everyone, and proposals with accept,
   reject and withdraw), and memory packs (publish, install, fork, uninstall, and verify and
   yank for `HUB_ADMINS`). Answers, checks and versions match the agent server's.
+- api-py imports memory too (issue #190, step 8c): pasted memory, `.md` files with front
+  matter and `.zip` exports go to the Memory inbox as on the agent server, and plain text
+  is sorted into notes by the same small model. Give api-py the agent's
+  `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL` and model settings
+  (`MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL`); without a key, the text waits as
+  one note. The demo compose file passes them.
+- api-py serves `/memory/agent` for remote backends too (issue #190, step 8c): a run's
+  memory token `via` `remote` (the Python chat agent's) gets the same prompt section, the
+  `memory_*` and `chats_*` tools and the same answers as from the agent server, with
+  search by meaning through api-py's embedding model when `EMBEDDING_*` is set there.
+  Outside MCP servers' memory tokens (`memoryAccess`) still go to the agent server, which
+  shows what they do under the chat's live reply.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

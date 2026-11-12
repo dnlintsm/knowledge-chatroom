@@ -10,10 +10,18 @@ trustworthy as the network in front of it.
 
 from __future__ import annotations
 
+import base64
+import json
+import re
+from dataclasses import dataclass
+from typing import Any
+
 from fastapi import Request
 
 from . import tokens
 from .access import AccessService, Principal
+
+_UUID = re.compile(r"[0-9a-fA-F-]{36}")
 
 
 async def identify(
@@ -43,4 +51,54 @@ async def _user_for(access: AccessService, claims: dict) -> str:
         claims["sub"],
         email if isinstance(email, str) else None,
         name if isinstance(name, str) else None,
+    )
+
+
+def memory_claims(request: Request, secret: str | None) -> dict[str, Any] | None:
+    """
+    The claims of the X-Knowledge-Memory token (a run's: `via` and `thread`
+    set), or None. Without login, the app's unsigned local.<base64url JSON>.
+    """
+    header = request.headers.get(tokens.MEMORY_HEADER)
+    if header is None:
+        return None
+    claims: Any = None
+    if secret:
+        claims = tokens.verify(header, secret, tokens.MEMORY_AUDIENCE)
+    elif header.startswith("local."):
+        data = header[len("local.") :]
+        try:
+            raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+            claims = json.loads(raw.decode("utf-8", errors="replace"))
+        except ValueError:
+            return None
+    if not isinstance(claims, dict):
+        return None
+    via, thread = claims.get("via"), claims.get("thread")
+    if not isinstance(via, str) or not via or not isinstance(thread, str) or not thread:
+        return None
+    return claims
+
+
+@dataclass
+class MemoryGrant:
+    """What an X-Knowledge-Memory token lets its holder do: the user's memory in one chat."""
+
+    user_id: str
+    via: str
+    thread: str
+    node: str | None
+
+
+async def memory_grant(
+    access: AccessService, secret: str | None, claims: dict[str, Any]
+) -> MemoryGrant:
+    """The grant for claims memory_claims read (identifyMemory in identity.ts)."""
+    node = claims.get("node")
+    user = await _user_for(access, claims) if secret else await access.local_user_id()
+    return MemoryGrant(
+        user_id=user,
+        via=claims["via"],
+        thread=claims["thread"],
+        node=node if isinstance(node, str) and _UUID.fullmatch(node) else None,
     )
