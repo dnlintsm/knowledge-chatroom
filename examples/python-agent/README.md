@@ -28,7 +28,7 @@ and `whoami` shows the forwarded user.
 
 ## Run it
 
-1. Start the tools server (Python 3.11+ and [uv](https://docs.astral.sh/uv/)), from
+1. Start the tools server (Python 3.12+ and [uv](https://docs.astral.sh/uv/)), from
    the repository root:
 
    ```bash
