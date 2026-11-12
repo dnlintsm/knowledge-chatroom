@@ -201,7 +201,7 @@ class SkillService:
                     VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (self.storage.workspace_id, user_id, thread_id, run_id, skill, source, trigger),
                 )
-        except Exception as err:  # noqa: BLE001 - never fails a run
+        except Exception as err:  # Failure to record a skill use must not fail a run.
             logger.warning("[skills] couldn't record a skill use: %s", err)
 
     async def layers(self, user_id: str, thread_id: str | None = None) -> dict[str, dict[str, str]]:

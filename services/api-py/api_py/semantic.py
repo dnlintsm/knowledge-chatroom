@@ -324,7 +324,7 @@ class SemanticIndex:
                 return False
             try:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            except Exception as err:  # noqa: BLE001 - words still work
+            except Exception as err:  # Word search still works.
                 logger.warning(
                     "[search] could not turn on pgvector (an admin can run CREATE EXTENSION vector); "
                     "search matches words only: %s",

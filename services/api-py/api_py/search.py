@@ -393,7 +393,7 @@ class SearchService:
         for sha256 in rows:
             try:
                 data = await blobs.get(sha256)
-            except Exception as err:  # noqa: BLE001 - tried again later
+            except Exception as err:  # Retry store failures later.
                 if not is_not_found(err):
                     logger.warning(
                         "[search] could not read blob %s to index it, will retry: %s", sha256, err

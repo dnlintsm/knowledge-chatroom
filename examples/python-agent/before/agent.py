@@ -26,7 +26,7 @@ from claude_agent_sdk import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "services" / "lab-tools"))
-from lab_tools import stats  # noqa: E402  (the same logic the MCP server uses)
+from lab_tools import stats  # The same logic the MCP server uses.
 
 # 1. The system prompt → becomes skills/lab-analyst/SKILL.md in the chatroom.
 SYSTEM_PROMPT = """You are a lab analyst. When the user gives metric values from experiment runs,
