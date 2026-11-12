@@ -12,11 +12,12 @@ from typing import Any
 import claude_agent_sdk
 import httpx
 import pytest
+from conftest import FakeClaude
+from fastapi.testclient import TestClient
+
 from agent_py.app import create_app, make_adapter
 from agent_py.skills import RunSkill, fetch_skills, materialize, slash_command
 from agent_py.workspace import Storage
-from conftest import FakeClaude
-from fastapi.testclient import TestClient
 
 SKILL_MD = b"---\nname: demo\ndescription: A demo skill\n---\n\nSay demo.\n"
 

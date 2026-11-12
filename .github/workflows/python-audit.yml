@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       fail-fast: false
+      # Both versions also cover future Python-specific lockfile markers.
       matrix:
         python: ["3.12", "3.14"]
     env:

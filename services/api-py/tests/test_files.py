@@ -21,9 +21,10 @@ import httpx
 import psycopg
 import pytest
 import uvicorn
+from support import ALICE, BOB, SECRET, URL, Client, storage_token
+
 from api_py.blobs import S3Settings
 from api_py.storage import EVENTS_CHANNEL
-from support import ALICE, BOB, SECRET, URL, Client, storage_token
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 pytestmark = [

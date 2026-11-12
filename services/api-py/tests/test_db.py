@@ -14,10 +14,11 @@ import anyio
 import httpx
 import psycopg
 import pytest
+from psycopg import conninfo
+
 from api_py import db
 from api_py.app import create_app
 from api_py.config import DEFAULT_MIGRATIONS_DIR, Settings
-from psycopg import conninfo
 
 URL = os.environ.get("TEST_DATABASE_URL")
 needs_postgres = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")

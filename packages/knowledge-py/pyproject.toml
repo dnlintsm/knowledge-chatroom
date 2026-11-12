@@ -37,6 +37,7 @@ openapi-scopes = ["schemas", "paths"]
 use-operation-id-as-name = true
 output = "src/knowledge_chatroom/api.py"
 output-model-type = "pydantic_v2.BaseModel"
+# Keep the generated output stable; this does not set the package minimum.
 target-python-version = "3.10"
 use-standard-collections = true
 use-union-operator = true
