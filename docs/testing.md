@@ -29,9 +29,16 @@ which CI runs too:
 uv sync --all-packages
 uv run --locked --no-sync ruff check packages/knowledge-py services examples/python-agent
 uv run --locked --no-sync ruff format --check packages/knowledge-py services examples/python-agent
+uv run --locked --no-sync pyrefly check --error-stale-baseline
 cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
 uv run pytest -q
 ```
+
+Pyrefly checks the handwritten package and service source at the minimum supported Python
+version. Existing findings are recorded in `pyrefly-baseline.json`; resolve them over time,
+then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated models and
+tests are not yet included. The ordered baseline prevents new matching findings from being
+silently absorbed. Do not regenerate the baseline merely to make CI pass.
 
 ## Disposable integration databases
 

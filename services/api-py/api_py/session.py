@@ -9,6 +9,7 @@ enforces the same rules if a check here is ever missed.
 
 from __future__ import annotations
 
+import builtins
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1010,7 +1011,7 @@ class FilesSession:
         async with self.session.scoped() as conn:
             return await self.service.read(conn, path)
 
-    async def history(self, path: str) -> list[dict[str, Any]] | None:
+    async def history(self, path: str) -> builtins.list[dict[str, Any]] | None:
         async with self.session.scoped() as conn:
             return await self.service.history(conn, path)
 
