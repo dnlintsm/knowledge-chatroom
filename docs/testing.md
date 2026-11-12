@@ -22,7 +22,7 @@ that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a 
 `*.test.ts` to the matching list, or it never runs.
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
-`services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.11+),
+`services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
 which CI runs too:
 
 ```bash

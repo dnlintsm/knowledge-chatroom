@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- The Python workspace, including the `knowledge-chatroom` library, now requires
+  Python 3.12 or later; Python 3.10 and 3.11 are no longer supported.
+
 ### Added
 
 - The Python API server, `services/api-py` (issue #190, phase 3 of #169). It sits in front

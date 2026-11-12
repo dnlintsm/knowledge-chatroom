@@ -3,7 +3,7 @@ name = "knowledge-chatroom"
 version = "0.2.3"
 description = "Identity, storage and memory clients shared by the chatroom's Python services"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     # Checks the chatroom's Ed25519-signed identity tokens (identity.py).
     "cryptography>=42",
@@ -37,6 +37,7 @@ openapi-scopes = ["schemas", "paths"]
 use-operation-id-as-name = true
 output = "src/knowledge_chatroom/api.py"
 output-model-type = "pydantic_v2.BaseModel"
+# Keep the generated output stable; this does not set the package minimum.
 target-python-version = "3.10"
 use-standard-collections = true
 use-union-operator = true

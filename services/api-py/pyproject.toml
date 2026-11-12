@@ -2,7 +2,7 @@
 name = "api-py"
 version = "0.2.3"
 description = "The agent server's HTTP API in Python, in front of the TypeScript server while routes move over (issue #190)"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "knowledge-chatroom",
     "fastapi>=0.115",

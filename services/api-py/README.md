@@ -84,7 +84,7 @@ until the last step of #190. api-py only checks the database:
 
 ## Run it
 
-You need Python 3.11+ and [uv](https://docs.astral.sh/uv/). `pnpm dev` at the
+You need Python 3.12+ and [uv](https://docs.astral.sh/uv/). `pnpm dev` at the
 repository root runs it on :8000 with the TypeScript server behind it on :8100, and
 the UI. `pnpm dev:ts` runs without it, with the TypeScript server on :8000 as before.
 On its own:
