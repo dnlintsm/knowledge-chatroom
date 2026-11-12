@@ -14,6 +14,9 @@
  * the same person whether Claude or a button asked. With AGENT_URL set this
  * server still answers these routes: the menu and buttons work with a remote
  * chat backend too.
+ *
+ * services/api-py/api_py/tools.py serves these routes too (issue #190, step
+ * 7b) when api-py has MCP_SERVERS; keep the two in step.
  */
 
 import type http from "node:http";

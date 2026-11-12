@@ -5,6 +5,8 @@ import { parseFrontMatter, SCRIPT_FILE, type SkillFile } from "./catalog";
  * a person should look at before installing it. Flags warn; they don't stop
  * publishing, and a clean scan doesn't make a skill safe (that's what an
  * admin's verification is for).
+ *
+ * services/api-py/api_py/skill_catalog.py scans the same way: change both.
  */
 
 export type FlagKind = "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
