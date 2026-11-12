@@ -90,6 +90,11 @@ import { chatTools, liveRunEvents, memoryEnabled, memoryPrompt, memoryTools, pre
  *                                 names, descriptions and JSON schemas
  *   POST /memory/agent/tools/<name>   the tool's arguments: {text, isError}
  */
+/*
+ * With MEMORY=on there too, api-py serves /memory/settings, /activity, /inbox,
+ * /export, /notes and /events (services/api-py/api_py/memory_routes.py, issue
+ * #190 step 8a); keep the two in step.
+ */
 /** An import's body at most: a pasted memory, a file or a .zip export. */
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 

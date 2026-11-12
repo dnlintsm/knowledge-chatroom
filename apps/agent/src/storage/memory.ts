@@ -15,6 +15,9 @@ import { asUser, inTransaction, type Sql, type Tx } from "./db";
  *
  * Every change is a version. Claude's changes are also events, which the chat
  * shows ("Updated: …") and the user can undo; Claude's deletes only archive.
+ *
+ * services/api-py/api_py/memory.py serves the user's own notes too (issue
+ * #190, step 8a), with the same SQL and checks; keep the two in step.
  */
 
 export const MEMORY_TYPES = ["preference", "profile", "project", "reference", "feedback"] as const;

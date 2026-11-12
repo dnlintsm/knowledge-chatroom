@@ -231,6 +231,11 @@ def main(env: Mapping[str, str] = os.environ) -> None:
     except ConfigError as err:
         raise SystemExit(f"[api-py] {err}") from err
     logger.info("passing routes not ported yet to %s", settings.ts_agent_url)
+    if settings.tools is not None:
+        logger.info(
+            "serving /tools for MCP_SERVERS: %s",
+            ", ".join(settings.tools.servers) or "(none usable)",
+        )
     # File watches never end on their own, so a stop doesn't wait for them for long.
     uvicorn.run(
         create_app(settings),

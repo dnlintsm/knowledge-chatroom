@@ -45,6 +45,11 @@ const port = await freePort();
 const apiPort = target === "api-py" ? await freePort() : null;
 const base = `http://127.0.0.1:${apiPort ?? port}`;
 const authSecret = randomBytes(32).toString("hex");
+// One "+" menu server, for the /tools routes (both servers read it; api-py serves them, issue #190 step 7).
+// Nothing listens on port 9, so a call answers 502.
+const mcpServers = JSON.stringify({
+  conformance: { url: "http://127.0.0.1:9/mcp", forwardIdentity: true, ui: { label: "Conformance", tools: ["search"] } },
+});
 
 const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
   cwd: agentDir,
@@ -57,6 +62,7 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     AUTH_SECRET: authSecret,
     // The suite's owner moderates the skill hub (verify, dismiss reports).
     HUB_ADMINS: "conformance|alice",
+    MCP_SERVERS: mcpServers,
     // Memory routes answer 404 unless memory is on; nothing learns in the background.
     MEMORY: "on",
     MEMORY_LEARN: "off",
@@ -85,6 +91,11 @@ const api = apiPort
         TS_AGENT_URL: `http://127.0.0.1:${port}`,
         API_PY_PORT: String(apiPort),
         EMBEDDING_MODEL: "off",
+        // The same hub admins as the agent: api-py serves the skill hub (step 7).
+        HUB_ADMINS: "conformance|alice",
+        MCP_SERVERS: mcpServers,
+        // api-py serves each user's own notes (step 8).
+        MEMORY: "on",
       },
       stdio: ["ignore", "inherit", "inherit"],
     })

@@ -588,8 +588,15 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
   step("tools menu", async () => {
     await call("GET", "/tools", { expect: 401 });
     await call("GET", "/tools", { headers: storageToken("conformance|alice"), expect: 401 });
-    await call("GET", "/tools", { headers: alice, expect: 200 });
+    const menu = await call<{ tools: { server: string; callable: string[] }[] }>("GET", "/tools", { headers: alice, expect: 200 });
     await call("POST", "/tools/no-such-server/search", { headers: alice, json: { arguments: {} }, expect: 404 });
+    // With the runner's MCP_SERVERS (scripts/test-conformance.mjs): a server in the menu that isn't up.
+    if (menu.data.tools.some((t) => t.server === "conformance")) {
+      await call("POST", "/tools/conformance/delete", { headers: alice, json: { arguments: {} }, expect: 403 });
+      await call("POST", "/tools/conformance/search", { headers: alice, json: [], expect: 400 });
+      const down = await call<{ error: string }>("POST", "/tools/conformance/search", { headers: alice, json: { arguments: {} }, expect: 502 });
+      assert.equal(down.data.error, "Conformance isn't reachable right now");
+    }
   });
 
   const skill = `conformance-${stamp}`;
