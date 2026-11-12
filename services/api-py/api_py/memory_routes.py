@@ -41,8 +41,14 @@
 
 A user's own notes are theirs alone; shared notes follow the grants
 (shared_memory_rank). These are served here only with MEMORY=on (as on the
-TypeScript server) once storage is ready. /memory/agent still passes through
-to the TypeScript server.
+TypeScript server) once storage is ready.
+
+    GET    /memory/agent                 {prompt, tools}, and
+    POST   /memory/agent/tools/<name>    for a remote backend's run (memory_agent.py)
+
+/memory/agent is served here only for a memory token `via` "remote"; outside
+MCP servers' tokens, and missing or bad ones, pass through to the TypeScript
+server.
 """
 
 from __future__ import annotations
@@ -55,7 +61,9 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
-from .identity import identify
+from . import chats, memory_agent
+from .access import Principal
+from .identity import MemoryGrant, identify, memory_claims, memory_grant
 from .llm import CreateMessage
 from .memory import (
     INDEX_CHARS,
@@ -68,6 +76,7 @@ from .memory import (
     MemoryNotFoundError,
     MemoryService,
 )
+from .memory_agent import REMOTE_VIA
 from .memory_import import import_memory
 from .memory_packs import MemoryPackHub
 from .proxy import forward
@@ -90,6 +99,7 @@ from .text_index import from_units, to_units
 logger = logging.getLogger("api_py")
 router = APIRouter()
 _OWN_PATH = re.compile(r"^/memory(/|$)")
+_AGENT_PATH = re.compile(r"^/memory/agent(/|$)")
 # The sections served here; the others go to the TypeScript server.
 OWN_SECTIONS = (
     "settings",
@@ -150,11 +160,21 @@ def _served_here(request: Request) -> bool:
 @router.api_route("/memory/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def memory_route(request: Request) -> Response:
     state = request.app.state
-    if not state.settings.memory or not _served_here(request) or not await state.storage_ready():
+    secret = state.settings.auth_secret
+    agent = _AGENT_PATH.match(raw_path(request)) is not None
+    claims = memory_claims(request, secret) if agent else None
+    # A remote backend's run is served here; outside MCP servers' tokens (and
+    # bad ones, for the TypeScript server's 401) go through.
+    here = claims is not None and claims["via"] == REMOTE_VIA if agent else _served_here(request)
+    if not state.settings.memory or not here or not await state.storage_ready():
         return await forward(request, state.http)
     storage = state.storage
     try:
-        principal = await identify(request, storage.access, state.settings.auth_secret)
+        if claims is not None:
+            return await _agent(
+                request, storage, await memory_grant(storage.access, secret, claims)
+            )
+        principal = await identify(request, storage.access, secret)
         if principal is None:
             return send(401, {"error": "Sign in first"})
         parts = _parts(raw_path(request)) or []
@@ -179,6 +199,34 @@ async def memory_route(request: Request) -> Response:
     except Exception:
         logger.exception("[memory] request failed")
         return send(500, {"error": "Memory request failed"})
+
+
+async def _agent(request: Request, storage: Any, grant: MemoryGrant) -> Response:
+    """/memory/agent for a remote backend's run (memory_agent.py)."""
+    session = Session(
+        storage, storage.access, Principal(user_id=grant.user_id, actor="agent", via=grant.via)
+    )
+    user = grant.user_id
+
+    async def search_chats(query: str, exclude: str | None, limit: int | None) -> list:
+        async with session.scoped() as conn:
+            return await chats.search_chats(conn, session.ws, user, query, exclude, limit)
+
+    async def read_chat(chat_id: str) -> dict[str, Any] | None:
+        async with session.scoped() as conn:
+            return await chats.chat_lines_of(conn, session.ws, user, chat_id)
+
+    given = memory_agent.AgentRequest(
+        service=MemoryService(session.scoped, session.ws, user),
+        shared_service=SharedMemoryService(session.scoped, storage.pool, session.ws, user),
+        thread=grant.thread,
+        via=grant.via,
+        node=grant.node,
+        recall=memory_agent.recall_for(storage.semantic),
+        search_chats=search_chats,
+        read_chat=read_chat,
+    )
+    return await memory_agent.serve(request, raw_path(request), given, read_json)
 
 
 @dataclass

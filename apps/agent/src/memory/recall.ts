@@ -14,6 +14,9 @@ import type { RunSharedNote, SharedMemoryService } from "../storage/shared-memor
  * changes, or is deleted, simply stops being looked up, and nothing derived
  * from private notes is stored. Uses the agent's embedding model (the one
  * file search uses, ../storage/semantic.ts) when search by meaning is on.
+ *
+ * MemoryRecall in services/api-py/api_py/memory_agent.py does the same for
+ * remote backends' runs (issue #190, step 8c).
  */
 
 /** Note texts embedded at most, in characters. */

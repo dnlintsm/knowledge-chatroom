@@ -33,6 +33,8 @@ from .memory import (
     _rows,
     check_input,
     clean_reason,
+    query_words,
+    snippet,
     valid_name,
 )
 from .paths import JS_SPACE
@@ -63,6 +65,15 @@ def is_uuid(value: Any) -> bool:
 def shared_ref(note_id: str) -> str:
     """The handle Claude uses for a shared note, next to personal notes' names."""
     return f"shared:{note_id}"
+
+
+_REF = re.compile(r"shared:([0-9a-f-]{36})", re.I)
+
+
+def parse_shared_ref(ref: str) -> str | None:
+    """The id in a shared:<id>, as given (any case), or None."""
+    found = _REF.fullmatch(ref)
+    return found.group(1) if found else None
 
 
 def place_of(row: dict[str, Any]) -> dict[str, Any]:
@@ -116,6 +127,18 @@ def _summary(row: dict[str, Any]) -> dict[str, Any]:
         "everyoneMode": everyone,
         "updatedAt": iso(row["updated_at"]),
         "pack": pack,
+    }
+
+
+def _run_note(row: dict[str, Any]) -> dict[str, Any]:
+    """RunSharedNote: what a run knows of a shared note."""
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "type": row["type"],
+        "label": place_of(row)["label"],
+        "mode": _summary(row)["mode"],
     }
 
 
@@ -223,6 +246,45 @@ class SharedMemoryService:
         """Every shared note the user can read."""
         async with self.scoped() as conn:
             return [_summary(r) for r in await self._rows(conn, "true")]
+
+    async def _for_run(self, node_id: str | None) -> Rows:
+        node = node_id if node_id and is_uuid(node_id) else None
+        async with self.scoped() as conn:
+            rows = await self._rows(
+                conn,
+                "(m.scope <> 'node' OR (%s::uuid IS NOT NULL AND n.path @> "
+                "(SELECT t.path FROM nodes t WHERE t.id = %s::uuid)))",
+                (node, node),
+            )
+        return [r for r in rows if _summary(r)["mode"] != "off"]
+
+    async def for_run(self, node_id: str | None) -> Rows:
+        """
+        The notes a run gets: the workspace's, the user's groups', and those of
+        `node_id` and the nodes above it; not the ones Off for the user.
+        """
+        return [_run_note(r) for r in await self._for_run(node_id)]
+
+    async def texts(self, node_id: str | None) -> Rows:
+        """The run's shared notes with their text: for search by meaning (memory_agent.py)."""
+        return [
+            {**_run_note(r), "body": r["body"], "version": r["version"]}
+            for r in await self._for_run(node_id)
+        ]
+
+    async def search(self, node_id: str | None, query: str, limit: int = 10) -> Rows:
+        """Shared notes in the run's set (not Off) matching words in the query."""
+        words = query_words(query, 12)
+        if not words:
+            return []
+        scored = []
+        for row in await self._for_run(node_id):
+            text = f"{row['name']} {row['description']} {row['body']}".lower()
+            score = sum(1 for w in words if w in text)
+            if score > 0:
+                scored.append((score, {**_run_note(row), "snippet": snippet(row["body"], words)}))
+        scored.sort(key=lambda hit: -hit[0])
+        return [note for _score, note in scored[:limit]]
 
     async def get(self, note_id: str) -> dict[str, Any]:
         async with self.scoped() as conn:
