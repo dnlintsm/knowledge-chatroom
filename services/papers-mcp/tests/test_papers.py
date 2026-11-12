@@ -9,9 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from knowledge_chatroom import identity, storage
 from mcp import Client
 from mcp.server.mcpserver.exceptions import ToolError
+
+from knowledge_chatroom import identity, storage
 from papers_mcp import fulltext, models, net, openalex, server
 
 FIXTURES = Path(__file__).parent / "fixtures"

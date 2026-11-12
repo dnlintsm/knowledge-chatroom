@@ -4,6 +4,7 @@ import base64
 import json
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from knowledge_chatroom import identity
 
 # The chatroom's public key for AUTH_SECRET "0123456789abcdef0123456789abcdef",

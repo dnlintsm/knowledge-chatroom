@@ -26,11 +26,12 @@ import posixpath
 from typing import Annotated, Literal
 
 import anyio
-from knowledge_chatroom import identity, storage
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
+
+from knowledge_chatroom import identity, storage
 
 from . import arxiv, fulltext, net, openalex
 from .models import PaperDetails, PaperSearchResult, PaperText, SavedPaper, parse_id, slug

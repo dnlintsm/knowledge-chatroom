@@ -20,7 +20,7 @@ profile and an e2e run with the app came last (step 7).
 
 ## Run it
 
-Python 3.11+ and [uv](https://docs.astral.sh/uv/). With the app, from the repository root:
+Python 3.12+ and [uv](https://docs.astral.sh/uv/). With the app, from the repository root:
 
 ```bash
 uv sync --all-packages

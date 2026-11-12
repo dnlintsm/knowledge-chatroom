@@ -8,11 +8,12 @@ from typing import Any
 
 import httpx
 import pytest
-from agent_py.app import create_app, make_adapter
-from agent_py.prompt import SYSTEM_PROMPT
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
+
+from agent_py.app import create_app, make_adapter
+from agent_py.prompt import SYSTEM_PROMPT
 
 KEY = Ed25519PrivateKey.generate()
 PUBLIC_KEY = base64.urlsafe_b64encode(

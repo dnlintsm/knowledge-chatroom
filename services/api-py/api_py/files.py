@@ -109,8 +109,9 @@ class FileService:
     async def list(self, conn: AsyncConnection) -> list[dict[str, Any]]:
         here, args = self._here()
         cur = await conn.execute(
-            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path", args
-        )  # type: ignore[arg-type]
+            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path",  # type: ignore[arg-type]
+            args,
+        )
         return [_to_info(row) for row in await cur.fetchall()]
 
     async def stat(self, conn: AsyncConnection, raw_path: str) -> dict[str, Any] | None:

@@ -18,3 +18,6 @@ extend-exclude = ["packages/knowledge-py/src/knowledge_chatroom/api.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["knowledge_chatroom", "agent_py", "api_py", "lab_tools", "papers_mcp"]
