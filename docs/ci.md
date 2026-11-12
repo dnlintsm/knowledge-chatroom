@@ -71,3 +71,4 @@ and login suites; their outcomes still determine `e2e`, and so `preview`. Full v
 screenshots and suite-count summaries remain available through the workflow's
 existing artifact/summary steps when those steps can execute. The overall preview
 job keeps its twenty-minute limit.
+<!-- gate test: docs only -->
