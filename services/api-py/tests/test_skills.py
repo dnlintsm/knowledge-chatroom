@@ -14,11 +14,11 @@ import support
 from support import ALICE, BOB, SECRET, URL, Client, storage_token
 from test_files import s3
 
+from api_py.collation import collation_key
 from api_py.config import DEFAULT_BUILTIN_SKILLS_DIR
 from api_py.skill_catalog import (
     SkillFile,
     builtin_skills,
-    collation_key,
     describe,
     merge_skills,
     parse_front_matter,
@@ -94,6 +94,28 @@ def test_workspace_and_merged_skills_sort_as_javascript_does():
     assert [(s.name, s.path) for s in skills] == [("same", "skills/A/SKILL.md"), ("zeta", "skills/zeta/SKILL.md")]
     names = ["b-2", "b2", "B", "a_b", "a-b", "ab", "10", "9", "Ab", "é", "f"]
     assert sorted(names, key=collation_key) == ["10", "9", "a_b", "a-b", "ab", "Ab", "B", "b-2", "b2", "é", "f"]
+    # Beyond ASCII too, as Node's ICU sorts them (#206 review): "ø" goes with "o", before "z".
+    others = ["z", "ø", "o", "p", "Ø", "oz", "–", "-", "€", "0", "α", "中", "“", '"', "ł", "m"]
+    assert sorted(others, key=collation_key) == [
+        "-",
+        "–",
+        '"',
+        "“",
+        "€",
+        "0",
+        "ł",
+        "m",
+        "o",
+        "ø",
+        "Ø",
+        "oz",
+        "p",
+        "z",
+        "α",
+        "中",
+    ]
+    picked = workspace_skills([("skills/z/SKILL.md", md("tidy")), ("skills/ø/SKILL.md", md("tidy"))])
+    assert [s.path for s in picked] == ["skills/ø/SKILL.md"]
     builtins = builtin_skills(DEFAULT_BUILTIN_SKILLS_DIR)
     assert {"analysis", "tldr"} <= {s.name for s in builtins} and all(s.source == "builtin" for s in builtins)
     merged = merge_skills(builtins, [s for s in skills if s.name == "zeta"])

@@ -57,9 +57,9 @@ Behind them:
   own model.
 - **Skills** (`skill_catalog.py`, `skills.py`). SKILL.md front matter, the file limits,
   the publish scan and the hub's version fingerprints follow `apps/agent/src/skills`.
-  Lists sort as JavaScript's `localeCompare` sorts them (`collation_key`: exact for
-  ASCII, close for accented letters), so both servers order skills, and fingerprint a
-  version's files, the same way. The built-in skills are read from `apps/agent/skills`.
+  Lists sort as JavaScript's `localeCompare` sorts them (`collation.py`: the Unicode
+  Collation Algorithm with CLDR's root table, the one Node's ICU uses), so both servers
+  order skills, and fingerprint a version's files, the same way. The built-in skills are read from `apps/agent/skills`.
 - **Change events** go out and come in on the same `LISTEN/NOTIFY` channel (`events.py`),
   so each server's file watch tells browsers about changes made on either, each to the
   people who may see it.

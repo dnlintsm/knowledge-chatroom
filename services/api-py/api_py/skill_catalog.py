@@ -8,7 +8,7 @@ has a mode: auto (Claude may use it on its own, and /name runs it), manual
 
 Both servers read the same skills and the hub keeps a fingerprint of each
 version's files in order, so the parsing, the limits and the sort order
-(JavaScript's localeCompare, approximated by collation_key) are the
+(JavaScript's localeCompare, collation.py) are the
 TypeScript server's.
 """
 
@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import os
 import re
-import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .collation import collation_key
 from .paths import JS_SPACE, js_trim
 from .text_index import from_units, to_units
 
@@ -58,50 +58,6 @@ def strict_text(data: bytes) -> str | None:
         return data.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError:
         return None
-
-
-# Sorting as String.prototype.localeCompare does (ICU's root collation), for
-# what the TypeScript server sorts that way. Exact for ASCII; other characters
-# sort by their decomposition (accents and compatibility forms after the plain
-# letter), else after the Latin letters by code point.
-_ASCII_ORDER = "\t\n\v\f\r _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
-_PRIMARY = {c: i + 1 for i, c in enumerate(_ASCII_ORDER)}
-_OTHER = len(_ASCII_ORDER) + 1
-# Accents in the order ICU gives them: acute, grave, breve, circumflex, caron, ring,
-# diaeresis, double acute, tilde, dot above, cedilla, ogonek, macron; others after.
-_ACCENTS = {
-    chr(c): i + 1
-    for i, c in enumerate([0x301, 0x300, 0x306, 0x302, 0x30C, 0x30A, 0x308, 0x30B, 0x303, 0x307, 0x327, 0x328, 0x304])
-}
-_EXPANSIONS = {"ß": "ss", "ẞ": "SS"}
-
-
-def collation_key(text: str) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
-    primary: list[int] = []
-    secondary: list[int] = []
-    tertiary: list[int] = []
-    for char in text:
-        if char < "\x80":
-            weight = _PRIMARY.get(char.lower())
-            if weight is None:
-                continue  # control characters don't count
-            primary.append(weight)
-            secondary.append(0)
-            tertiary.append(1 if char.isupper() else 0)
-            continue
-        compat = _EXPANSIONS.get(char) or unicodedata.normalize("NFKD", char)
-        canonical = unicodedata.normalize("NFD", char)
-        for part in compat:
-            if unicodedata.combining(part):
-                secondary.append(_ACCENTS.get(part) or 0x1000 + ord(part))
-                continue
-            if part < "\x80" and part.lower() in _PRIMARY:
-                primary.append(_PRIMARY[part.lower()])
-            else:
-                primary.append(_OTHER + ord(part.lower()[:1] or part))
-            secondary.append(0)
-            tertiary.append((1 if part.isupper() or char.isupper() else 0) + (2 if compat != canonical else 0))
-    return tuple(primary), tuple(secondary), tuple(tertiary)
 
 
 def code_unit_key(text: str) -> bytes:

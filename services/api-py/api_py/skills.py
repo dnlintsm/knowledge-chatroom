@@ -34,6 +34,7 @@ from psycopg.types.json import Jsonb
 
 from .access import ForbiddenError, Principal, Role, at_least, is_uuid, iso
 from .blobs import sha256_hex
+from .collation import collation_key
 from .paths import JS_SPACE, InvalidPathError, js_trim, mime_for_path, normalize_path, utf16_len
 from .session import FilesSession, Session
 from .skill_catalog import (
@@ -46,7 +47,6 @@ from .skill_catalog import (
     builtin_skills,
     chosen_mode,
     code_unit_key,
-    collation_key,
     decode_text,
     describe,
     effective_mode,
