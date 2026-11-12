@@ -24,6 +24,7 @@ What it serves itself so far:
 | 6 | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
 | 7a | `/skills` (lists, modes at three levels, `/skills/run` and `/skills/used` for outside agents, .zip export and import, delete) and the skill hub `/hub` (publish, install, fork, diff, verify, yank, reports) | `skills_routes.py`, `skills.py`, `skill_catalog.py` |
 | 7b | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
+| 8a | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
 
 Behind them:
 
@@ -104,6 +105,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub, and `on` when skills' scripts run. |
 | `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
+| `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off leaves `/memory` to the TypeScript server. |
 | `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset leaves `/tools` to the TypeScript server. |
 | `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |
 

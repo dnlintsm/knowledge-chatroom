@@ -20,6 +20,8 @@
     SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
                          runs chats; /skills here says so)
     BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
+    MEMORY               on: each user's memory (as on the TypeScript server); this
+                         server serves the notes, settings, inbox and activity
     MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
                          the "+" menu's tool servers and their calls (tools.py); with
                          MCP_SERVERS unset, /tools stays with the TypeScript server
@@ -96,6 +98,8 @@ class Settings:
     hub_admins: str | None = None
     skill_scripts: bool = False
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
+    # Personalized memory (MEMORY=on); off leaves /memory to the TypeScript server, which answers 404.
+    memory: bool = False
     # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to the TypeScript server.
     tools: ToolsSettings | None = None
 
@@ -119,6 +123,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
         tools=_tools(env),
+        memory=bool(re.fullmatch(r"(on|1|true|yes)", (env.get("MEMORY") or "").strip(f"{JS_SPACE}"), re.IGNORECASE)),
     )
 
 

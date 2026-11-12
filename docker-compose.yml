@@ -133,6 +133,8 @@ services:
       SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
       # The chat's "+" menu (issue #190, step 7b): the same outside MCP servers as the agent.
       MCP_SERVERS: ${MCP_SERVERS:-}
+      # Each user's memory notes (step 8): on where the agent has it on.
+      MEMORY: ${MEMORY:-}
     volumes:
       - api-models:/var/lib/knowledge/models
     depends_on:
