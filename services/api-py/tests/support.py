@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import psycopg
+
 from api_py import db, tokens
 from api_py.app import create_app
 from api_py.config import DEFAULT_MIGRATIONS_DIR, Settings

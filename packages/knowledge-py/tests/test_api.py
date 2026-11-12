@@ -18,8 +18,9 @@ from typing import Any
 
 import pytest
 import yaml
-from knowledge_chatroom import api
 from pydantic import TypeAdapter
+
+from knowledge_chatroom import api
 
 SPEC = yaml.safe_load(
     (Path(__file__).parents[2] / "contracts" / "openapi" / "storage.yaml").read_text()

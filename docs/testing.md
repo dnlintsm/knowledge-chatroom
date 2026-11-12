@@ -23,7 +23,10 @@ that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a 
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
 `services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
-which CI runs on Python 3.12 and 3.14:
+which CI runs on Python 3.12 and 3.14. The `python` status check aggregates both
+matrix legs, including lint, type checking and code generation; repository rules
+should require `python` along with the existing `checks` and `preview` checks.
+To run checks locally:
 
 ```bash
 uv sync --all-packages
@@ -34,10 +37,11 @@ cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
 uv run pytest -q
 ```
 
-The 3.12 CI run also reports coverage of handwritten Python source. It has no
-percentage gate yet; use the report to identify important untested behavior.
+The 3.12 CI run also reports coverage of handwritten Python source in the job log
+and GitHub Actions job summary. It has no percentage gate yet; use the report to
+identify important untested behavior.
 
-Pyrefly checks the handwritten package and service source at the minimum supported Python
+Pyrefly checks the handwritten package, service, and example source at the minimum supported Python
 version. Existing findings are recorded in `pyrefly-baseline.json`; resolve them over time,
 then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated models and
 tests are not yet included. The ordered baseline prevents new matching findings from being

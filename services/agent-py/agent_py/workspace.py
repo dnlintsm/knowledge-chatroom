@@ -41,67 +41,11 @@ MAX_EDIT_PREVIEW_CHARS = 4_000
 # packages/contracts/src/files.ts
 KIND_FOLDERS = {"note": "notes", "skill": "skills", "upload": "uploads", "artifact": "artifacts"}
 TEXT_EXTENSIONS = set(
-    [
-        "md",
-        "markdown",
-        "txt",
-        "json",
-        "csv",
-        "ts",
-        "tsx",
-        "js",
-        "jsx",
-        "py",
-        "yaml",
-        "yml",
-        "html",
-        "css",
-        "sql",
-        "sh",
-        "toml",
-        "xml",
-        "htm",
-        "tsv",
-        "log",
-        "ini",
-        "cfg",
-        "conf",
-        "env",
-        "jsonl",
-        "ipynb",
-        "mjs",
-        "cjs",
-        "mts",
-        "cts",
-        "scss",
-        "less",
-        "vue",
-        "svelte",
-        "graphql",
-        "go",
-        "rs",
-        "java",
-        "kt",
-        "c",
-        "h",
-        "cpp",
-        "hpp",
-        "cc",
-        "cs",
-        "rb",
-        "php",
-        "swift",
-        "scala",
-        "r",
-        "lua",
-        "pl",
-        "bash",
-        "zsh",
-        "ps1",
-        "bat",
-        "tex",
-        "rst",
-    ]
+    (  # noqa: SIM905 - keep the extensions compact and readable
+        "md markdown txt json csv ts tsx js jsx py yaml yml html css sql sh toml xml htm tsv "
+        "log ini cfg conf env jsonl ipynb mjs cjs mts cts scss less vue svelte graphql go rs "
+        "java kt c h cpp hpp cc cs rb php swift scala r lua pl bash zsh ps1 bat tex rst"
+    ).split()
 )
 
 

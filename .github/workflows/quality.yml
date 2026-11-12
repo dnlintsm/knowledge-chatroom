@@ -84,12 +84,17 @@ jobs:
         working-directory: packages/knowledge-py
         run: uv run --locked datamodel-codegen --check
       - name: Python tests
+        id: python_tests
         run: |
           status=0
+          coverage_sources="$GITHUB_WORKSPACE/packages/knowledge-py/src/knowledge_chatroom,$GITHUB_WORKSPACE/services/agent-py/agent_py,$GITHUB_WORKSPACE/services/api-py/api_py,$GITHUB_WORKSPACE/services/lab-tools/lab_tools,$GITHUB_WORKSPACE/services/papers-mcp/papers_mcp"
           for project in packages/knowledge-py services/*/; do
             echo "::group::$project"
             if [[ "${{ matrix.python }}" == "3.12" ]]; then
-              uv run --locked --no-sync coverage run --append -m pytest -q -c "$project/pyproject.toml" "$project/tests" || status=1
+              (cd "$project" && uv run --locked --no-sync coverage run \
+                --rcfile="$GITHUB_WORKSPACE/pyproject.toml" \
+                --data-file="$GITHUB_WORKSPACE/.coverage" --source="$coverage_sources" \
+                --append -m pytest -q) || status=1
             else
               (cd "$project" && uv run --locked pytest -q) || status=1
             fi
@@ -97,5 +102,20 @@ jobs:
           done
           exit $status
       - name: Python coverage report
-        if: always() && matrix.python == '3.12'
-        run: uv run --locked --no-sync coverage report
+        if: ${{ !cancelled() && matrix.python == '3.12' && steps.python_tests.outcome != 'skipped' }}
+        run: |
+          uv run --locked --no-sync coverage report
+          uv run --locked --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
+  python-required:
+    # Stable required-check name covering every Python matrix leg.
+    name: python
+    if: ${{ always() }}
+    needs: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all Python checks
+        env:
+          PYTHON_MATRIX_RESULT: ${{ needs.python.result }}
+        run: test "$PYTHON_MATRIX_RESULT" = success

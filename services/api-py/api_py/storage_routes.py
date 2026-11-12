@@ -405,8 +405,9 @@ async def handle_access(request: Request, session: Session) -> Response:
                 if not body or not isinstance(body.get("name"), str) or parent_id is False:
                     return error(400, "Expected {parentId: string | null, name: string}")
                 return json_response(
-                    201, {"id": await session.create_group(parent_id, body["name"])}
-                )  # type: ignore[arg-type]
+                    201,
+                    {"id": await session.create_group(parent_id, body["name"])},  # type: ignore[arg-type]
+                )
         elif not sub:
             if method == "PATCH":
                 body = await read_json(request)
@@ -438,8 +439,11 @@ async def handle_access(request: Request, session: Session) -> Response:
                     'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
                 )
             grant_id = await session.set_grant(
-                node, body["principalType"], body["principalId"], body["role"]
-            )  # type: ignore[arg-type]
+                node,  # type: ignore[arg-type]
+                body["principalType"],
+                body["principalId"],
+                body["role"],
+            )
             return json_response(200, {"id": grant_id})
         if ident and method == "DELETE":
             return done(await session.revoke(ident))
