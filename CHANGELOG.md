@@ -58,6 +58,13 @@
   publishing, installing, forking, diffing, verifying, yanking and reporting hub skills, with
   the same scan flags, fingerprints and sort order as the agent server. Give api-py the same
   `HUB_ADMINS` and `SKILL_SCRIPTS` as the agent. `/tools` follows in step 7b.
+- api-py serves the chat's "+" menu, `/tools`, too (issue #190, step 7b): the menu of
+  `MCP_SERVERS` entries with a `ui` block, and the app's calls to their `ui.tools` over
+  streamable HTTP or SSE, as the signed-in user, with the same identity and storage tokens,
+  refusals and answers as the agent server. It does this only when `MCP_SERVERS` is set
+  for api-py, so give it the same `MCP_SERVERS` (and `TOOLS_CALL_TIMEOUT_MS`,
+  `STORAGE_TOKEN_SECONDS`) as the agent; without it `/tools` stays with the agent server.
+  The demo compose file passes `MCP_SERVERS` to both.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

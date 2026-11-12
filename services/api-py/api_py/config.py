@@ -20,6 +20,9 @@
     SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
                          runs chats; /skills here says so)
     BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
+    MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
+                         the "+" menu's tool servers and their calls (tools.py); with
+                         MCP_SERVERS unset, /tools stays with the TypeScript server
 """
 
 from __future__ import annotations
@@ -28,10 +31,14 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .blobs import S3Settings
 from .paths import JS_SPACE
 from .semantic import EmbeddingSettings, embedding_settings
+
+if TYPE_CHECKING:
+    from .tools import ToolsSettings
 
 DEFAULT_TS_AGENT_URL = "http://127.0.0.1:8100"
 # services/api-py/api_py/config.py -> the repository root.
@@ -89,6 +96,8 @@ class Settings:
     hub_admins: str | None = None
     skill_scripts: bool = False
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
+    # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to the TypeScript server.
+    tools: ToolsSettings | None = None
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -109,7 +118,17 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         hub_admins=env.get("HUB_ADMINS"),
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
+        tools=_tools(env),
     )
+
+
+def _tools(env: Mapping[str, str]) -> ToolsSettings | None:
+    from .tools import tools_settings_from_env
+
+    try:
+        return tools_settings_from_env(env)
+    except ValueError as err:  # STORAGE_TOKEN_SECONDS
+        raise ConfigError(str(err)) from err
 
 
 def max_upload_bytes(env: Mapping[str, str]) -> int:
