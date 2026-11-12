@@ -57,6 +57,26 @@
   its user's alone, workspace owners included, and storage tokens can't reach it. Searching
   past chats for Claude stays on the agent server with memory until step 8.
 
+- api-py now serves `/skills` and the skill hub (`/hub`) too (issue #190, step 7a): skill
+  lists and modes (yours, the workspace's, a chat's), what an outside agent's run gets
+  (`/skills/run`, `/skills/used`), .zip export and import, deleting a workspace skill, and
+  publishing, installing, forking, diffing, verifying, yanking and reporting hub skills, with
+  the same scan flags, fingerprints and sort order as the agent server. Give api-py the same
+  `HUB_ADMINS` and `SKILL_SCRIPTS` as the agent. `/tools` follows in step 7b.
+- api-py serves the chat's "+" menu, `/tools`, too (issue #190, step 7b): the menu of
+  `MCP_SERVERS` entries with a `ui` block, and the app's calls to their `ui.tools` over
+  streamable HTTP or SSE, as the signed-in user, with the same identity and storage tokens,
+  refusals and answers as the agent server. It does this only when `MCP_SERVERS` is set
+  for api-py, so give it the same `MCP_SERVERS` (and `TOOLS_CALL_TIMEOUT_MS`,
+  `STORAGE_TOKEN_SECONDS`) as the agent; without it `/tools` stays with the agent server.
+  The demo compose file passes `MCP_SERVERS` to both.
+- api-py serves each user's own memory notes too (issue #190, step 8a): reading, writing,
+  restoring, archiving and deleting notes, the memory mode and incognito chats, the inbox's
+  accept and reject, Claude's recent changes and their Undo, and the .zip export, with the
+  same checks, versions, answers and row-level security as the agent server. It does this
+  only with `MEMORY=on` for api-py, so give it the same `MEMORY` as the agent. The memory
+  overview (`GET /memory`), shared notes, packs, import and `/memory/agent` stay on the agent
+  server for now; chats keep using memory there.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

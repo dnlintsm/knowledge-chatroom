@@ -107,10 +107,31 @@
       "severity": "error"
     },
     {
-      "column": 35,
-      "path": "services/api-py/api_py/semantic.py",
-      "name": "no-matching-overload",
-      "concise_description": "No matching overload found for function `psycopg.connection_async.AsyncConnection.execute` called with arguments: (str)",
+      "column": 23,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.cursor_async.AsyncCursor.execute`",
+      "severity": "error"
+    },
+    {
+      "column": 44,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 50,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
       "severity": "error"
     },
     {
@@ -135,10 +156,87 @@
       "severity": "error"
     },
     {
+      "column": 76,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 67,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 45,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 48,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 48,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 47,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 36,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 61,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/api-py/api_py/skills_routes.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Literal[''] | object | Any` is not assignable to parameter `run_id` with type `str` in function `api_py.skills.SkillService.record`",
+      "severity": "error"
+    },
+    {
       "column": 25,
       "path": "services/api-py/api_py/storage.py",
       "name": "bad-argument-type",
       "concise_description": "Argument `(() -> Awaitable[str]) | (() -> str) | str` is not assignable to parameter `conninfo` with type `str` in function `api_py.events.EventHub.__init__`",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "services/api-py/api_py/tools.py",
+      "name": "no-matching-overload",
+      "concise_description": "No matching overload found for function `str.join` called with arguments: (Generator[object | str])",
+      "severity": "error"
+    },
+    {
+      "column": 82,
+      "path": "services/api-py/api_py/tools.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of type `AudioContent | EmbeddedResource | ImageContent | ResourceLink | TextContent` has no attribute `text`",
       "severity": "error"
     },
     {

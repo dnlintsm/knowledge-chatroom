@@ -23,6 +23,11 @@ dependencies = [
     "tokenizers>=0.20",
     "huggingface-hub>=0.26",
     "numpy>=1.26",
+    # Sorting as JavaScript's localeCompare does (collation.py), with CLDR's root table.
+    "pyuca>=1.2",
+    # The app's direct calls to outside MCP servers' tools (/tools, tools.py), as the
+    # TypeScript server makes them with @modelcontextprotocol/sdk.
+    "mcp>=2.2,<3",
 ]
 
 [dependency-groups]
