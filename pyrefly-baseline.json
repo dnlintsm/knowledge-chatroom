@@ -79,13 +79,6 @@
       "severity": "error"
     },
     {
-      "column": 13,
-      "path": "services/api-py/api_py/files.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.connection_async.AsyncConnection.execute`",
-      "severity": "error"
-    },
-    {
       "column": 28,
       "path": "services/api-py/api_py/files.py",
       "name": "missing-attribute",
@@ -97,13 +90,6 @@
       "path": "services/api-py/api_py/files.py",
       "name": "missing-attribute",
       "concise_description": "Object of class `NoneType` has no attribute `put`",
-      "severity": "error"
-    },
-    {
-      "column": 70,
-      "path": "services/api-py/api_py/files.py",
-      "name": "unsupported-operation",
-      "concise_description": "`(self: Self@FileService, conn: AsyncConnection) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
       "severity": "error"
     },
     {
@@ -128,31 +114,10 @@
       "severity": "error"
     },
     {
-      "column": 43,
-      "path": "services/api-py/api_py/session.py",
-      "name": "unsupported-operation",
-      "concise_description": "`(self: Self@FilesSession) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
-      "severity": "error"
-    },
-    {
       "column": 25,
       "path": "services/api-py/api_py/storage.py",
       "name": "bad-argument-type",
       "concise_description": "Argument `(() -> Awaitable[str]) | (() -> str) | str` is not assignable to parameter `conninfo` with type `str` in function `api_py.events.EventHub.__init__`",
-      "severity": "error"
-    },
-    {
-      "column": 60,
-      "path": "services/api-py/api_py/storage_routes.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Literal[True] | str | None` is not assignable to parameter `parent_id` with type `str | None` in function `api_py.session.Session.create_group`",
-      "severity": "error"
-    },
-    {
-      "column": 17,
-      "path": "services/api-py/api_py/storage_routes.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Literal[True] | str | None` is not assignable to parameter `node_id` with type `str | None` in function `api_py.session.Session.set_grant`",
       "severity": "error"
     },
     {

@@ -7,16 +7,17 @@ import json
 import time
 from typing import Any, ClassVar
 
-import agent_py.adapter as adapter_module
 import claude_agent_sdk
 import httpx
 import pytest
+from conftest import FakeClaude
+from fastapi.testclient import TestClient
+
+import agent_py.adapter as adapter_module
 from agent_py.app import create_app, make_adapter
 from agent_py.memory import OFF, RunMemory, fetch_memory, memory_tools
 from agent_py.prompt import SYSTEM_PROMPT
 from agent_py.workspace import Storage
-from conftest import FakeClaude
-from fastapi.testclient import TestClient
 
 TOKEN = "memory-token-for-t1"
 PROMPT = "- Memory: you keep notes about this user across chats.\n<memory-index>\n- style (preference): Short\n</memory-index>"

@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 from knowledge_chatroom import identity, memory, storage
 from lab_tools import server, stats
 

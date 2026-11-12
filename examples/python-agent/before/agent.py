@@ -25,7 +25,7 @@ from claude_agent_sdk import (
     tool,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "services" / "lab-tools"))
 from lab_tools import stats  # noqa: E402  (the same logic the MCP server uses)
 
 # 1. The system prompt → becomes skills/lab-analyst/SKILL.md in the chatroom.
@@ -34,7 +34,7 @@ use describe_metric for one run and compare_runs for two. Report the verdict fir
 numbers that support it, and say when there are too few repeats to tell."""
 
 
-def _json(result: object) -> dict:
+def _json(result: stats.MetricSummary | stats.Comparison) -> dict:
     return {"content": [{"type": "text", "text": json.dumps(stats.as_dict(result))}]}
 
 

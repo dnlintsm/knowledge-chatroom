@@ -92,3 +92,16 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+
+  python-required:
+    # Stable required-check name covering every Python matrix leg.
+    name: python
+    if: ${{ always() }}
+    needs: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all Python checks
+        env:
+          PYTHON_MATRIX_RESULT: ${{ needs.python.result }}
+        run: test "$PYTHON_MATRIX_RESULT" = success

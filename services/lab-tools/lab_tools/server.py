@@ -18,9 +18,10 @@ import csv
 import io
 import os
 
-from knowledge_chatroom import identity, memory, storage
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+
+from knowledge_chatroom import identity, memory, storage
 
 from . import stats
 
