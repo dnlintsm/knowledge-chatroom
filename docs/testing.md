@@ -47,6 +47,14 @@ then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated m
 tests are not yet included. The ordered baseline prevents new matching findings from being
 silently absorbed. Do not regenerate the baseline merely to make CI pass.
 
+Python runtime dependencies are audited on pull requests that change the lockfile or
+Python project metadata, and weekly in CI. The audit exports the locked workspace
+runtime dependencies and checks them with pip-audit on Python 3.12 and 3.14.
+The two versions currently resolve the same packages on Linux, but retain both
+checks for future Python-specific dependency markers. Review scheduled results
+in **Actions → Python dependency audit**; this workflow does not create issues.
+Optional extras are not exported unless selected through a workspace runtime dependency.
+
 ## Disposable integration databases
 
 The storage suite **drops the public schema** of `TEST_DATABASE_URL`. Never point
