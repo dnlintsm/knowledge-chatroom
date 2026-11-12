@@ -16,10 +16,11 @@ import uuid
 
 import psycopg
 import pytest
-from api_py import tokens
-from api_py.storage import EVENTS_CHANNEL
 from psycopg import conninfo
 from support import ALICE, BOB, SECRET, URL, Client, forwarded, storage_token
+
+from api_py import tokens
+from api_py.storage import EVENTS_CHANNEL
 
 pytestmark = [pytest.mark.anyio, pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")]
 

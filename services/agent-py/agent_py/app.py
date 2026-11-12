@@ -28,6 +28,7 @@ from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+
 from knowledge_chatroom.identity import User, caller, public_key
 
 from .adapter import ChatroomAdapter

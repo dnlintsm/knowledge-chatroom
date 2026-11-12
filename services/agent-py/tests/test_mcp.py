@@ -8,9 +8,10 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
+
 from agent_py.app import create_app, make_adapter
 from agent_py.mcp import servers_from_env
-from fastapi.testclient import TestClient
 
 SERVERS = {
     "mcpServers": {

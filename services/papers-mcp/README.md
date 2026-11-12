@@ -14,7 +14,7 @@ docs/remote-agent.md, step 8.
 
 ## Run it
 
-1. Start the server (Python 3.11+ and [uv](https://docs.astral.sh/uv/)), from the
+1. Start the server (Python 3.12+ and [uv](https://docs.astral.sh/uv/)), from the
    repository root:
 
    ```bash

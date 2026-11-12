@@ -8,6 +8,7 @@ place: an experiment's files change on their own, apart from its node's.
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -109,8 +110,9 @@ class FileService:
     async def list(self, conn: AsyncConnection) -> list[dict[str, Any]]:
         here, args = self._here()
         cur = await conn.execute(
-            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path", args
-        )  # type: ignore[arg-type]
+            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path",  # type: ignore[arg-type]
+            args,
+        )
         return [_to_info(row) for row in await cur.fetchall()]
 
     async def stat(self, conn: AsyncConnection, raw_path: str) -> dict[str, Any] | None:
@@ -295,7 +297,9 @@ class FileService:
             raise FileExistsError_(target) from err
         return await self.stat(conn, target)
 
-    async def history(self, conn: AsyncConnection, raw_path: str) -> list[dict[str, Any]] | None:
+    async def history(
+        self, conn: AsyncConnection, raw_path: str
+    ) -> builtins.list[dict[str, Any]] | None:
         path = normalize_path(raw_path)
         here, args = self._here()
         cur = await conn.execute(
