@@ -24,9 +24,12 @@ RUN uv sync --frozen --no-dev --package api-py
 COPY apps/agent/src/storage/migrations ./migrations
 COPY services/api-py/api_py ./services/api-py/api_py
 
-RUN useradd --create-home --uid 10001 api
+RUN useradd --create-home --uid 10001 api \
+  && mkdir -p /var/lib/knowledge/models && chown -R api:api /var/lib/knowledge
 WORKDIR /app/services/api-py
-ENV PATH="/app/.venv/bin:$PATH" API_PY_HOST=0.0.0.0 API_PY_PORT=8000 MIGRATIONS_DIR=/app/migrations
+# The embedding model for search by meaning is downloaded there on first use.
+ENV PATH="/app/.venv/bin:$PATH" API_PY_HOST=0.0.0.0 API_PY_PORT=8000 MIGRATIONS_DIR=/app/migrations \
+  EMBEDDING_CACHE_DIR=/var/lib/knowledge/models
 EXPOSE 8000
 USER api
 CMD ["python", "-m", "api_py.app"]

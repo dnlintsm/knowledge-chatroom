@@ -9,6 +9,10 @@ import { asUser, inTransaction, type Sql, type Tx } from "./db";
  * Every query names its user, and with row-level security it also runs as
  * that user (db.ts asUser), so Postgres keeps chats private too: nobody
  * reads another person's chats, workspace owners included.
+ *
+ * The Python API server in front serves /chats too (services/api-py/api_py/chats.py,
+ * issue #190): change both until phase 4 retires this one. search() and
+ * lines() stay here with memory until #190's step 8.
  */
 
 /** A chat in a user's history, shaped like CopilotKit's thread records. */

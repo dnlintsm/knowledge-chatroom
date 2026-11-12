@@ -89,6 +89,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
       SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
+      # The api service in front runs the search indexer; this one embeds only queries.
+      SEARCH_INDEXER: "off"
     volumes:
       - models:/var/lib/knowledge/models
     depends_on:
@@ -123,6 +125,14 @@ services:
       S3_SECRET_ACCESS_KEY: knowledge-secret
       S3_FORCE_PATH_STYLE: "true"
       S3_PUBLIC_URL: http://localhost:8333
+      # Search and its indexer (issue #190, step 5): the same model settings as the agent.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
+      SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
+    volumes:
+      - api-models:/var/lib/knowledge/models
     depends_on:
       agent:
         condition: service_healthy
@@ -223,3 +233,4 @@ volumes:
   postgres-data:
   s3-data:
   models:
+  api-models:
