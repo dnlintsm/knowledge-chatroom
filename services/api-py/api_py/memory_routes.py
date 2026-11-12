@@ -84,7 +84,17 @@ logger = logging.getLogger("api_py")
 router = APIRouter()
 _OWN_PATH = re.compile(r"^/memory(/|$)")
 # The sections served here; the others go to the TypeScript server.
-OWN_SECTIONS = ("settings", "activity", "inbox", "export", "notes", "events", "shared", "packs", "installs")
+OWN_SECTIONS = (
+    "settings",
+    "activity",
+    "inbox",
+    "export",
+    "notes",
+    "events",
+    "shared",
+    "packs",
+    "installs",
+)
 MAX_JSON_BYTES = 64 * 1024
 
 
@@ -213,7 +223,12 @@ async def _route(request: Request, m: Memory, parts: list[str]) -> Response:
                 "targets": targets,
                 "installs": installs,
                 "types": list(MEMORY_TYPES),
-                "limits": {"notes": MAX_NOTES, "body": MAX_BODY, "description": MAX_DESCRIPTION, "index": INDEX_CHARS},
+                "limits": {
+                    "notes": MAX_NOTES,
+                    "body": MAX_BODY,
+                    "description": MAX_DESCRIPTION,
+                    "index": INDEX_CHARS,
+                },
             },
         )
     if method == "PUT" and section == "settings" and not name:
@@ -308,7 +323,9 @@ async def _shared(request: Request, shared: SharedMemoryService, parts: list[str
         and len(parts) < 4
         and decision in ("accept", "reject", "withdraw")
     ):
-        return send(200, {"id": action, "status": decision, **(await shared.decide(action, decision))})
+        return send(
+            200, {"id": action, "status": decision, **(await shared.decide(action, decision))}
+        )
     if note_id and note_id != "proposals" and not action:
         if method == "GET":
             note = await shared.get(note_id)
@@ -320,7 +337,14 @@ async def _shared(request: Request, shared: SharedMemoryService, parts: list[str
             version = _given_version(given)
             if version is not None and not version.is_integer():
                 return send(400, {"error": "version is a number"})
-            return send(200, {"note": await shared.update(note_id, given, None if version is None else int(version))})
+            return send(
+                200,
+                {
+                    "note": await shared.update(
+                        note_id, given, None if version is None else int(version)
+                    )
+                },
+            )
         if method == "DELETE":
             await shared.remove(note_id)
             return send(200, {"id": note_id, "deleted": True})
@@ -328,7 +352,14 @@ async def _shared(request: Request, shared: SharedMemoryService, parts: list[str
         given = await read_json(request)
         if given is None:
             return send(400, {"error": "Invalid JSON body"})
-        return send(200, {"note": await shared.set_mode(note_id, given.get("mode"), given.get("everyone") is True)})
+        return send(
+            200,
+            {
+                "note": await shared.set_mode(
+                    note_id, given.get("mode"), given.get("everyone") is True
+                )
+            },
+        )
     return _refused(method)
 
 
@@ -343,7 +374,9 @@ async def _packs(request: Request, m: Memory, parts: list[str]) -> Response:
         version = js_to_number(given) if given else None
         if version is not None and not version.is_integer():
             return send(400, {"error": "version is a number"})
-        return send(200, {"pack": await hub.detail(m.user, name, None if version is None else int(version))})
+        return send(
+            200, {"pack": await hub.detail(m.user, name, None if version is None else int(version))}
+        )
     if method != "POST":
         return send(405, {"error": "Method not allowed"})
     body = await read_json(request)
@@ -363,6 +396,8 @@ async def _packs(request: Request, m: Memory, parts: list[str]) -> Response:
         await hub.verify(m.user, name, _db_int(version), body.get("verified") is not False)
         return send(200, {"pack": await hub.detail(m.user, name, int(version))})
     if action == "yank":
-        await hub.yank(m.user, name, _db_int(version), body.get("yanked") is not False, body.get("reason"))
+        await hub.yank(
+            m.user, name, _db_int(version), body.get("yanked") is not False, body.get("reason")
+        )
         return send(200, {"pack": await hub.detail(m.user, name, int(version))})
     return send(404, {"error": "Not found"})

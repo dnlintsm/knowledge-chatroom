@@ -49,6 +49,10 @@ _VERSION_COLUMNS = (
     "v.id::text AS id, v.pack_id::text AS pack_id, v.version, v.description, v.notes, v.flags, v.published_at, "
     "v.verified_at, v.yanked_at, v.yank_reason"
 )
+
+# A method named list shadows the builtin in the class body's annotations.
+Rows = list[dict[str, Any]]
+
 _WORDS = f"[{JS_SPACE}]+"
 
 
@@ -66,14 +70,16 @@ def _version(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def scan_notes(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def scan_notes(notes: list[dict[str, Any]]) -> Rows:
     """The notes as files, for the skills' scan."""
     return scan_skill([SkillFile(f"{n['name']}.md", to_markdown(n).encode()) for n in notes])
 
 
 def fingerprint(about: str, notes: list[dict[str, Any]]) -> str:
     """sha256 of JSON.stringify([about, notes]), as the TypeScript server computes it."""
-    return hashlib.sha256(js_json([about, notes]).encode("utf-8", errors="surrogatepass")).hexdigest()
+    return hashlib.sha256(
+        js_json([about, notes]).encode("utf-8", errors="surrogatepass")
+    ).hexdigest()
 
 
 def _json(value: Any) -> Jsonb:
@@ -81,7 +87,9 @@ def _json(value: Any) -> Jsonb:
 
 
 class MemoryPackHub:
-    def __init__(self, pool: AsyncConnectionPool, workspace_id: str, admins: frozenset[str]) -> None:
+    def __init__(
+        self, pool: AsyncConnectionPool, workspace_id: str, admins: frozenset[str]
+    ) -> None:
         self.pool = pool
         self.ws = workspace_id
         self.admins = admins
@@ -92,7 +100,11 @@ class MemoryPackHub:
         if not user:
             return False
         subject, email = user["subject"], user["email"]
-        return subject == "local" or subject.lower() in self.admins or bool(email and email.lower() in self.admins)
+        return (
+            subject == "local"
+            or subject.lower() in self.admins
+            or bool(email and email.lower() in self.admins)
+        )
 
     async def _rank(self, conn: AsyncConnection, user_id: str, place: dict[str, Any]) -> int:
         found = await _one(
@@ -102,7 +114,7 @@ class MemoryPackHub:
         )
         return found["rank"] if found else 0
 
-    async def _versions(self, conn: AsyncConnection, pack_id: str) -> list[dict[str, Any]]:
+    async def _versions(self, conn: AsyncConnection, pack_id: str) -> Rows:
         return await _rows(
             conn,
             f"""
@@ -125,7 +137,9 @@ class MemoryPackHub:
                 FROM hub_memory_packs p ORDER BY p.updated_at DESC, p.name LIMIT 200""",
             )
             for row in rows:
-                latest = next((v for v in await self._versions(conn, row["id"]) if not v["yanked_at"]), None)
+                latest = next(
+                    (v for v in await self._versions(conn, row["id"]) if not v["yanked_at"]), None
+                )
                 text = f"{row['name']} {latest['description'] if latest else ''}".lower()
                 if any(w not in text for w in words):
                     continue
@@ -172,7 +186,9 @@ class MemoryPackHub:
             "isAdmin": await self.is_admin(user_id),
         }
 
-    async def publish(self, user_id: str, target: dict[str, Any], name: Any, description: Any) -> dict[str, Any]:
+    async def publish(
+        self, user_id: str, target: dict[str, Any], name: Any, description: Any
+    ) -> dict[str, Any]:
         """Publishes a place's own shared notes as the next version of the pack `name` (made, yours, if it's new)."""
         if not valid_name(name):
             raise MemoryError_("A pack's name is lowercase letters, digits and dashes, at most 64")
@@ -207,7 +223,9 @@ class MemoryPackHub:
             )
             assert pack is not None
             if pack["owner_id"] != user_id:
-                raise MemoryConflictError(f"The pack {name} on the hub was published by someone else")
+                raise MemoryConflictError(
+                    f"The pack {name} on the hub was published by someone else"
+                )
             latest = await _one(
                 conn,
                 """
@@ -223,12 +241,24 @@ class MemoryPackHub:
                 INSERT INTO hub_memory_pack_versions (pack_id, version, description, notes, fingerprint, flags,
                                                       published_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (pack["id"], version, about, _json(notes), printed, _json(scan_notes(notes)), user_id),
+                (
+                    pack["id"],
+                    version,
+                    about,
+                    _json(notes),
+                    printed,
+                    _json(scan_notes(notes)),
+                    user_id,
+                ),
             )
-            await conn.execute("UPDATE hub_memory_packs SET updated_at = now() WHERE id = %s", (pack["id"],))
+            await conn.execute(
+                "UPDATE hub_memory_packs SET updated_at = now() WHERE id = %s", (pack["id"],)
+            )
             return {"name": name, "version": version, "unchanged": False}
 
-    async def install(self, user_id: str, target: dict[str, Any], name: Any, version: int | None = None) -> dict:
+    async def install(
+        self, user_id: str, target: dict[str, Any], name: Any, version: int | None = None
+    ) -> dict:
         """
         Installs a pack in a place (or moves its install there to `version`, by
         default the newest that isn't yanked). Notes it adds are Manual for
@@ -241,7 +271,9 @@ class MemoryPackHub:
         async with self.pool.connection() as conn, conn.transaction():
             if await self._rank(conn, user_id, place) < 2:
                 raise MemoryError_("Installing a memory pack needs edit access to the place")
-            pack = await _one(conn, "SELECT id::text AS id FROM hub_memory_packs WHERE name = %s", (name,))
+            pack = await _one(
+                conn, "SELECT id::text AS id FROM hub_memory_packs WHERE name = %s", (name,)
+            )
             if not pack:
                 raise MemoryNotFoundError(f"pack {name}")
             chosen = await _one(
@@ -254,7 +286,9 @@ class MemoryPackHub:
                 (pack["id"],) if version is None else (pack["id"], version),
             )
             if not chosen:
-                raise MemoryNotFoundError(f"pack {name}{'' if version is None else f' version {version}'}")
+                raise MemoryNotFoundError(
+                    f"pack {name}{'' if version is None else f' version {version}'}"
+                )
             current = await _one(
                 conn,
                 f"""
@@ -276,7 +310,9 @@ class MemoryPackHub:
             )
             if taken:
                 names = ", ".join(t["name"] for t in taken)
-                raise MemoryConflictError(f"The place already has notes named {names}; rename them first")
+                raise MemoryConflictError(
+                    f"The place already has notes named {names}; rename them first"
+                )
             # The install's own notes are replaced, so they don't count.
             counted = await _one(
                 conn,
@@ -285,7 +321,9 @@ class MemoryPackHub:
             )
             total = (counted["count"] if counted else 0) + len(chosen["notes"])
             if total > MAX_SHARED_NOTES:
-                raise MemoryError_(f"A place has at most {MAX_SHARED_NOTES} shared notes; this pack would make {total}")
+                raise MemoryError_(
+                    f"A place has at most {MAX_SHARED_NOTES} shared notes; this pack would make {total}"
+                )
             if current:
                 install_id = current["id"]
                 await conn.execute(
@@ -359,16 +397,24 @@ class MemoryPackHub:
                     INSERT INTO shared_memory_versions (memory_id, version, description, type, body, changed_by,
                                                         changed_as)
                     VALUES (%s, %s, %s, %s, %s, %s, 'user')""",
-                    (written["id"], written["version"], note["description"], note["type"], note["body"], user_id),
+                    (
+                        written["id"],
+                        written["version"],
+                        note["description"],
+                        note["type"],
+                        note["body"],
+                        user_id,
+                    ),
                 )
             # Notes the version no longer has.
             if existing:
                 await conn.execute(
-                    "DELETE FROM shared_memories WHERE id = ANY(%s::uuid[])", ([g["id"] for g in existing.values()],)
+                    "DELETE FROM shared_memories WHERE id = ANY(%s::uuid[])",
+                    ([g["id"] for g in existing.values()],),
                 )
         return next(i for i in await self.installs(user_id) if i["id"] == install_id)
 
-    async def installs(self, user_id: str) -> list[dict[str, Any]]:
+    async def installs(self, user_id: str) -> Rows:
         """Installed packs in places the user reads."""
         async with self.pool.connection() as conn:
             rows = await _rows(
@@ -439,7 +485,8 @@ class MemoryPackHub:
         async with self.pool.connection() as conn, conn.transaction():
             await self._editable_install(conn, user_id, install_id)
             cur = await conn.execute(
-                "UPDATE shared_memories SET pack_install_id = NULL WHERE pack_install_id = %s", (install_id,)
+                "UPDATE shared_memories SET pack_install_id = NULL WHERE pack_install_id = %s",
+                (install_id,),
             )
             kept = cur.rowcount
             await conn.execute("DELETE FROM memory_pack_installs WHERE id = %s", (install_id,))
@@ -451,33 +498,41 @@ class MemoryPackHub:
             raise MemoryError_("Only hub admins verify packs")
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                f"""
+                """
                 UPDATE hub_memory_pack_versions v SET
-                  verified_at = {"now()" if verified else "NULL"}, verified_by = %s
+                  verified_at = CASE WHEN %s THEN now() END, verified_by = %s
                 FROM hub_memory_packs p WHERE p.id = v.pack_id AND p.name = %s AND v.version = %s""",
-                (user_id if verified else None, name, version),
+                (verified, user_id if verified else None, name, version),
             )
         if not cur.rowcount:
             raise MemoryNotFoundError(f"pack {name} version {_js_version(version)}")
 
-    async def yank(self, user_id: str, name: str, version: int, yanked: bool, reason: Any = None) -> None:
+    async def yank(
+        self, user_id: str, name: str, version: int, yanked: bool, reason: Any = None
+    ) -> None:
         """Yanks a version (its publisher or a hub admin), or takes the yank back."""
         async with self.pool.connection() as conn:
             pack = await _one(
-                conn, "SELECT id::text AS id, owner_id::text AS owner_id FROM hub_memory_packs WHERE name = %s", (name,)
+                conn,
+                "SELECT id::text AS id, owner_id::text AS owner_id FROM hub_memory_packs WHERE name = %s",
+                (name,),
             )
         if not pack:
             raise MemoryNotFoundError(f"pack {name}")
         if pack["owner_id"] != user_id and not await self.is_admin(user_id):
             raise MemoryError_("Only its publisher or a hub admin yanks a version")
-        why = (from_units(to_units(js_trim(reason))[:500]) or None) if isinstance(reason, str) else None
+        why = (
+            (from_units(to_units(js_trim(reason))[:500]) or None)
+            if isinstance(reason, str)
+            else None
+        )
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                f"""
+                """
                 UPDATE hub_memory_pack_versions SET
-                  yanked_at = {"now()" if yanked else "NULL"}, yanked_by = %s, yank_reason = %s
+                  yanked_at = CASE WHEN %s THEN now() END, yanked_by = %s, yank_reason = %s
                 WHERE pack_id = %s AND version = %s""",
-                (user_id if yanked else None, why if yanked else None, pack["id"], version),
+                (yanked, user_id if yanked else None, why if yanked else None, pack["id"], version),
             )
         if not cur.rowcount:
             raise MemoryNotFoundError(f"pack {name} version {_js_version(version)}")

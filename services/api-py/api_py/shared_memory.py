@@ -51,6 +51,9 @@ _PROPOSAL_COLUMNS = (
     "p.author_id::text AS author_id, p.author_type, p.thread_id, p.reason, p.created_at"
 )
 
+# A method named list shadows the builtin in the class body's annotations.
+Rows = list[dict[str, Any]]
+
 
 def is_uuid(value: Any) -> bool:
     return isinstance(value, str) and bool(_UUID.fullmatch(value))
@@ -75,7 +78,9 @@ def place_of(row: dict[str, Any]) -> dict[str, Any]:
         "scope": scope,
         "nodeId": row["node_id"],
         "groupId": row["group_id"],
-        "label": "Workspace" if scope == "workspace" else label or ("A node" if scope == "node" else "A group"),
+        "label": "Workspace"
+        if scope == "workspace"
+        else label or ("A node" if scope == "node" else "A group"),
     }
 
 
@@ -96,7 +101,11 @@ def check_place(given: dict[str, Any]) -> dict[str, str | None]:
 def _summary(row: dict[str, Any]) -> dict[str, Any]:
     everyone = row["everyone_mode"] or "auto"
     pack = (
-        {"installId": row["pack_install_id"], "name": row["pack_name"] or "", "version": row["pack_version"] or 0}
+        {
+            "installId": row["pack_install_id"],
+            "name": row["pack_name"] or "",
+            "version": row["pack_version"] or 0,
+        }
         if row["pack_install_id"]
         else None
     )
@@ -134,7 +143,9 @@ _SAME_PLACE = "scope = %s AND node_id IS NOT DISTINCT FROM %s::uuid AND group_id
 class SharedMemoryService:
     """Shared notes as one user sees them; `scoped` opens that user's transaction, `pool` reads as the server."""
 
-    def __init__(self, scoped: Scope, pool: AsyncConnectionPool, workspace_id: str, user_id: str) -> None:
+    def __init__(
+        self, scoped: Scope, pool: AsyncConnectionPool, workspace_id: str, user_id: str
+    ) -> None:
         self.scoped = scoped
         self.pool = pool
         self.ws = workspace_id
@@ -148,7 +159,7 @@ class SharedMemoryService:
         )
         return found["rank"] if found else 0
 
-    async def _rows(self, conn: AsyncConnection, where: str, params: tuple = ()) -> list[dict[str, Any]]:
+    async def _rows(self, conn: AsyncConnection, where: str, params: tuple = ()) -> Rows:
         """
         Readable notes, with the user's rank and modes. Labels come from groups
         and nodes the user may see the note of, so they are read as the server.
@@ -177,7 +188,7 @@ class SharedMemoryService:
         )
         return await self._label(rows)
 
-    async def _label(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def _label(self, rows: list[dict[str, Any]]) -> Rows:
         nodes = list(dict.fromkeys(r["node_id"] for r in rows if r["node_id"]))
         groups = list(dict.fromkeys(r["group_id"] for r in rows if r["group_id"]))
         names: dict[str, str] = {}
@@ -185,12 +196,16 @@ class SharedMemoryService:
             async with self.pool.connection() as conn:
                 if nodes:
                     for found in await _rows(
-                        conn, "SELECT id::text AS id, name FROM nodes WHERE id = ANY(%s::uuid[])", (nodes,)
+                        conn,
+                        "SELECT id::text AS id, name FROM nodes WHERE id = ANY(%s::uuid[])",
+                        (nodes,),
                     ):
                         names[found["id"]] = found["name"]
                 if groups:
                     for found in await _rows(
-                        conn, "SELECT id::text AS id, name FROM groups WHERE id = ANY(%s::uuid[])", (groups,)
+                        conn,
+                        "SELECT id::text AS id, name FROM groups WHERE id = ANY(%s::uuid[])",
+                        (groups,),
                     ):
                         names[found["id"]] = found["name"]
         for row in rows:
@@ -210,7 +225,7 @@ class SharedMemoryService:
             raise MemoryNotFoundError(shared_ref(note_id))
         return rows[0]
 
-    async def list(self) -> list[dict[str, Any]]:
+    async def list(self) -> Rows:
         """Every shared note the user can read."""
         async with self.scoped() as conn:
             return [_summary(r) for r in await self._rows(conn, "true")]
@@ -219,7 +234,7 @@ class SharedMemoryService:
         async with self.scoped() as conn:
             return _note(await self._one(conn, note_id))
 
-    async def versions(self, note_id: str) -> list[dict[str, Any]]:
+    async def versions(self, note_id: str) -> Rows:
         async with self.scoped() as conn:
             await self._one(conn, note_id)
             rows = await _rows(
@@ -307,11 +322,21 @@ class SharedMemoryService:
             """
             INSERT INTO shared_memory_versions (memory_id, version, description, type, body, changed_by, changed_as)
             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (written["id"], written["version"], given["description"], given["type"], given["body"], by, as_),
+            (
+                written["id"],
+                written["version"],
+                given["description"],
+                given["type"],
+                given["body"],
+                by,
+                as_,
+            ),
         )
         return written["id"]
 
-    async def share(self, target: dict[str, Any], name: Any, given: dict[str, Any]) -> dict[str, Any]:
+    async def share(
+        self, target: dict[str, Any], name: Any, given: dict[str, Any]
+    ) -> dict[str, Any]:
         """Shares a copy of a note into a place: made there when the user can edit it, else proposed to its editors."""
         if not valid_name(name):
             raise MemoryError_(
@@ -323,20 +348,30 @@ class SharedMemoryService:
             rank = await self._rank(conn, place)
             if rank < 1:
                 raise MemoryError_("You can't share to that place")
-            made = await self._write(conn, None, place, name, clean, self.user, "user") if rank >= 2 else None
+            made = (
+                await self._write(conn, None, place, name, clean, self.user, "user")
+                if rank >= 2
+                else None
+            )
         if made:
             return {"note": await self.get(made), "proposal": None}
-        proposal = await self.propose({"op": "add", "place": target, "name": name, "input": clean}, author_type="user")
+        proposal = await self.propose(
+            {"op": "add", "place": target, "name": name, "input": clean}, author_type="user"
+        )
         return {"note": None, "proposal": proposal}
 
-    async def update(self, note_id: str, given: dict[str, Any], if_version: int | None = None) -> dict[str, Any]:
+    async def update(
+        self, note_id: str, given: dict[str, Any], if_version: int | None = None
+    ) -> dict[str, Any]:
         """An editor's own change; `if_version` refuses a note that changed since."""
         clean = check_input(given)
         async with self.scoped() as conn:
             await self._lock(conn, note_id)
             row = await self._one(conn, note_id)
             if row["rank"] < 2:
-                raise MemoryError_("Only its place's editors change a shared note; Claude can propose a change")
+                raise MemoryError_(
+                    "Only its place's editors change a shared note; Claude can propose a change"
+                )
             _from_pack(row)
             if if_version is not None and row["version"] != if_version:
                 raise MemoryConflictError(f"{row['name']} changed since")
@@ -380,7 +415,11 @@ class SharedMemoryService:
             else:
                 row = await self._one(conn, change.get("id") or "")
                 _from_pack(row)
-                place = {"scope": row["scope"], "nodeId": row["node_id"], "groupId": row["group_id"]}
+                place = {
+                    "scope": row["scope"],
+                    "nodeId": row["node_id"],
+                    "groupId": row["group_id"],
+                }
                 memory_id, name, base = row["id"], row["name"], row["version"]
             counted = await _one(
                 conn,
@@ -396,9 +435,22 @@ class SharedMemoryService:
                 WHERE workspace_id = %s AND author_id = %s AND author_type = %s
                   AND status = 'open' AND op = %s AND name = %s AND {_SAME_PLACE}
                 FOR UPDATE""",
-                (self.ws, self.user, author_type, op, name, place["scope"], place["nodeId"], place["groupId"]),
+                (
+                    self.ws,
+                    self.user,
+                    author_type,
+                    op,
+                    name,
+                    place["scope"],
+                    place["nodeId"],
+                    place["groupId"],
+                ),
             )
-            content = (clean or {}).get("description"), (clean or {}).get("type"), (clean or {}).get("body")
+            content = (
+                (clean or {}).get("description"),
+                (clean or {}).get("type"),
+                (clean or {}).get("body"),
+            )
             if open_:
                 await conn.execute(
                     """
@@ -443,7 +495,7 @@ class SharedMemoryService:
                 proposal_id = made["id"]
         return (await self._proposal_rows(proposal_id))[0]
 
-    async def _proposal_rows(self, proposal_id: str | None = None) -> list[dict[str, Any]]:
+    async def _proposal_rows(self, proposal_id: str | None = None) -> Rows:
         async with self.scoped() as conn:
             rows = await _rows(
                 conn,
@@ -481,7 +533,7 @@ class SharedMemoryService:
             for r in await self._label(rows)
         ]
 
-    async def proposals(self) -> list[dict[str, Any]]:
+    async def proposals(self) -> Rows:
         """Open proposals the user may decide, and their own."""
         return await self._proposal_rows()
 
@@ -526,7 +578,9 @@ class SharedMemoryService:
             place = {"scope": p["scope"], "nodeId": p["node_id"], "groupId": p["group_id"]}
             content = {"description": p["description"], "type": p["type"], "body": p["body"]}
             if p["op"] == "add":
-                made = await self._write(conn, None, place, p["name"], content, p["author_id"], p["author_type"])
+                made = await self._write(
+                    conn, None, place, p["name"], content, p["author_id"], p["author_type"]
+                )
                 return {"note": _note(await self._one(conn, made))}
             row = (
                 await _one(
@@ -544,7 +598,9 @@ class SharedMemoryService:
             if p["op"] == "delete":
                 await conn.execute("DELETE FROM shared_memories WHERE id = %s", (row["id"],))
                 return {"note": None}
-            await self._write(conn, row, place, p["name"], content, p["author_id"], p["author_type"])
+            await self._write(
+                conn, row, place, p["name"], content, p["author_id"], p["author_type"]
+            )
             return {"note": _note(await self._one(conn, row["id"]))}
 
     async def set_mode(self, note_id: str, mode: Any, everyone: bool) -> dict[str, Any]:
@@ -562,7 +618,8 @@ class SharedMemoryService:
                 raise MemoryError_("Only its place's editors set a shared note for everyone")
             if mode is None:
                 await conn.execute(
-                    "DELETE FROM shared_memory_settings WHERE memory_id = %s AND user_id = %s", (row["id"], self.user)
+                    "DELETE FROM shared_memory_settings WHERE memory_id = %s AND user_id = %s",
+                    (row["id"], self.user),
                 )
             else:
                 await conn.execute(
@@ -573,7 +630,7 @@ class SharedMemoryService:
                 )
             return _summary(await self._one(conn, note_id))
 
-    async def targets(self, node_id: str | None) -> list[dict[str, Any]]:
+    async def targets(self, node_id: str | None) -> Rows:
         """Places the user can share to: the workspace, `node_id`, their groups."""
         node = node_id if node_id and is_uuid(node_id) else None
         async with self.scoped() as conn:
