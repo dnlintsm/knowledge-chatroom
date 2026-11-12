@@ -1,4 +1,4 @@
-"""The storage API's /access, /nodes, /files, /experiments and /proposals in Python (issue #190), as storage/http.ts.
+"""The storage API's /access, /nodes, /files, /experiments, /proposals and /search in Python (#190), as storage/http.ts.
 
     GET    /access                  {me, rootRole}
     GET    /access/users            everyone who has signed in
@@ -55,6 +55,12 @@
     GET    /proposals/<id>/content  its proposed bytes
     POST   /proposals/<id>/accept|reject|withdraw
 
+    GET    /search?q=<text>         {results}: files you can read whose text or path
+                                    matches, best first (search.py); &scope=<node id>
+                                    only there and below, &near=<node id> or
+                                    &experiment=<id> ranks files near there first,
+                                    &limit= (at most 50)
+
 Until the database has the migrations this server knows (the TypeScript
 server applies them as it starts), these pass through to the TypeScript
 server, which answers as it does while storage starts or when it is off.
@@ -94,6 +100,7 @@ from .paths import (
 from .proposals import EVERYWHERE, ProposalError
 from .proxy import forward
 from .run_report import js_json, js_number
+from .search import SearchError
 from .session import Session
 
 logger = logging.getLogger("api_py")
@@ -105,7 +112,7 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too, but the TypeScript server reads the raw
 # path and serves those as files. They go to it, so a storage token's limits
 # (agent_refusal) always see the section the handlers act on.
-_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals|search)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
 # Stored bytes are served from the app's origin, so a file opened as a page (an
@@ -290,7 +297,7 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(409, str(err), exists=True)
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
-    except (NodeError, AccessError, InvalidPathError, ExperimentError, ProposalError) as err:
+    except (NodeError, AccessError, InvalidPathError, ExperimentError, ProposalError, SearchError) as err:
         return error(400, str(err))
     except Exception:
         logger.exception("[storage] request failed")
@@ -329,6 +336,28 @@ def _experiment_path(request: Request) -> str:
 @router.api_route("/experiments/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def experiments_route(request: Request) -> Response:
     return await _serve(request, handle_experiments, _no_blob_store)
+
+
+@router.api_route("/search", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/search/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def search_route(request: Request) -> Response:
+    return await _serve(request, handle_search)
+
+
+async def handle_search(request: Request, session: Session) -> Response:
+    if not re.fullmatch(r"/search/?", raw_path(request)):
+        return error(404, "Not found")
+    if request.method != "GET":
+        return error(405, "Method not allowed")
+    limit = parse_int(first_param(request, "limit") or "")
+    results = await session.search(
+        first_param(request, "q") or "",
+        scope=first_param(request, "scope") or None,
+        near=first_param(request, "near") or None,
+        near_experiment=first_param(request, "experiment") or None,
+        limit=limit,
+    )
+    return json_response(200, {"results": results})
 
 
 @router.api_route("/proposals", methods=ALL_METHODS, include_in_schema=False)

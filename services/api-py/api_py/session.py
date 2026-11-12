@@ -707,6 +707,27 @@ class Session:
                 await proposals.decide(conn, self.storage, proposal_id, "accept", user_id, audit)
         return await self.proposal(proposal_id)
 
+    async def search(
+        self,
+        query: str,
+        *,
+        scope: str | None = None,
+        near: str | None = None,
+        near_experiment: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Files this principal may read that match, best first (see search.py)."""
+        async with self.scoped() as conn:
+            return await self.storage.search.search(
+                conn,
+                self.principal.user_id,
+                query,
+                scope=scope,
+                near=near,
+                near_experiment=near_experiment,
+                limit=limit,
+            )
+
     async def can_see(self, event: dict[str, Any]) -> bool:
         """Whether this principal may hear about a change."""
         user_id = self.principal.user_id
