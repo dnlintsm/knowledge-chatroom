@@ -12,6 +12,10 @@ MIGRATIONS_DIR       the SQL migrations to expect in the database
                      (default apps/agent/src/storage/migrations in this repository)
 S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
 MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
+EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
+EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
+                     search by meaning, as the TypeScript server reads them
+                     (semantic.py); this server runs the indexer
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from pathlib import Path
 
 from .blobs import S3Settings
 from .paths import JS_SPACE
+from .semantic import EmbeddingSettings, embedding_settings
 
 DEFAULT_TS_AGENT_URL = "http://127.0.0.1:8100"
 # services/api-py/api_py/config.py -> the repository root.
@@ -73,6 +78,8 @@ class Settings:
     # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
     s3: S3Settings | None = None
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    # Search by meaning; None leaves search to words (EMBEDDING_MODEL=off, and tests).
+    embedding: EmbeddingSettings | None = None
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -89,6 +96,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         port=int(port),
         s3=S3Settings.from_env(env),
         max_upload_bytes=max_upload_bytes(env),
+        embedding=embedding_settings(env),
     )
 
 

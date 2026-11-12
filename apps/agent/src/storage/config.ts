@@ -45,6 +45,13 @@ export interface StorageConfig {
    * set by EMBEDDING_BASE_URL. embeddingModel is then the name it knows.
    */
   embeddingApi?: EmbeddingApiConfig;
+  /**
+   * Whether this server runs the search indexer (indexing files written
+   * before search existed, embedding passages). SEARCH_INDEXER=off when the
+   * Python API server in front runs it (services/api-py, issue #190): then
+   * exactly one process does.
+   */
+  searchIndexer: boolean;
 }
 
 export interface EmbeddingApiConfig {
@@ -81,6 +88,7 @@ export function storageConfigFromEnv(
       env.EMBEDDING_MODEL === "off" ? null : env.EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL,
     embeddingCacheDir: env.EMBEDDING_CACHE_DIR || undefined,
     embeddingApi: embeddingApiFromEnv(env),
+    searchIndexer: env.SEARCH_INDEXER !== "off",
   };
 }
 

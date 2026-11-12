@@ -85,7 +85,8 @@ const agentServers = useRealAgent
             {
               // Scripts on only shows them as runnable, and memory only shows its API:
               // chat goes to the mock agent.
-              command: `AGENT_PORT=${withApiPy ? TS_STORAGE_PORT : STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
+              // Behind api-py, which then runs the search indexer.
+              command: `AGENT_PORT=${withApiPy ? `${TS_STORAGE_PORT} SEARCH_INDEXER=off` : STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
               url: `http://localhost:${withApiPy ? TS_STORAGE_PORT : STORAGE_PORT}/health`,
             },
             ...(withApiPy
