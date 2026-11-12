@@ -16,6 +16,10 @@
     EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
                          search by meaning, as the TypeScript server reads them
                          (semantic.py); this server runs the indexer
+    HUB_ADMINS           who moderates the skill hub: emails or login subjects
+    SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
+                         runs chats; /skills here says so)
+    BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ DEFAULT_TS_AGENT_URL = "http://127.0.0.1:8100"
 # services/api-py/api_py/config.py -> the repository root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MIGRATIONS_DIR = REPO_ROOT / "apps" / "agent" / "src" / "storage" / "migrations"
+DEFAULT_BUILTIN_SKILLS_DIR = REPO_ROOT / "apps" / "agent" / "skills"
 DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SECRET_HINT = "(at least 32 characters, e.g. openssl rand -hex 32)"
 
@@ -80,6 +85,10 @@ class Settings:
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     # Search by meaning; None leaves search to words (EMBEDDING_MODEL=off, and tests).
     embedding: EmbeddingSettings | None = None
+    # The skill hub's admins (HUB_ADMINS, as given), whether skills' scripts run, and the built-in skills.
+    hub_admins: str | None = None
+    skill_scripts: bool = False
+    builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -97,6 +106,9 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         s3=S3Settings.from_env(env),
         max_upload_bytes=max_upload_bytes(env),
         embedding=embedding_settings(env),
+        hub_admins=env.get("HUB_ADMINS"),
+        skill_scripts=env.get("SKILL_SCRIPTS") == "on",
+        builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
     )
 
 

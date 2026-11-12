@@ -52,6 +52,12 @@
   its user's alone, workspace owners included, and storage tokens can't reach it. Searching
   past chats for Claude stays on the agent server with memory until step 8.
 
+- api-py now serves `/skills` and the skill hub (`/hub`) too (issue #190, step 7a): skill
+  lists and modes (yours, the workspace's, a chat's), what an outside agent's run gets
+  (`/skills/run`, `/skills/used`), .zip export and import, deleting a workspace skill, and
+  publishing, installing, forking, diffing, verifying, yanking and reporting hub skills, with
+  the same scan flags, fingerprints and sort order as the agent server. Give api-py the same
+  `HUB_ADMINS` and `SKILL_SCRIPTS` as the agent. `/tools` follows in step 7b.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

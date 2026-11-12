@@ -57,6 +57,10 @@ import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillSer
  *
  * /skills works without storage too: then only the built-in skills, for the
  * local user, with modes kept until the server restarts.
+ *
+ * With storage, the Python API server in front serves these too
+ * (services/api-py/api_py/skills_routes.py, skills.py and skill_catalog.py,
+ * issue #190): change them in both until phase 4 retires these.
  */
 export function createSkillsHandler(
   skills: SkillService,

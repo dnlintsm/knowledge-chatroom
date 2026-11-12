@@ -93,7 +93,7 @@ const agentServers = useRealAgent
               ? [
                   {
                     // In front of it, as in `pnpm dev` and compose: the routes moved to Python so far.
-                    command: `cd services/api-py && TS_AGENT_URL=http://localhost:${TS_STORAGE_PORT} API_PY_PORT=${STORAGE_PORT} uv run --locked python -m api_py.app`,
+                    command: `cd services/api-py && TS_AGENT_URL=http://localhost:${TS_STORAGE_PORT} API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on uv run --locked python -m api_py.app`,
                     url: `http://localhost:${STORAGE_PORT}/health`,
                   },
                 ]
