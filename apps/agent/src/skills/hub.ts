@@ -30,6 +30,9 @@ import { SkillForbiddenError, type HubFile, type SkillService } from "./service"
  *
  * Everything here is the user's own doing over HTTP: Claude has no tools for
  * the hub, so a document can't talk it into installing a skill.
+ *
+ * The Python API server in front serves the hub too (services/api-py/api_py/skills.py,
+ * issue #190): change both until phase 4 retires this one.
  */
 
 /** The request is wrong (bad zip, wrong kind of skill...). */
