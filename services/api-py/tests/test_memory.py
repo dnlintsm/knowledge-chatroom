@@ -302,13 +302,8 @@ async def test_export(memory_api):
 async def test_the_rest_of_memory_stays_with_typescript(memory_api, database):
     api, _app = memory_api
     for method, path in [
-        ("GET", "/memory"),
-        ("GET", "/memory/"),
-        ("POST", "/memory/shared"),
-        ("GET", "/memory/packs"),
         ("POST", "/memory/import"),
         ("GET", "/memory/agent"),
-        ("DELETE", "/memory/installs/x"),
         ("GET", "/memory/%zz"),
         ("GET", "/memory/%6Eotes/x"),  # decoded: notes, served here
         ("GET", "/memoryx"),
@@ -319,13 +314,8 @@ async def test_the_rest_of_memory_stays_with_typescript(memory_api, database):
         else:
             assert answer.json() == {"from": "typescript"}, path
     assert support.forwarded == [
-        "GET /memory",
-        "GET /memory/",
-        "POST /memory/shared",
-        "GET /memory/packs",
         "POST /memory/import",
         "GET /memory/agent",
-        "DELETE /memory/installs/x",
         "GET /memory/%zz",
         "GET /memoryx",
     ]

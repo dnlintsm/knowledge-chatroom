@@ -30,6 +30,9 @@ import { MAX_SHARED_NOTES, SHARED_SCOPES, type SharedScope } from "./shared-memo
  * - Hub admins (HUB_ADMINS, or the local user without login) verify
  *   versions; the publisher or an admin yanks one, after which it can't be
  *   newly installed.
+ *
+ * services/api-py/api_py/memory_packs.py serves these too (issue #190, step
+ * 8b), with the same SQL and checks; keep the two in step.
  */
 
 export interface PackNote {
