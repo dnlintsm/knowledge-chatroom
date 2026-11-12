@@ -373,6 +373,9 @@ class SearchService:
         error other than "not there"), which stay pending for a later try.
         Runs with the server's own connection, outside any user's rights.
         """
+        blobs = self.blobs
+        if blobs is None:
+            raise RuntimeError("Blob store is not configured")
         async with pool.connection() as conn:
             cur = await conn.execute(
                 """
@@ -389,7 +392,7 @@ class SearchService:
         failed: list[str] = []
         for sha256 in rows:
             try:
-                data = await self.blobs.get(sha256)  # type: ignore[union-attr]
+                data = await blobs.get(sha256)
             except Exception as err:  # noqa: BLE001 - tried again later
                 if not is_not_found(err):
                     logger.warning(

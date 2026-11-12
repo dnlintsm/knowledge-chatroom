@@ -93,20 +93,6 @@
       "severity": "error"
     },
     {
-      "column": 28,
-      "path": "services/api-py/api_py/files.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `get`",
-      "severity": "error"
-    },
-    {
-      "column": 15,
-      "path": "services/api-py/api_py/files.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `put`",
-      "severity": "error"
-    },
-    {
       "column": 23,
       "path": "services/api-py/api_py/memory.py",
       "name": "bad-argument-type",

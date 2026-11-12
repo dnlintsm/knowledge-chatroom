@@ -652,7 +652,7 @@ async def handle_files(request: Request, session: Session) -> Response:
         # Text stays here, since the UI fetches it from this origin.
         info = await files.stat(path)
         if info and not is_text_file(info["path"], info["mime"]):
-            link = await session.storage.blobs.download_url(  # type: ignore[union-attr]
+            link = await session.storage.require_blobs().download_url(
                 info["sha256"], info["mime"], info["path"].split("/")[-1]
             )
             if link:
@@ -1082,7 +1082,7 @@ async def watch(session: Session) -> Response:
     gets a normal error answer.
     """
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    unsubscribe = await session.storage.events.subscribe(queue.put_nowait)  # type: ignore[union-attr]
+    unsubscribe = await session.storage.require_events().subscribe(queue.put_nowait)
 
     async def stream():
         loop = asyncio.get_running_loop()

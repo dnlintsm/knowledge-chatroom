@@ -6,6 +6,7 @@ Python side, with the same queries, so both servers answer alike.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,8 @@ from psycopg_pool import AsyncConnectionPool
 
 Role = Literal["viewer", "editor", "owner"]
 ROLES: tuple[Role, ...] = ("viewer", "editor", "owner")
+_ROLE_RANK: dict[str, int] = {role: rank for rank, role in enumerate(ROLES)}
+logger = logging.getLogger("api_py")
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 # How often a user's last_seen_at is refreshed, at most.
@@ -32,8 +35,16 @@ def is_uuid(value: object) -> bool:
     return isinstance(value, str) and bool(_UUID.match(value))
 
 
+def _checked_role(value: object) -> Role | None:
+    """Treat unexpected database roles as no access, and report the inconsistency."""
+    if value is None or value == "viewer" or value == "editor" or value == "owner":
+        return value
+    logger.error("Unexpected effective role from database: %r", value)
+    return None
+
+
 def at_least(role: str | None, minimum: Role) -> bool:
-    return role is not None and ROLES.index(role) >= ROLES.index(minimum)  # type: ignore[arg-type]
+    return _ROLE_RANK.get(role, -1) >= _ROLE_RANK[minimum] if role is not None else False
 
 
 def iso(value: datetime | None) -> str | None:
@@ -157,8 +168,10 @@ class AccessService:
             cur = await conn.execute(
                 "SELECT effective_role(%s, %s, %s::uuid)", (self.workspace_id, user_id, node_id)
             )
-            (role,) = await cur.fetchone()  # type: ignore[misc]
-        return role
+            row = await cur.fetchone()
+        if row is None:
+            raise RuntimeError("effective_role query returned no row")
+        return _checked_role(row[0])
 
     async def sees_node(self, user_id: str, node_id: str) -> bool:
         """Whether the user sees the node or anything below it (a node event's audience)."""
@@ -212,7 +225,7 @@ class AccessService:
                 WHERE workspace_id = %(ws)s AND deleted_at IS NULL""",
                 {"ws": self.workspace_id, "user": user_id},
             )
-            return {str(node): role for node, role in await cur.fetchall()}
+            return {str(node): _checked_role(role) for node, role in await cur.fetchall()}
 
     async def user(self, user_id: str) -> dict[str, Any] | None:
         """One user's id, subject, email and name, or None."""

@@ -191,7 +191,7 @@ async def propose(
     ws = storage.workspace_id
     if isinstance(content, bytes):
         sha256, size = sha256_hex(content), len(content)
-        await storage.blobs.put(sha256, content, mime)  # type: ignore[union-attr]
+        await storage.require_blobs().put(sha256, content, mime)
     else:
         sha256, size = content["sha256"], content["size"]
 
