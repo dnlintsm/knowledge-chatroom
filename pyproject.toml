@@ -9,7 +9,7 @@
 members = ["services/*", "packages/knowledge-py"]
 
 [dependency-groups]
-dev = ["ruff==0.17.4", "pyrefly==1.4.1"]
+dev = ["ruff==0.17.4", "pyrefly==1.4.1", "coverage==7.17.2"]
 
 [tool.ruff]
 target-version = "py312"
@@ -42,3 +42,17 @@ search-path = [
 ]
 baseline = "pyrefly-baseline.json"
 baseline-matching-mode = "column-ordered"
+
+[tool.coverage.run]
+source = [
+    "packages/knowledge-py/src/knowledge_chatroom",
+    "services/agent-py/agent_py",
+    "services/api-py/api_py",
+    "services/lab-tools/lab_tools",
+    "services/papers-mcp/papers_mcp",
+]
+omit = ["*/knowledge_chatroom/api.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true

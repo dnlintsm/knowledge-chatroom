@@ -84,14 +84,28 @@ jobs:
         working-directory: packages/knowledge-py
         run: uv run --locked datamodel-codegen --check
       - name: Python tests
+        id: python_tests
         run: |
           status=0
+          coverage_sources="$GITHUB_WORKSPACE/packages/knowledge-py/src/knowledge_chatroom,$GITHUB_WORKSPACE/services/agent-py/agent_py,$GITHUB_WORKSPACE/services/api-py/api_py,$GITHUB_WORKSPACE/services/lab-tools/lab_tools,$GITHUB_WORKSPACE/services/papers-mcp/papers_mcp"
           for project in packages/knowledge-py services/*/; do
             echo "::group::$project"
-            (cd "$project" && uv run --locked pytest -q) || status=1
+            if [[ "${{ matrix.python }}" == "3.12" ]]; then
+              (cd "$project" && uv run --locked --no-sync coverage run \
+                --rcfile="$GITHUB_WORKSPACE/pyproject.toml" \
+                --data-file="$GITHUB_WORKSPACE/.coverage" --source="$coverage_sources" \
+                --append -m pytest -q) || status=1
+            else
+              (cd "$project" && uv run --locked pytest -q) || status=1
+            fi
             echo "::endgroup::"
           done
           exit $status
+      - name: Python coverage report
+        if: ${{ !cancelled() && matrix.python == '3.12' && steps.python_tests.outcome != 'skipped' }}
+        run: |
+          uv run --locked --no-sync coverage report
+          uv run --locked --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
   python-required:
     # Stable required-check name covering every Python matrix leg.
