@@ -24,6 +24,9 @@ import { learnModel } from "./learn";
  * merges it with the ones the user has. Nothing is saved directly: every note
  * waits in the Memory inbox, since it is someone else's text until the user
  * accepts it.
+ *
+ * services/api-py/api_py/memory_import.py serves imports too (issue #190, step
+ * 8c), with the same parsing, prompt and tool; keep the two in step.
  */
 
 export const IMPORT_TOOL = "memory_import";

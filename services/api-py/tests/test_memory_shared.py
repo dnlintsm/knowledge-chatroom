@@ -421,15 +421,14 @@ async def test_memory_packs(place):
 
 
 @needs_database
-async def test_import_and_agent_stay_with_typescript(place):
+async def test_the_agent_api_stays_with_typescript(place):
     api, _ids = place
     for method, path in [
-        ("POST", "/memory/import"),
         ("GET", "/memory/agent"),
         ("GET", "/memory/%zz"),
     ]:
         assert (await api.request(method, path, headers=ALICE)).json() == {"from": "typescript"}, (
             path
         )
-    assert support.forwarded == ["POST /memory/import", "GET /memory/agent", "GET /memory/%zz"]
+    assert support.forwarded == ["GET /memory/agent", "GET /memory/%zz"]
     support.forwarded.clear()

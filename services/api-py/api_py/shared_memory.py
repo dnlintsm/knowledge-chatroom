@@ -28,13 +28,14 @@ from .memory import (
     MemoryError_,
     MemoryNotFoundError,
     Scope,
+    _js_string,
     _one,
     _rows,
     check_input,
+    clean_reason,
     valid_name,
 )
-from .paths import JS_SPACE, js_trim
-from .text_index import from_units, to_units
+from .paths import JS_SPACE
 
 SHARED_SCOPES = ("workspace", "node", "group")
 SHARED_MODES = ("auto", "manual", "off")
@@ -62,13 +63,6 @@ def is_uuid(value: Any) -> bool:
 def shared_ref(note_id: str) -> str:
     """The handle Claude uses for a shared note, next to personal notes' names."""
     return f"shared:{note_id}"
-
-
-def clean_reason(reason: Any) -> str | None:
-    """reason?.replace(/\\s+/g, " ").trim().slice(0, 500) || null."""
-    if not isinstance(reason, str):
-        return None
-    return from_units(to_units(js_trim(_SPACES.sub(" ", reason)))[:500]) or None
 
 
 def place_of(row: dict[str, Any]) -> dict[str, Any]:
@@ -660,20 +654,3 @@ class SharedMemoryService:
                 (self.ws, self.user, self.ws),
             )
         return [{**place_of(r), "canEdit": r["rank"] >= 2} for r in await self._label(rows)]
-
-
-def _js_string(value: Any) -> str:
-    """String(value), for a name that isn't one."""
-    if value is None:
-        return "undefined"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, str):
-        return value
-    if isinstance(value, int | float):
-        from .run_report import js_number
-
-        return js_number(value)
-    if isinstance(value, list):
-        return ",".join("" if v is None else _js_string(v) for v in value)
-    return "[object Object]"

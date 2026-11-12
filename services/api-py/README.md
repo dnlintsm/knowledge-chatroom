@@ -26,6 +26,7 @@ What it serves itself so far:
 | 7b | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
 | 8a | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
 | 8b | The memory overview (`GET /memory`), shared notes at the workspace, a node or a group (share, edit, delete, modes, proposals and their decisions), and memory packs (`/memory/packs`, `/memory/installs`: publish, install, fork, uninstall, verify, yank) | `memory_routes.py`, `shared_memory.py`, `memory_packs.py` |
+| 8c | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`, the same Messages API call and model choice as the agent server) | `memory_import.py`, `llm.py` |
 
 Behind them:
 
@@ -107,6 +108,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run. |
 | `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
 | `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off leaves `/memory` to the TypeScript server. |
+| `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | As the TypeScript server reads them: the small model that sorts imported plain-text memory into notes. Without a key, imported text waits in the inbox as one note, as there. |
 | `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset leaves `/tools` to the TypeScript server. |
 | `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |
 
