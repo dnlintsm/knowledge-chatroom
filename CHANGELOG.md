@@ -65,6 +65,13 @@
   for api-py, so give it the same `MCP_SERVERS` (and `TOOLS_CALL_TIMEOUT_MS`,
   `STORAGE_TOKEN_SECONDS`) as the agent; without it `/tools` stays with the agent server.
   The demo compose file passes `MCP_SERVERS` to both.
+- api-py serves each user's own memory notes too (issue #190, step 8a): reading, writing,
+  restoring, archiving and deleting notes, the memory mode and incognito chats, the inbox's
+  accept and reject, Claude's recent changes and their Undo, and the .zip export, with the
+  same checks, versions, answers and row-level security as the agent server. It does this
+  only with `MEMORY=on` for api-py, so give it the same `MEMORY` as the agent. The memory
+  overview (`GET /memory`), shared notes, packs, import and `/memory/agent` stay on the agent
+  server for now; chats keep using memory there.
 - The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
   the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
   builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the

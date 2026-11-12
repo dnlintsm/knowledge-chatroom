@@ -94,6 +94,8 @@ const api = apiPort
         // The same hub admins as the agent: api-py serves the skill hub (step 7).
         HUB_ADMINS: "conformance|alice",
         MCP_SERVERS: mcpServers,
+        // api-py serves each user's own notes (step 8).
+        MEMORY: "on",
       },
       stdio: ["ignore", "inherit", "inherit"],
     })
