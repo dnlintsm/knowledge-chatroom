@@ -57,7 +57,7 @@ def _doi(value: str | None) -> str | None:
         return None
     for prefix in ("https://doi.org/", "http://doi.org/"):
         if value.lower().startswith(prefix):
-            return value[len(prefix):]
+            return value[len(prefix) :]
     return value
 
 
@@ -98,7 +98,11 @@ def to_paper(work: dict[str, Any], abstract_limit: int | None = SEARCH_ABSTRACT_
         url = f"https://doi.org/{doi}"
     else:
         url = primary.get("landing_page_url") or openalex_url
-    pdf = best.get("pdf_url") or primary.get("pdf_url") or (f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else None)
+    pdf = (
+        best.get("pdf_url")
+        or primary.get("pdf_url")
+        or (f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else None)
+    )
     return Paper(
         id=f"openalex:{short_id(openalex_url)}",
         title=work.get("display_name") or work.get("title") or "(untitled)",
@@ -124,7 +128,11 @@ def to_paper(work: dict[str, Any], abstract_limit: int | None = SEARCH_ABSTRACT_
 
 def details(work: dict[str, Any]) -> PaperDetails:
     paper = to_paper(work, abstract_limit=None)
-    return PaperDetails(**paper.model_dump(), references_count=work.get("referenced_works_count"), bibtex=bibtex(paper))
+    return PaperDetails(
+        **paper.model_dump(),
+        references_count=work.get("referenced_works_count"),
+        bibtex=bibtex(paper),
+    )
 
 
 def _lookup(kind: str, name: str) -> str | None:
@@ -179,7 +187,9 @@ def search(
     meta = found.get("meta") or {}
     results = [to_paper(work) for work in found.get("results") or []]
     next_cursor = meta.get("next_cursor") if len(results) == limit else None
-    return PaperSearchResult(query=query, results=results, total=meta.get("count"), next_cursor=next_cursor)
+    return PaperSearchResult(
+        query=query, results=results, total=meta.get("count"), next_cursor=next_cursor
+    )
 
 
 def work(scheme: str, bare: str) -> dict[str, Any]:
@@ -197,18 +207,36 @@ def work(scheme: str, bare: str) -> dict[str, Any]:
 MAX_OR_IDS = 100
 
 
-def related(work_raw: dict[str, Any], kind: Literal["cites", "cited_by", "similar"], limit: int) -> list[Paper]:
+def related(
+    work_raw: dict[str, Any], kind: Literal["cites", "cited_by", "similar"], limit: int
+) -> list[Paper]:
     """Papers this one cites, papers citing it, or OpenAlex's similar papers, most cited first."""
     if kind == "cited_by":
         filters = [f"cites:{short_id(work_raw.get('id'))}"]
     else:
-        ids = [short_id(i) for i in work_raw.get("referenced_works" if kind == "cites" else "related_works") or []]
+        ids = [
+            short_id(i)
+            for i in work_raw.get("referenced_works" if kind == "cites" else "related_works") or []
+        ]
         ids = list(dict.fromkeys(i for i in ids if i))
         # Rank all of them, not just the first `limit`: ask for the most cited of each batch, then merge.
-        filters = ["ids.openalex:" + "|".join(ids[i : i + MAX_OR_IDS]) for i in range(0, len(ids), MAX_OR_IDS)]
+        filters = [
+            "ids.openalex:" + "|".join(ids[i : i + MAX_OR_IDS])
+            for i in range(0, len(ids), MAX_OR_IDS)
+        ]
     works: list[dict[str, Any]] = []
     for filt in filters:
-        found = net.get_json(_url("/works", {"filter": filt, "sort": "cited_by_count:desc", "per-page": limit, "select": FIELDS}))
+        found = net.get_json(
+            _url(
+                "/works",
+                {
+                    "filter": filt,
+                    "sort": "cited_by_count:desc",
+                    "per-page": limit,
+                    "select": FIELDS,
+                },
+            )
+        )
         works.extend(found.get("results") or [])
     works.sort(key=lambda w: w.get("cited_by_count") or 0, reverse=True)
     return [to_paper(w) for w in works[:limit]]

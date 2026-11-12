@@ -35,7 +35,9 @@ class FakeClaude:
         self.prompts.append(prompt)
 
     async def receive_response(self):
-        yield SystemMessage(subtype="init", data={"session_id": "11111111-2222-3333-4444-555555555555"})
+        yield SystemMessage(
+            subtype="init", data={"session_id": "11111111-2222-3333-4444-555555555555"}
+        )
         yield AssistantMessage(content=[TextBlock(text=self.reply)], model="fake")
         yield ResultMessage(
             subtype="success",

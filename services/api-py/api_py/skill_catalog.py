@@ -38,7 +38,9 @@ _FIELD = re.compile(rf"([A-Za-z][A-Za-z0-9_-]*){_S}*:{_S}*({_DOT}*)\Z")
 _QUOTED = re.compile(rf"([\"']){_DOT}*\1\Z")
 _LINES = re.compile(r"\r?\n")
 _HEADING = re.compile(rf"\A#+{_S}*")
-SCRIPT_FILE = re.compile(r"(^|/)scripts/|\.(py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)\Z", re.IGNORECASE | re.ASCII)
+SCRIPT_FILE = re.compile(
+    r"(^|/)scripts/|\.(py|sh|bash|js|mjs|cjs|ts|rb|pl|ps1)\Z", re.IGNORECASE | re.ASCII
+)
 _BASH = re.compile(r"\bBash\b", re.ASCII)
 _WORKSPACE_FILE = re.compile(rf"\Askills/([^/]+)/({_DOT}+)\Z")
 
@@ -108,7 +110,9 @@ def parse_front_matter(text: str) -> dict[str, str]:
     return fields
 
 
-def skill_from_files(folder: str, files: list[SkillFile], source: str, skill_path: str | None) -> Skill | None:
+def skill_from_files(
+    folder: str, files: list[SkillFile], source: str, skill_path: str | None
+) -> Skill | None:
     """A skill from its folder's files, or None without a usable SKILL.md; named by its front matter, else the folder."""
     main = next((f for f in files if f.path == "SKILL.md"), None)
     if main is None:
@@ -173,7 +177,10 @@ def _read_tree(directory: Path, prefix: str = "") -> list[SkillFile]:
         rel = f"{prefix}/{entry.name}" if prefix else entry.name
         if entry.is_dir(follow_symlinks=False):
             found.extend(_read_tree(Path(entry.path), rel))
-        elif entry.is_file(follow_symlinks=False) and os.stat(entry.path).st_size <= MAX_SKILL_FILE_BYTES:
+        elif (
+            entry.is_file(follow_symlinks=False)
+            and os.stat(entry.path).st_size <= MAX_SKILL_FILE_BYTES
+        ):
             found.append(SkillFile(rel, Path(entry.path).read_bytes()))
     return found
 
@@ -185,7 +192,10 @@ def builtin_skills(directory: Path) -> list[Skill]:
             folders = sorted((e.name for e in entries if e.is_dir()), key=code_unit_key)
     except OSError:
         return []
-    skills = [skill_from_files(folder, _read_tree(directory / folder), "builtin", None) for folder in folders]
+    skills = [
+        skill_from_files(folder, _read_tree(directory / folder), "builtin", None)
+        for folder in folders
+    ]
     return [s for s in skills if s is not None]
 
 
@@ -266,11 +276,16 @@ _NETWORK = [
         lambda m: f"links to {_host_of(m)}",
     ),
     (
-        re.compile(rf"\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|netcat|scp|rsync){_S}", re.ASCII),
+        re.compile(
+            rf"\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|netcat|scp|rsync){_S}", re.ASCII
+        ),
         lambda m: f"runs {js_trim(m)}",
     ),
     (
-        re.compile(r"\b(fetch|XMLHttpRequest|requests\.(get|post|put)|urllib|http\.client|axios)\b", re.ASCII),
+        re.compile(
+            r"\b(fetch|XMLHttpRequest|requests\.(get|post|put)|urllib|http\.client|axios)\b",
+            re.ASCII,
+        ),
         lambda m: f"calls {m}",
     ),
 ]
@@ -278,7 +293,9 @@ _NETWORK = [
 
 def _js(pattern: str) -> re.Pattern[str]:
     r"""A case-insensitive JavaScript pattern of scan.ts: \s as JavaScript's spaces, \b and case as ASCII."""
-    return re.compile(pattern.replace(r"[\s_-]", f"[{JS_SPACE}_-]").replace(r"\s", _S), re.IGNORECASE | re.ASCII)
+    return re.compile(
+        pattern.replace(r"[\s_-]", f"[{JS_SPACE}_-]").replace(r"\s", _S), re.IGNORECASE | re.ASCII
+    )
 
 
 _INSTRUCTIONS = [
@@ -290,7 +307,9 @@ _INSTRUCTIONS = [
         r"\b(do\s+not|don't|never)\s+(tell|inform|mention|reveal|show|alert)\b[^.\n]{0,40}\b(the\s+)?(user|human|person)\b"
     ),
     _js(r"\bwithout\s+(telling|asking|informing|notifying)\s+(the\s+)?(user|human|person)\b"),
-    _js(r"\b(reveal|print|repeat|output)\s+(your\s+|the\s+)?(system\s+prompt|hidden\s+instructions)"),
+    _js(
+        r"\b(reveal|print|repeat|output)\s+(your\s+|the\s+)?(system\s+prompt|hidden\s+instructions)"
+    ),
     _js(r"\bexfiltrat"),
     _js(
         r"\b(api[\s_-]?keys?|passwords?|secrets?|tokens?|credentials?|\.env\b|ssh\s+keys?)\b[^\n]{0,60}"
@@ -302,7 +321,9 @@ _INSTRUCTIONS = [
     ),
 ]
 # Zero-width, bidirectional-override and Unicode tag characters: text a reader can't see.
-_HIDDEN = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
+_HIDDEN = re.compile(
+    r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]"
+)
 # A run of base64-looking text long enough to hide a payload.
 _ENCODED = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
 _MARKDOWN = re.compile(r"\.(md|markdown)\Z", re.IGNORECASE | re.ASCII)
@@ -350,7 +371,9 @@ def scan_skill(files: list[SkillFile] | tuple[SkillFile, ...]) -> list[dict[str,
     for file in sorted(files, key=lambda f: collation_key(f.path)):
         counts: dict[str, int] = {}
 
-        def add(kind: str, line: int | None, detail: str, path: str = file.path, counts: dict = counts) -> None:
+        def add(
+            kind: str, line: int | None, detail: str, path: str = file.path, counts: dict = counts
+        ) -> None:
             counts[kind] = counts.get(kind, 0) + 1
             if counts[kind] <= _PER_FILE:
                 flags.append({"kind": kind, "path": path, "line": line, "detail": detail})
@@ -363,7 +386,9 @@ def scan_skill(files: list[SkillFile] | tuple[SkillFile, ...]) -> list[dict[str,
         if text is None:
             add("binary", None, "not text, so not checked")
         else:
-            if file.path == "SKILL.md" and _BASH.search(parse_front_matter(text).get("allowed-tools", "")):
+            if file.path == "SKILL.md" and _BASH.search(
+                parse_front_matter(text).get("allowed-tools", "")
+            ):
                 add("scripts", None, "asks for Bash in allowed-tools")
             markdown = _MARKDOWN.search(file.path) is not None
             for i, line in enumerate(_LINES.split(text)):
@@ -386,6 +411,11 @@ def scan_skill(files: list[SkillFile] | tuple[SkillFile, ...]) -> list[dict[str,
         for kind, n in counts.items():
             if n > _PER_FILE:
                 flags.append(
-                    {"kind": kind, "path": file.path, "line": None, "detail": f"and {n - _PER_FILE} more like this"}
+                    {
+                        "kind": kind,
+                        "path": file.path,
+                        "line": None,
+                        "detail": f"and {n - _PER_FILE} more like this",
+                    }
                 )
     return flags[:_MAX_FLAGS]

@@ -2,7 +2,7 @@
 name = "papers-mcp"
 version = "0.2.3"
 description = "Paper search (OpenAlex + arXiv) as an MCP server for the chatroom"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "knowledge-chatroom",
     # The MCP server (papers_mcp/server.py). mcp 2 renamed FastMCP to MCPServer.

@@ -46,7 +46,9 @@ def describe_metric(values: list[float]) -> MetricSummary:
     )
 
 
-def compare_runs(baseline: list[float], candidate: list[float], higher_is_better: bool = True) -> Comparison:
+def compare_runs(
+    baseline: list[float], candidate: list[float], higher_is_better: bool = True
+) -> Comparison:
     """How a candidate run's metric differs from a baseline's (Welch's t for noise)."""
     a, b = describe_metric(baseline), describe_metric(candidate)
     difference = b.mean - a.mean
@@ -59,7 +61,13 @@ def compare_runs(baseline: list[float], candidate: list[float], higher_is_better
         verdict = "not enough repeats to tell noise from change"
     elif welch_t is None:
         # Repeats with no spread at all: any difference is real.
-        verdict = "no change" if difference == 0 else "better" if (difference > 0) == higher_is_better else "worse"
+        verdict = (
+            "no change"
+            if difference == 0
+            else "better"
+            if (difference > 0) == higher_is_better
+            else "worse"
+        )
     elif abs(welch_t) < 2:
         verdict = "within noise"
     elif (difference > 0) == higher_is_better:

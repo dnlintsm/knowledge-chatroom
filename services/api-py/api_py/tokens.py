@@ -40,14 +40,21 @@ def _unb64(data: str) -> bytes:
 @lru_cache(maxsize=4)
 def _private_key(secret: str) -> Ed25519PrivateKey:
     seed = HKDF(
-        algorithm=hashes.SHA256(), length=32, salt=b"knowledge-chatroom", info=b"x-knowledge-user v2"
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"knowledge-chatroom",
+        info=b"x-knowledge-user v2",
     ).derive(secret.encode())
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
 def public_key(secret: str) -> str:
     """The public key for AUTH_SECRET: the raw 32-byte Ed25519 key, base64url (GET /identity/public-key)."""
-    raw = _private_key(secret).public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    raw = (
+        _private_key(secret)
+        .public_key()
+        .public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    )
     return _b64(raw)
 
 
@@ -80,12 +87,18 @@ def read(token: str | None, secret: str, now: float | None = None) -> dict[str, 
     if not isinstance(claims, dict):
         return None
     exp = claims.get("exp")
-    if not isinstance(exp, int | float) or isinstance(exp, bool) or exp < (time.time() if now is None else now):
+    if (
+        not isinstance(exp, int | float)
+        or isinstance(exp, bool)
+        or exp < (time.time() if now is None else now)
+    ):
         return None
     return claims
 
 
-def verify(token: str | None, secret: str, audience: str | None = None, now: float | None = None) -> dict[str, Any] | None:
+def verify(
+    token: str | None, secret: str, audience: str | None = None, now: float | None = None
+) -> dict[str, Any] | None:
     """A signed-in user's claims for `audience` (None: an X-Knowledge-User token), as verifyIdentity checks them."""
     claims = read(token, secret, now)
     if not claims:

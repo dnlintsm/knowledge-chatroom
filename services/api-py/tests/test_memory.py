@@ -42,7 +42,10 @@ def test_input_is_cleaned_like_check_input():
         ({"description": "x" * 301}, "A memory's description is at most 300 characters"),
         # 150 emoji are 300 characters as JavaScript counts them; one more is too many.
         ({"description": "😀" * 151}, "A memory's description is at most 300 characters"),
-        ({"description": "x", "type": "mood"}, "A memory's type is one of preference, profile, project"),
+        (
+            {"description": "x", "type": "mood"},
+            "A memory's type is one of preference, profile, project",
+        ),
         ({"description": "x", "type": ["preference"]}, "A memory's type is one of"),
         ({"description": "x", "body": "😀" * 8001}, "A memory is at most 16000 characters"),
     ]
@@ -65,7 +68,9 @@ async def alice_memory(app) -> MemoryService:
     """Alice's MemoryService, for what only Claude does (its changes, the inbox)."""
     assert await app.state.storage_ready()
     storage = app.state.storage
-    user_id = await storage.access.user_for_subject("kc|alice", email="alice@example.com", name="Alice")
+    user_id = await storage.access.user_for_subject(
+        "kc|alice", email="alice@example.com", name="Alice"
+    )
     session = Session(storage, storage.access, Principal(user_id=user_id))
     return MemoryService(session.scoped, session.ws, user_id)
 
@@ -77,7 +82,13 @@ async def test_notes_from_create_to_delete(memory_api):
     assert made.status_code == 200, made.text
     assert made.headers["cache-control"] == "no-store"
     note = made.json()["note"]
-    assert (note["name"], note["version"], note["createdBy"], note["archived"], note["lastUsedAt"]) == (
+    assert (
+        note["name"],
+        note["version"],
+        note["createdBy"],
+        note["archived"],
+        note["lastUsedAt"],
+    ) == (
         "style",
         1,
         "user",
@@ -98,10 +109,17 @@ async def test_notes_from_create_to_delete(memory_api):
         "lastUsedAt",
     ]
     again = await api.put("/memory/notes/style?create=1", headers=ALICE, json=NOTE)
-    assert (again.status_code, again.json()) == (409, {"error": "A memory named style already exists"})
+    assert (again.status_code, again.json()) == (
+        409,
+        {"error": "A memory named style already exists"},
+    )
     # The same content again is no new version.
-    assert (await api.put("/memory/notes/style", headers=ALICE, json=NOTE)).json()["note"]["version"] == 1
-    changed = await api.put("/memory/notes/style", headers=ALICE, json={**NOTE, "body": "Very short."})
+    assert (await api.put("/memory/notes/style", headers=ALICE, json=NOTE)).json()["note"][
+        "version"
+    ] == 1
+    changed = await api.put(
+        "/memory/notes/style", headers=ALICE, json={**NOTE, "body": "Very short."}
+    )
     assert changed.json()["note"]["version"] == 2
     got = (await api.get("/memory/notes/style", headers=ALICE)).json()
     assert [(v["version"], v["body"], v["changedBy"], v["threadId"]) for v in got["versions"]] == [
@@ -109,18 +127,26 @@ async def test_notes_from_create_to_delete(memory_api):
         (1, "Short sentences.", "user", None),
     ]
     restored = await api.post("/memory/notes/style/restore", headers=ALICE, json={"version": "1"})
-    assert (restored.json()["note"]["version"], restored.json()["note"]["body"]) == (3, "Short sentences.")
+    assert (restored.json()["note"]["version"], restored.json()["note"]["body"]) == (
+        3,
+        "Short sentences.",
+    )
     for bad in ({}, {"version": 0}, {"version": 1.5}, {"version": "x"}, {"version": None}):
         answer = await api.post("/memory/notes/style/restore", headers=ALICE, json=bad)
         assert (answer.status_code, answer.json()) == (400, {"error": "Say which version"}), bad
     missing = await api.post("/memory/notes/style/restore", headers=ALICE, json={"version": 9})
-    assert (missing.status_code, missing.json()) == (404, {"error": "No memory named style version 9"})
+    assert (missing.status_code, missing.json()) == (
+        404,
+        {"error": "No memory named style version 9"},
+    )
     huge = await api.post("/memory/notes/style/restore", headers=ALICE, json={"version": 2**40})
     assert (huge.status_code, huge.json()) == (500, {"error": "Memory request failed"})
 
     archived = await api.post("/memory/notes/style/archive", headers=ALICE, json={"archived": True})
     assert archived.json()["note"]["archived"] is True
-    assert (await api.post("/memory/notes/style/archive", headers=ALICE, json={})).json()["note"]["archived"] is True
+    assert (await api.post("/memory/notes/style/archive", headers=ALICE, json={})).json()["note"][
+        "archived"
+    ] is True
     back = await api.post("/memory/notes/style/archive", headers=ALICE, json={"archived": False})
     assert back.json()["note"]["archived"] is False
 
@@ -151,15 +177,36 @@ async def test_refusals(memory_api):
         ("PUT", "/memory/settings", {"mode": "sometimes"}, 400, "mode is on, ask or off"),
         ("PUT", "/memory/settings", {"mode": None}, 400, "mode is on, ask or off"),
         ("PUT", "/memory/settings", {"incognito": True}, 400, "Say which chat: thread"),
-        ("PUT", "/memory/settings", {"incognito": True, "thread": "😀" * 101}, 400, "Say which chat: thread"),
-        ("POST", "/memory/inbox/not-an-id/accept", None, 404, "No memory named change in the inbox"),
+        (
+            "PUT",
+            "/memory/settings",
+            {"incognito": True, "thread": "😀" * 101},
+            400,
+            "Say which chat: thread",
+        ),
+        (
+            "POST",
+            "/memory/inbox/not-an-id/accept",
+            None,
+            404,
+            "No memory named change in the inbox",
+        ),
         ("POST", "/memory/events/not-an-id/undo", None, 404, "No memory named for that change"),
-        ("POST", "/memory/events/00000000-0000-0000-0000-000000000000/undo", None, 404, "No memory named for that"),
+        (
+            "POST",
+            "/memory/events/00000000-0000-0000-0000-000000000000/undo",
+            None,
+            404,
+            "No memory named for that",
+        ),
         ("GET", "/memory/events/00000000-0000-0000-0000-000000000000/undo", None, 404, "Not found"),
     ]
     for method, path, body, status, error in cases:
         answer = await api.request(method, path, headers=ALICE, json=body)
-        assert answer.status_code == status and answer.json()["error"].startswith(error), (path, answer.text)
+        assert answer.status_code == status and answer.json()["error"].startswith(error), (
+            path,
+            answer.text,
+        )
     bom = await api.put("/memory/settings", headers=ALICE, content="﻿{}".encode())
     assert (bom.status_code, bom.json()) == (400, {"error": "Invalid JSON body"})
     empty = await api.put("/memory/settings", headers=ALICE)
@@ -173,16 +220,22 @@ async def test_settings_and_incognito_chats(memory_api):
         "mode": "ask",
         "incognito": False,
     }
-    on = await api.put("/memory/settings", headers=ALICE, json={"mode": "on", "thread": "t1", "incognito": True})
+    on = await api.put(
+        "/memory/settings", headers=ALICE, json={"mode": "on", "thread": "t1", "incognito": True}
+    )
     assert on.json() == {"mode": "on", "incognito": True}
     # The mode is set before the chat is checked, as on the TypeScript server.
-    refused = await api.put("/memory/settings", headers=ALICE, json={"mode": "off", "incognito": True, "thread": ""})
+    refused = await api.put(
+        "/memory/settings", headers=ALICE, json={"mode": "off", "incognito": True, "thread": ""}
+    )
     assert refused.status_code == 400
     assert (await api.put("/memory/settings", headers=ALICE, json={"thread": "t1"})).json() == {
         "mode": "off",
         "incognito": True,
     }
-    off = await api.put("/memory/settings", headers=ALICE, json={"thread": "t1", "incognito": "yes"})
+    off = await api.put(
+        "/memory/settings", headers=ALICE, json={"thread": "t1", "incognito": "yes"}
+    )
     assert off.json() == {"mode": "off", "incognito": False}
     assert (await api.put("/memory/settings", headers=BOB, json={"thread": "t1"})).json() == {
         "mode": "on",
@@ -204,7 +257,11 @@ async def test_claudes_changes_the_inbox_and_undo(memory_api, database):
         ("create", 1, "chat", False),
     ]
     undone = await api.post(f"/memory/events/{updated['id']}/undo", headers=ALICE)
-    assert (undone.json()["name"], undone.json()["note"]["version"], undone.json()["note"]["body"]) == (
+    assert (
+        undone.json()["name"],
+        undone.json()["note"]["version"],
+        undone.json()["note"]["body"],
+    ) == (
         "tone",
         3,
         "Short sentences.",
@@ -212,7 +269,10 @@ async def test_claudes_changes_the_inbox_and_undo(memory_api, database):
     twice = await api.post(f"/memory/events/{updated['id']}/undo", headers=ALICE)
     assert (twice.status_code, twice.json()) == (409, {"error": "That change was already undone"})
     stale = await api.post(f"/memory/events/{created['id']}/undo", headers=ALICE)
-    assert (stale.status_code, stale.json()["error"]) == (409, "tone changed since; restore an earlier version instead")
+    assert (stale.status_code, stale.json()["error"]) == (
+        409,
+        "tone changed since; restore an earlier version instead",
+    )
     assert (await api.post(f"/memory/events/{created['id']}/undo", headers=BOB)).status_code == 404
 
     # Archived by Claude, then undone: back in use.
@@ -247,7 +307,11 @@ async def test_claudes_changes_the_inbox_and_undo(memory_api, database):
     drop = await propose("delete", "tone", 3)
     accepted = await api.post(f"/memory/inbox/{add}/accept", headers=ALICE)
     assert accepted.status_code == 200, accepted.text
-    assert (accepted.json()["id"], accepted.json()["status"], accepted.json()["note"]["createdBy"]) == (
+    assert (
+        accepted.json()["id"],
+        accepted.json()["status"],
+        accepted.json()["note"]["createdBy"],
+    ) == (
         add,
         "accepted",
         "agent",
@@ -261,7 +325,9 @@ async def test_claudes_changes_the_inbox_and_undo(memory_api, database):
     assert stale_update in [i["id"] for i in await memory.inbox()]
     rejected = await api.post(f"/memory/inbox/{stale_update}/reject", headers=ALICE)
     assert rejected.json() == {"id": stale_update, "status": "rejected"}
-    assert (await api.post(f"/memory/inbox/{stale_update}/reject", headers=ALICE)).status_code == 404
+    assert (
+        await api.post(f"/memory/inbox/{stale_update}/reject", headers=ALICE)
+    ).status_code == 404
     dropped = await api.post(f"/memory/inbox/{drop}/accept", headers=ALICE)
     assert dropped.json()["note"]["archived"] is True
     activity = (await api.get("/memory/activity", headers=ALICE)).json()["activity"]
@@ -294,7 +360,9 @@ async def test_export(memory_api):
         assert archive.read("memory/style.md").decode() == (
             "---\nname: style\ndescription: How alice likes answers\ntype: preference\n---\n\nShort sentences.\n"
         )
-    with zipfile.ZipFile(io.BytesIO((await api.get("/memory/export", headers=BOB)).content)) as archive:
+    with zipfile.ZipFile(
+        io.BytesIO((await api.get("/memory/export", headers=BOB)).content)
+    ) as archive:
         assert archive.namelist() == []
 
 

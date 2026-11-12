@@ -35,7 +35,10 @@ class _RootCollator(pyuca.Collator):
                     self.implicit_weights.append([int(start, 16), int(end, 16), int(base, 16)])
                     continue
                 chars, elements = line.split(";", 1)
-                weights = [hexstrings2int(m.groups()) for m in COLL_ELEMENT_PATTERN.finditer(elements.strip())]
+                weights = [
+                    hexstrings2int(m.groups())
+                    for m in COLL_ELEMENT_PATTERN.finditer(elements.strip())
+                ]
                 self.table.add(hexstrings2int(chars.split()), weights)
 
 

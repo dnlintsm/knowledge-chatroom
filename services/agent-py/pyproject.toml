@@ -2,8 +2,7 @@
 name = "agent-py"
 version = "0.2.3"
 description = "The chatroom's chat agent in Python, served to the app through AGENT_URL (issue #176)"
-# ag-ui-claude-sdk needs 3.11.
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "knowledge-chatroom",
     # The AG-UI adapter for the Claude Agent SDK (docs/remote-agent.md).

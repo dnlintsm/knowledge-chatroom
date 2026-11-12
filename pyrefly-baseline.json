@@ -1,0 +1,257 @@
+{
+  "min_severity": "error",
+  "errors": [
+    {
+      "column": 42,
+      "path": "services/agent-py/agent_py/adapter.py",
+      "name": "no-matching-overload",
+      "concise_description": "No matching overload found for function `str.join` called with arguments: (Generator[RunMemory | RunServers | str])",
+      "severity": "error"
+    },
+    {
+      "column": 35,
+      "path": "services/agent-py/agent_py/adapter.py",
+      "name": "bad-assignment",
+      "concise_description": "`dict[str, dict[str, Any]]` is not assignable to attribute `mcp_servers` with type `Path | dict[str, McpServerConfig] | str`",
+      "severity": "error"
+    },
+    {
+      "column": 39,
+      "path": "services/agent-py/agent_py/adapter.py",
+      "name": "invalid-argument",
+      "concise_description": "Expected a mapping, got Path | dict[str, McpServerConfig] | str",
+      "severity": "error"
+    },
+    {
+      "column": 39,
+      "path": "services/agent-py/agent_py/adapter.py",
+      "name": "invalid-argument",
+      "concise_description": "Expected a mapping, got Path | dict[str, McpServerConfig] | str",
+      "severity": "error"
+    },
+    {
+      "column": 39,
+      "path": "services/agent-py/agent_py/app.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str | None` is not assignable to parameter `accept` with type `str` in function `ag_ui.encoder.encoder.EventEncoder.__init__`",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/agent-py/agent_py/memory.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[(input_data: Any, _tool_use_id: str | None, _context: Any) -> Coroutine[Unknown, Unknown, dict[str, Any]]]` is not assignable to parameter `hooks` with type `list[(HookInput, str | None, HookContext) -> Awaitable[HookJSONOutput]]` in function `claude_agent_sdk.types.HookMatcher.__init__`",
+      "severity": "error"
+    },
+    {
+      "column": 11,
+      "path": "services/agent-py/agent_py/model.py",
+      "name": "bad-assignment",
+      "concise_description": "`_Environ[str] | dict[str, str]` is not assignable to variable `env` with type `dict[str, str] | None`",
+      "severity": "error"
+    },
+    {
+      "column": 13,
+      "path": "services/agent-py/agent_py/model.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `get`",
+      "severity": "error"
+    },
+    {
+      "column": 40,
+      "path": "services/agent-py/agent_py/model.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `get`",
+      "severity": "error"
+    },
+    {
+      "column": 60,
+      "path": "services/agent-py/agent_py/skills.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `list[(input_data: Any, _tool_use_id: str | None, _context: Any) -> Coroutine[Unknown, Unknown, dict[str, Any]]]` is not assignable to parameter `hooks` with type `list[(HookInput, str | None, HookContext) -> Awaitable[HookJSONOutput]]` in function `claude_agent_sdk.types.HookMatcher.__init__`",
+      "severity": "error"
+    },
+    {
+      "column": 50,
+      "path": "services/api-py/api_py/blobs.py",
+      "name": "no-matching-overload",
+      "concise_description": "No matching overload found for function `boto3.session.Session.client` called with arguments: (Literal['s3'], endpoint_url=str | None, region_name=str, config=Config, **dict[str, str])",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/api-py/api_py/chats.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.connection_async.AsyncConnection.execute`",
+      "severity": "error"
+    },
+    {
+      "column": 9,
+      "path": "services/api-py/api_py/chats.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.connection_async.AsyncConnection.execute`",
+      "severity": "error"
+    },
+    {
+      "column": 28,
+      "path": "services/api-py/api_py/files.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `get`",
+      "severity": "error"
+    },
+    {
+      "column": 15,
+      "path": "services/api-py/api_py/files.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `put`",
+      "severity": "error"
+    },
+    {
+      "column": 23,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str` is not assignable to parameter `query` with type `LiteralString | Composed | SQL | bytes` in function `psycopg.cursor_async.AsyncCursor.execute`",
+      "severity": "error"
+    },
+    {
+      "column": 44,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 50,
+      "path": "services/api-py/api_py/memory.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@MemoryService) -> Coroutine[Unknown, Unknown, list[dict[str, Any]]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "services/api-py/api_py/session.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `str | Any` is not assignable to parameter `data` with type `bytes` in function `api_py.files.FileService.write`",
+      "severity": "error"
+    },
+    {
+      "column": 32,
+      "path": "services/api-py/api_py/session.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `get`",
+      "severity": "error"
+    },
+    {
+      "column": 22,
+      "path": "services/api-py/api_py/session.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of class `NoneType` has no attribute `get`",
+      "severity": "error"
+    },
+    {
+      "column": 76,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 67,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 45,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 48,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 48,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillService, user_id: str, thread_id: str | None = None) -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 47,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 36,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 61,
+      "path": "services/api-py/api_py/skills.py",
+      "name": "unsupported-operation",
+      "concise_description": "`(self: Self@SkillHub, user_id: str, query: str = '') -> Coroutine[Unknown, Unknown, dict[str, Any]]` is not subscriptable",
+      "severity": "error"
+    },
+    {
+      "column": 30,
+      "path": "services/api-py/api_py/skills_routes.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Literal[''] | object | Any` is not assignable to parameter `run_id` with type `str` in function `api_py.skills.SkillService.record`",
+      "severity": "error"
+    },
+    {
+      "column": 25,
+      "path": "services/api-py/api_py/storage.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `(() -> Awaitable[str]) | (() -> str) | str` is not assignable to parameter `conninfo` with type `str` in function `api_py.events.EventHub.__init__`",
+      "severity": "error"
+    },
+    {
+      "column": 21,
+      "path": "services/api-py/api_py/tools.py",
+      "name": "no-matching-overload",
+      "concise_description": "No matching overload found for function `str.join` called with arguments: (Generator[object | str])",
+      "severity": "error"
+    },
+    {
+      "column": 82,
+      "path": "services/api-py/api_py/tools.py",
+      "name": "missing-attribute",
+      "concise_description": "Object of type `AudioContent | EmbeddedResource | ImageContent | ResourceLink | TextContent` has no attribute `text`",
+      "severity": "error"
+    },
+    {
+      "column": 28,
+      "path": "services/lab-tools/lab_tools/server.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Mapping[str, str] | None` is not assignable to parameter `headers` with type `dict[str, str] | None` in function `knowledge_chatroom.identity.caller`",
+      "severity": "error"
+    },
+    {
+      "column": 28,
+      "path": "services/papers-mcp/papers_mcp/server.py",
+      "name": "bad-argument-type",
+      "concise_description": "Argument `Mapping[str, str] | None` is not assignable to parameter `headers` with type `dict[str, str] | None` in function `knowledge_chatroom.identity.caller`",
+      "severity": "error"
+    }
+  ]
+}

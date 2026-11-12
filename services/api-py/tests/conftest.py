@@ -34,5 +34,3 @@ async def database() -> AsyncIterator[str]:
 async def api(database) -> AsyncIterator[httpx.AsyncClient]:
     async with Client(database, SECRET) as (client, _app):
         yield client
-
-

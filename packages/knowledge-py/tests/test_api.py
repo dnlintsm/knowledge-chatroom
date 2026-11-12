@@ -85,7 +85,9 @@ def test_models_parse_and_keep_fields():
     }
     files = api.FileList.model_validate({"files": [info]})
     assert files.files[0].updatedAt.tzinfo is not None
-    assert _same(files.model_dump(mode="json", by_alias=True, exclude_unset=True), {"files": [info]})
+    assert _same(
+        files.model_dump(mode="json", by_alias=True, exclude_unset=True), {"files": [info]}
+    )
     with pytest.raises(ValueError):
         api.FileInfo.model_validate({**info, "kind": "spreadsheet"})
 
@@ -99,7 +101,9 @@ def test_a_stored_json_file_is_any_json():
 SAMPLES = os.environ.get("API_SAMPLES")
 
 
-@pytest.mark.skipif(not SAMPLES, reason="API_SAMPLES (the conformance suite's CONFORMANCE_SAMPLES file) not set")
+@pytest.mark.skipif(
+    not SAMPLES, reason="API_SAMPLES (the conformance suite's CONFORMANCE_SAMPLES file) not set"
+)
 def test_real_traffic_parses():
     lines = [json.loads(line) for line in Path(SAMPLES).read_text().splitlines() if line]
     assert lines, f"{SAMPLES} is empty: did the conformance suite run with CONFORMANCE_SAMPLES?"
@@ -132,7 +136,7 @@ def _same(a: Any, b: Any) -> bool:
     if isinstance(a, dict) and isinstance(b, dict):
         return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
     if isinstance(a, list) and isinstance(b, list):
-        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
     if isinstance(a, str) and isinstance(b, str) and _DATETIME.match(a) and _DATETIME.match(b):
         return _instant(a) == _instant(b)
     return a == b

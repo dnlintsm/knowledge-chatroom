@@ -20,6 +20,7 @@ import json
 import tomllib
 import urllib.parse
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,9 +41,11 @@ MAX_EDIT_PREVIEW_CHARS = 4_000
 # packages/contracts/src/files.ts
 KIND_FOLDERS = {"note": "notes", "skill": "skills", "upload": "uploads", "artifact": "artifacts"}
 TEXT_EXTENSIONS = set(
-    "md markdown txt json csv ts tsx js jsx py yaml yml html css sql sh toml xml htm tsv log ini cfg conf env "
-    "jsonl ipynb mjs cjs mts cts scss less vue svelte graphql go rs java kt c h cpp hpp cc cs rb php swift scala "
-    "r lua pl bash zsh ps1 bat tex rst".split()
+    (  # noqa: SIM905 - keep the extensions compact and readable
+        "md markdown txt json csv ts tsx js jsx py yaml yml html css sql sh toml xml htm tsv "
+        "log ini cfg conf env jsonl ipynb mjs cjs mts cts scss less vue svelte graphql go rs "
+        "java kt c h cpp hpp cc cs rb php swift scala r lua pl bash zsh ps1 bat tex rst"
+    ).split()
 )
 
 
@@ -53,7 +56,11 @@ def storage_url(env: Mapping[str, str]) -> str:
 
 def is_text_file(path: str, mime: str) -> bool:
     extension = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
-    return mime.startswith("text/") or mime in ("application/json", "image/svg+xml") or extension in TEXT_EXTENSIONS
+    return (
+        mime.startswith("text/")
+        or mime in ("application/json", "image/svg+xml")
+        or extension in TEXT_EXTENSIONS
+    )
 
 
 def is_skill_path(path: str) -> bool:
@@ -86,12 +93,20 @@ class Storage:
         headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
         """`headers` replace the storage token (memory calls send their own)."""
-        headers = dict(headers) if headers is not None else {STORAGE_HEADER: self.token} if self.token else {}
+        headers = (
+            dict(headers)
+            if headers is not None
+            else {STORAGE_HEADER: self.token}
+            if self.token
+            else {}
+        )
         if content is not None:
             headers["Content-Type"] = "application/octet-stream"
         query = {k: v for k, v in (params or {}).items() if v is not None}
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=60, transport=self.transport) as client:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, timeout=60, transport=self.transport
+            ) as client:
                 response = await client.request(
                     method, route, params=query, json=json_body, content=content, headers=headers
                 )
@@ -121,7 +136,9 @@ def _refusal(response: httpx.Response) -> str:
 
 def file_route(path: str) -> str:
     """/files/<path>, each segment encoded and slashes kept."""
-    return "/files/" + "/".join(urllib.parse.quote(s, safe="") for s in path.strip().lstrip("/").split("/"))
+    return "/files/" + "/".join(
+        urllib.parse.quote(s, safe="") for s in path.strip().lstrip("/").split("/")
+    )
 
 
 def _place(args: Mapping[str, Any]) -> dict[str, str | None]:
@@ -134,7 +151,11 @@ ToolResult = dict[str, Any]
 
 
 def text(value: Any) -> ToolResult:
-    return {"content": [{"type": "text", "text": value if isinstance(value, str) else json.dumps(value)}]}
+    return {
+        "content": [
+            {"type": "text", "text": value if isinstance(value, str) else json.dumps(value)}
+        ]
+    }
 
 
 def error(message: str) -> ToolResult:
@@ -153,8 +174,16 @@ def format_tree(nodes: list[dict[str, Any]]) -> str:
             count = node.get("fileCount", 0)
             files = "1 file" if count == 1 else f"{count} files"
             role = node.get("role", "")
-            about = "no access, shown as a path" if role is None else f"{files}, {role}" if role else files
-            lines.append(f"{'  ' * depth}- {node['name']} [{node['type']}] id={node['id']} ({about})")
+            about = (
+                "no access, shown as a path"
+                if role is None
+                else f"{files}, {role}"
+                if role
+                else files
+            )
+            lines.append(
+                f"{'  ' * depth}- {node['name']} [{node['type']}] id={node['id']} ({about})"
+            )
             walk(node["id"], depth + 1)
 
     walk(None, 0)
@@ -170,7 +199,10 @@ EXPERIMENT = {
     "description": "Experiment id (from list_experiments or the context's currentExperiment); the experiment's "
     "files instead of a node's. Takes precedence over `node`.",
 }
-SUMMARY = {"type": "string", "description": "One line on what changed and why; shown to whoever reviews a proposal."}
+SUMMARY = {
+    "type": "string",
+    "description": "One line on what changed and why; shown to whoever reviews a proposal.",
+}
 
 
 def schema(properties: dict[str, Any], *required: str) -> dict[str, Any]:
@@ -181,19 +213,24 @@ def tool_versions() -> dict[str, str]:
     """This agent's version and its SDKs', for the provenance of runs it starts."""
     versions = {}
     try:  # A server run from its folder, not an installed package: its version is in pyproject.toml.
-        project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]
+        project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())[
+            "project"
+        ]
         versions["agentPy"] = project["version"]
     except (OSError, KeyError, tomllib.TOMLDecodeError):
         pass
-    for key, package in (("claudeAgentSdk", "claude-agent-sdk"), ("agUiClaudeSdk", "ag-ui-claude-sdk")):
-        try:
+    for key, package in (
+        ("claudeAgentSdk", "claude-agent-sdk"),
+        ("agUiClaudeSdk", "ag-ui-claude-sdk"),
+    ):
+        with suppress(importlib.metadata.PackageNotFoundError):
             versions[key] = importlib.metadata.version(package)
-        except importlib.metadata.PackageNotFoundError:
-            pass
     return versions
 
 
-def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = None) -> list[SdkMcpTool[Any]]:
+def file_tools(
+    storage: Callable[[], Storage], meta: Mapping[str, Any] | None = None
+) -> list[SdkMcpTool[Any]]:
     """The workspace tools; `storage` gives the current run's storage API.
 
     `meta` is about the chat, for the provenance of runs Claude starts: its
@@ -235,7 +272,9 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                 }
             )
         info = await s.json("PUT", file_route(path), params=place, content=data)
-        return text({"ok": True, "path": info["path"], "node": None, "experiment": place.get("experiment")})
+        return text(
+            {"ok": True, "path": info["path"], "node": None, "experiment": place.get("experiment")}
+        )
 
     async def read(s: Storage, path: str, place: Mapping[str, str | None]) -> httpx.Response | None:
         """The file's bytes; None for a binary file the API redirects to the object store."""
@@ -254,19 +293,25 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
             author = "agent" if s.token else "user"
             # node=root for the root's own: without node the API lists every node's.
             node = place.get("node")
-            proposals = (await s.json("GET", "/proposals", params={"node": node or "root", "status": "open"}))[
-                "proposals"
-            ]
+            proposals = (
+                await s.json("GET", "/proposals", params={"node": node or "root", "status": "open"})
+            )["proposals"]
             mine = next(
                 (
                     p
                     for p in proposals
-                    if me and p["path"] == wanted and p["node"] == node and p["author"] == author and p["authorId"] == me
+                    if me
+                    and p["path"] == wanted
+                    and p["node"] == node
+                    and p["author"] == author
+                    and p["authorId"] == me
                 ),
                 None,
             )
             if mine:
-                content = await s.call("GET", f"/proposals/{urllib.parse.quote(mine['id'], safe='')}/content")
+                content = await s.call(
+                    "GET", f"/proposals/{urllib.parse.quote(mine['id'], safe='')}/content"
+                )
                 return mine["path"], content.content.decode("utf-8", errors="replace")
         try:
             response = await read(s, wanted, place)
@@ -289,7 +334,10 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     async def list_nodes(s: Storage, args: dict[str, Any]) -> ToolResult:
         tree = await s.json("GET", "/nodes")
         levels = " › ".join(t["name"] for t in tree["types"])
-        return text(f"Levels: {levels}\n" + (format_tree(tree["nodes"]) if tree["nodes"] else "(no nodes yet)"))
+        return text(
+            f"Levels: {levels}\n"
+            + (format_tree(tree["nodes"]) if tree["nodes"] else "(no nodes yet)")
+        )
 
     @tool(
         "create_node",
@@ -297,7 +345,10 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         "below the parent's.",
         schema(
             {
-                "parentId": {"type": "string", "description": "Parent node id; omit for the top level."},
+                "parentId": {
+                    "type": "string",
+                    "description": "Parent node id; omit for the top level.",
+                },
                 "name": {"type": "string", "description": "e.g. Etch, Module 3, Endpoint control"},
             },
             "name",
@@ -305,7 +356,11 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     )
     @guarded
     async def create_node(s: Storage, args: dict[str, Any]) -> ToolResult:
-        node = await s.json("POST", "/nodes", json_body={"parentId": args.get("parentId") or None, "name": args["name"]})
+        node = await s.json(
+            "POST",
+            "/nodes",
+            json_body={"parentId": args.get("parentId") or None, "name": args["name"]},
+        )
         return text({"ok": True, "id": node["id"], "name": node["name"], "type": node["type"]})
 
     @tool(
@@ -372,10 +427,22 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
             return error(f"No file at {path}" if err.status == 404 else str(err))
         mime = (response.headers.get("content-type", "") if response else "").split(";")[0].strip()
         if response is None or not is_text_file(path, mime):
-            return text({"path": path, "mime": mime or None, "note": "Binary file; content not readable as text."})
+            return text(
+                {
+                    "path": path,
+                    "mime": mime or None,
+                    "note": "Binary file; content not readable as text.",
+                }
+            )
         content = response.content.decode("utf-8", errors="replace")
         return text(
-            read_lines(path, content, offset=args.get("offset") or 1, column=args.get("column") or 1, limit=args.get("limit"))
+            read_lines(
+                path,
+                content,
+                offset=args.get("offset") or 1,
+                column=args.get("column") or 1,
+                limit=args.get("limit"),
+            )
         )
 
     @tool(
@@ -404,7 +471,12 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "type": "string",
                     "description": "The context's currentExperiment, if any, so its node's neighborhood ranks first.",
                 },
-                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Most results (default 20)."},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Most results (default 20).",
+                },
             },
             "query",
         ),
@@ -429,7 +501,11 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "experiment": h["experiment"],
                     "where": " › ".join(
                         [*(h["where"] or ["(workspace root)"])]
-                        + ([f"experiment: {h['experimentTitle']}"] if h.get("experimentTitle") else [])
+                        + (
+                            [f"experiment: {h['experimentTitle']}"]
+                            if h.get("experimentTitle")
+                            else []
+                        )
                     ),
                     "match": h["match"],
                     "snippet": h["snippet"] or "(matched by path)",
@@ -453,7 +529,10 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         schema(
             {
                 "path": {"type": "string", "description": "e.g. artifacts/summary.md"},
-                "content": {"type": "string", "description": "The full file content (markdown for .md files)."},
+                "content": {
+                    "type": "string",
+                    "description": "The full file content (markdown for .md files).",
+                },
                 "node": NODE,
                 "experiment": EXPERIMENT,
                 "summary": SUMMARY,
@@ -476,9 +555,18 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         "version. The result shows the changed lines.",
         schema(
             {
-                "path": {"type": "string", "description": "Workspace path of the file, e.g. artifacts/page.html"},
-                "oldText": {"type": "string", "description": "The exact text to replace, without line numbers."},
-                "newText": {"type": "string", "description": "The replacement text (empty to delete oldText)."},
+                "path": {
+                    "type": "string",
+                    "description": "Workspace path of the file, e.g. artifacts/page.html",
+                },
+                "oldText": {
+                    "type": "string",
+                    "description": "The exact text to replace, without line numbers.",
+                },
+                "newText": {
+                    "type": "string",
+                    "description": "The replacement text (empty to delete oldText).",
+                },
                 "replaceAll": {
                     "type": "boolean",
                     "description": "Replace every occurrence of oldText instead of exactly one. Default false.",
@@ -496,7 +584,9 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     async def edit_file(s: Storage, args: dict[str, Any]) -> ToolResult:
         path, content = await current_text(s, args["path"], args)
         try:
-            edit = apply_edit(content, args["oldText"], args["newText"], bool(args.get("replaceAll")))
+            edit = apply_edit(
+                content, args["oldText"], args["newText"], bool(args.get("replaceAll"))
+            )
         except EditError as err:
             return error(str(err))
         result = await store(s, path, edit.content.encode("utf-8"), args)
@@ -522,7 +612,9 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     )
     @guarded
     async def list_experiments(s: Storage, args: dict[str, Any]) -> ToolResult:
-        found = (await s.json("GET", "/experiments", params={"node": args.get("node") or None}))["experiments"]
+        found = (await s.json("GET", "/experiments", params={"node": args.get("node") or None}))[
+            "experiments"
+        ]
         if not found:
             return text("(no experiments)")
         return text(
@@ -563,8 +655,17 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     @guarded
     async def update_experiment(s: Storage, args: dict[str, Any]) -> ToolResult:
         body = {k: args[k] for k in ("title", "hypothesis", "params") if k in args}
-        updated = await s.json("PATCH", f"/experiments/{urllib.parse.quote(args['id'], safe='')}", json_body=body)
-        return text({"ok": True, "id": updated["id"], "status": updated["status"], "state": updated["state"]})
+        updated = await s.json(
+            "PATCH", f"/experiments/{urllib.parse.quote(args['id'], safe='')}", json_body=body
+        )
+        return text(
+            {
+                "ok": True,
+                "id": updated["id"],
+                "status": updated["status"],
+                "state": updated["state"],
+            }
+        )
 
     @tool(
         "propose_experiment",
@@ -579,7 +680,10 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "items": {"type": "string"},
                     "description": "Only these files; omit for every changed file.",
                 },
-                "note": {"type": "string", "description": "Why these changes belong in the node, in a line or two."},
+                "note": {
+                    "type": "string",
+                    "description": "Why these changes belong in the node, in a line or two.",
+                },
             },
             "experiment",
         ),
@@ -610,13 +714,19 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
         "set_experiment_results. To repeat an earlier experiment, pass rerunOf instead of changing it.",
         schema(
             {
-                "node": {"type": "string", "description": "Knowledge node id to fork; omit for the workspace root."},
+                "node": {
+                    "type": "string",
+                    "description": "Knowledge node id to fork; omit for the workspace root.",
+                },
                 "title": {
                     "type": "string",
                     "description": "Short name, e.g. 'Lower RF power, 40 W'; required unless rerunOf.",
                 },
                 "hypothesis": {"type": "string", "description": "What the user expects and why."},
-                "params": {"type": "object", "description": 'What is varied, e.g. {"rfPower_W": 40}'},
+                "params": {
+                    "type": "object",
+                    "description": 'What is varied, e.g. {"rfPower_W": 40}',
+                },
                 "inputs": {
                     "type": "array",
                     "description": "Files the experiment reads (uploads, data, earlier results); the user must be able "
@@ -624,15 +734,30 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "The file's path, e.g. uploads/wafer-map.csv"},
-                            "node": {"type": "string", "description": "Its knowledge node; omit for the workspace root."},
-                            "experiment": {"type": "string", "description": "Its experiment, if it is in one."},
-                            "as": {"type": "string", "description": "Name under inputs/; defaults to its file name."},
+                            "path": {
+                                "type": "string",
+                                "description": "The file's path, e.g. uploads/wafer-map.csv",
+                            },
+                            "node": {
+                                "type": "string",
+                                "description": "Its knowledge node; omit for the workspace root.",
+                            },
+                            "experiment": {
+                                "type": "string",
+                                "description": "Its experiment, if it is in one.",
+                            },
+                            "as": {
+                                "type": "string",
+                                "description": "Name under inputs/; defaults to its file name.",
+                            },
                         },
                         "required": ["path"],
                     },
                 },
-                "skill": {"type": "string", "description": "The skill this experiment follows, if any, e.g. analysis."},
+                "skill": {
+                    "type": "string",
+                    "description": "The skill this experiment follows, if any, e.g. analysis.",
+                },
                 "rerunOf": {
                     "type": "string",
                     "description": "Run this earlier experiment (its id) again as a new one: its place (node), "
@@ -655,7 +780,13 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
             "tools": versions,
         }
         body: dict[str, Any] = {"provenance": provenance}
-        body.update({k: args[k] for k in ("title", "hypothesis", "params", "inputs", "rerunOf") if k in args})
+        body.update(
+            {
+                k: args[k]
+                for k in ("title", "hypothesis", "params", "inputs", "rerunOf")
+                if k in args
+            }
+        )
         if "node" in args:
             body["nodeId"] = args["node"] or None
         elif not args.get("rerunOf"):
@@ -686,7 +817,11 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
                     "type": "object",
                     "description": 'e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}',
                 },
-                "state": {"type": "string", "enum": ["done", "failed"], "description": "Defaults to done."},
+                "state": {
+                    "type": "string",
+                    "enum": ["done", "failed"],
+                    "description": "Defaults to done.",
+                },
             },
             "id",
             "results",
@@ -696,9 +831,18 @@ def file_tools(storage: Callable[[], Storage], meta: Mapping[str, Any] | None = 
     async def set_experiment_results(s: Storage, args: dict[str, Any]) -> ToolResult:
         route = f"/experiments/{urllib.parse.quote(args['id'], safe='')}/finish"
         finished = await s.json(
-            "POST", route, json_body={"results": args["results"], "state": args.get("state") or "done"}
+            "POST",
+            route,
+            json_body={"results": args["results"], "state": args.get("state") or "done"},
         )
-        return text({"ok": True, "id": finished["id"], "state": finished["state"], "results": finished["results"]})
+        return text(
+            {
+                "ok": True,
+                "id": finished["id"],
+                "state": finished["state"],
+                "results": finished["results"],
+            }
+        )
 
     return [
         list_nodes,
@@ -722,5 +866,3 @@ def tool_names(tools: list[SdkMcpTool[Any]]) -> list[str]:
 
 def server(tools: list[SdkMcpTool[Any]]):
     return create_sdk_mcp_server(SERVER_NAME, "1.0.0", tools=tools)
-
-

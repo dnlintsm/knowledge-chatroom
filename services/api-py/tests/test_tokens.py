@@ -54,6 +54,9 @@ def test_refuses_expired_forged_and_other_secrets():
     for bad in (None, "", "v1.a.b", "v2.only-two", f"{head}.{body}.short"):
         assert tokens.read(bad, SECRET, NOW) is None
     # Nobody signs in as "local", and a token needs a subject.
-    assert tokens.verify(tokens.sign({"sub": "local", "exp": 1893456000}, SECRET), SECRET, None, NOW) is None
+    assert (
+        tokens.verify(tokens.sign({"sub": "local", "exp": 1893456000}, SECRET), SECRET, None, NOW)
+        is None
+    )
     assert tokens.verify(tokens.sign({"exp": 1893456000}, SECRET), SECRET, None, NOW) is None
     assert tokens.read(tokens.sign({"sub": "kc|a", "exp": True}, SECRET), SECRET, NOW) is None

@@ -44,7 +44,9 @@ def read_text(
     except urllib.error.HTTPError as err:
         raise WorkspaceError(f"Couldn't read {path} ({err.code}): {_reason(err)}") from err
     except (urllib.error.URLError, TimeoutError) as err:
-        raise WorkspaceError(f"The chatroom's storage API at {base_url} isn't reachable: {err}") from err
+        raise WorkspaceError(
+            f"The chatroom's storage API at {base_url} isn't reachable: {err}"
+        ) from err
     except UnicodeDecodeError as err:
         raise WorkspaceError(f"{path} isn't a text file") from err
 
@@ -80,10 +82,14 @@ def write(
             return propose
     except urllib.error.HTTPError as err:
         if err.code == 413:
-            raise WorkspaceError(f"{path} is larger than the workspace accepts (MAX_UPLOAD_BYTES)") from err
+            raise WorkspaceError(
+                f"{path} is larger than the workspace accepts (MAX_UPLOAD_BYTES)"
+            ) from err
         raise WorkspaceError(f"Couldn't save {path} ({err.code}): {_reason(err)}") from err
     except (urllib.error.URLError, TimeoutError) as err:
-        raise WorkspaceError(f"The chatroom's storage API at {base_url} isn't reachable: {err}") from err
+        raise WorkspaceError(
+            f"The chatroom's storage API at {base_url} isn't reachable: {err}"
+        ) from err
 
 
 def _reason(err: urllib.error.HTTPError) -> str:

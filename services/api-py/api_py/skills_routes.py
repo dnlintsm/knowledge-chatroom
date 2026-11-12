@@ -87,7 +87,10 @@ def services(request: Request) -> tuple[SkillService, SkillHub]:
     if made is None or made[0].storage is not state.storage:
         settings = state.settings
         service = SkillService(state.storage, settings.builtin_skills_dir, settings.skill_scripts)
-        made = state.skills = (service, SkillHub(state.storage, service, parse_admins(settings.hub_admins)))
+        made = state.skills = (
+            service,
+            SkillHub(state.storage, service, parse_admins(settings.hub_admins)),
+        )
     return made
 
 
@@ -194,7 +197,11 @@ async def skills_route(request: Request) -> Response:
         if principal is None:
             return send(401, {"error": "Sign in first"})
         try:
-            parts = [decode_component(p) for p in path[len("/hub" if is_hub else "/skills") :].split("/") if p]
+            parts = [
+                decode_component(p)
+                for p in path[len("/hub" if is_hub else "/skills") :].split("/")
+                if p
+            ]
         except _MalformedPath:
             return send(400, {"error": "Invalid skill name"})
         if len(parts) > 2:
@@ -241,7 +248,8 @@ async def route_skills(
                         "userInvocable": skill.user_invocable,
                         "needsExecution": skill.needs_execution,
                         "files": [
-                            {"path": f.path, "content": base64.b64encode(f.data).decode("ascii")} for f in skill.files
+                            {"path": f.path, "content": base64.b64encode(f.data).decode("ascii")}
+                            for f in skill.files
                         ],
                     }
                     for skill, mode in run
@@ -250,7 +258,9 @@ async def route_skills(
         )
     if method == "POST" and name == "used" and not action:
         given = await read_json(request) or {}
-        thread, run_id, skill, trigger = (given.get(k, _ABSENT) for k in ("thread", "run", "skill", "trigger"))
+        thread, run_id, skill, trigger = (
+            given.get(k, _ABSENT) for k in ("thread", "run", "skill", "trigger")
+        )
         if (
             not _short_string(thread)
             or not thread
@@ -264,16 +274,22 @@ async def route_skills(
         if found is None:
             return send(404, {"error": f"No skill named {skill}"})
         use = {"skill": found.name, "source": found.source, "trigger": trigger}
-        await skills.record(user_id, thread, "" if run_id is _ABSENT else run_id, found.name, found.source, trigger)
+        await skills.record(
+            user_id, thread, "" if run_id is _ABSENT else run_id, found.name, found.source, trigger
+        )
         return send(200, use)
     if method == "GET" and not name:
         return send(200, await skills.list(user_id, _thread(request)))
     if method == "POST" and name == "import" and not action:
         data = await read_body(request, MAX_ZIP_BYTES)
         if data is None:
-            return send(413, {"error": f"The .zip may be at most {MAX_ZIP_BYTES // 1024 // 1024} MB"})
+            return send(
+                413, {"error": f"The .zip may be at most {MAX_ZIP_BYTES // 1024 // 1024} MB"}
+            )
         replace = (first_param(request, "replace") or "") in ("1", "true")
-        imported = await hub.import_zip(user_id, data, replace=replace, filename=first_param(request, "filename"))
+        imported = await hub.import_zip(
+            user_id, data, replace=replace, filename=first_param(request, "filename")
+        )
         return send(201, imported)
     if method == "GET" and name and action == "export" and len(parts) == 2:
         zipped = await hub.export_zip(user_id, name)
@@ -300,7 +316,9 @@ async def route_skills(
     return send(405, {"error": "Method not allowed"})
 
 
-async def route_hub(request: Request, skills: SkillService, hub: SkillHub, user_id: str, parts: list[str]) -> Response:
+async def route_hub(
+    request: Request, skills: SkillService, hub: SkillHub, user_id: str, parts: list[str]
+) -> Response:
     method = request.method
     name, action = (parts + [None, None])[:2]
     if method == "GET" and not name:
@@ -339,7 +357,11 @@ async def route_hub(request: Request, skills: SkillService, hub: SkillHub, user_
         return send(
             200,
             await hub.yank(
-                user_id, name, v, given.get("yanked") is not False, reason if isinstance(reason, str) else None
+                user_id,
+                name,
+                v,
+                given.get("yanked") is not False,
+                reason if isinstance(reason, str) else None,
             ),
         )
     if name and action == "reports":
@@ -347,7 +369,12 @@ async def route_hub(request: Request, skills: SkillService, hub: SkillHub, user_
             given = await read_json(request)
             if given is None:
                 return send(400, {"error": "Invalid JSON body"})
-            return send(201, await hub.report(user_id, name, given.get("reason"), version(given.get("version"))))
+            return send(
+                201,
+                await hub.report(user_id, name, given.get("reason"), version(given.get("version"))),
+            )
         if method == "DELETE":
-            return send(200, await hub.dismiss_report(user_id, name, first_param(request, "id") or ""))
+            return send(
+                200, await hub.dismiss_report(user_id, name, first_param(request, "id") or "")
+            )
     return send(405, {"error": "Method not allowed"})

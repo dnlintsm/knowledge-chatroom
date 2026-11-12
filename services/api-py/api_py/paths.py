@@ -11,7 +11,12 @@ from __future__ import annotations
 import json
 import re
 
-KIND_FOLDERS: dict[str, str] = {"note": "notes", "skill": "skills", "upload": "uploads", "artifact": "artifacts"}
+KIND_FOLDERS: dict[str, str] = {
+    "note": "notes",
+    "skill": "skills",
+    "upload": "uploads",
+    "artifact": "artifacts",
+}
 
 # What String.prototype.trim() and \s strip in JavaScript (WhiteSpace and LineTerminator).
 JS_SPACE = "\t\n\v\f\r    -     　﻿"
@@ -55,11 +60,65 @@ MIME_BY_EXT: dict[str, str] = {
 
 TEXT_EXTENSIONS = frozenset(
     {
-        "md", "markdown", "txt", "json", "csv", "ts", "tsx", "js", "jsx", "py", "yaml", "yml", "html", "css",
-        "sql", "sh", "toml", "xml", "htm", "tsv", "log", "ini", "cfg", "conf", "env", "jsonl", "ipynb", "mjs",
-        "cjs", "mts", "cts", "scss", "less", "vue", "svelte", "graphql", "go", "rs", "java", "kt", "c", "h",
-        "cpp", "hpp", "cc", "cs", "rb", "php", "swift", "scala", "r", "lua", "pl", "bash", "zsh", "ps1", "bat",
-        "tex", "rst",
+        "md",
+        "markdown",
+        "txt",
+        "json",
+        "csv",
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "yaml",
+        "yml",
+        "html",
+        "css",
+        "sql",
+        "sh",
+        "toml",
+        "xml",
+        "htm",
+        "tsv",
+        "log",
+        "ini",
+        "cfg",
+        "conf",
+        "env",
+        "jsonl",
+        "ipynb",
+        "mjs",
+        "cjs",
+        "mts",
+        "cts",
+        "scss",
+        "less",
+        "vue",
+        "svelte",
+        "graphql",
+        "go",
+        "rs",
+        "java",
+        "kt",
+        "c",
+        "h",
+        "cpp",
+        "hpp",
+        "cc",
+        "cs",
+        "rb",
+        "php",
+        "swift",
+        "scala",
+        "r",
+        "lua",
+        "pl",
+        "bash",
+        "zsh",
+        "ps1",
+        "bat",
+        "tex",
+        "rst",
     }
 )
 
@@ -109,7 +168,9 @@ def extension(path: str) -> str:
 
 def mime_for_path(path: str) -> str:
     ext = extension(path)
-    return MIME_BY_EXT.get(ext) or ("text/plain" if ext in TEXT_EXTENSIONS else "application/octet-stream")
+    return MIME_BY_EXT.get(ext) or (
+        "text/plain" if ext in TEXT_EXTENSIONS else "application/octet-stream"
+    )
 
 
 def is_text_file(path: str, mime: str, svg_as_text: bool = True) -> bool:

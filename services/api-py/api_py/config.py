@@ -1,30 +1,30 @@
 """Settings from the environment, read as the TypeScript agent server reads them.
 
-    TS_AGENT_URL         the TypeScript agent server, which serves every route not
-                         ported yet (default http://127.0.0.1:8100)
-    API_PY_HOST / API_PY_PORT
-                         where this server listens (default 127.0.0.1:8000, the
-                         address the app and agent-py know as LOCAL_AGENT_URL)
-    DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
-    AUTH_MODE, AUTH_SECRET
-                         login, with the rules of packages/contracts/src/auth-mode.ts
-    MIGRATIONS_DIR       the SQL migrations to expect in the database
-                         (default apps/agent/src/storage/migrations in this repository)
-    S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
-    MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
-    EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
-    EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
-                         search by meaning, as the TypeScript server reads them
-                         (semantic.py); this server runs the indexer
-    HUB_ADMINS           who moderates the skill hub: emails or login subjects
-    SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
-                         runs chats; /skills here says so)
-    BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
-    MEMORY               on: each user's memory (as on the TypeScript server); this
-                         server serves the notes, settings, inbox and activity
-    MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
-                         the "+" menu's tool servers and their calls (tools.py); with
-                         MCP_SERVERS unset, /tools stays with the TypeScript server
+TS_AGENT_URL         the TypeScript agent server, which serves every route not
+                     ported yet (default http://127.0.0.1:8100)
+API_PY_HOST / API_PY_PORT
+                     where this server listens (default 127.0.0.1:8000, the
+                     address the app and agent-py know as LOCAL_AGENT_URL)
+DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
+AUTH_MODE, AUTH_SECRET
+                     login, with the rules of packages/contracts/src/auth-mode.ts
+MIGRATIONS_DIR       the SQL migrations to expect in the database
+                     (default apps/agent/src/storage/migrations in this repository)
+S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
+MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
+EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
+EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
+                     search by meaning, as the TypeScript server reads them
+                     (semantic.py); this server runs the indexer
+HUB_ADMINS           who moderates the skill hub: emails or login subjects
+SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
+                     runs chats; /skills here says so)
+BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
+MEMORY               on: each user's memory (as on the TypeScript server); this
+                     server serves the notes, settings, inbox and activity
+MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
+                     the "+" menu's tool servers and their calls (tools.py); with
+                     MCP_SERVERS unset, /tools stays with the TypeScript server
 """
 
 from __future__ import annotations
@@ -123,7 +123,11 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
         tools=_tools(env),
-        memory=bool(re.fullmatch(r"(on|1|true|yes)", (env.get("MEMORY") or "").strip(f"{JS_SPACE}"), re.IGNORECASE)),
+        memory=bool(
+            re.fullmatch(
+                r"(on|1|true|yes)", (env.get("MEMORY") or "").strip(f"{JS_SPACE}"), re.IGNORECASE
+            )
+        ),
     )
 
 

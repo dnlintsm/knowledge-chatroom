@@ -106,7 +106,9 @@ async def list_chats(
     """The user's chats, most recently active first, a page at a time."""
     count = _limit(limit)
     after = _read_cursor(cursor) if cursor else None
-    sql = [f"SELECT {_COLUMNS}, updated_at::text AS at FROM chats WHERE user_id = %s AND workspace_id = %s"]
+    sql = [
+        f"SELECT {_COLUMNS}, updated_at::text AS at FROM chats WHERE user_id = %s AND workspace_id = %s"
+    ]
     params: list[Any] = [user_id, workspace_id]
     if agent_id:
         sql.append("AND agent_id = %s")
@@ -140,15 +142,20 @@ async def get_chat(conn: AsyncConnection, user_id: str, chat_id: str) -> dict[st
     return {"chat": _summary(row), "messages": row[7]} if row else None
 
 
-async def chat_runs(conn: AsyncConnection, user_id: str, chat_id: str) -> list[dict[str, Any]] | None:
+async def chat_runs(
+    conn: AsyncConnection, user_id: str, chat_id: str
+) -> list[dict[str, Any]] | None:
     """The chat's runs in order; None when it isn't the user's or doesn't exist."""
     if not valid_chat_id(chat_id):
         return None
-    cur = await conn.execute("SELECT 1 FROM chats WHERE id = %s AND user_id = %s", (chat_id, user_id))
+    cur = await conn.execute(
+        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s", (chat_id, user_id)
+    )
     if await cur.fetchone() is None:
         return None
     cur = await conn.execute(
-        "SELECT run_id, parent_run_id, events, created_at FROM chat_runs WHERE chat_id = %s ORDER BY seq", (chat_id,)
+        "SELECT run_id, parent_run_id, events, created_at FROM chat_runs WHERE chat_id = %s ORDER BY seq",
+        (chat_id,),
     )
     return [
         {"runId": run_id, "parentRunId": parent, "events": events, "createdAt": iso(created_at)}
@@ -166,7 +173,9 @@ async def append_run(
     )
     # Locks the chat, so two runs saved at once get their own seq. Another
     # user's chat isn't found (row security hides it, the user_id test too).
-    cur = await conn.execute("SELECT 1 FROM chats WHERE id = %s AND user_id = %s FOR UPDATE", (chat_id, user_id))
+    cur = await conn.execute(
+        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s FOR UPDATE", (chat_id, user_id)
+    )
     if await cur.fetchone() is None:
         raise ChatTakenError()
     await conn.execute(
@@ -212,5 +221,7 @@ async def remove_chat(conn: AsyncConnection, user_id: str, chat_id: str) -> bool
     """Deletes one of the user's chats for good, with its runs."""
     if not valid_chat_id(chat_id):
         return False
-    cur = await conn.execute("DELETE FROM chats WHERE id = %s AND user_id = %s RETURNING id", (chat_id, user_id))
+    cur = await conn.execute(
+        "DELETE FROM chats WHERE id = %s AND user_id = %s RETURNING id", (chat_id, user_id)
+    )
     return await cur.fetchone() is not None

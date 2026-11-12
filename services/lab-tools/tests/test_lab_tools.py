@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 from knowledge_chatroom import identity, memory, storage
 from lab_tools import server, stats
 
@@ -18,7 +19,13 @@ FOR_LAB = (
 
 def test_describe_metric():
     summary = stats.describe_metric([1, 2, 3, 4])
-    assert (summary.n, summary.mean, summary.median, summary.min, summary.max) == (4, 2.5, 2.5, 1, 4)
+    assert (summary.n, summary.mean, summary.median, summary.min, summary.max) == (
+        4,
+        2.5,
+        2.5,
+        1,
+        4,
+    )
     assert summary.std == pytest.approx(1.2910, abs=1e-4)
     assert stats.describe_metric([5]).std == 0.0
     with pytest.raises(ValueError):
@@ -28,9 +35,13 @@ def test_describe_metric():
 def test_compare_runs_verdicts():
     baseline = [0.71, 0.73, 0.72]
     assert stats.compare_runs(baseline, [0.78, 0.80, 0.79]).verdict == "better"
-    assert stats.compare_runs(baseline, [0.78, 0.80, 0.79], higher_is_better=False).verdict == "worse"
+    assert (
+        stats.compare_runs(baseline, [0.78, 0.80, 0.79], higher_is_better=False).verdict == "worse"
+    )
     assert stats.compare_runs(baseline, [0.70, 0.74, 0.72]).verdict == "within noise"
-    assert stats.compare_runs([1.0], [2.0]).verdict == "not enough repeats to tell noise from change"
+    assert (
+        stats.compare_runs([1.0], [2.0]).verdict == "not enough repeats to tell noise from change"
+    )
     # Constant repeats: no noise, so any difference counts.
     assert stats.compare_runs([1, 1, 1], [2, 2, 2]).verdict == "better"
     assert stats.compare_runs([1, 1, 1], [1, 1, 1]).verdict == "no change"
@@ -47,14 +58,19 @@ def test_tools_need_a_known_caller_when_login_is_on(monkeypatch):
         server.describe_metric([1.0, 2.0], SimpleNamespace(headers={}))
     with pytest.raises(server.ToolError):
         server.describe_metric([], SimpleNamespace(headers={identity.HEADER: FOR_LAB}))
-    assert server.compare_runs([1, 1.1, 0.9], [2, 2.1, 1.9], SimpleNamespace(headers={identity.HEADER: FOR_LAB}))["verdict"] == "better"
+    assert (
+        server.compare_runs(
+            [1, 1.1, 0.9], [2, 2.1, 1.9], SimpleNamespace(headers={identity.HEADER: FOR_LAB})
+        )["verdict"]
+        == "better"
+    )
 
 
 @pytest.fixture
 def storage_api(monkeypatch):
     """A stand-in for the chatroom's storage API: alice's token may read data/run.csv, nothing else."""
-    from http.server import BaseHTTPRequestHandler, HTTPServer
     import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     seen = []
 
@@ -86,7 +102,9 @@ def storage_api(monkeypatch):
 
 
 def test_workspace_files_are_read_with_the_runs_storage_token(storage_api):
-    ctx = SimpleNamespace(headers={identity.HEADER: FOR_LAB, storage.STORAGE_HEADER: "alice-storage-token"})
+    ctx = SimpleNamespace(
+        headers={identity.HEADER: FOR_LAB, storage.STORAGE_HEADER: "alice-storage-token"}
+    )
     result = server.describe_column("data/run.csv", "loss", ctx, node="n1")
     assert (result["n"], result["mean"], result["min"]) == (3, pytest.approx(0.7), 0.5)
     # Passed on unchanged, with the place.
@@ -109,9 +127,9 @@ def test_workspace_files_need_the_storage_token(storage_api):
 @pytest.fixture
 def memory_api(monkeypatch):
     """A stand-in for the chatroom's /memory/agent: alice's memory token finds one note."""
-    from http.server import BaseHTTPRequestHandler, HTTPServer
     import json
     import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     seen = []
 
@@ -120,9 +138,18 @@ def memory_api(monkeypatch):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append((self.path, self.headers.get(memory.MEMORY_HEADER), body))
             if self.headers.get(memory.MEMORY_HEADER) != "alice-memory-token":
-                self._send(401, {"error": "This needs the X-Knowledge-Memory token of a run (memoryAccess)"})
+                self._send(
+                    401,
+                    {"error": "This needs the X-Knowledge-Memory token of a run (memoryAccess)"},
+                )
             else:
-                self._send(200, {"text": "- reporting (preference): p < 0.01 for significance", "isError": False})
+                self._send(
+                    200,
+                    {
+                        "text": "- reporting (preference): p < 0.01 for significance",
+                        "isError": False,
+                    },
+                )
 
         def _send(self, status, body):
             data = json.dumps(body).encode()
@@ -144,9 +171,15 @@ def memory_api(monkeypatch):
 
 
 def test_user_notes_are_searched_with_the_runs_memory_token(memory_api):
-    ctx = SimpleNamespace(headers={identity.HEADER: FOR_LAB, memory.MEMORY_HEADER: "alice-memory-token"})
+    ctx = SimpleNamespace(
+        headers={identity.HEADER: FOR_LAB, memory.MEMORY_HEADER: "alice-memory-token"}
+    )
     assert "p < 0.01" in server.recall_user_notes("significance", ctx)
-    assert memory_api[-1] == ("/memory/agent/tools/memory_search", "alice-memory-token", {"query": "significance"})
+    assert memory_api[-1] == (
+        "/memory/agent/tools/memory_search",
+        "alice-memory-token",
+        {"query": "significance"},
+    )
     ctx.headers[memory.MEMORY_HEADER] = "stale-token"
     with pytest.raises(server.ToolError, match=r"\(401\)"):
         server.recall_user_notes("significance", ctx)

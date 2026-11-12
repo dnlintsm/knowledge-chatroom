@@ -22,14 +22,38 @@ that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a 
 `*.test.ts` to the matching list, or it never runs.
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
-`services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.11+),
-which CI runs too:
+`services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
+which CI runs on Python 3.12 and 3.14. The `python` status check aggregates both
+matrix legs, including lint, type checking and code generation; repository rules
+should require `python` along with the existing `checks` and `preview` checks.
+To run checks locally:
 
 ```bash
 uv sync --all-packages
+uv run --locked --no-sync ruff check packages/knowledge-py services examples/python-agent
+uv run --locked --no-sync ruff format --check packages/knowledge-py services examples/python-agent
+uv run --locked --no-sync pyrefly check --error-stale-baseline
 cd services/papers-mcp        # or services/lab-tools, packages/knowledge-py
 uv run pytest -q
 ```
+
+The 3.12 CI run also reports coverage of handwritten Python source in the job log
+and GitHub Actions job summary. It has no percentage gate yet; use the report to
+identify important untested behavior.
+
+Pyrefly checks the handwritten package, service, and example source at the minimum supported Python
+version. Existing findings are recorded in `pyrefly-baseline.json`; resolve them over time,
+then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated models and
+tests are not yet included. The ordered baseline prevents new matching findings from being
+silently absorbed. Do not regenerate the baseline merely to make CI pass.
+
+Python runtime dependencies are audited on pull requests that change the lockfile or
+Python project metadata, and weekly in CI. The audit exports the locked workspace
+runtime dependencies and checks them with pip-audit on Python 3.12 and 3.14.
+The two versions currently resolve the same packages on Linux, but retain both
+checks for future Python-specific dependency markers. Review scheduled results
+in **Actions → Python dependency audit**; this workflow does not create issues.
+Optional extras are not exported unless selected through a workspace runtime dependency.
 
 ## Disposable integration databases
 

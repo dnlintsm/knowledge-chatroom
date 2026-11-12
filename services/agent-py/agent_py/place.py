@@ -31,7 +31,9 @@ def workspace_note(input_data: RunAgentInput) -> str:
         parts.append(f"{item.description}\n{_compact(item.value)}")
     storage = chatroom_props(input_data).get("storage")
     if storage == "local":
-        parts.append("Files live only in the user's browser: use the browser's workspace file tools.")
+        parts.append(
+            "Files live only in the user's browser: use the browser's workspace file tools."
+        )
     if input_data.state:
         parts.append(f"Shared state (current):\n{json.dumps(input_data.state, ensure_ascii=False)}")
     if not parts:

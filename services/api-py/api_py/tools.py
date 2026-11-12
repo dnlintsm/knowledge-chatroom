@@ -35,7 +35,14 @@ from .paths import JS_SPACE, js_trim, utf16_len
 from .proxy import forward
 from .run_report import js_json
 from .skills_routes import js_to_number
-from .storage_routes import ALL_METHODS, _MalformedPath, decode_component, parse_json, raw_path, read_body
+from .storage_routes import (
+    ALL_METHODS,
+    _MalformedPath,
+    decode_component,
+    parse_json,
+    raw_path,
+    read_body,
+)
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -115,7 +122,9 @@ def _parse_ui(raw: Any) -> ToolUi:
         raise ValueError('ui.mode must be "auto" or "manual"')
     names = raw.get("tools")
     names = [] if names is None else names
-    if not isinstance(names, list) or not all(isinstance(t, str) and _NAME.fullmatch(t) for t in names):
+    if not isinstance(names, list) or not all(
+        isinstance(t, str) and _NAME.fullmatch(t) for t in names
+    ):
         raise ValueError("ui.tools must be a list of tool names")
     return ToolUi(
         label=label,
@@ -136,15 +145,21 @@ def _parse_server(name: str, raw: Any, env: Mapping[str, str]) -> ExternalServer
         raise ValueError("must be an object")  # noqa: TRY004 - a bad setting, logged with the rest
     kind = raw.get("type")
     kind = "http" if kind is None else kind
-    flags = {key: raw.get(key) is True for key in ("forwardIdentity", "storageAccess", "memoryAccess")}
+    flags = {
+        key: raw.get(key) is True for key in ("forwardIdentity", "storageAccess", "memoryAccess")
+    }
     if kind == "stdio":
         if not isinstance(raw.get("command"), str) or not raw["command"]:
             raise ValueError("stdio needs a command")
         args = raw.get("args")
-        if args is not None and not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
+        if args is not None and not (
+            isinstance(args, list) and all(isinstance(a, str) for a in args)
+        ):
             raise ValueError("args must be a list of strings")
         if any(flags.values()) or "ui" in raw:
-            raise ValueError("forwardIdentity, storageAccess, memoryAccess and ui need an http or sse server")
+            raise ValueError(
+                "forwardIdentity, storageAccess, memoryAccess and ui need an http or sse server"
+            )
         _strings(raw.get("env"), env, f"{name}.env")
         return ExternalServer(type="stdio")  # Claude's only: never in the menu
     if kind not in ("http", "sse"):
@@ -155,7 +170,9 @@ def _parse_server(name: str, raw: Any, env: Mapping[str, str]) -> ExternalServer
     headers = _strings(raw.get("headers"), env, f"{name}.headers") or {}
     for header in _AGENT_HEADERS:
         if any(h.lower() == header for h in headers):
-            raise ValueError(f"{header} is set by the agent (forwardIdentity, storageAccess, memoryAccess)")
+            raise ValueError(
+                f"{header} is set by the agent (forwardIdentity, storageAccess, memoryAccess)"
+            )
     return ExternalServer(
         type=kind,
         url=url,
@@ -179,7 +196,9 @@ def servers_from_env(env: Mapping[str, str]) -> dict[str, ExternalServer] | None
     if not setting:
         return None
     try:
-        parsed = parse_json(setting if setting.startswith("{") else Path(setting).read_text(encoding="utf-8"))
+        parsed = parse_json(
+            setting if setting.startswith("{") else Path(setting).read_text(encoding="utf-8")
+        )
     except (OSError, ValueError) as err:
         logger.error("[mcp] MCP_SERVERS isn't readable JSON; no outside MCP servers: %s", err)
         return {}
@@ -193,7 +212,9 @@ def servers_from_env(env: Mapping[str, str]) -> dict[str, ExternalServer] | None
         try:
             servers[name] = _parse_server(name, entries[name], env)
         except ValueError as err:
-            logger.error("[mcp] skipping MCP server %s: %s", json.dumps(name, ensure_ascii=False), err)
+            logger.error(
+                "[mcp] skipping MCP server %s: %s", json.dumps(name, ensure_ascii=False), err
+            )
     return servers
 
 
@@ -215,7 +236,10 @@ def tool_menu(servers: Mapping[str, ExternalServer]) -> list[dict[str, Any]]:
 
 def call_timeout_seconds(env: Mapping[str, str]) -> float:
     """TOOLS_CALL_TIMEOUT_MS, read as Number.parseInt reads it (milliseconds, default 120000)."""
-    match = re.match(rf"[{JS_SPACE}]*([+-]?\d+)", env.get("TOOLS_CALL_TIMEOUT_MS") or str(DEFAULT_CALL_TIMEOUT_MS))
+    match = re.match(
+        rf"[{JS_SPACE}]*([+-]?\d+)",
+        env.get("TOOLS_CALL_TIMEOUT_MS") or str(DEFAULT_CALL_TIMEOUT_MS),
+    )
     return max(int(match.group(1)), 0) / 1000 if match else 0.0
 
 
@@ -226,7 +250,9 @@ def storage_token_seconds(env: Mapping[str, str]) -> int:
         return 3600
     seconds = js_to_number(value)
     if not seconds.is_integer() or not 60 <= seconds <= 24 * 3600:
-        raise ValueError(f'STORAGE_TOKEN_SECONDS must be whole seconds from 60 to 86400, not "{value}"')
+        raise ValueError(
+            f'STORAGE_TOKEN_SECONDS must be whole seconds from 60 to 86400, not "{value}"'
+        )
     return int(seconds)
 
 
@@ -252,7 +278,8 @@ def signer(claims: dict[str, Any] | None, secret: str | None, storage_seconds: i
         via = f"mcp:{server}"
         if kind == "storage":
             return tokens.sign(
-                {**user, "aud": tokens.STORAGE_AUDIENCE, "via": via, "exp": now + storage_seconds}, secret
+                {**user, "aud": tokens.STORAGE_AUDIENCE, "via": via, "exp": now + storage_seconds},
+                secret,
             )
         if kind == "identity":
             return tokens.sign({**user, "aud": via, "exp": now + TOOL_IDENTITY_SECONDS}, secret)
@@ -281,11 +308,18 @@ class ToolAnswer:
     is_error: bool
 
 
-CallTool = Callable[[str, ExternalServer, str, dict[str, Any], dict[str, str], float], Awaitable[ToolAnswer]]
+CallTool = Callable[
+    [str, ExternalServer, str, dict[str, Any], dict[str, str], float], Awaitable[ToolAnswer]
+]
 
 
 async def mcp_call(
-    name: str, server: ExternalServer, tool: str, args: dict[str, Any], headers: dict[str, str], timeout: float
+    name: str,
+    server: ExternalServer,
+    tool: str,
+    args: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
 ) -> ToolAnswer:
     """One tool call over MCP (streamable HTTP or SSE), on a connection of its own."""
     from mcp import ClientSession, types
@@ -300,7 +334,9 @@ async def mcp_call(
             await asyncio.wait_for(session.initialize(), timeout)
             answer = await session.call_tool(tool, args, read_timeout_seconds=timeout)
         if not isinstance(answer, types.CallToolResult):
-            raise TypeError(f"{tool} answered {type(answer).__name__}")  # e.g. asked the user for input
+            raise TypeError(
+                f"{tool} answered {type(answer).__name__}"
+            )  # e.g. asked the user for input
         return answer
 
     if server.type == "sse":
@@ -312,7 +348,9 @@ async def mcp_call(
             streamable_http_client(server.url, http_client=http) as (read, write),  # type: ignore[arg-type]
         ):
             answer = await over(read, write)
-    text = "\n".join(b.text for b in answer.content if getattr(b, "type", None) == "text" and b.text)
+    text = "\n".join(
+        b.text for b in answer.content if getattr(b, "type", None) == "text" and b.text
+    )
     result = answer.structured_content
     if result is None:
         try:
@@ -331,7 +369,9 @@ def _reason(err: BaseException) -> str:
 
 def _send(status: int, body: Any, cache: bool = True) -> Response:
     headers = {"Cache-Control": "no-store"} if cache else {}
-    return Response(js_json(body), status_code=status, media_type="application/json", headers=headers)
+    return Response(
+        js_json(body), status_code=status, media_type="application/json", headers=headers
+    )
 
 
 def _signed_in(request: Request, secret: str | None) -> tuple[bool, dict[str, Any] | None]:
@@ -370,9 +410,13 @@ async def tools_route(request: Request) -> Response:
     found = servers.get(server)
     ui = found.ui if found else None
     if found is None or ui is None:
-        return _send(404, {"error": f"No tool server {json.dumps(server, ensure_ascii=False)} in the menu"})
+        return _send(
+            404, {"error": f"No tool server {json.dumps(server, ensure_ascii=False)} in the menu"}
+        )
     if tool not in ui.tools:
-        return _send(403, {"error": f"{tool} isn't one of {server}'s tools the app may call (ui.tools)"})
+        return _send(
+            403, {"error": f"{tool} isn't one of {server}'s tools the app may call (ui.tools)"}
+        )
     ok, claims = _signed_in(request, secret)
     if not ok:
         return _send(401, {"error": "Sign in first"}, cache=False)
@@ -383,13 +427,19 @@ async def tools_route(request: Request) -> Response:
             given = parse_json(body.decode("utf-8", errors="replace")) if body else {}
         except ValueError:
             given = None
-    args = (given.get("arguments") if given.get("arguments") is not None else {}) if isinstance(given, dict) else None
+    args = (
+        (given.get("arguments") if given.get("arguments") is not None else {})
+        if isinstance(given, dict)
+        else None
+    )
     if not isinstance(args, dict):
         return _send(400, {"error": "Expected {arguments: {...}}"})
     sign = signer(claims, secret, tools_settings.storage_token_seconds)
     call: CallTool = getattr(state, "call_tool", None) or mcp_call
     try:
-        answer = await call(server, found, tool, args, headers_for(server, found, sign), tools_settings.timeout)
+        answer = await call(
+            server, found, tool, args, headers_for(server, found, sign), tools_settings.timeout
+        )
     except Exception as err:  # noqa: BLE001 - any failure to reach the server is the same answer
         logger.error("[tools] %s/%s: %s", server, tool, _reason(err))
         return _send(502, {"error": f"{ui.label} isn't reachable right now"})
@@ -405,5 +455,7 @@ def tools_settings_from_env(env: Mapping[str, str] = os.environ) -> ToolsSetting
     if servers is None:
         return None
     return ToolsSettings(
-        servers=servers, timeout=call_timeout_seconds(env), storage_token_seconds=storage_token_seconds(env)
+        servers=servers,
+        timeout=call_timeout_seconds(env),
+        storage_token_seconds=storage_token_seconds(env),
     )
