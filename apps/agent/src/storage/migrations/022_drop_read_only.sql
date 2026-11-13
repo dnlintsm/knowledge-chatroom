@@ -5,3 +5,4 @@
 -- run's generated models/general_rules.md or an experiment's linked inputs,
 -- become ordinary files.
 ALTER TABLE files DROP COLUMN read_only;
+-- Docker matrix test (#228): migration-only change.
