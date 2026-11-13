@@ -39,7 +39,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from . import tokens
 from .access import LEGACY_TOKEN, Principal, is_uuid, iso
-from .identity import identify, token_ws
+from .identity import identify, memory_claims, token_ws
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -320,12 +320,15 @@ async def typescript_refusal(request: Request) -> Response | None:
         return None
     named = set(named_selectors(request))
     secret = state.settings.auth_secret
-    for header, audience in (
-        (tokens.STORAGE_HEADER, tokens.STORAGE_AUDIENCE),
-        (tokens.MEMORY_HEADER, tokens.MEMORY_AUDIENCE),
-    ):
-        token = request.headers.get(header)
-        claims = tokens.verify(token, secret, audience) if token and secret else None
+    storage_token = request.headers.get(tokens.STORAGE_HEADER)
+    found = [
+        tokens.verify(storage_token, secret, tokens.STORAGE_AUDIENCE)
+        if storage_token and secret
+        else None,
+        # Signed, or without login the app's unsigned local.<...> memory token.
+        memory_claims(request, secret),
+    ]
+    for claims in found:
         if claims:
             bound = token_ws(claims)
             named.add(LEGACY_TOKEN if bound == LEGACY_TOKEN else bound.lower())

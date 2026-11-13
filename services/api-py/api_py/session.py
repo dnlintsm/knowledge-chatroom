@@ -35,7 +35,7 @@ ARCHIVED = "This experiment is archived; restore it to change it"
 # The node name an upload uses for a level its path leaves empty ("Etch/Module 3//").
 EMPTY_LEVEL_NAME = "None"
 # What an audit target says about content, hidden from a reader who can't see it.
-_AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "note"})
+_AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "inputs", "note"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
 

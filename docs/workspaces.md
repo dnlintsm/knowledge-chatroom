@@ -396,13 +396,12 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 3. ~~The tests above in the conformance suite, expected to fail at first.~~ Done: the
    multi-workspace ones are marked `todo` until they pass.
 4. Backend: membership table and backfill, bootstrap change, per-request workspace and
-   selectors, revalidation, events, search, member list and lookup, creator ownership.
-   Done in api-py. Still to do:
+   selectors, revalidation, events, search, member list and lookup, creator ownership,
+   audit redaction. Done in api-py. Still to do:
    - 4b, the TypeScript agent: runs capture their workspace, tokens minted with `ws`, the
      in-process tools and the working copy per workspace, and `/memory/agent` for outside
      MCP servers. Until then api-py refuses (400) requests for other workspaces that it
      would pass to that server, rather than let it serve them in the default workspace.
-   - Audit redaction for readers without access to a target.
 5. Frontend: `/w/<slug>` URLs and redirects, the shared request helper, saved state per
    workspace, switching.
 6. Screens: switcher, create, no-workspace onboarding, add member, no-access page.
