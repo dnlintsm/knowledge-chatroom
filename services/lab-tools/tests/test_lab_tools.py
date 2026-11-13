@@ -75,7 +75,7 @@ def storage_api(monkeypatch):
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
+        def do_GET(self):
             seen.append((self.path, self.headers.get(storage.STORAGE_HEADER)))
             if self.headers.get(storage.STORAGE_HEADER) != "alice-storage-token":
                 self._send(401, b'{"error": "Sign in to use the workspace"}')
@@ -134,7 +134,7 @@ def memory_api(monkeypatch):
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):  # noqa: N802
+        def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append((self.path, self.headers.get(memory.MEMORY_HEADER), body))
             if self.headers.get(memory.MEMORY_HEADER) != "alice-memory-token":

@@ -40,7 +40,7 @@ SYSTEM = f"""You suggest what the user might ask Claude next in Knowledge Chatro
 - Offer natural next steps from what Claude just did (go deeper, check it, compare, save it as a file, propose it for review), never a repeat of it.
 - Only things Claude can do here: no email, calendar, web browsing or outside services.
 - title: at most 5 words. message: the complete request in the user's own voice, one or two sentences.
-- Call the {SUGGEST_TOOL} tool once."""  # noqa: E501
+- Call the {SUGGEST_TOOL} tool once."""
 
 _MISSING = object()
 
