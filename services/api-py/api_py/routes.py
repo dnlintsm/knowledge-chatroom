@@ -9,16 +9,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import memory_routes, skills_routes, storage_routes, tools
+from . import memory_routes, server_routes, skills_routes, storage_routes, tools
 
 # Steps 2 to 6: /access, /nodes, /files, /experiments, /proposals, /search and /chats (storage_routes.py);
 # step 7: /skills and /hub (skills_routes.py), and /tools (tools.py; no storage needed);
-# step 8: /memory (memory_routes.py, with MEMORY=on).
+# step 8: /memory (memory_routes.py, with MEMORY=on);
+# step 9: /identity/public-key, /identity/mcp-tokens and /suggest (server_routes.py; no storage needed).
 ROUTERS: list[APIRouter] = [
     storage_routes.router,
     skills_routes.router,
     tools.router,
     memory_routes.router,
+    server_routes.router,
 ]
 # The storage API's sections served here once the database is ready.
 STORAGE_PREFIXES = (

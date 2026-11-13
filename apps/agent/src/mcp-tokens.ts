@@ -17,6 +17,9 @@
  * wait in the user's inbox. Tokens made for an outside service (`via`
  * "mcp:...") can't be traded. Without login there are no identity or storage
  * tokens, and memory tokens are the unsigned local form.
+ *
+ * services/api-py/api_py/mcp_tokens.py makes the same tokens when the Python
+ * API server is in front (issue #190, step 9); change both together.
  */
 
 import { STORAGE_AUDIENCE } from "@knowledge-chatroom/contracts/identity-token";

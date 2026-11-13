@@ -71,6 +71,25 @@ def js_json(value: Any) -> str:
     raise TypeError(f"Not a JSON value: {type(value).__name__}")
 
 
+_INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
+
+
+def js_order(value: Any) -> Any:
+    """
+    The value with each object's keys in JavaScript's order: array-index keys
+    ("0", "1", ...) first, ascending, then the rest as given. What JSON.parse
+    then JSON.stringify gives back.
+    """
+    if isinstance(value, list):
+        return [js_order(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    index = sorted((k for k in value if _INDEX_KEY.fullmatch(k) and int(k) < 2**32 - 1), key=int)
+    first = set(index)
+    rest = [k for k in value if k not in first]
+    return {k: js_order(value[k]) for k in [*index, *rest]}
+
+
 def _started_by(who: Any) -> Any:
     if not isinstance(who, dict):
         return None
