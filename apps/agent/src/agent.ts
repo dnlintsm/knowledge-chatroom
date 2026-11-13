@@ -299,3 +299,4 @@ export const adapter = new WorkspaceAgentAdapter({
   tools: [],
   includePartialMessages: true,
 });
+// Docker matrix test (#228): agent-only change.
