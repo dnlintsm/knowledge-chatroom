@@ -59,6 +59,18 @@ def is_not_found(err: Exception) -> bool:
     return code in ("404", "NotFound", "NoSuchKey", "NoSuchBucket") or status == 404
 
 
+def is_bucket_taken(err: Exception) -> bool:
+    """Whether CreateBucket failed because the bucket is already there.
+
+    Both servers create the bucket at startup, so on an empty store one of them
+    can lose that race (issue #243). The bucket then exists, which is all that
+    startup needs.
+    """
+    response: dict[str, Any] = getattr(err, "response", None) or {}
+    code = str(response.get("Error", {}).get("Code", ""))
+    return code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists")
+
+
 class BlobStore:
     def __init__(self, settings: S3Settings) -> None:
         import boto3
@@ -110,7 +122,14 @@ class BlobStore:
             except Exception as err:
                 if not is_not_found(err):
                     raise
-                self._client.create_bucket(Bucket=self.bucket)
+                try:
+                    self._client.create_bucket(Bucket=self.bucket)
+                except Exception as create_err:
+                    if not is_bucket_taken(create_err):
+                        raise
+                    # Another server made it first. BucketAlreadyExists can also mean
+                    # someone else's bucket, so check this one can use it.
+                    self._client.head_bucket(Bucket=self.bucket)
 
         await asyncio.to_thread(run)
 

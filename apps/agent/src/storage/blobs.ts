@@ -44,6 +44,16 @@ export function isNotFound(err: unknown): boolean {
   );
 }
 
+/**
+ * Whether CreateBucket failed because the bucket is already there. Both
+ * servers create the bucket at startup, so on an empty store one of them can
+ * lose that race (issue #243); the bucket then exists, which is all startup needs.
+ */
+export function isBucketTaken(err: unknown): boolean {
+  const name = (err as { name?: string })?.name;
+  return name === "BucketAlreadyOwnedByYou" || name === "BucketAlreadyExists";
+}
+
 export class S3BlobStore implements BlobStore {
   private readonly client: S3Client;
   /** Signs links for the address browsers use (S3_PUBLIC_URL). */
@@ -79,7 +89,14 @@ export class S3BlobStore implements BlobStore {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch (err) {
       if (!isNotFound(err)) throw err;
-      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      try {
+        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      } catch (createErr) {
+        if (!isBucketTaken(createErr)) throw createErr;
+        // Another server made it first. BucketAlreadyExists can also mean
+        // someone else's bucket, so check this one can use it.
+        await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      }
     }
   }
 
