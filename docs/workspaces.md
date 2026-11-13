@@ -1,9 +1,11 @@
 # Workspaces (design)
 
-Status: **proposed**, tracked in [#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), for the milestone in
+Status: **being built**, tracked in [#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), for the milestone in
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
-Nothing here is implemented yet. Today the app runs in one workspace (slug `default`), which
-both servers pick when they start.
+The backend in api-py is in (rollout step 4, below): memberships, the backfill and
+bootstrap, workspace creation, adding members, and the per-request workspace. The chat run
+on the TypeScript server still uses the default workspace (step 4b), and the app has no
+workspace screens yet (steps 5 and 6).
 
 This is the short spec and operation matrix that the milestone asks for before
 implementation. It covers creating, joining and switching workspaces, and the isolation that
@@ -48,6 +50,9 @@ Confirmed on 2026-11-13, refined after the review on #227.
      header or query parameter can't point it anywhere else (see
      [Legacy tokens](#legacy-tokens)). After the cut-off, such tokens are refused.
    - Saved browser state moves into the default workspace once.
+   - Every signed-in user is a Member of the default workspace (which gives no content
+     access), as everyone could open it before memberships existed, so the app keeps
+     working until people can be added from the UI. New workspaces never work this way.
 
    A workspace that is named but unknown, invalid or not yours is refused. It never falls
    back to the default workspace.
@@ -233,16 +238,19 @@ The endpoint paths stay as they are. The OpenAPI contract
 404 answers, the `ws` claim and the new workspace operations (create, list, read, add member,
 look up a user). The proxy, the conformance suite and the tests change with it.
 
-The isolation tests (`packages/contracts/conformance/workspaces.test.ts`) assume these new
-routes. Step 4 may rename them, changing the tests in the same PR:
+The workspace routes, in the spec and served by api-py (`services/api-py/api_py/workspaces.py`):
 
 | Route | Answer |
 | --- | --- |
 | `GET /workspaces` | `{workspaces: [{id, slug, name, role}]}`, only the caller's |
-| `POST /workspaces` `{name}` | 201, the new workspace with `role: "owner"` |
+| `POST /workspaces` `{name, levels?}` | 201, the new workspace with `role: "owner"`; levels default to tech, module, loop, process |
+| `GET /workspaces/{id}` | One of yours, with your role |
 | `GET /workspaces/{id}/members` | `{members: [{id, name, role, email?}]}`, email for Owners and Admins only |
 | `GET /workspaces/{id}/lookup?email=` | `{user: {id, name}}`, or 404; Owners and Admins only |
-| `POST /workspaces/{id}/members` `{userId, role, access}` | 201, or 409 with the current `role` when already a member |
+| `POST /workspaces/{id}/members` `{userId, role, access?}` | 201, or 409 with the current `role` when already a member; `access` defaults to viewer |
+
+Grants to a user and group memberships are refused (400) for someone who isn't a member of
+the workspace: add them first.
 
 ## What has to be isolated
 
@@ -270,7 +278,7 @@ access, not just from grant rows. No grant changes.
 | Node grants only, direct or through a group | Member |
 | The built-in `local` user | Owner of every existing workspace, as today |
 | No grant, but chats, memory notes, memory settings, skill settings or incognito chats in the workspace | Member, so their own data stays reachable |
-| Signed-in users with nothing in the workspace | Not a member |
+| Signed-in users with nothing in the workspace | Not a member (but see decision 5: until the cut-off, signing in makes them a Member of the default workspace) |
 
 ### Authenticated bootstrap
 
@@ -388,8 +396,13 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 3. ~~The tests above in the conformance suite, expected to fail at first.~~ Done: the
    multi-workspace ones are marked `todo` until they pass.
 4. Backend: membership table and backfill, bootstrap change, per-request workspace and
-   selectors, revalidation, events, search, working copy, tokens, member list and lookup,
-   audit redaction, creator ownership.
+   selectors, revalidation, events, search, member list and lookup, creator ownership.
+   Done in api-py. Still to do:
+   - 4b, the TypeScript agent: runs capture their workspace, tokens minted with `ws`, the
+     in-process tools and the working copy per workspace, and `/memory/agent` for outside
+     MCP servers. Until then api-py refuses (400) requests for other workspaces that it
+     would pass to that server, rather than let it serve them in the default workspace.
+   - Audit redaction for readers without access to a target.
 5. Frontend: `/w/<slug>` URLs and redirects, the shared request helper, saved state per
    workspace, switching.
 6. Screens: switcher, create, no-workspace onboarding, add member, no-access page.

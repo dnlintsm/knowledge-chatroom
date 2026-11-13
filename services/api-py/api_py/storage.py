@@ -1,8 +1,10 @@
 """The workspace storage this server serves, once the database is ready (issue #190).
 
-It mirrors initStorage() in apps/agent/src/storage/index.ts: the one default
+It mirrors initStorage() in apps/agent/src/storage/index.ts: the default
 workspace, whether row-level security can be used, and the change events
-that every process hears through LISTEN/NOTIFY (events.ts). It opens only
+that every process hears through LISTEN/NOTIFY (events.ts). A request in
+another workspace (issue #226, workspaces.py) uses in_workspace(), the same
+storage bound to that workspace's id. It opens only
 once the database has exactly the migrations this server knows (db.py, which
 applies them), and until then the ported routes pass through to the
 TypeScript server, which answers as it does while its storage starts.
@@ -12,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -53,6 +55,24 @@ class Storage:
     events: EventHub | None = None
     # Search by meaning, when an embedding model is set (semantic.py).
     semantic: SemanticIndex | None = None
+    # The default workspace's storage, and this storage bound to other workspaces, by id.
+    _views: dict[str, Storage] = field(default_factory=dict, repr=False)
+
+    def in_workspace(self, workspace_id: str) -> Storage:
+        """
+        This storage for another workspace: the same pool, blob store, events
+        and search index, with the workspace's own id. Whether the caller may
+        use that workspace is checked before (workspaces.py).
+        """
+        if workspace_id == self.workspace_id:
+            return self
+        view = self._views.get(workspace_id)
+        if view is None:
+            view = replace(
+                self, workspace_id=workspace_id, access=self.access.in_workspace(workspace_id)
+            )
+            self._views[workspace_id] = view
+        return view
 
     def require_blobs(self) -> BlobStore:
         """Return the blob store required by a content operation."""
@@ -139,5 +159,5 @@ async def open_storage(pool: AsyncConnectionPool, s3: S3Settings | None = None) 
         row_security=row_security,
         access=AccessService(pool, workspace_id),
         blobs=blobs,
-        events=EventHub(pool.conninfo, workspace_id, EVENTS_CHANNEL),
+        events=EventHub(pool.conninfo, EVENTS_CHANNEL),
     )

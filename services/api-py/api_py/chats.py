@@ -136,25 +136,29 @@ async def list_chats(
     }
 
 
-async def get_chat(conn: AsyncConnection, user_id: str, chat_id: str) -> dict[str, Any] | None:
-    """One of the user's chats with its latest messages; None when it isn't theirs or doesn't exist."""
+async def get_chat(
+    conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str
+) -> dict[str, Any] | None:
+    """One of the user's chats in the workspace, with its latest messages; None when it isn't theirs or there."""
     if not valid_chat_id(chat_id):
         return None
     cur = await conn.execute(
-        f"SELECT {_COLUMNS}, messages FROM chats WHERE id = %s AND user_id = %s", (chat_id, user_id)
+        f"SELECT {_COLUMNS}, messages FROM chats WHERE id = %s AND user_id = %s AND workspace_id = %s",
+        (chat_id, user_id, workspace_id),
     )
     row = await cur.fetchone()
     return {"chat": _summary(row), "messages": row[7]} if row else None
 
 
 async def chat_runs(
-    conn: AsyncConnection, user_id: str, chat_id: str
+    conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str
 ) -> list[dict[str, Any]] | None:
-    """The chat's runs in order; None when it isn't the user's or doesn't exist."""
+    """The chat's runs in order; None when it isn't the user's, in this workspace."""
     if not valid_chat_id(chat_id):
         return None
     cur = await conn.execute(
-        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s", (chat_id, user_id)
+        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s AND workspace_id = %s",
+        (chat_id, user_id, workspace_id),
     )
     if await cur.fetchone() is None:
         return None
@@ -177,9 +181,11 @@ async def append_run(
         (chat_id, workspace_id, user_id, run["agentId"]),
     )
     # Locks the chat, so two runs saved at once get their own seq. Another
-    # user's chat isn't found (row security hides it, the user_id test too).
+    # user's chat isn't found (row security hides it, the user_id test too),
+    # nor one in another workspace: a chat lives in one.
     cur = await conn.execute(
-        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s FOR UPDATE", (chat_id, user_id)
+        "SELECT 1 FROM chats WHERE id = %s AND user_id = %s AND workspace_id = %s FOR UPDATE",
+        (chat_id, user_id, workspace_id),
     )
     if await cur.fetchone() is None:
         raise ChatTakenError()
@@ -202,7 +208,13 @@ _KEEP = object()
 
 
 async def update_chat(
-    conn: AsyncConnection, user_id: str, chat_id: str, *, name: Any = _KEEP, archived: Any = _KEEP
+    conn: AsyncConnection,
+    workspace_id: str,
+    user_id: str,
+    chat_id: str,
+    *,
+    name: Any = _KEEP,
+    archived: Any = _KEEP,
 ) -> dict[str, Any] | None:
     """Renames or (un)archives one of the user's chats; None when it isn't theirs."""
     if not valid_chat_id(chat_id):
@@ -215,19 +227,21 @@ async def update_chat(
         sets.append("archived = %s")
         params.append(archived)
     cur = await conn.execute(
-        f"UPDATE chats SET {', '.join(sets) or 'name = name'} WHERE id = %s AND user_id = %s RETURNING {_COLUMNS}",
-        (*params, chat_id, user_id),
+        f"UPDATE chats SET {', '.join(sets) or 'name = name'} "
+        f"WHERE id = %s AND user_id = %s AND workspace_id = %s RETURNING {_COLUMNS}",
+        (*params, chat_id, user_id, workspace_id),
     )
     row = await cur.fetchone()
     return _summary(row) if row else None
 
 
-async def remove_chat(conn: AsyncConnection, user_id: str, chat_id: str) -> bool:
-    """Deletes one of the user's chats for good, with its runs."""
+async def remove_chat(conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str) -> bool:
+    """Deletes one of the user's chats in the workspace for good, with its runs."""
     if not valid_chat_id(chat_id):
         return False
     cur = await conn.execute(
-        "DELETE FROM chats WHERE id = %s AND user_id = %s RETURNING id", (chat_id, user_id)
+        "DELETE FROM chats WHERE id = %s AND user_id = %s AND workspace_id = %s RETURNING id",
+        (chat_id, user_id, workspace_id),
     )
     return await cur.fetchone() is not None
 

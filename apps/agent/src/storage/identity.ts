@@ -45,6 +45,8 @@ export interface Identity {
   /** Memory tokens: the chat and knowledge node of the run. */
   thread?: string;
   node?: string | null;
+  /** Storage and memory tokens: the workspace they are bound to (issue #226); without it, the default one. */
+  ws?: string;
 }
 
 /** A signed token for `identity`. */

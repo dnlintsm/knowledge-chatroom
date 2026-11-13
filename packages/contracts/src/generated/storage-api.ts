@@ -434,6 +434,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The workspaces you belong to, the default one first */
+        get: operations["listWorkspaces"];
+        put?: never;
+        /**
+         * Create a workspace, with you as its Owner
+         * @description You become its Owner, with Full access on its root, in the same transaction.
+         *     Its slug comes from the name (a number is added when it is taken). Without
+         *     `levels`, its knowledge levels are tech, module, loop and process; `[]` gives none.
+         *     Storage tokens can't create workspaces (403).
+         */
+        post: operations["createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of your workspaces */
+        get: operations["getWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The workspace's members
+         * @description Names and roles for every member; email, sign-up and last-active times for Owners
+         *     and Admins only. Never login subjects.
+         */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        /**
+         * Add someone who has signed in, as Member or Admin (Owners and Admins)
+         * @description Writes the membership and, unless `access` is none, a starting grant on the root,
+         *     in one transaction (`access` defaults to viewer). Someone who is already a member
+         *     is left as they are: 409 with their current role. The starting grant never
+         *     replaces a grant they already have.
+         */
+        post: operations["addWorkspaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find someone to add, by exact email (Owners and Admins)
+         * @description One exact email address, case ignored. Never lists or searches users; 404 when no
+         *     one with that email has signed in yet.
+         */
+        get: operations["lookUpWorkspaceUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/access": {
         parameters: {
             query?: never;
@@ -1512,6 +1602,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @enum {string} */
+        WorkspaceRole: "owner" | "admin" | "member";
+        Workspace: {
+            /** @description The immutable id that selectors and tokens carry. */
+            id: string;
+            /** @description For page URLs (/w/<slug>/); it can change. */
+            slug: string;
+            name: string;
+            role: components["schemas"]["WorkspaceRole"];
+        };
+        AlreadyMember: {
+            error: string;
+            role: components["schemas"]["WorkspaceRole"];
+        };
+        WorkspaceMember: {
+            id: string;
+            name: string | null;
+            role: components["schemas"]["WorkspaceRole"];
+            /** @description For Owners and Admins only. */
+            email?: string | null;
+            createdAt?: components["schemas"]["Timestamp"];
+            lastSeenAt?: components["schemas"]["Timestamp"] | null;
+        };
         Error: {
             error: string;
             /**
@@ -3548,6 +3661,206 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             413: components["responses"]["TooLarge"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your workspaces, with your role in each. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        workspaces: components["schemas"]["Workspace"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    levels?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The new workspace, with `role` owner. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace, with your role there. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The members. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        members: components["schemas"]["WorkspaceMember"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    addWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId: string;
+                    /** @enum {string} */
+                    role: "member" | "admin";
+                    /** @enum {string} */
+                    access?: "none" | "viewer" | "editor";
+                };
+            };
+        };
+        responses: {
+            /** @description Added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        member: {
+                            id: string;
+                            role: components["schemas"]["WorkspaceRole"];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Already a member; nothing changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlreadyMember"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    lookUpWorkspaceUser: {
+        parameters: {
+            query: {
+                email: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The person. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user: {
+                            id: string;
+                            name: string | null;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

@@ -1,25 +1,22 @@
 /**
- * Workspace isolation tests (issue #226, step 3), for the design in
+ * Workspace isolation tests (issue #226, steps 3 and 4), for the design in
  * docs/workspaces.md. Like storage.test.ts, this file only speaks HTTP, so it
  * checks any backend that serves the storage API.
  *
  * Two kinds of tests:
  *
- * - "today's rules" pass now. They pin behaviour of the single default
- *   workspace that the membership layer must keep: Viewer workflows, draft
- *   visibility, revalidation of grants for tokens, and per-event filtering of
- *   ?watch streams.
- * - "multi-workspace" tests are marked `todo` (node:test runs them and reports
- *   their failures without failing the run). They describe the behaviour step 4
- *   and 5 of #226 must add: creating workspaces, the workspace selectors, ids
- *   that belong to another workspace, adding members, and isolation of every
- *   surface. Each implementation PR removes `todo` from the tests it makes
- *   pass, so they then guard the behaviour like any other test.
+ * - "today's rules" pin behaviour of the default workspace that the membership
+ *   layer must keep: Viewer workflows, draft visibility, revalidation of grants
+ *   for tokens, and per-event filtering of ?watch streams.
+ * - "multi-workspace" tests check what step 4 of #226 adds: creating
+ *   workspaces, the workspace selectors, ids that belong to another workspace,
+ *   adding members, and isolation of every surface. A test marked `todo`
+ *   (node:test runs it and reports its failure without failing the run) waits
+ *   for the TypeScript agent to take the workspace from the run (step 4b); that
+ *   PR removes `todo` once it passes.
  *
- * The new routes (/workspaces...) and the X-Knowledge-Workspace header are not
- * in openapi/storage.yaml yet; step 4 adds them there, and their calls then
- * move into storage.test.ts's spec checks. Until then this file checks statuses
- * and bodies only.
+ * The workspace routes and selectors are in openapi/storage.yaml; this file
+ * checks statuses and bodies.
  *
  * Runs after storage.test.ts against the same backend (see
  * apps/agent/scripts/test-conformance.mjs): the workspace owner is that suite's
@@ -43,12 +40,12 @@ const BASE = process.env.STORAGE_URL?.replace(/\/$/, "");
 const SECRET = process.env.AUTH_SECRET;
 const OWNER = process.env.CONFORMANCE_OWNER || "conformance|alice";
 const WS_HEADER = "X-Knowledge-Workspace";
-const TODO = "multi-workspace support isn't built yet (#226, steps 4 and 5)";
+const TODO = "the TypeScript agent doesn't take the workspace from the run yet (#226, step 4b)";
 const NO_SUCH_WORKSPACE = "00000000-0000-4000-8000-000000000000";
 const enabled = !!(BASE && SECRET);
 
 const now = () => Math.floor(Date.now() / 1000);
-const sign = (claims: IdentityClaims & { ws?: string }) => signIdentityToken(claims, SECRET!);
+const sign = (claims: IdentityClaims) => signIdentityToken(claims, SECRET!);
 /** Signed only when the suite runs: without AUTH_SECRET the suites report skipped, as storage.test.ts's do. */
 const user = (sub: string, name: string): Headers =>
   enabled ? { "X-Knowledge-User": sign({ sub, name, email: `${name}@example.com`, exp: now() + 600 }) } : {};
@@ -211,7 +208,7 @@ describe("workspaces: today's rules the membership layer must keep", { skip: !en
   });
 });
 
-describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
+describe("workspaces: multi-workspace", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
   /** The default workspace's id, and carol's second workspace. */
   let defaultWs = "";
   let ws2 = "";
@@ -219,7 +216,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
   let ws2Experiment = "";
   const need = () => assert.ok(ws2 && defaultWs, "needs workspace creation (the first test) to pass");
 
-  test("a signed-in user creates a workspace and becomes its Owner", { todo: TODO }, async () => {
+  test("a signed-in user creates a workspace and becomes its Owner", async () => {
     const { workspaces } = await ok<{ workspaces: { id: string; slug: string; role: string }[] }>(200, "GET", "/workspaces", { headers: owner });
     defaultWs = workspaces.find((w) => w.slug === "default")!.id;
     const created = await ok<{ id: string; slug: string; role: string }>(201, "POST", "/workspaces", { headers: carol, json: { name: `Carol's lab ${stamp}` } });
@@ -234,7 +231,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     assert.equal(access.rootRole, "owner");
   });
 
-  test("the header, the query parameter and no selector each pick a workspace", { todo: TODO }, async () => {
+  test("the header, the query parameter and no selector each pick a workspace", async () => {
     need();
     ws2Node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: { ...carol, ...inWs(ws2) }, json: { parentId: null, name: `Only in ws2 ${stamp}` } })).id;
     await ok(200, "PUT", `/files/notes/secret.md?node=${ws2Node}`, { headers: { ...carol, ...inWs(ws2) }, body: `zebra-${stamp}` });
@@ -245,7 +242,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     assert.ok(!named((await ok<{ nodes: { id: string }[] }>(200, "GET", "/nodes", { headers: { ...owner, ...inWs(defaultWs) } })).nodes));
   });
 
-  test("selectors that disagree are refused, and unknown, malformed or foreign workspaces look alike", { todo: TODO }, async () => {
+  test("selectors that disagree are refused, and unknown, malformed or foreign workspaces look alike", async () => {
     need();
     await ok(400, "GET", `/nodes?workspace=${defaultWs}`, { headers: { ...carol, ...inWs(ws2) } });
     const unknown = await req("GET", "/nodes", { headers: { ...carol, ...inWs(NO_SUCH_WORKSPACE) } });
@@ -256,7 +253,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     assert.ok(!foreign.text.includes("Carol"), "no workspace name in the answer");
   });
 
-  test("ids from another workspace are not found", { todo: TODO }, async () => {
+  test("ids from another workspace are not found", async () => {
     need();
     ws2Experiment = (await ok<{ id: string }>(201, "POST", "/experiments", { headers: { ...carol, ...inWs(ws2) }, json: { nodeId: ws2Node, title: "ws2 run" } })).id;
     // carol is in both workspaces from here on, so only the workspace decides.
@@ -270,7 +267,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     await ok(404, "POST", "/access/grants", { headers: { ...owner, ...inWs(defaultWs) }, json: { node: ws2Node, principalType: "user", principalId: ids.dave, role: "viewer" } });
   });
 
-  test("adding a member: exact-email lookup, starting access, and no overwrite on retry", { todo: TODO }, async () => {
+  test("adding a member: exact-email lookup, starting access, and no overwrite on retry", async () => {
     need();
     const lookup = await ok<{ user: Json }>(200, "GET", `/workspaces/${ws2}/lookup?email=DAVE@example.com`, { headers: carol });
     assert.deepEqual(Object.keys(lookup.user).sort(), ["id", "name"], "only the id and name, never the login subject");
@@ -290,7 +287,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     await ok(200, "PUT", `/files/notes/dave.md?node=${ws2Node}`, { headers: { ...dave, ...inWs(ws2) }, body: "dave can still edit" });
   });
 
-  test("the member list is the workspace's own, and Members don't see emails", { todo: TODO }, async () => {
+  test("the member list is the workspace's own, and Members don't see emails", async () => {
     need();
     const asOwner = await ok<{ members: Json[] }>(200, "GET", `/workspaces/${ws2}/members`, { headers: carol });
     assert.deepEqual(asOwner.members.map((m) => m.id).sort(), [ids.carol, ids.dave].sort());
@@ -302,7 +299,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     assert.ok(!users.users.some((u) => u.id === ids.erin), "no directory of every signed-in user");
   });
 
-  test("search, chats, memory and change streams stay in their workspace", { todo: TODO }, async () => {
+  test("search, chats, memory and change streams stay in their workspace", async () => {
     need();
     const inWs2 = { ...carol, ...inWs(ws2) };
     const inDefault = { ...carol, ...inWs(defaultWs) };
@@ -334,7 +331,7 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     }
   });
 
-  test("tokens carry their workspace, and a legacy token stays in the default workspace", { todo: TODO }, async () => {
+  test("storage tokens carry their workspace, and a legacy token stays in the default workspace", async () => {
     need();
     // carol can read in both workspaces (the editor grant in default from an earlier test).
     const scoped = storageToken("workspaces|carol", ws2);
@@ -346,15 +343,18 @@ describe("workspaces: multi-workspace (todo until #226 steps 4 and 5)", { skip: 
     await ok(200, "GET", "/nodes", { headers: { ...legacy, ...inWs(defaultWs) } });
     await ok(400, "GET", "/nodes", { headers: { ...legacy, ...inWs(ws2) } });
     await ok(400, "GET", `/nodes?workspace=${ws2}`, { headers: legacy });
-
-    const thread = `ws-thread-${stamp}`;
-    await ok(200, "GET", "/memory/agent", { headers: memoryToken("workspaces|carol", thread, ws2) });
-    await ok(400, "GET", "/memory/agent", { headers: { ...memoryToken("workspaces|carol", thread), ...inWs(ws2) } });
     // After the compatibility cut-off, tokens without `ws` are refused (401). That is
     // a release switch, tested when the cut-off is set.
   });
 
-  test("an agent run keeps the workspace it started in", { todo: TODO }, async () => {
+  test("memory tokens carry their workspace too", { todo: TODO }, async () => {
+    need();
+    const thread = `ws-thread-${stamp}`;
+    await ok(200, "GET", "/memory/agent", { headers: memoryToken("workspaces|carol", thread, ws2) });
+    await ok(400, "GET", "/memory/agent", { headers: { ...memoryToken("workspaces|carol", thread), ...inWs(ws2) } });
+  });
+
+  test("an agent run keeps the workspace it started in", async () => {
     need();
     // A run started in ws2 records ws2, whatever the caller selects afterwards.
     const run = await ok<{ id: string }>(201, "POST", "/experiments/runs", { headers: storageToken("workspaces|carol", ws2), json: { nodeId: ws2Node, title: "Pinned" } });

@@ -355,3 +355,15 @@ async def test_the_routes():
         }
         events = await client.post("/suggest", json={"tools": []})
         assert events.status_code == 200
+
+
+def test_the_runs_workspace_stays_with_the_tokens():
+    ws = "0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b"
+    headers = {"x-knowledge-storage": storage(ws=ws), "x-knowledge-memory": memory(ws=ws)}
+    lab = made(mcp_tokens(headers, ALL, SECRET, NOW))["lab"]
+    assert tokens.verify(lab["storage"], SECRET, "storage", NOW)["ws"] == ws  # type: ignore[index]
+    assert tokens.verify(lab["memory"], SECRET, "memory", NOW)["ws"] == ws  # type: ignore[index]
+    assert "ws" not in tokens.verify(lab["identity"], SECRET, "mcp:lab", NOW)  # type: ignore[operator]
+    # A memory token of another workspace gives no memory token.
+    other = {"x-knowledge-storage": storage(ws=ws), "x-knowledge-memory": memory()}
+    assert "memory" not in made(mcp_tokens(other, ALL, SECRET, NOW))["lab"]

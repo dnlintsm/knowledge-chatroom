@@ -95,6 +95,7 @@ from .storage_routes import (
     read_body,
 )
 from .text_index import from_units, to_units
+from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -171,16 +172,18 @@ async def memory_route(request: Request) -> Response:
     storage = state.storage
     try:
         if claims is not None:
-            return await _agent(
-                request, storage, await memory_grant(storage.access, secret, claims)
-            )
+            grant = await memory_grant(storage.access, secret, claims)
+            ws, _ = await resolve(request, state.workspaces, grant.user_id, grant.bound_ws)
+            return await _agent(request, storage.in_workspace(ws), grant)
         principal = await identify(request, storage.access, secret)
         if principal is None:
             return send(401, {"error": "Sign in first"})
         parts = _parts(raw_path(request)) or []
         if len(parts) > (4 if parts and parts[0] == "shared" else 3):
             return send(404, {"error": "Not found"})
-        session = Session(storage, storage.access, principal)
+        ws, membership = await resolve(request, state.workspaces, principal.user_id, None)
+        storage = storage.in_workspace(ws)
+        session = Session(storage, storage.access, principal, membership)
         user = principal.user_id
         memory = Memory(
             own=MemoryService(session.scoped, session.ws, user),
@@ -190,6 +193,8 @@ async def memory_route(request: Request) -> Response:
             create_message=state.create_message,
         )
         return await _route(request, memory, parts)
+    except WorkspaceError as err:
+        return send(err.status, {"error": str(err)})
     except MemoryError_ as err:
         return send(400, {"error": str(err)})
     except MemoryNotFoundError as err:

@@ -30,6 +30,7 @@ from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
 from .semantic import SemanticIndex
 from .storage import Storage, open_storage
+from .workspaces import Workspaces
 
 logger = logging.getLogger("api_py")
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -174,10 +175,13 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
 
         app.state.storage_ready = storage_ready
         watcher = None
+        # The workspaces and memberships (workspaces.py); None without a database.
+        app.state.workspaces = None
         if settings.database_url:
             pool = db.open_pool(settings.database_url)
             await pool.open(wait=False)
             app.state.pool = pool
+            app.state.workspaces = Workspaces(pool)
             try:
                 found = await db.schema(pool, settings.migrations_dir)
             except Exception as err:  # /health reports the database is not ready.

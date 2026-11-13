@@ -34,6 +34,8 @@ ROLE_VERB: dict[str, str] = {"viewer": "view", "editor": "edit", "owner": "manag
 ARCHIVED = "This experiment is archived; restore it to change it"
 # The node name an upload uses for a level its path leaves empty ("Etch/Module 3//").
 EMPTY_LEVEL_NAME = "None"
+# What an audit target says about content, hidden from a reader who can't see it.
+_AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "note"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
 
@@ -43,10 +45,19 @@ def _now() -> str:
 
 
 class Session:
-    def __init__(self, storage: Storage, access: AccessService, principal: Principal) -> None:
+    def __init__(
+        self,
+        storage: Storage,
+        access: AccessService,
+        principal: Principal,
+        membership: str | None = None,
+    ) -> None:
         self.storage = storage
         self.access = access
         self.principal = principal
+        # The principal's role in the workspace (owner, admin, member), checked
+        # for this request by workspaces.resolve().
+        self.membership = membership
 
     @property
     def ws(self) -> str:
@@ -54,6 +65,20 @@ class Session:
 
     async def role(self, node_id: str | None) -> Role | None:
         return await self.access.role(self.principal.user_id, node_id)
+
+    async def still_member(self) -> bool:
+        """Whether the principal is still a member of the workspace (an open stream rechecks it)."""
+        async with self.storage.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (self.ws, self.principal.user_id),
+            )
+            return await cur.fetchone() is not None
+
+    def need_admin(self) -> None:
+        """People, groups and the audit log are for the workspace's Owners and Admins."""
+        if self.membership not in ("owner", "admin"):
+            raise ForbiddenError("Only the workspace's Owners and Admins can do this")
 
     async def need(self, node_id: str | None, minimum: Role) -> Role:
         role = await self.role(node_id)
@@ -812,11 +837,11 @@ class Session:
 
     async def chat(self, chat_id: str) -> dict[str, Any] | None:
         async with self.scoped() as conn:
-            return await chats.get_chat(conn, self.principal.user_id, chat_id)
+            return await chats.get_chat(conn, self.ws, self.principal.user_id, chat_id)
 
     async def chat_runs(self, chat_id: str) -> list[dict[str, Any]] | None:
         async with self.scoped() as conn:
-            return await chats.chat_runs(conn, self.principal.user_id, chat_id)
+            return await chats.chat_runs(conn, self.ws, self.principal.user_id, chat_id)
 
     async def append_chat_run(self, chat_id: str, run: dict[str, Any]) -> dict[str, Any]:
         if not chats.valid_chat_id(chat_id):
@@ -828,11 +853,13 @@ class Session:
 
     async def update_chat(self, chat_id: str, **changes: Any) -> dict[str, Any] | None:
         async with self.scoped() as conn:
-            return await chats.update_chat(conn, self.principal.user_id, chat_id, **changes)
+            return await chats.update_chat(
+                conn, self.ws, self.principal.user_id, chat_id, **changes
+            )
 
     async def remove_chat(self, chat_id: str) -> bool:
         async with self.scoped() as conn:
-            return await chats.remove_chat(conn, self.principal.user_id, chat_id)
+            return await chats.remove_chat(conn, self.ws, self.principal.user_id, chat_id)
 
     async def search(
         self,
@@ -879,18 +906,19 @@ class Session:
     # The org tree and grants
 
     async def users(self) -> list[dict[str, Any]]:
+        """The workspace's members, not everyone who has signed in."""
         return await self.access.users()
 
     async def people(self) -> list[dict[str, Any]]:
-        """Everyone who has signed in, with roles and groups: for workspace owners."""
-        await self.need(None, "owner")
+        """The workspace's members, with roles and groups: for its Owners and Admins."""
+        self.need_admin()
         return await self.access.people()
 
     async def groups(self) -> list[dict[str, Any]]:
         return await self.access.groups()
 
     async def create_group(self, parent_id: str | None, name: str) -> str:
-        await self.need(None, "owner")
+        self.need_admin()
 
         async def in_tx(conn: AsyncConnection, group_id: str) -> None:
             await self._audit(
@@ -900,19 +928,19 @@ class Session:
         return await self.access.create_group(parent_id, name, in_tx)
 
     async def rename_group(self, group_id: str, name: str) -> bool:
-        await self.need(None, "owner")
+        self.need_admin()
         return await self.access.rename_group(
             group_id, name, self._audit("group.rename", {"group": group_id, "name": name})
         )
 
     async def delete_group(self, group_id: str) -> bool:
-        await self.need(None, "owner")
+        self.need_admin()
         return await self.access.delete_group(
             group_id, self._audit("group.delete", {"group": group_id})
         )
 
     async def set_member(self, group_id: str, user_id: str, member: bool) -> bool:
-        await self.need(None, "owner")
+        self.need_admin()
         action = "group.add_member" if member else "group.remove_member"
         return await self.access.set_member(
             group_id, user_id, member, self._audit(action, {"group": group_id, "user": user_id})
@@ -962,8 +990,46 @@ class Session:
         )
 
     async def audit_log(self, limit: int, kinds: list[str]) -> list[dict[str, Any]]:
-        await self.need(None, "owner")
-        return await self.access.audit_log(limit, kinds)
+        """
+        Recent changes, for Owners and Admins. A target's name, path or title shows
+        only if the reader can see that target now (docs/workspaces.md, "Audit log
+        visibility"): otherwise the entry keeps its ids and says `redacted`.
+        """
+        self.need_admin()
+        entries = await self.access.audit_log(limit, kinds)
+        seen: dict[tuple[str, str | None], bool] = {}
+
+        async def visible(target: dict[str, Any]) -> bool:
+            experiment = target.get("experiment")
+            key = ("experiment", experiment) if isinstance(experiment, str) else None
+            if key is None:
+                node = target.get("node")
+                if "node" not in target or not (node is None or isinstance(node, str)):
+                    return True
+                key = ("node", node)
+            if key not in seen:
+                user = self.principal.user_id
+                if key[0] == "experiment":
+                    found = await self.access.experiment_access(user, key[1])  # pyrefly: ignore[bad-argument-type]
+                    seen[key] = found is not None
+                elif key[1] is None:
+                    seen[key] = await self.role(None) is not None
+                else:
+                    seen[key] = await self.access.sees_node(user, key[1])
+            return seen[key]
+
+        for entry in entries:
+            target = entry["target"]
+            if (
+                isinstance(target, dict)
+                and _AUDIT_CONTENT.intersection(target)
+                and not await visible(target)
+            ):
+                entry["target"] = {
+                    **{k: v for k, v in target.items() if k not in _AUDIT_CONTENT},
+                    "redacted": True,
+                }
+        return entries
 
 
 class FilesSession:

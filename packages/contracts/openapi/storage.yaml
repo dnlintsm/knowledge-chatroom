@@ -26,6 +26,20 @@ info:
       Storage tokens only reach the storage routes: the skills, hub, tools, memory and
       follow-up routes take `X-Knowledge-User` alone (or nothing without login).
 
+    Which workspace (issue #226, docs/workspaces.md): every storage, memory and skills
+    request runs in one workspace, named by its id in any of
+    - the `X-Knowledge-Workspace` header (the app's requests),
+    - the `workspace` query parameter (EventSource and plain links, which can't set headers),
+    - the `ws` claim of a storage or memory token, set when the token is minted.
+    All that are present must name the same workspace, or the answer is 400. None at all
+    means the default workspace, until a cut-off release named in the CHANGELOG; a token
+    without a `ws` claim counts as naming the default workspace. A workspace that doesn't
+    exist, isn't a UUID or that the user isn't a member of answers 404, the same for all
+    three; so does any node, experiment, file, grant, group, proposal or chat of another
+    workspace. Membership is checked on every request, and a watch stream ends once it is
+    gone. The routes the TypeScript server still serves (the chat run, outside MCP servers'
+    /memory/agent) answer 400 for any workspace but the default one, for now.
+
     Errors are JSON `{error}` with a 4xx or 5xx status. When storage isn't ready:
     503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
 servers:
@@ -43,6 +57,7 @@ tags:
   - name: proposals
   - name: chats
   - name: access
+  - name: workspaces
   - name: skills
   - name: hub
   - name: memory
@@ -1010,6 +1025,191 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces:
+    get:
+      tags: [workspaces]
+      operationId: listWorkspaces
+      summary: The workspaces you belong to, the default one first
+      responses:
+        "200":
+          description: Your workspaces, with your role in each.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspaces]
+                properties:
+                  workspaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/Workspace" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [workspaces]
+      operationId: createWorkspace
+      summary: Create a workspace, with you as its Owner
+      description: |
+        You become its Owner, with Full access on its root, in the same transaction.
+        Its slug comes from the name (a number is added when it is taken). Without
+        `levels`, its knowledge levels are tech, module, loop and process; `[]` gives none.
+        Storage tokens can't create workspaces (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                levels:
+                  type: array
+                  maxItems: 10
+                  items: { type: string, minLength: 1 }
+      responses:
+        "201":
+          description: The new workspace, with `role` owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces/{id}:
+    get:
+      tags: [workspaces]
+      operationId: getWorkspace
+      summary: One of your workspaces
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The workspace, with your role there.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces/{id}/members:
+    get:
+      tags: [workspaces]
+      operationId: listWorkspaceMembers
+      summary: The workspace's members
+      description: |
+        Names and roles for every member; email, sign-up and last-active times for Owners
+        and Admins only. Never login subjects.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorkspaceMember" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [workspaces]
+      operationId: addWorkspaceMember
+      summary: Add someone who has signed in, as Member or Admin (Owners and Admins)
+      description: |
+        Writes the membership and, unless `access` is none, a starting grant on the root,
+        in one transaction (`access` defaults to viewer). Someone who is already a member
+        is left as they are: 409 with their current role. The starting grant never
+        replaces a grant they already have.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, role]
+              properties:
+                userId: { type: string }
+                role: { type: string, enum: [member, admin] }
+                access: { type: string, enum: [none, viewer, editor] }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [member]
+                properties:
+                  member:
+                    type: object
+                    required: [id, role]
+                    properties:
+                      id: { type: string }
+                      role: { $ref: "#/components/schemas/WorkspaceRole" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Already a member; nothing changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlreadyMember" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces/{id}/lookup:
+    get:
+      tags: [workspaces]
+      operationId: lookUpWorkspaceUser
+      summary: Find someone to add, by exact email (Owners and Admins)
+      description: |
+        One exact email address, case ignored. Never lists or searches users; 404 when no
+        one with that email has signed in yet.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: email
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The person.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id: { type: string }
+                      name: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -3063,6 +3263,40 @@ components:
               ok: { type: boolean, const: true }
 
   schemas:
+    WorkspaceRole:
+      type: string
+      enum: [owner, admin, member]
+
+    Workspace:
+      type: object
+      required: [id, slug, name, role]
+      properties:
+        id: { type: string, description: The immutable id that selectors and tokens carry. }
+        slug: { type: string, description: "For page URLs (/w/<slug>/); it can change." }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/WorkspaceRole" }
+
+    AlreadyMember:
+      type: object
+      required: [error, role]
+      properties:
+        error: { type: string }
+        role: { $ref: "#/components/schemas/WorkspaceRole" }
+
+    WorkspaceMember:
+      type: object
+      required: [id, name, role]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+        role: { $ref: "#/components/schemas/WorkspaceRole" }
+        email: { type: [string, "null"], description: For Owners and Admins only. }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        lastSeenAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
     Error:
       type: object
       required: [error]

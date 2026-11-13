@@ -178,9 +178,28 @@
 - Python models of the whole API: `knowledge_chatroom.api` (`packages/knowledge-py`, install
   the `api` extra for pydantic) is generated from the OpenAPI spec, and CI checks that it is
   up to date and that it parses every request and answer of the conformance run (issue #169).
+- Workspaces on the backend (issue #226, step 4 of [the design](docs/workspaces.md)): any
+  signed-in user can create a workspace and becomes its Owner, with Full access on its root.
+  Owners and Admins add people who have signed in, looked up by exact email, as Member or
+  Admin with a starting access of none, Can view or Can edit. New routes: `GET`/`POST
+  /workspaces`, `GET /workspaces/<id>`, `GET`/`POST /workspaces/<id>/members` and `GET
+  /workspaces/<id>/lookup`, all on api-py. Every storage, memory and skills request runs in
+  one workspace, chosen by the `X-Knowledge-Workspace` header, the `?workspace=` parameter or
+  a token's `ws` claim; with none of them, the default workspace. Nodes, files, experiments,
+  proposals, grants, groups, chats, memory, search and `?watch` streams stay in their
+  workspace, and membership is checked on every request. The app has no screens for this
+  yet (steps 5 and 6), and the chat run still uses the default workspace (step 4b).
 
 ### Changed
 
+- Workspace membership replaces the root owner grant for administration (issue #226):
+  people, groups and the audit log are for the workspace's Owners and Admins, and
+  `/access/users` and `/access/people` list the workspace's members, not everyone who has
+  signed in. Grants and group memberships are only for members. The first sign-in of a new
+  deployment still becomes the owner, but only once: after that, signing in makes nobody
+  an owner, even if every signed-in owner is gone. Until a cut-off release, every
+  signed-in user is a Member of the default workspace, which gives no content access, as
+  before.
 - Follow-up chips work with a remote backend (`AGENT_URL`): the app keeps asking this
   repo's agent server's `POST /suggest`, which needs only the messages, instead of
   keeping the first-round chips. The agent server no longer answers 404 there when it
@@ -247,6 +266,12 @@
 
   The agent server alone (`pnpm dev:ts`, or without api-py) keeps working and keeps
   migrating, but new work lands in api-py.
+- Migration `023_workspace_members.sql` adds workspace memberships and fills them from
+  today's access: root owners (directly or through groups) become Owners, anyone else with
+  a grant, or with their own chats, memory or skill settings in the workspace, becomes a
+  Member, and the local user owns every workspace. No grant changes. Requests that name
+  no workspace, and tokens without a `ws` claim, keep using the default workspace until
+  a cut-off release that this changelog will name.
 - Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
   files, linked inputs, locked skill files) become ordinary files when it runs.
 - Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends

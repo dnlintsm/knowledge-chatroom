@@ -61,6 +61,11 @@ def end_to_end(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
 
 async def forward(request: Request, http: httpx.AsyncClient) -> Response:
     """Sends `request` to the TypeScript server and streams its answer back."""
+    # That server serves the default workspace only (workspaces.typescript_refusal).
+    from .workspaces import typescript_refusal
+
+    if refusal := await typescript_refusal(request):
+        return refusal
     # The path as sent (percent-encoding kept, %2F included) and the query as is.
     target = (request.scope.get("raw_path") or request.scope["path"].encode()).decode("latin-1")
     if query := request.scope.get("query_string", b""):

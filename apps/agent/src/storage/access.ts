@@ -112,8 +112,9 @@ export class AccessService {
 
   /**
    * The user for a login identity, created on first sight. Name and email
-   * follow the provider. The first user to sign in to a workspace that only
-   * the local user owns becomes its owner, so a new deployment can be set up.
+   * follow the provider. The first user to sign in to the default workspace
+   * before any signed-in owner becomes its owner, once, so a new deployment
+   * can be set up; signing in never joins another workspace.
    */
   async userForSubject(subject: string, profile: { email?: string; name?: string } = {}) {
     const cached = this.subjects.get(subject);
@@ -134,16 +135,9 @@ export class AccessService {
               name = coalesce(EXCLUDED.name, users.name),
               last_seen_at = now()
         RETURNING id`;
-      // Serialize first sign-ins so exactly one becomes the owner.
-      await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))`;
-      await tx`
-        INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
-        SELECT ${this.workspaceId}, NULL, 'user', ${user.id}, 'owner'
-        WHERE NOT EXISTS (
-          SELECT 1 FROM grants g JOIN users u ON u.id = g.principal_id
-          WHERE g.workspace_id = ${this.workspaceId} AND g.principal_type = 'user'
-            AND g.role = 'owner' AND u.subject <> 'local')
-        ON CONFLICT DO NOTHING`;
+      // The one-time owner bootstrap and the default workspace's open
+      // membership (023_workspace_members.sql), as api-py's user_for_subject.
+      await tx`SELECT sign_in_memberships(${user.id})`;
       return user.id;
     });
     this.subjects.set(subject, { id, seen: Date.now() });
@@ -152,10 +146,18 @@ export class AccessService {
 
   /** The user's best role on a node (null = workspace root), or null if none. */
   async role(userId: string, nodeId: string | null): Promise<Role | null> {
-    if (nodeId !== null && !isUuid(nodeId)) return null;
+    if (nodeId === null) {
+      const [row] = await this.sql<{ role: Role | null }[]>`
+        SELECT effective_role(${this.workspaceId}, ${userId}, NULL) AS role`;
+      return row.role;
+    }
+    if (!isUuid(nodeId)) return null;
+    // Only a node of this workspace: a root grant here says nothing about
+    // another workspace's nodes (issue #226).
     const [row] = await this.sql<{ role: Role | null }[]>`
-      SELECT effective_role(${this.workspaceId}, ${userId}, ${nodeId}::uuid) AS role`;
-    return row.role;
+      SELECT effective_role(workspace_id, ${userId}, id) AS role FROM nodes
+      WHERE id = ${nodeId} AND workspace_id = ${this.workspaceId}`;
+    return row?.role ?? null;
   }
 
   /**

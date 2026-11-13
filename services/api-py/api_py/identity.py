@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import Request
 
 from . import tokens
-from .access import AccessService, Principal
+from .access import LEGACY_TOKEN, AccessService, Principal
 
 _UUID = re.compile(r"[0-9a-fA-F-]{36}")
 
@@ -36,12 +36,23 @@ async def identify(
         via = claims.get("via") if claims else None
         if not claims or not isinstance(via, str) or not via:
             return None
-        return Principal(user_id=await _user_for(access, claims), actor="agent", via=via)
+        return Principal(
+            user_id=await _user_for(access, claims),
+            actor="agent",
+            via=via,
+            bound_ws=token_ws(claims),
+        )
     header = request.headers.get(tokens.IDENTITY_HEADER)
     claims = tokens.verify(header, secret) if header is not None else None
     if not claims:
         return None
     return Principal(user_id=await _user_for(access, claims))
+
+
+def token_ws(claims: dict[str, Any]) -> str:
+    """The workspace a token is bound to: its `ws` claim, or the default one for a legacy token."""
+    ws = claims.get("ws")
+    return ws if isinstance(ws, str) else LEGACY_TOKEN
 
 
 async def _user_for(access: AccessService, claims: dict) -> str:
@@ -88,6 +99,8 @@ class MemoryGrant:
     via: str
     thread: str
     node: str | None
+    # As Principal.bound_ws: the token's workspace (LEGACY_TOKEN without a `ws` claim).
+    bound_ws: str = LEGACY_TOKEN
 
 
 async def memory_grant(
@@ -101,4 +114,5 @@ async def memory_grant(
         via=claims["via"],
         thread=claims["thread"],
         node=node if isinstance(node, str) and _UUID.fullmatch(node) else None,
+        bound_ws=token_ws(claims),
     )
