@@ -52,3 +52,8 @@ test("the chat runs on the Python agent: replies, browser tools, skills, follow-
   await expect(answer).toContainText("TL;DR", reply);
   await expect(page.getByTestId("skill-used")).toHaveText("/tldr", reply);
 });
+
+// Gate test (#234): a real E2E failure. Do not merge.
+test("gate test: deliberate failure", async () => {
+  expect(1, "deliberate failure to test the preview gate").toBe(2);
+});
