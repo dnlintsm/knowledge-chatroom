@@ -24,7 +24,11 @@ COPY packages/contracts/package.json ./packages/contracts/
 # Only the UI and what it uses: the agent's packages stay out of this image.
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --filter "@knowledge-chatroom/web..."
-COPY . .
+# Only what the UI build reads, so scripts/docker-changes.mjs can map a change to
+# this image exactly: copy anything else the build starts to need here, and add it
+# to that script's rules.
+COPY packages/contracts ./packages/contracts
+COPY apps/web ./apps/web
 # NEXT_PUBLIC_* values are fixed at build time (see apps/web/next.config.ts).
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm -C apps/web build
