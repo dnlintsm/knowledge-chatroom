@@ -1,14 +1,17 @@
-# Builds the app on every PR, walks the key screens with Playwright, and posts
-# screenshots + a walkthrough GIF in a sticky PR comment, so reviewers can see
-# the UI without running `pnpm dev`. Full-resolution videos and the
-# Playwright report are attached to the run as an artifact.
+# Builds the app on every PR, runs the E2E suites, and posts screenshots + a
+# walkthrough GIF in a sticky PR comment, so reviewers can see the UI without
+# running `pnpm dev`. Full-resolution videos and the Playwright reports are
+# attached to the run as artifacts, one per suite job.
 #
 # Images are stored on the `ui-previews` branch (pr-<number>/<sha>/) so the
 # comment can show them inline; a PR's folder is removed when it closes.
 #
 # Each suite runs only when the change can affect it (scripts/ci-changes.mjs,
 # issue #192): a change to services/api-py runs the storage and login suites but
-# not the walkthrough. `preview`, the required check, always reports.
+# not the walkthrough. The suites run in parallel jobs, each on its own runner
+# (its own database, S3, ports and output folders), and `preview`, the required
+# check, waits only for them. The GIF, the image upload and the PR comment run
+# afterwards in `publish`, which `preview` does not wait for (issue #219).
 name: UI preview
 
 on:
@@ -26,6 +29,7 @@ concurrency:
 env:
   PREVIEW_BRANCH: ui-previews
   COMMENT_MARKER: "<!-- ui-preview -->"
+  ARTIFACT_PREFIX: ui-preview-${{ github.event.pull_request.number || github.run_id }}
 
 jobs:
   # Which suites this change can affect.
@@ -46,16 +50,56 @@ jobs:
         id: affected
         run: node scripts/ci-changes.mjs
 
-  e2e:
+  # The walkthrough and the other browser specs, against the mock agent. No
+  # server storage: browser mode clears DATABASE_URL (playwright.config.ts).
+  e2e-browser:
     needs: changes
-    if: needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true'
+    if: needs.changes.outputs.browser == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write # push images to the ui-previews branch
-      pull-requests: write # sticky preview comment
-    # Server storage, so the preview shows what needs it (the knowledge tree,
-    # "Saved" files). Same setup as storage.yml.
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+      COPILOTKIT_TELEMETRY_DISABLED: true
+    outputs:
+      browser: ${{ steps.browser.outcome }}
+      artifact: ${{ steps.artifact.outputs.artifact-url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-setup
+
+      - name: Capture UI preview
+        id: browser
+        run: node scripts/ci-tests.mjs run "Browser E2E" playwright -- pnpm test:e2e --reporter=list,html,json
+
+      - name: Summarize test suites
+        if: always()
+        # Diagnostics only: a failure here must not fail the suite's job, and so `preview`.
+        continue-on-error: true
+        run: node scripts/ci-tests.mjs summary "Browser E2E"
+
+      - name: Upload preview artifact
+        id: artifact
+        if: always()
+        continue-on-error: true # diagnostics only, as above
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-browser
+          path: |
+            preview/
+            test-results/
+            playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Server storage and the knowledge tree, then login and sharing, with api-py in
+  # front of the agent server (issue #190). They share this job's database and S3
+  # in sequence, as before; login gets its own output folder.
+  e2e-storage:
+    needs: changes
+    if: needs.changes.outputs.storage == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
@@ -77,12 +121,10 @@ jobs:
       S3_PUBLIC_URL: http://localhost:8333
       NEXT_TELEMETRY_DISABLED: 1
       COPILOTKIT_TELEMETRY_DISABLED: true
-      # Forks get a read-only token and no secrets, so they only get the artifact.
-      CAN_PUBLISH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-      # The walkthrough (browser E2E, GIF), storage and login E2E, Python agent E2E.
-      RUN_BROWSER: ${{ needs.changes.outputs.browser }}
-      RUN_STORAGE: ${{ needs.changes.outputs.storage }}
-      RUN_PYAGENT: ${{ needs.changes.outputs.pyagent }}
+    outputs:
+      storage: ${{ steps.storage.outcome }}
+      login: ${{ steps.login.outcome }}
+      artifact: ${{ steps.artifact.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,99 +142,191 @@ jobs:
           docker logs s3
           exit 1
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/e2e-setup
         with:
-          node-version-file: .nvmrc
-      # pnpm at the version in package.json "packageManager".
-      - name: Enable pnpm
-        run: corepack enable
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Build app
-        run: pnpm build
-
-      - name: Capture UI preview
-        id: playwright
-        if: env.RUN_BROWSER == 'true'
-        run: node scripts/ci-tests.mjs run "Browser E2E" playwright -- pnpm test:e2e --reporter=list,html,json
-
-      - name: Make walkthrough GIF
-        if: always() && env.RUN_BROWSER == 'true'
-        continue-on-error: true
-        timeout-minutes: 3
-        run: |
-          command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-          scripts/preview-gif.sh preview/walkthrough.gif
-
-      # The Python services: api-py in front of the agent server in the storage and
-      # login runs (issue #190), and the Python chat agent below.
-      - uses: actions/setup-python@v5
-        if: always() && (env.RUN_STORAGE == 'true' || env.RUN_PYAGENT == 'true')
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-        if: always() && (env.RUN_STORAGE == 'true' || env.RUN_PYAGENT == 'true')
-        with:
-          version: "0.11.32"
-          enable-cache: true
-          # The one lockfile of the uv workspace. The default glob searches the whole
-          # checkout, node_modules included, which took 20-70 s here (issue #219).
-          cache-dependency-glob: uv.lock
-      - name: Install the Python services
-        if: always() && (env.RUN_STORAGE == 'true' || env.RUN_PYAGENT == 'true')
-        run: uv sync --all-packages --locked
+          python: "true"
 
       - name: Test server storage and knowledge tree
         id: storage
-        if: always() && env.RUN_STORAGE == 'true'
         run: node scripts/ci-tests.mjs run "Storage E2E" playwright -- pnpm test:e2e:storage --output test-results-storage --reporter=list,json
 
       # Login and sharing need the app with login on, so they get their own run
-      # (and their own output folder, so the walkthrough video above stays).
+      # (and their own output folder).
       - name: Capture login and sharing
         id: login
-        if: always() && env.RUN_STORAGE == 'true'
+        if: always() && steps.storage.outcome != 'skipped'
         run: node scripts/ci-tests.mjs run "Login E2E" playwright -- pnpm test:e2e:login --output test-results-login --reporter=list,json
-
-      # The chat on the Python agent (services/agent-py, issue #176): a real
-      # Claude Code engine with a scripted model, so it needs no API key.
-      - name: Test the chat on the Python agent
-        id: python
-        if: always() && env.RUN_PYAGENT == 'true'
-        run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json
 
       - name: Summarize test suites
         if: always()
-        run: node scripts/ci-tests.mjs summary "Browser E2E" "Storage E2E" "Login E2E" "Python agent E2E"
+        # Diagnostics only: a failure here must not fail the suite's job, and so `preview`.
+        continue-on-error: true
+        run: node scripts/ci-tests.mjs summary "Storage E2E" "Login E2E"
 
       - name: Upload preview artifact
         id: artifact
         if: always()
+        continue-on-error: true # diagnostics only, as above
         uses: actions/upload-artifact@v4
         with:
-          name: ui-preview-${{ github.event.pull_request.number || github.run_id }}
+          name: ${{ env.ARTIFACT_PREFIX }}-storage
           path: |
             preview/
-            test-results/
             test-results-storage/
             test-results-login/
-            playwright-report/
           retention-days: 14
           if-no-files-found: ignore
 
+  # The chat on the Python agent (services/agent-py, issue #176): a real Claude
+  # Code engine with a scripted model, so it needs no API key, and no storage.
+  e2e-python:
+    needs: changes
+    if: needs.changes.outputs.pyagent == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+      COPILOTKIT_TELEMETRY_DISABLED: true
+    outputs:
+      pyagent: ${{ steps.python.outcome }}
+      artifact: ${{ steps.artifact.outputs.artifact-url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/e2e-setup
+        with:
+          python: "true"
+
+      - name: Test the chat on the Python agent
+        id: python
+        run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json
+
+      - name: Summarize test suites
+        if: always()
+        # Diagnostics only: a failure here must not fail the suite's job, and so `preview`.
+        continue-on-error: true
+        run: node scripts/ci-tests.mjs summary "Python agent E2E"
+
+      - name: Upload preview artifact
+        id: artifact
+        if: always()
+        continue-on-error: true # diagnostics only, as above
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-python
+          path: |
+            test-results-python/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The required check: always reports, and passes only when each suite this
+  # change can affect passed, and each one it cannot affect was skipped.
+  preview:
+    if: ${{ always() && github.event.action != 'closed' }}
+    needs: [changes, e2e-browser, e2e-storage, e2e-python]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the affected E2E suites
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          WANT_BROWSER: ${{ needs.changes.outputs.browser }}
+          WANT_STORAGE: ${{ needs.changes.outputs.storage }}
+          WANT_PYAGENT: ${{ needs.changes.outputs.pyagent }}
+          GOT_BROWSER: ${{ needs.e2e-browser.result }}
+          GOT_STORAGE: ${{ needs.e2e-storage.result }}
+          GOT_PYAGENT: ${{ needs.e2e-python.result }}
+        run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::Could not decide which suites to run (changes: $CHANGES)."; exit 1
+          fi
+          failed=0
+          check() { # job, wanted, result
+            if [ "$2" = true ]; then expected=success; else expected=skipped; fi
+            if [ "$3" = "$expected" ]; then
+              echo "$1: $3, as expected."
+            else
+              echo "::error::$1: expected $expected, got $3."; failed=1
+            fi
+          }
+          check e2e-browser "$WANT_BROWSER" "$GOT_BROWSER"
+          check e2e-storage "$WANT_STORAGE" "$GOT_STORAGE"
+          check e2e-python "$WANT_PYAGENT" "$GOT_PYAGENT"
+          exit $failed
+
+  # Not required, and `preview` does not wait for it: the walkthrough GIF, the
+  # images on the ui-previews branch and the sticky PR comment. It runs no code
+  # from the PR: the suite artifacts are data, and the GIF script comes from the
+  # base branch. Forks get a read-only token, so they only get the artifacts.
+  publish:
+    needs: [changes, e2e-browser, e2e-storage, e2e-python]
+    # !cancelled(), not always(): a run superseded by a newer push must not
+    # overwrite the newer run's images and comment.
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' && github.event.action != 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.result == 'success'
+      && (needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push images to the ui-previews branch
+      pull-requests: write # sticky preview comment
+    steps:
+      - name: Download the suite artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ARTIFACT_PREFIX }}-*
+          path: artifacts
+
+      - name: Collect the screenshots
+        run: |
+          mkdir -p preview
+          for dir in artifacts/*/preview; do
+            [ -d "$dir" ] && cp -r "$dir"/. preview/
+          done
+          ls -R preview | head -50
+
+      # The base branch's script, not the PR's: this job has a write token.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          sparse-checkout: scripts/preview-gif.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Make walkthrough GIF
+        if: needs.changes.outputs.browser == 'true'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          command -v ffmpeg >/dev/null || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          out="$PWD/preview/walkthrough.gif"
+          cd "artifacts/$ARTIFACT_PREFIX-browser"
+          bash "$GITHUB_WORKSPACE/base/scripts/preview-gif.sh" "$out"
+
+      # A newer push cancels this run, but a step already running can finish, and
+      # the images and comment are per PR, not per commit. So publish only while
+      # this run's commit is still the PR's head (the comment step checks again).
+      - name: Check that this commit is still the PR's head
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          head=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .head.sha)
+          if [ "$head" = "$SHA" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::The PR's head is now ${head:0:7}, not ${SHA:0:7}: not publishing this run's previews."
+          fi
+
       - name: Publish images to ${{ env.PREVIEW_BRANCH }}
         id: publish
-        if: always() && env.CAN_PUBLISH == 'true' && hashFiles('preview/**') != ''
+        if: steps.current.outputs.latest == 'true' && hashFiles('preview/**') != ''
         env:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
@@ -227,27 +361,38 @@ jobs:
           echo "base=https://raw.githubusercontent.com/${{ github.repository }}/$PREVIEW_BRANCH/$dir" >> "$GITHUB_OUTPUT"
 
       - name: Update PR comment
-        if: always() && env.CAN_PUBLISH == 'true'
+        # Not always(): that runs even after the run is cancelled.
+        if: ${{ !cancelled() && steps.current.outputs.latest == 'true' }}
         uses: actions/github-script@v7
         env:
           IMAGE_BASE: ${{ steps.publish.outputs.base }}
-          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
-          # Each suite's outcome; "skipped" when the change cannot affect it.
-          OUTCOME_BROWSER: ${{ steps.playwright.outcome }}
-          OUTCOME_STORAGE: ${{ steps.storage.outcome }}
-          OUTCOME_LOGIN: ${{ steps.login.outcome }}
-          OUTCOME_PYAGENT: ${{ steps.python.outcome }}
+          RUN_BROWSER: ${{ needs.changes.outputs.browser }}
+          RUN_STORAGE: ${{ needs.changes.outputs.storage }}
+          RUN_PYAGENT: ${{ needs.changes.outputs.pyagent }}
+          # Each suite's step outcome, and its job's result for a suite that never
+          # ran (the job was cancelled, failed during setup, or was skipped).
+          OUTCOME_BROWSER: ${{ needs.e2e-browser.outputs.browser }}
+          OUTCOME_STORAGE: ${{ needs.e2e-storage.outputs.storage }}
+          OUTCOME_LOGIN: ${{ needs.e2e-storage.outputs.login }}
+          OUTCOME_PYAGENT: ${{ needs.e2e-python.outputs.pyagent }}
+          JOB_BROWSER: ${{ needs.e2e-browser.result }}
+          JOB_STORAGE: ${{ needs.e2e-storage.result }}
+          JOB_PYAGENT: ${{ needs.e2e-python.result }}
+          ARTIFACT_BROWSER: ${{ needs.e2e-browser.outputs.artifact }}
+          ARTIFACT_STORAGE: ${{ needs.e2e-storage.outputs.artifact }}
+          ARTIFACT_PYAGENT: ${{ needs.e2e-python.outputs.artifact }}
         with:
           script: |
             const fs = require("fs");
-            const { IMAGE_BASE: base, ARTIFACT_URL: artifactUrl, COMMENT_MARKER: marker } = process.env;
-            // [suite, outcome, whether this change needs it]
+            const { IMAGE_BASE: base, COMMENT_MARKER: marker } = process.env;
             const env = process.env;
+            // [suite, outcome, whether this change needs it]
+            const result = (step, job) => (!step || step === "skipped" ? job : step);
             const suites = [
-              ["Browser E2E", env.OUTCOME_BROWSER, env.RUN_BROWSER === "true"],
-              ["Storage E2E", env.OUTCOME_STORAGE, env.RUN_STORAGE === "true"],
-              ["Login E2E", env.OUTCOME_LOGIN, env.RUN_STORAGE === "true"],
-              ["Python agent E2E", env.OUTCOME_PYAGENT, env.RUN_PYAGENT === "true"],
+              ["Browser E2E", result(env.OUTCOME_BROWSER, env.JOB_BROWSER), env.RUN_BROWSER === "true"],
+              ["Storage E2E", result(env.OUTCOME_STORAGE, env.JOB_STORAGE), env.RUN_STORAGE === "true"],
+              ["Login E2E", result(env.OUTCOME_LOGIN, env.JOB_STORAGE), env.RUN_STORAGE === "true"],
+              ["Python agent E2E", result(env.OUTCOME_PYAGENT, env.JOB_PYAGENT), env.RUN_PYAGENT === "true"],
             ];
             const outcome = suites.every(([, o, needed]) => (needed ? o === "success" : o === "skipped")) ? "success" : "failure";
             const skipped = suites.filter(([, , needed]) => !needed).map(([name]) => name);
@@ -261,7 +406,8 @@ jobs:
 
             const lines = [marker, `## UI preview for ${sha}`, ""];
             if (outcome !== "success") {
-              lines.push(`> [!WARNING]`, `> The Playwright walkthrough ${outcome === "failure" ? "failed" : "did not finish"}; images below may be partial. See the [run log](${runUrl}).`, "");
+              const bad = suites.filter(([, o, needed]) => needed && o !== "success").map(([name, o]) => `${name} (${o || "not run"})`);
+              lines.push(`> [!WARNING]`, `> Not every E2E suite passed: ${bad.join(", ")}. Images below may be partial. See the [run log](${runUrl}).`, "");
             }
             lines.push("_Agent: deterministic mock; live provider smoke tests run separately._", "");
             if (skipped.length) {
@@ -277,10 +423,21 @@ jobs:
               }
               lines.push("");
             }
-            lines.push(`Full-size videos and the Playwright report: ${artifactUrl ? `[download artifact](${artifactUrl})` : `[workflow run](${runUrl})`}.`);
+            const artifacts = [
+              ["browser", env.ARTIFACT_BROWSER],
+              ["storage and login", env.ARTIFACT_STORAGE],
+              ["Python agent", env.ARTIFACT_PYAGENT],
+            ].filter(([, url]) => url).map(([name, url]) => `[${name}](${url})`);
+            lines.push(`Full-size videos and the Playwright reports: ${artifacts.length ? artifacts.join(", ") : `[workflow run](${runUrl})`}.`);
             const body = lines.join("\n");
 
             const { owner, repo } = context.repo;
+            // Checked again here, just before the write.
+            const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+            if (current.head.sha !== pr.head.sha) {
+              core.notice(`The PR's head is now ${current.head.sha.slice(0, 7)}, not ${sha}: not updating the comment.`);
+              return;
+            }
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr.number, per_page: 100 });
             const existing = comments.find((c) => c.body?.startsWith(marker));
             if (existing) {
@@ -288,29 +445,6 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
             }
-
-  # The required check: always reports, and passes only when the suites this
-  # change can affect passed (or none needed to run).
-  preview:
-    if: ${{ always() && github.event.action != 'closed' }}
-    needs: [changes, e2e]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require the affected E2E suites
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          WANTED: ${{ needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true' }}
-          RESULT: ${{ needs.e2e.result }}
-        run: |
-          if [ "$CHANGES" != success ]; then
-            echo "::error::Could not decide which suites to run (changes: $CHANGES)."; exit 1
-          fi
-          if [ "$WANTED" = true ]; then expected=success; else expected=skipped; fi
-          if [ "$RESULT" != "$expected" ]; then
-            echo "::error::Expected $expected, got $RESULT."; exit 1
-          fi
-          echo "Result $RESULT, as expected."
 
   cleanup:
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
