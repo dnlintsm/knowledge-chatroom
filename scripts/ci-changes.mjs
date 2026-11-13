@@ -36,7 +36,7 @@ export const RULES = [
   ["pyrefly-baseline.json", ["python"]],
 ];
 
-function matches(pattern, path) {
+export function matches(pattern, path) {
   return pattern.endsWith("/**") ? path.startsWith(pattern.slice(0, -2)) : path === pattern;
 }
 
