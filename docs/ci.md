@@ -95,3 +95,4 @@ A newer push cancels the older run. `publish` does not start in a cancelled run,
 and it pushes images and writes the comment only while its commit is still the
 PR's head (checked before the push and again just before the comment), so an
 older run cannot replace a newer run's preview.
+<!-- gate test commit B -->
