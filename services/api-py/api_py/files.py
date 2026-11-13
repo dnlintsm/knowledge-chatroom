@@ -131,7 +131,7 @@ class FileService:
         info = await self.stat(conn, raw_path)
         if not info:
             return None
-        return info, await self.storage.blobs.get(info["sha256"])
+        return info, await self.storage.require_blobs().get(info["sha256"])
 
     async def _lock_node(self, conn: AsyncConnection) -> None:
         """Holds the node or experiment until commit, so it can't be deleted under a write (NodeService.lockLive)."""
@@ -163,7 +163,7 @@ class FileService:
         path = normalize_path(raw_path)
         mime = mime or mime_for_path(path)
         sha256 = sha256_hex(data)
-        await self.storage.blobs.put(sha256, data, mime)
+        await self.storage.require_blobs().put(sha256, data, mime)
 
         here, args = self._here()
         async with conn.transaction():

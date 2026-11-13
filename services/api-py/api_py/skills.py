@@ -235,7 +235,7 @@ class SkillService:
         """A blob's bytes, from the cache when this server has read it before."""
         data = self._blobs.get(sha256)
         if data is None:
-            data = await self.storage.blobs.get(sha256)  # type: ignore[union-attr]
+            data = await self.storage.require_blobs().get(sha256)
             self._remember(sha256, data)
         return data
 
@@ -660,7 +660,7 @@ class SkillHub:
         files = []
         for file in sorted(skill.files, key=lambda f: collation_key(f.path)):
             sha256 = sha256_hex(file.data)
-            await self.storage.blobs.put(sha256, file.data, mime_for_path(file.path))  # type: ignore[union-attr]
+            await self.storage.require_blobs().put(sha256, file.data, mime_for_path(file.path))
             files.append({"path": file.path, "sha256": sha256, "size": len(file.data)})
         fingerprint = sha256_hex("\n".join(f"{f['path']}\0{f['sha256']}" for f in files).encode())
 

@@ -54,6 +54,18 @@ class Storage:
     # Search by meaning, when an embedding model is set (semantic.py).
     semantic: SemanticIndex | None = None
 
+    def require_blobs(self) -> BlobStore:
+        """Return the blob store required by a content operation."""
+        if self.blobs is None:
+            raise RuntimeError("Blob store is not configured")
+        return self.blobs
+
+    def require_events(self) -> EventHub:
+        """Return the event hub required by a watch operation."""
+        if self.events is None:
+            raise RuntimeError("Event hub is not configured")
+        return self.events
+
     @property
     def search(self) -> SearchService:
         return SearchService(self.workspace_id, self.blobs, self.semantic)
