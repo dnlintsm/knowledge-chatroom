@@ -120,7 +120,7 @@ class LocalEmbedder:
     def _run(self, texts: list[str]) -> list[list[float]]:
         import numpy as np
 
-        tokenizer, session = self._loaded  # type: ignore[misc]
+        tokenizer, session = self._loaded  # pyrefly: ignore[not-iterable]
         encodings = tokenizer.encode_batch(texts)
         ids = np.array([e.ids for e in encodings], dtype=np.int64)
         mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
@@ -286,7 +286,7 @@ class SemanticIndex:
             if not (current and current[0] == model and current[1] == dims):
                 # Vectors from another model don't compare with this one's: start over.
                 await conn.execute("ALTER TABLE blob_chunks DROP COLUMN IF EXISTS embedding")
-                await conn.execute(  # type: ignore[arg-type]
+                await conn.execute(  # pyrefly: ignore[no-matching-overload]
                     f"ALTER TABLE blob_chunks ADD COLUMN embedding vector({int(dims)})"
                 )
                 if dims <= MAX_INDEXED_DIMS:

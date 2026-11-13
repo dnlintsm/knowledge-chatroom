@@ -36,9 +36,9 @@ def js_number(value: float) -> str:
     # repr() gives the shortest digits that read back as this double, as JavaScript picks them.
     digits_tuple, exponent = Decimal(repr(abs(value))).as_tuple()[1:]
     digits = "".join(map(str, digits_tuple)).rstrip("0")
-    exponent += len(digits_tuple) - len(digits)  # type: ignore[operator]
+    exponent += len(digits_tuple) - len(digits)  # pyrefly: ignore[unsupported-operation]
     k = len(digits)
-    n = exponent + k  # type: ignore[operator]
+    n = exponent + k
     if k <= n <= 21:
         text = digits + "0" * (n - k)
     elif 0 < n <= 21:

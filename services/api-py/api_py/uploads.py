@@ -65,12 +65,12 @@ def _params(text: str, i: int, *, utf8_values: bool) -> dict[str, str] | None:
     """`; name=value` parameters from position i, as busboy reads them; None when malformed. First one wins."""
     params: dict[str, str] = {}
     while i < len(text):
-        i = _SPACE.match(text, i).end()  # type: ignore[union-attr]
+        i = _SPACE.match(text, i).end()  # pyrefly: ignore[missing-attribute]
         if i == len(text):
             break
         if text[i] != ";":
             return None
-        i = _SPACE.match(text, i + 1).end()  # type: ignore[union-attr]
+        i = _SPACE.match(text, i + 1).end()  # pyrefly: ignore[missing-attribute]
         name_match = _TOKEN.match(text, i)
         if not name_match or name_match.end() == len(text) or text[name_match.end()] != "=":
             return None

@@ -47,6 +47,10 @@ then run `uv run --locked --no-sync pyrefly check --prune-baseline`. Generated m
 tests are not yet included. The ordered baseline prevents new matching findings from being
 silently absorbed. Do not regenerate the baseline merely to make CI pass.
 
+Pyrefly ignores with a tag from another checker do not suppress Pyrefly errors. Fix
+findings where possible; when an exception is needed, use a `# pyrefly: ignore[code]`
+with the specific Pyrefly diagnostic rather than suppressing every diagnostic on a line.
+
 Python runtime dependencies are audited on pull requests that change the lockfile or
 Python project metadata, and weekly in CI. The audit exports the locked workspace
 runtime dependencies and checks them with pip-audit on Python 3.12 and 3.14.

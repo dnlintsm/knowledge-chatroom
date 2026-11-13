@@ -140,7 +140,7 @@ class AccessService:
                 RETURNING id""",
                 (subject, email, name),
             )
-            (user_id,) = await cur.fetchone()  # type: ignore[misc]
+            (user_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             user_id = str(user_id)
             # Serialize first sign-ins so exactly one becomes the owner.
             await conn.execute(
@@ -196,7 +196,7 @@ class AccessService:
             cur = await conn.execute(
                 "SELECT experiment_access(%s, %s::uuid)", (user_id, experiment_id)
             )
-            (found,) = await cur.fetchone()  # type: ignore[misc]
+            (found,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         return found
 
     async def hears_experiment(self, user_id: str, experiment_id: str, change: str) -> bool:
@@ -318,7 +318,7 @@ class AccessService:
                     "INSERT INTO groups (workspace_id, parent_id, name) VALUES (%s, %s, %s) RETURNING id",
                     (self.workspace_id, parent_id, clean),
                 )
-                (gid,) = await cur.fetchone()  # type: ignore[misc]
+                (gid,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 await in_tx(conn, str(gid))
                 return str(gid)
         except errors.Error as err:
@@ -397,7 +397,7 @@ class AccessService:
             params.append(node_id)
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, node_id, principal_type, principal_id, role, created_at FROM grants "  # type: ignore[arg-type]
+                "SELECT id, node_id, principal_type, principal_id, role, created_at FROM grants "  # pyrefly: ignore[bad-argument-type]
                 f"WHERE workspace_id = %s {where} ORDER BY created_at",
                 params,
             )
@@ -449,7 +449,7 @@ class AccessService:
                     RETURNING id""",
                     (self.workspace_id, node_id, principal_type, principal_id, role, created_by),
                 )
-                (gid,) = await cur.fetchone()  # type: ignore[misc]
+                (gid,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 await in_tx(conn)
                 return str(gid)
         except errors.Error as err:
@@ -532,7 +532,7 @@ class AccessService:
         where = "AND split_part(action, '.', 1) = ANY(%(kinds)s)" if kinds else ""
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, actor_type, actor_id, action, target, at FROM audit_log "  # type: ignore[arg-type]
+                "SELECT id, actor_type, actor_id, action, target, at FROM audit_log "  # pyrefly: ignore[bad-argument-type]
                 f"WHERE workspace_id = %(ws)s {where} ORDER BY at DESC, id DESC LIMIT %(limit)s",
                 {"ws": self.workspace_id, "kinds": kinds, "limit": min(max(limit, 1), 1000)},
             )

@@ -301,7 +301,7 @@ class SearchService:
             )
             SELECT {", ".join(_FIELDS)}, body, score FROM hits
             ORDER BY score / (1 + 0.25 * distance) DESC, updated_at DESC, path
-            LIMIT %(limit)s""",  # type: ignore[arg-type]
+            LIMIT %(limit)s""",  # pyrefly: ignore[bad-argument-type]
             self._params(
                 where, query=query, any=any_words(query), pattern=pattern, limit=CANDIDATES
             ),
@@ -342,7 +342,7 @@ class SearchService:
                 JOIN files f ON f.current_version_id = v.id
                 {_PLACE_JOINS}
                 WHERE {_filters(where.scope is not None)} AND k.similarity >= %(floor)s
-                ORDER BY f.id, k.similarity DESC""",  # type: ignore[arg-type]
+                ORDER BY f.id, k.similarity DESC""",  # pyrefly: ignore[bad-argument-type]
                 self._params(where, vector=vector, nearest=NEAREST, floor=semantic.min_similarity),
             )
             rows = await cur.fetchall()

@@ -43,6 +43,7 @@ search-path = [
 ]
 baseline = "pyrefly-baseline.json"
 baseline-matching-mode = "column-ordered"
+type-ignore-unknown-tag-behavior = "no-effect"
 
 [tool.coverage.run]
 source = [
