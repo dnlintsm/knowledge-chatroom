@@ -86,3 +86,4 @@ artifacts as data and takes `scripts/preview-gif.sh` from the base branch, so a
 change to that script takes effect after it merges. Fork PRs skip `publish` and
 keep the artifacts. The GIF step has a three-minute limit, including any ffmpeg
 installation; each E2E job has a twenty-minute limit.
+<!-- Gate test (#234): docs-only change. -->
