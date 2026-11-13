@@ -23,7 +23,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ui-preview-${{ github.event.pull_request.number || github.ref }}
+  # gate test: every run in its own group, so a newer push does not cancel this one
+  group: ui-preview-${{ github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -273,6 +274,8 @@ jobs:
       contents: write # push images to the ui-previews branch
       pull-requests: write # sticky preview comment
     steps:
+      - name: Gate test, hold publish so a newer push lands while it runs
+        run: sleep 120
       - name: Download the suite artifacts
         uses: actions/download-artifact@v4
         with:
