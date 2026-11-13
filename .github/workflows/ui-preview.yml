@@ -84,7 +84,7 @@ jobs:
         continue-on-error: true # diagnostics only, as above
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_PREFIX }}-browser
+          name: ${{ env.ARTIFACT_PREFIX }}/browser # gate test: an invalid artifact name, so the upload fails
           path: |
             preview/
             test-results/
