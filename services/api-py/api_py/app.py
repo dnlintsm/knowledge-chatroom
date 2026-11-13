@@ -50,7 +50,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             return True
         try:
             found = await db.schema(pool, settings.migrations_dir)
-        except Exception as err:  # noqa: BLE001 - a database that is down is reported, not fatal
+        except Exception as err:  # A database that is down is reported, not fatal.
             app.state.schema = None
             logger.warning("can't read the database's migrations yet: %s", err)
             return False
@@ -68,7 +68,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             return False
         try:
             storage = await open_storage(pool, settings.s3)
-        except Exception as err:  # noqa: BLE001 - tried again, as the database may still be settling
+        except Exception as err:  # Try again while the database may still be settling.
             logger.warning("can't open storage yet: %s", err)
             return False
         _start_search(app, storage, settings)
@@ -180,7 +180,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             app.state.pool = pool
             try:
                 found = await db.schema(pool, settings.migrations_dir)
-            except Exception as err:  # noqa: BLE001 - not up yet: /health says so until it is
+            except Exception as err:  # /health reports the database is not ready.
                 logger.warning("can't read the database's migrations yet: %s", err)
                 found = None
             if found and found.state is db.SchemaState.AHEAD:

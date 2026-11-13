@@ -55,7 +55,7 @@ class EventHub:
                         self._deliver(note.payload)
             except asyncio.CancelledError:
                 raise
-            except Exception as err:  # noqa: BLE001 - reported, then listened for again
+            except Exception as err:  # Report and reconnect after listener failures.
                 if not ready.done():
                     ready.set_exception(err)
                     return  # The next subscriber tries again.

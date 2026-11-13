@@ -65,7 +65,7 @@ Rules:
 - Prefer updating an existing note over adding one. Merge duplicates (update one, delete the other). When the chat contradicts a note, update it. Delete notes the chat shows are wrong or finished, and notes that look stale and contradicted.
 - For update, give the note's whole new body, keeping what is still true. Names are lowercase-with-dashes. Descriptions are one line.
 - Most chats teach nothing lasting: then return no changes. At most {MAX_CHANGES} changes.
-- Call the {LEARN_TOOL} tool once."""  # noqa: E501
+- Call the {LEARN_TOOL} tool once."""
 
 TOOL = {
     "name": LEARN_TOOL,

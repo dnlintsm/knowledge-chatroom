@@ -301,7 +301,7 @@ class SearchService:
             )
             SELECT {", ".join(_FIELDS)}, body, score FROM hits
             ORDER BY score / (1 + 0.25 * distance) DESC, updated_at DESC, path
-            LIMIT %(limit)s""",  # type: ignore[arg-type]
+            LIMIT %(limit)s""",  # pyrefly: ignore[bad-argument-type]
             self._params(
                 where, query=query, any=any_words(query), pattern=pattern, limit=CANDIDATES
             ),
@@ -342,7 +342,7 @@ class SearchService:
                 JOIN files f ON f.current_version_id = v.id
                 {_PLACE_JOINS}
                 WHERE {_filters(where.scope is not None)} AND k.similarity >= %(floor)s
-                ORDER BY f.id, k.similarity DESC""",  # type: ignore[arg-type]
+                ORDER BY f.id, k.similarity DESC""",  # pyrefly: ignore[bad-argument-type]
                 self._params(where, vector=vector, nearest=NEAREST, floor=semantic.min_similarity),
             )
             rows = await cur.fetchall()
@@ -373,6 +373,9 @@ class SearchService:
         error other than "not there"), which stay pending for a later try.
         Runs with the server's own connection, outside any user's rights.
         """
+        blobs = self.blobs
+        if blobs is None:
+            raise RuntimeError("Blob store is not configured")
         async with pool.connection() as conn:
             cur = await conn.execute(
                 """
@@ -389,8 +392,8 @@ class SearchService:
         failed: list[str] = []
         for sha256 in rows:
             try:
-                data = await self.blobs.get(sha256)  # type: ignore[union-attr]
-            except Exception as err:  # noqa: BLE001 - tried again later
+                data = await blobs.get(sha256)
+            except Exception as err:  # Retry store failures later.
                 if not is_not_found(err):
                     logger.warning(
                         "[search] could not read blob %s to index it, will retry: %s", sha256, err

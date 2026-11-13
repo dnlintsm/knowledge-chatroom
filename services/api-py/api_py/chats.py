@@ -195,7 +195,7 @@ async def append_run(
         WHERE id = %s RETURNING {_COLUMNS}""",
         (_to_json(run["messages"]), clean_name(run.get("name")), chat_id),
     )
-    return _summary(await cur.fetchone())  # type: ignore[arg-type]
+    return _summary(await cur.fetchone())  # pyrefly: ignore[bad-argument-type]
 
 
 _KEEP = object()

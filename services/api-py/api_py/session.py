@@ -39,7 +39,7 @@ _SAME_PLACE = object()
 
 
 def _now() -> str:
-    return iso(datetime.now(UTC))  # type: ignore[return-value]
+    return iso(datetime.now(UTC))  # pyrefly: ignore[bad-return]
 
 
 class Session:
@@ -157,7 +157,7 @@ class Session:
     async def experiments(self, node_id: str | None | object = ANYWHERE) -> list[dict[str, Any]]:
         """Experiments you can see, on one node (None: at the root) or anywhere."""
         if node_id is not ANYWHERE:
-            await self.need(node_id, "viewer")  # type: ignore[arg-type]
+            await self.need(node_id, "viewer")  # pyrefly: ignore[bad-argument-type]
         async with self.scoped() as conn:
             return await experiments.list_experiments(
                 conn, self.ws, self.principal.user_id, node_id
@@ -504,7 +504,7 @@ class Session:
             return given[key] if given.get(key) is not None else fallback
 
         return await self.start_run(
-            old["nodeId"] if node_id is _SAME_PLACE else node_id,  # type: ignore[arg-type]
+            old["nodeId"] if node_id is _SAME_PLACE else node_id,  # pyrefly: ignore[bad-argument-type]
             {
                 "title": given_or("title", f"{old['title']} (rerun)"),
                 "hypothesis": given_or("hypothesis", old["hypothesis"]),

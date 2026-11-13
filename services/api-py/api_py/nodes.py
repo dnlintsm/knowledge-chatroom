@@ -72,7 +72,7 @@ async def types(conn: AsyncConnection, workspace_id: str) -> list[dict[str, Any]
 async def list_nodes(conn: AsyncConnection, workspace_id: str) -> list[dict[str, Any]]:
     """Every live node, parents before children, siblings by name."""
     cur = await conn.execute(
-        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "  # type: ignore[arg-type]
+        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "
         "WHERE n.workspace_id = %s AND n.deleted_at IS NULL ORDER BY t.depth, lower(n.name)",
         (workspace_id,),
     )
@@ -83,7 +83,7 @@ async def get(conn: AsyncConnection, workspace_id: str, node_id: str) -> dict[st
     if not is_uuid(node_id):
         return None
     cur = await conn.execute(
-        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "  # type: ignore[arg-type]
+        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "
         "WHERE n.id = %s AND n.workspace_id = %s AND n.deleted_at IS NULL",
         (node_id, workspace_id),
     )
@@ -99,7 +99,7 @@ async def find_child(
     if parent_id is not None and not is_uuid(parent_id):
         return None
     cur = await conn.execute(
-        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "  # type: ignore[arg-type]
+        f"SELECT {_NODE_COLUMNS} FROM nodes n JOIN node_types t ON t.id = n.type_id "
         "WHERE n.workspace_id = %s AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM %s::uuid "
         "AND lower(n.name) = lower(%s)",
         (workspace_id, parent_id, name),
@@ -172,7 +172,7 @@ async def create(
                 "INSERT INTO nodes (workspace_id, parent_id, type_id, name) VALUES (%s, %s, %s, %s) RETURNING id",
                 (ws, parent_id, level[0], name),
             )
-            (new_id,) = await cur.fetchone()  # type: ignore[misc]
+            (new_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             new_id = str(new_id)
             await in_tx(conn, new_id)
             await storage.notify(conn, {"op": "node", "change": "create", "id": new_id})

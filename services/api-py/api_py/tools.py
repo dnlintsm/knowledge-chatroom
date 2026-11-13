@@ -103,7 +103,7 @@ def _strings(value: Any, env: Mapping[str, str], where: str) -> dict[str, str] |
 
 def _parse_ui(raw: Any) -> ToolUi:
     if not isinstance(raw, dict):
-        raise ValueError("ui must be an object")  # noqa: TRY004 - a bad setting, logged with the rest
+        raise ValueError("ui must be an object")  # A bad setting, logged with the rest.
 
     def text(key: str, most: int) -> str | None:
         value = raw.get(key)
@@ -142,7 +142,7 @@ def _parse_server(name: str, raw: Any, env: Mapping[str, str]) -> ExternalServer
     if name in _RESERVED:
         raise ValueError("that name is the agent's own tool server")
     if not isinstance(raw, dict):
-        raise ValueError("must be an object")  # noqa: TRY004 - a bad setting, logged with the rest
+        raise ValueError("must be an object")  # A bad setting, logged with the rest.
     kind = raw.get("type")
     kind = "http" if kind is None else kind
     flags = {
@@ -340,12 +340,12 @@ async def mcp_call(
         return answer
 
     if server.type == "sse":
-        async with sse_client(server.url, headers=headers, timeout=timeout) as (read, write):  # type: ignore[arg-type]
+        async with sse_client(server.url, headers=headers, timeout=timeout) as (read, write):  # pyrefly: ignore[bad-argument-type]
             answer = await over(read, write)
     else:
         async with (
             create_mcp_http_client(headers=headers) as http,
-            streamable_http_client(server.url, http_client=http) as (read, write),  # type: ignore[arg-type]
+            streamable_http_client(server.url, http_client=http) as (read, write),  # pyrefly: ignore[bad-argument-type]
         ):
             answer = await over(read, write)
     text = "\n".join(
@@ -440,7 +440,7 @@ async def tools_route(request: Request) -> Response:
         answer = await call(
             server, found, tool, args, headers_for(server, found, sign), tools_settings.timeout
         )
-    except Exception as err:  # noqa: BLE001 - any failure to reach the server is the same answer
+    except Exception as err:  # Server failures receive the same answer.
         logger.error("[tools] %s/%s: %s", server, tool, _reason(err))
         return _send(502, {"error": f"{ui.label} isn't reachable right now"})
     if answer.is_error:

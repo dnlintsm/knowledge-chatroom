@@ -110,7 +110,7 @@ class FileService:
     async def list(self, conn: AsyncConnection) -> list[dict[str, Any]]:
         here, args = self._here()
         cur = await conn.execute(
-            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path",  # type: ignore[arg-type]
+            f"{_INFO} WHERE {here} AND f.deleted_at IS NULL ORDER BY f.path",  # pyrefly: ignore[bad-argument-type]
             args,
         )
         return [_to_info(row) for row in await cur.fetchall()]
@@ -119,7 +119,7 @@ class FileService:
         path = normalize_path(raw_path)
         here, args = self._here()
         cur = await conn.execute(
-            f"{_INFO} WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # type: ignore[arg-type]
+            f"{_INFO} WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # pyrefly: ignore[bad-argument-type]
             (*args, path),
         )
         row = await cur.fetchone()
@@ -131,7 +131,7 @@ class FileService:
         info = await self.stat(conn, raw_path)
         if not info:
             return None
-        return info, await self.storage.blobs.get(info["sha256"])
+        return info, await self.storage.require_blobs().get(info["sha256"])
 
     async def _lock_node(self, conn: AsyncConnection) -> None:
         """Holds the node or experiment until commit, so it can't be deleted under a write (NodeService.lockLive)."""
@@ -163,7 +163,7 @@ class FileService:
         path = normalize_path(raw_path)
         mime = mime or mime_for_path(path)
         sha256 = sha256_hex(data)
-        await self.storage.blobs.put(sha256, data, mime)
+        await self.storage.require_blobs().put(sha256, data, mime)
 
         here, args = self._here()
         async with conn.transaction():
@@ -186,10 +186,10 @@ class FileService:
                 SELECT f.id, v.blob_sha256, f.mime
                 FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
                 WHERE {here} AND f.path = %s AND f.deleted_at IS NULL
-                FOR UPDATE OF f""",  # type: ignore[arg-type]
+                FOR UPDATE OF f""",  # pyrefly: ignore[bad-argument-type]
                 (*args, path),
             )
-            file_id, current_sha, current_mime = await cur.fetchone()  # type: ignore[misc]
+            file_id, current_sha, current_mime = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             if created.rowcount == 0 and create_only:
                 raise FileExistsError_(path)
             if current_sha != sha256 or current_mime != mime:
@@ -199,7 +199,7 @@ class FileService:
                     VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
                     (file_id, sha256, len(data), mime, author, author_id),
                 )
-                (version_id,) = await cur.fetchone()  # type: ignore[misc]
+                (version_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 # For search; once per distinct content.
                 await index_blob(conn, sha256, data)
                 await conn.execute(
@@ -222,7 +222,7 @@ class FileService:
         here, args = self._here()
         async with conn.transaction():
             cur = await conn.execute(
-                f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL FOR UPDATE OF f",  # type: ignore[arg-type]
+                f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL FOR UPDATE OF f",  # pyrefly: ignore[bad-argument-type]
                 (*args, path),
             )
             row = await cur.fetchone()
@@ -259,7 +259,7 @@ class FileService:
                     SELECT f.id, f.mime, v.blob_sha256
                     FROM files f JOIN file_versions v ON v.id = f.current_version_id
                     WHERE {here} AND f.path = %s AND f.deleted_at IS NULL
-                    FOR UPDATE OF f""",  # type: ignore[arg-type]
+                    FOR UPDATE OF f""",  # pyrefly: ignore[bad-argument-type]
                     (*args, source),
                 )
                 row = await cur.fetchone()
@@ -268,7 +268,7 @@ class FileService:
                 file_id, mime, sha256 = row
                 if source != target:
                     cur = await conn.execute(
-                        f"SELECT 1 FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # type: ignore[arg-type]
+                        f"SELECT 1 FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # pyrefly: ignore[bad-argument-type]
                         (*args, target),
                     )
                     if await cur.fetchone():
@@ -303,7 +303,7 @@ class FileService:
         path = normalize_path(raw_path)
         here, args = self._here()
         cur = await conn.execute(
-            f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # type: ignore[arg-type]
+            f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # pyrefly: ignore[bad-argument-type]
             (*args, path),
         )
         row = await cur.fetchone()
