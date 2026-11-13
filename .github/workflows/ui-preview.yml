@@ -343,12 +343,15 @@ jobs:
           RUN_BROWSER: ${{ needs.changes.outputs.browser }}
           RUN_STORAGE: ${{ needs.changes.outputs.storage }}
           RUN_PYAGENT: ${{ needs.changes.outputs.pyagent }}
-          # Each suite's step outcome, or its job's result when the job did not
-          # get that far (cancelled, or failed during setup).
-          OUTCOME_BROWSER: ${{ needs.e2e-browser.outputs.browser || needs.e2e-browser.result }}
-          OUTCOME_STORAGE: ${{ needs.e2e-storage.outputs.storage || needs.e2e-storage.result }}
-          OUTCOME_LOGIN: ${{ needs.e2e-storage.outputs.login || needs.e2e-storage.result }}
-          OUTCOME_PYAGENT: ${{ needs.e2e-python.outputs.pyagent || needs.e2e-python.result }}
+          # Each suite's step outcome, and its job's result for a suite that never
+          # ran (the job was cancelled, failed during setup, or was skipped).
+          OUTCOME_BROWSER: ${{ needs.e2e-browser.outputs.browser }}
+          OUTCOME_STORAGE: ${{ needs.e2e-storage.outputs.storage }}
+          OUTCOME_LOGIN: ${{ needs.e2e-storage.outputs.login }}
+          OUTCOME_PYAGENT: ${{ needs.e2e-python.outputs.pyagent }}
+          JOB_BROWSER: ${{ needs.e2e-browser.result }}
+          JOB_STORAGE: ${{ needs.e2e-storage.result }}
+          JOB_PYAGENT: ${{ needs.e2e-python.result }}
           ARTIFACT_BROWSER: ${{ needs.e2e-browser.outputs.artifact }}
           ARTIFACT_STORAGE: ${{ needs.e2e-storage.outputs.artifact }}
           ARTIFACT_PYAGENT: ${{ needs.e2e-python.outputs.artifact }}
@@ -358,11 +361,12 @@ jobs:
             const { IMAGE_BASE: base, COMMENT_MARKER: marker } = process.env;
             const env = process.env;
             // [suite, outcome, whether this change needs it]
+            const result = (step, job) => (!step || step === "skipped" ? job : step);
             const suites = [
-              ["Browser E2E", env.OUTCOME_BROWSER, env.RUN_BROWSER === "true"],
-              ["Storage E2E", env.OUTCOME_STORAGE, env.RUN_STORAGE === "true"],
-              ["Login E2E", env.OUTCOME_LOGIN, env.RUN_STORAGE === "true"],
-              ["Python agent E2E", env.OUTCOME_PYAGENT, env.RUN_PYAGENT === "true"],
+              ["Browser E2E", result(env.OUTCOME_BROWSER, env.JOB_BROWSER), env.RUN_BROWSER === "true"],
+              ["Storage E2E", result(env.OUTCOME_STORAGE, env.JOB_STORAGE), env.RUN_STORAGE === "true"],
+              ["Login E2E", result(env.OUTCOME_LOGIN, env.JOB_STORAGE), env.RUN_STORAGE === "true"],
+              ["Python agent E2E", result(env.OUTCOME_PYAGENT, env.JOB_PYAGENT), env.RUN_PYAGENT === "true"],
             ];
             const outcome = suites.every(([, o, needed]) => (needed ? o === "success" : o === "skipped")) ? "success" : "failure";
             const skipped = suites.filter(([, , needed]) => !needed).map(([name]) => name);
