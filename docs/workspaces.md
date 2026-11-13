@@ -42,8 +42,11 @@ Confirmed on 2026-11-13, refined after the review on #227.
    same transaction that creates the workspace.
 5. **Old links, tokens and saved state keep working** while no workspace is named:
    - URLs without a workspace redirect to the default workspace.
-   - Requests and tokens that name no workspace count as the default workspace until a
-     release named in the CHANGELOG, and are refused after that.
+   - Requests that name no workspace count as the default workspace until a release named
+     in the CHANGELOG, and are refused after that.
+   - A token without a `ws` claim is **bound to the default workspace** for that period. A
+     header or query parameter can't point it anywhere else (see
+     [Legacy tokens](#legacy-tokens)). After the cut-off, such tokens are refused.
    - Saved browser state moves into the default workspace once.
 
    A workspace that is named but unknown, invalid or not yours is refused. It never falls
@@ -149,8 +152,15 @@ grants.
   protected tool call is authorized, even with an unexpired token.
 - **A call already accepted** runs to its end. Its result and its audit entry are kept as
   evidence. Cancelling a run can't undo what an outside service has already done.
-- **Open change streams** (`?watch`) check membership again before sending each event, and
-  close when it's gone.
+- **Open change streams** (`?watch`) check each event against the user's access at the
+  moment it is sent:
+  - Membership first. When it's gone, the stream closes.
+  - Then the content and Experiment-visibility check that already runs per event today
+    (`Session.can_see` in api-py: node visibility, Experiment visibility, proposal access,
+    and the role on the event's node). It stays, scoped to the stream's workspace.
+  - So a Member who loses a grant or a group keeps the stream, but stops getting that
+    subtree's events, paths and Experiment details, while events they can still see keep
+    coming. A draft's events still go only to its author.
 - **Signed download links** stay valid until they expire (`DOWNLOAD_LINK_SECONDS`, 300 s
   today). Revoking access doesn't recall a link already handed out.
 
@@ -185,10 +195,30 @@ Rules on the server:
    If they differ, the request is refused with 400.
 2. An id that doesn't exist, isn't a UUID, or names a workspace the user isn't a member of
    gets 404, the same answer for all three, so it doesn't reveal which workspaces exist.
-3. Only when **no** selector is present does the legacy default apply (decision 5).
+3. Only when **no** selector is present does the legacy default apply (decision 5). A token
+   without a `ws` claim counts as a selector for the default workspace (next section).
 4. Every node, Experiment, file, grant, group, proposal and chat id in the request must
    belong to that workspace, or the answer is 404.
 5. A header or parameter is never proof of access. Membership is checked every time.
+
+### Legacy tokens
+
+A storage or memory token minted before this change has no `ws` claim. During the
+compatibility period its workspace **is** the default workspace, as if it carried
+`ws: <default id>`, and the normal rules apply to it:
+
+| Legacy token with | Result |
+| --- | --- |
+| No header or query parameter | Default workspace, with current membership and access checked |
+| A selector naming the default workspace | Default workspace, the same |
+| A selector naming any other workspace | Refused (400), even if the user belongs to both workspaces |
+| Anything, after the cut-off release | Refused (401) |
+
+A header or query parameter only chooses the workspace for a request that has no
+workspace-bound token, such as a signed-in browser request, and then membership in the chosen
+workspace is checked. It never gives an existing token a new scope.
+
+### Runs
 
 **Runs capture their workspace when they start.** A chat run takes the workspace id from the
 request that starts it, and every token minted for that run (including renewals) carries
@@ -196,7 +226,9 @@ that id. Tool calls use the run's workspace, never whichever workspace a tab hap
 selected now. So two tabs on two workspaces, or a switch while a run is going, can't move
 work between workspaces.
 
-**Contract changes.** The endpoint paths stay as they are. The OpenAPI contract
+### Contract changes
+
+The endpoint paths stay as they are. The OpenAPI contract
 (`packages/contracts/openapi/storage.yaml`) gains the header, the query parameter, the 400 and
 404 answers, the `ws` claim and the new workspace operations (create, list, read, add member,
 look up a user). The proxy, the conformance suite and the tests change with it.
@@ -229,19 +261,32 @@ access, not just from grant rows. No grant changes.
 | No grant, but chats, memory notes, memory settings, skill settings or incognito chats in the workspace | Member, so their own data stays reachable |
 | Signed-in users with nothing in the workspace | Not a member |
 
-If no Owner results (for example a deployment where nobody has signed in yet), the
-one-time bootstrap below applies.
+### Authenticated bootstrap
 
-**One-time bootstrap, separate from sign-in.** Today `user_for_subject` makes the first
-person who signs in Owner of the default workspace, on every first sight of a new subject,
-whenever no Owner exists. That changes to:
+Signing in registers or updates the user and grants nothing. The **one exception** is the
+one-time bootstrap of the default workspace's first signed-in Owner, defined here.
 
-- Signing in only registers or updates the user. It never grants anything.
-- The default workspace has a `bootstrapped_at` timestamp. While it is empty, the first
-  sign-in claims Owner and sets it, in one locked transaction. Once set, it never runs again,
-  even if every Owner later leaves.
-- Backfill sets `bootstrapped_at` when it finds an Owner. Running the migration again
-  changes nothing.
+Today `user_for_subject` makes a newly seen user Owner of the default workspace whenever no
+Owner other than `local` exists. That keeps a fresh deployment usable when login is turned
+on, but it can run again later, for example if every non-local Owner is removed. It changes
+to:
+
+- The default workspace has an `auth_bootstrapped_at` timestamp. It records that a real
+  (non-`local`) user has become Owner. The `local` user's ownership never sets it, because
+  it is local-mode ownership and nobody can sign in as `local`.
+- **Backfill** sets it only if the workspace already has a non-`local` Owner, directly or
+  through a nested group (the table above). A database with only the `local` Owner stays
+  open for bootstrap. Running the migration again changes nothing.
+- **While it is unset,** the first sign-in takes an advisory lock, checks the timestamp
+  again, then adds that user as Owner, adds their root Full access grant and sets the
+  timestamp, all in one transaction. Concurrent first sign-ins produce exactly one Owner.
+- **Once it is set,** it is never cleared. Later sign-ins, and later ownership changes, don't
+  reopen bootstrap. A workspace that loses all its signed-in Owners is recovered by the
+  ownership tools in the next batch, not by the next person to sign in.
+- **Local mode** is unaffected. The `local` user owns the default workspace and every
+  workspace it creates.
+- New workspaces never use bootstrap. Their creator becomes Owner when they are created
+  (decision 4).
 
 **Test:** before and after the migration, compute every user's effective content role on
 every node and their administrative rights (people, groups, audit, sharing). They must
@@ -274,8 +319,8 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 
 - `workspace_members (workspace_id, user_id, role, created_at, created_by)`, with `role` in
   `owner`, `admin`, `member`, and at least one `owner` per workspace.
-- `workspaces.created_by`, `workspaces.bootstrapped_at`, and a status column for archiving
-  later.
+- `workspaces.created_by`, `workspaces.auth_bootstrapped_at`, and a status column for
+  archiving later.
 - The backfill above, idempotent, changing no grant.
 - Creating a workspace inserts the workspace, the creator's Owner membership and their root
   Full access grant in one transaction.
@@ -295,6 +340,17 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 ## Tests this spec asks for
 
 - Backfill: effective access before and after, as above.
+- Bootstrap:
+  - A fresh database with only the `local` Owner switches to login, and the first real user
+    gets Owner membership and root Full access.
+  - Concurrent first sign-ins produce exactly one bootstrap Owner.
+  - Later sign-ins get no ownership.
+  - Existing non-local Owners, including nested-group Owners from backfill, keep their
+    rights, and bootstrap doesn't reopen.
+  - In local mode, creating and using several workspaces still works.
+- Legacy tokens: storage and memory tokens without `ws`, each with no selector, a selector
+  for the default workspace, and a selector for another workspace. The last is refused even
+  when the user belongs to both. After the cut-off, all are refused.
 - Two workspaces and two users across UI, API and agent: every surface in the isolation table.
 - Selectors: two tabs on two workspaces at once, a header that disagrees with the token,
   unknown and malformed ids, a non-member's id, no selector (legacy default), and a switch
@@ -306,6 +362,13 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
   call's result and audit entry are kept.
 - Adding a member: repeat adds, adding an existing Owner, and a retry after a Share change.
 - Audit redaction: an Admin without access sees ids, not names.
+- Open streams:
+  1. Open `?watch` while the user can view a node.
+  2. Remove the grant or group that allowed it, keeping workspace membership.
+  3. That node's and subtree's events stop arriving, and events for content the user can
+     still see keep arriving.
+  4. Events for someone else's draft Experiment never arrive.
+  5. Removing workspace membership closes the stream.
 
 ## Rollout
 
