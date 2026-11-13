@@ -76,13 +76,22 @@ each has its own database, S3, ports and output folders ([issue #219](https://gi
 
 Each job builds the app itself (`.github/actions/e2e-setup`) and uploads its own
 artifact (`ui-preview-<PR>-browser`, `-storage`, `-python`) with videos, traces,
-screenshots and reports, and writes its suites' counts to its job summary.
+screenshots and reports, and writes its suites' counts to its job summary. Those
+two steps are diagnostics: they run `continue-on-error`, so a failed upload or
+summary leaves the job, and `preview`, to the suite results. They still run inside
+the job, so `preview` waits for them: the upload has to happen on the runner that
+holds the files. In the runs measured for #219 it took 2–3 s per job.
 
 `preview` waits only for those jobs. The walkthrough GIF, the images on the
 `ui-previews` branch and the sticky comment come afterwards from `publish`, which
-is not required, so a slow or failed GIF or upload never holds up a merge. `publish`
-is the only job with a write token, and it runs no code from the PR: it reads the
-artifacts as data and takes `scripts/preview-gif.sh` from the base branch, so a
-change to that script takes effect after it merges. Fork PRs skip `publish` and
-keep the artifacts. The GIF step has a three-minute limit, including any ffmpeg
-installation; each E2E job has a twenty-minute limit.
+is not required, so a slow or failed GIF, image push or comment never holds up a
+merge. `publish` is the only job with a write token, and it runs no code from the
+PR: it reads the artifacts as data and takes `scripts/preview-gif.sh` from the base
+branch, so a change to that script takes effect after it merges. Fork PRs skip
+`publish` and keep the artifacts. The GIF step has a three-minute limit, including
+any ffmpeg installation; each E2E job has a twenty-minute limit.
+
+A newer push cancels the older run. `publish` does not start in a cancelled run,
+and it pushes images and writes the comment only while its commit is still the
+PR's head (checked before the push and again just before the comment), so an
+older run cannot replace a newer run's preview.
