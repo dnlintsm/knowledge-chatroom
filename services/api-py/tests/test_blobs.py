@@ -38,7 +38,11 @@ class FakeClient:
 
 
 def store_with(replies: dict[str, list[ClientError]]) -> tuple[BlobStore, FakeClient]:
-    store = BlobStore(S3Settings(endpoint="http://s3.test", bucket="kb"))
+    # Credentials up front, so boto3 doesn't look for them (instance metadata) on the network.
+    settings = S3Settings(
+        endpoint="http://s3.test", bucket="kb", access_key_id="test", secret_access_key="test"
+    )
+    store = BlobStore(settings)
     fake = FakeClient(replies)
     store._client = fake
     return store, fake
