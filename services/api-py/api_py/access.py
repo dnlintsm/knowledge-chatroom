@@ -6,6 +6,7 @@ Python side, with the same queries, so both servers answer alike.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,8 @@ from psycopg_pool import AsyncConnectionPool
 
 Role = Literal["viewer", "editor", "owner"]
 ROLES: tuple[Role, ...] = ("viewer", "editor", "owner")
+_ROLE_RANK: dict[str, int] = {role: rank for rank, role in enumerate(ROLES)}
+logger = logging.getLogger("api_py")
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 # How often a user's last_seen_at is refreshed, at most.
@@ -32,8 +35,16 @@ def is_uuid(value: object) -> bool:
     return isinstance(value, str) and bool(_UUID.match(value))
 
 
+def _checked_role(value: object) -> Role | None:
+    """Treat unexpected database roles as no access, and report the inconsistency."""
+    if value is None or value == "viewer" or value == "editor" or value == "owner":
+        return value
+    logger.error("Unexpected effective role from database: %r", value)
+    return None
+
+
 def at_least(role: str | None, minimum: Role) -> bool:
-    return role is not None and ROLES.index(role) >= ROLES.index(minimum)  # type: ignore[arg-type]
+    return _ROLE_RANK.get(role, -1) >= _ROLE_RANK[minimum] if role is not None else False
 
 
 def iso(value: datetime | None) -> str | None:
@@ -129,7 +140,7 @@ class AccessService:
                 RETURNING id""",
                 (subject, email, name),
             )
-            (user_id,) = await cur.fetchone()  # type: ignore[misc]
+            (user_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             user_id = str(user_id)
             # Serialize first sign-ins so exactly one becomes the owner.
             await conn.execute(
@@ -157,8 +168,10 @@ class AccessService:
             cur = await conn.execute(
                 "SELECT effective_role(%s, %s, %s::uuid)", (self.workspace_id, user_id, node_id)
             )
-            (role,) = await cur.fetchone()  # type: ignore[misc]
-        return role
+            row = await cur.fetchone()
+        if row is None:
+            raise RuntimeError("effective_role query returned no row")
+        return _checked_role(row[0])
 
     async def sees_node(self, user_id: str, node_id: str) -> bool:
         """Whether the user sees the node or anything below it (a node event's audience)."""
@@ -183,7 +196,7 @@ class AccessService:
             cur = await conn.execute(
                 "SELECT experiment_access(%s, %s::uuid)", (user_id, experiment_id)
             )
-            (found,) = await cur.fetchone()  # type: ignore[misc]
+            (found,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         return found
 
     async def hears_experiment(self, user_id: str, experiment_id: str, change: str) -> bool:
@@ -212,7 +225,7 @@ class AccessService:
                 WHERE workspace_id = %(ws)s AND deleted_at IS NULL""",
                 {"ws": self.workspace_id, "user": user_id},
             )
-            return {str(node): role for node, role in await cur.fetchall()}
+            return {str(node): _checked_role(role) for node, role in await cur.fetchall()}
 
     async def user(self, user_id: str) -> dict[str, Any] | None:
         """One user's id, subject, email and name, or None."""
@@ -305,7 +318,7 @@ class AccessService:
                     "INSERT INTO groups (workspace_id, parent_id, name) VALUES (%s, %s, %s) RETURNING id",
                     (self.workspace_id, parent_id, clean),
                 )
-                (gid,) = await cur.fetchone()  # type: ignore[misc]
+                (gid,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 await in_tx(conn, str(gid))
                 return str(gid)
         except errors.Error as err:
@@ -384,7 +397,7 @@ class AccessService:
             params.append(node_id)
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, node_id, principal_type, principal_id, role, created_at FROM grants "  # type: ignore[arg-type]
+                "SELECT id, node_id, principal_type, principal_id, role, created_at FROM grants "  # pyrefly: ignore[bad-argument-type]
                 f"WHERE workspace_id = %s {where} ORDER BY created_at",
                 params,
             )
@@ -436,7 +449,7 @@ class AccessService:
                     RETURNING id""",
                     (self.workspace_id, node_id, principal_type, principal_id, role, created_by),
                 )
-                (gid,) = await cur.fetchone()  # type: ignore[misc]
+                (gid,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 await in_tx(conn)
                 return str(gid)
         except errors.Error as err:
@@ -519,7 +532,7 @@ class AccessService:
         where = "AND split_part(action, '.', 1) = ANY(%(kinds)s)" if kinds else ""
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, actor_type, actor_id, action, target, at FROM audit_log "  # type: ignore[arg-type]
+                "SELECT id, actor_type, actor_id, action, target, at FROM audit_log "  # pyrefly: ignore[bad-argument-type]
                 f"WHERE workspace_id = %(ws)s {where} ORDER BY at DESC, id DESC LIMIT %(limit)s",
                 {"ws": self.workspace_id, "kinds": kinds, "limit": min(max(limit, 1), 1000)},
             )

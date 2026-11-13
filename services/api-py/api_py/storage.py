@@ -2,10 +2,10 @@
 
 It mirrors initStorage() in apps/agent/src/storage/index.ts: the one default
 workspace, whether row-level security can be used, and the change events
-that every process hears through LISTEN/NOTIFY (events.ts). The TypeScript
-server still applies the migrations; this side opens only once the database
-has exactly the ones it knows (db.py), and until then the ported routes pass
-through to the TypeScript server, which answers as it starts.
+that every process hears through LISTEN/NOTIFY (events.ts). It opens only
+once the database has exactly the migrations this server knows (db.py, which
+applies them), and until then the ported routes pass through to the
+TypeScript server, which answers as it does while its storage starts.
 """
 
 from __future__ import annotations
@@ -54,6 +54,18 @@ class Storage:
     # Search by meaning, when an embedding model is set (semantic.py).
     semantic: SemanticIndex | None = None
 
+    def require_blobs(self) -> BlobStore:
+        """Return the blob store required by a content operation."""
+        if self.blobs is None:
+            raise RuntimeError("Blob store is not configured")
+        return self.blobs
+
+    def require_events(self) -> EventHub:
+        """Return the event hub required by a watch operation."""
+        if self.events is None:
+            raise RuntimeError("Event hub is not configured")
+        return self.events
+
     @property
     def search(self) -> SearchService:
         return SearchService(self.workspace_id, self.blobs, self.semantic)
@@ -84,7 +96,7 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
         if not row or not row[0]:
             return False
         cur = await conn.execute("SELECT current_schema()")
-        (schema,) = await cur.fetchone()  # type: ignore[misc]
+        (schema,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         role = APP_ROLE
         quoted = '"' + schema.replace('"', '""') + '"'
         grants = [
@@ -98,7 +110,7 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
             f"GRANT SELECT ON memory_pack_installs, hub_memory_packs, hub_memory_pack_versions TO {role}",
         ]
         for statement in grants:
-            await conn.execute(statement)  # type: ignore[arg-type]
+            await conn.execute(statement)  # pyrefly: ignore[no-matching-overload]
         return True
 
 

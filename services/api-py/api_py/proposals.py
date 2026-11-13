@@ -137,7 +137,7 @@ async def list_proposals(
     if experiment is not None:
         where += " AND p.experiment_id = %(experiment)s"
     cur = await conn.execute(
-        f"{_SELECT} {where} ORDER BY p.updated_at DESC, p.id LIMIT %(limit)s",  # type: ignore[arg-type]
+        f"{_SELECT} {where} ORDER BY p.updated_at DESC, p.id LIMIT %(limit)s",
         {
             "user": user_id,
             "ws": workspace_id,
@@ -156,7 +156,7 @@ async def get(
     if not is_uuid(proposal_id):
         return None
     cur = await conn.execute(
-        f"{_SELECT} AND p.id = %(id)s",  # type: ignore[arg-type]
+        f"{_SELECT} AND p.id = %(id)s",
         {"user": user_id, "ws": workspace_id, "id": proposal_id},
     )
     row = await cur.fetchone()
@@ -191,7 +191,7 @@ async def propose(
     ws = storage.workspace_id
     if isinstance(content, bytes):
         sha256, size = sha256_hex(content), len(content)
-        await storage.blobs.put(sha256, content, mime)  # type: ignore[union-attr]
+        await storage.require_blobs().put(sha256, content, mime)
     else:
         sha256, size = content["sha256"], content["size"]
 
@@ -236,7 +236,7 @@ async def propose(
             WHERE workspace_id = %(ws)s AND node_id IS NOT DISTINCT FROM %(node)s::uuid
               AND path = %(path)s AND author_type = %(author)s AND author_id = %(author_id)s
               AND status = 'open'
-            RETURNING id""",  # type: ignore[arg-type]
+            RETURNING id""",  # pyrefly: ignore[bad-argument-type]
             {
                 **fields,
                 "ws": ws,
@@ -303,7 +303,7 @@ async def decide_in(
             version_id = CASE WHEN %(status)s = 'accepted' THEN (
               SELECT f.current_version_id FROM files f WHERE {_TARGET_FILE}) END
         WHERE p.id = %(id)s AND p.workspace_id = %(ws)s AND p.status = 'open'
-        RETURNING p.node_id, p.path, p.author_type, p.author_id""",  # type: ignore[arg-type]
+        RETURNING p.node_id, p.path, p.author_type, p.author_id""",
         {
             "status": status,
             "user": user_id,

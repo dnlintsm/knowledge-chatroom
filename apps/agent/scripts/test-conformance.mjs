@@ -69,8 +69,8 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     AGENT_PORT: String(port),
     // Full-text search is enough here; search by meaning has its own tests.
     EMBEDDING_MODEL: "off",
-    // api-py in front runs the search indexer (issue #190, step 5).
-    ...(apiPort && { SEARCH_INDEXER: "off" }),
+    // api-py in front runs the search indexer (issue #190, step 5) and applies the migrations (step 9).
+    ...(apiPort && { SEARCH_INDEXER: "off", MIGRATIONS: "off" }),
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "conformance-no-model-calls",
   },
   stdio: ["ignore", "inherit", "inherit"],
@@ -109,11 +109,13 @@ api?.once("error", (err) => {
 
 async function waitForStorage() {
   const end = Date.now() + 60_000;
+  // With api-py in front, the agent's own storage too: it opens once api-py has migrated.
+  const servers = apiPort ? [base, `http://127.0.0.1:${port}`] : [base];
   while (Date.now() < end && !agentExited) {
     // 401 once storage is up; 503 while it starts (502 from api-py before the
     // agent listens); no answer before the server listens.
-    const status = await fetch(`${base}/nodes`).then((r) => r.status, () => 0);
-    if (status === 401) return true;
+    const statuses = await Promise.all(servers.map((url) => fetch(`${url}/nodes`).then((r) => r.status, () => 0)));
+    if (statuses.every((status) => status === 401)) return true;
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;

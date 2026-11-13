@@ -39,8 +39,9 @@ SCHEMA_POLL_SECONDS = 2.0
 async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
     """
     Opens the storage routes moved to Python once the database has exactly the
-    migrations this server knows (the TypeScript server applies them). Returns
-    whether they are served; until then they pass through to the TypeScript server.
+    migrations this server knows, applying them first (unless MIGRATIONS=off:
+    then the TypeScript server does). Returns whether they are served; until
+    then they pass through to the TypeScript server.
     """
     if app.state.storage is not None:
         return True
@@ -49,16 +50,25 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             return True
         try:
             found = await db.schema(pool, settings.migrations_dir)
-        except Exception as err:  # noqa: BLE001 - a database that is down is reported, not fatal
+        except Exception as err:  # A database that is down is reported, not fatal.
             app.state.schema = None
             logger.warning("can't read the database's migrations yet: %s", err)
             return False
+        if found.state is db.SchemaState.BEHIND and settings.migrations:
+            try:
+                applied = await db.migrate(pool, settings.migrations_dir)
+                found = await db.schema(pool, settings.migrations_dir)
+            except Exception as err:  # Reported and tried again, as the database may be down.
+                logger.error("couldn't apply the migrations: %s", err)
+                return False
+            if applied:
+                logger.info("applied migrations: %s", ", ".join(applied))
         app.state.schema = found
         if found.state is not db.SchemaState.READY:
             return False
         try:
             storage = await open_storage(pool, settings.s3)
-        except Exception as err:  # noqa: BLE001 - tried again, as the database may still be settling
+        except Exception as err:  # Try again while the database may still be settling.
             logger.warning("can't open storage yet: %s", err)
             return False
         _start_search(app, storage, settings)
@@ -170,7 +180,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             app.state.pool = pool
             try:
                 found = await db.schema(pool, settings.migrations_dir)
-            except Exception as err:  # noqa: BLE001 - not up yet: /health says so until it is
+            except Exception as err:  # /health reports the database is not ready.
                 logger.warning("can't read the database's migrations yet: %s", err)
                 found = None
             if found and found.state is db.SchemaState.AHEAD:
@@ -182,7 +192,10 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             app.state.schema = found
             if found and found.state is not db.SchemaState.READY:
                 logger.info(
-                    "waiting for the TypeScript server to apply %s", ", ".join(found.missing)
+                    "applying %s"
+                    if settings.migrations
+                    else "waiting for the TypeScript server to apply %s",
+                    ", ".join(found.missing),
                 )
             watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
         try:

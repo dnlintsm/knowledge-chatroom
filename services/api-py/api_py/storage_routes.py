@@ -76,8 +76,8 @@
     Chats are their user's alone (017_chats.sql): workspace owners don't see
     them, and storage tokens can't reach them.
 
-Until the database has the migrations this server knows (the TypeScript
-server applies them as it starts), these pass through to the TypeScript
+Until the database has the migrations this server knows (db.py applies them
+as it starts), these pass through to the TypeScript
 server, which answers as it does while storage starts or when it is off.
 Paths are read as sent: each segment is percent-decoded on its own, so a %2F
 stays inside its segment, as the TypeScript server reads them.
@@ -202,7 +202,7 @@ def _js_int(text: str) -> int | float | None:
     if abs(value) < 2**53:
         return int(text)
     # The digits JSON.stringify would send on, e.g. 12345678901234567000.
-    return value if abs(value) >= 1e21 else int(js_number(value))  # type: ignore[return-value]
+    return value if abs(value) >= 1e21 else int(js_number(value))
 
 
 def _js_float(text: str) -> float | None:
@@ -510,7 +510,7 @@ async def handle_nodes(request: Request, session: Session) -> Response:
             parent_id = optional_id(body.get("parentId")) if body else None
             if not body or not isinstance(body.get("name"), str) or parent_id is False:
                 return error(400, "Expected {parentId: string | null, name: string}")
-            return json_response(201, await session.create_node(parent_id, body["name"]))  # type: ignore[arg-type]
+            return json_response(201, await session.create_node(parent_id, body["name"]))  # pyrefly: ignore[bad-argument-type]
         return error(405, "Method not allowed")
 
     if method == "GET":
@@ -563,7 +563,7 @@ async def handle_access(request: Request, session: Session) -> Response:
                     return error(400, "Expected {parentId: string | null, name: string}")
                 return json_response(
                     201,
-                    {"id": await session.create_group(parent_id, body["name"])},  # type: ignore[arg-type]
+                    {"id": await session.create_group(parent_id, body["name"])},  # pyrefly: ignore[bad-argument-type]
                 )
         elif not sub:
             if method == "PATCH":
@@ -596,7 +596,7 @@ async def handle_access(request: Request, session: Session) -> Response:
                     'Expected {node: string | null, principalType: "user" | "group", principalId, role}',
                 )
             grant_id = await session.set_grant(
-                node,  # type: ignore[arg-type]
+                node,  # pyrefly: ignore[bad-argument-type]
                 body["principalType"],
                 body["principalId"],
                 body["role"],
@@ -652,7 +652,7 @@ async def handle_files(request: Request, session: Session) -> Response:
         # Text stays here, since the UI fetches it from this origin.
         info = await files.stat(path)
         if info and not is_text_file(info["path"], info["mime"]):
-            link = await session.storage.blobs.download_url(  # type: ignore[union-attr]
+            link = await session.storage.require_blobs().download_url(
                 info["sha256"], info["mime"], info["path"].split("/")[-1]
             )
             if link:
@@ -1082,7 +1082,7 @@ async def watch(session: Session) -> Response:
     gets a normal error answer.
     """
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    unsubscribe = await session.storage.events.subscribe(queue.put_nowait)  # type: ignore[union-attr]
+    unsubscribe = await session.storage.require_events().subscribe(queue.put_nowait)
 
     async def stream():
         loop = asyncio.get_running_loop()
