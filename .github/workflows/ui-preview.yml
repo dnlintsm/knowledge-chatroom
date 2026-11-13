@@ -251,8 +251,10 @@ jobs:
   # base branch. Forks get a read-only token, so they only get the artifacts.
   publish:
     needs: [changes, e2e-browser, e2e-storage, e2e-python]
+    # !cancelled(), not always(): a run superseded by a newer push must not
+    # overwrite the newer run's images and comment.
     if: >-
-      always() && github.event_name == 'pull_request' && github.event.action != 'closed'
+      !cancelled() && github.event_name == 'pull_request' && github.event.action != 'closed'
       && github.event.pull_request.head.repo.full_name == github.repository
       && needs.changes.result == 'success'
       && (needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true')
