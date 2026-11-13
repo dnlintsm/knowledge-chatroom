@@ -9,6 +9,26 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from typing_extensions import TypeAliasType
 
+WorkspaceRole = TypeAliasType("WorkspaceRole", Literal["owner", "admin", "member"])
+
+
+class Workspace(BaseModel):
+    id: str
+    """
+    The immutable id that selectors and tokens carry.
+    """
+    slug: str
+    """
+    For page URLs (/w/<slug>/); it can change.
+    """
+    name: str
+    role: WorkspaceRole
+
+
+class AlreadyMember(BaseModel):
+    error: str
+    role: WorkspaceRole
+
 
 class Error(BaseModel):
     error: str
@@ -1150,6 +1170,42 @@ class SaveChatRunRequest(BaseModel):
     """
 
 
+class ListWorkspacesResponse(BaseModel):
+    workspaces: list[Workspace]
+
+
+Level = TypeAliasType("Level", Annotated[str, Field(min_length=1)])
+
+
+class CreateWorkspaceRequest(BaseModel):
+    name: Annotated[str, Field(max_length=200, min_length=1)]
+    levels: Annotated[list[Level] | None, Field(max_length=10)] = None
+
+
+class AddWorkspaceMemberRequest(BaseModel):
+    userId: str
+    role: Literal["member", "admin"]
+    access: Literal["none", "viewer", "editor"] | None = None
+
+
+class Member(BaseModel):
+    id: str
+    role: WorkspaceRole
+
+
+class AddWorkspaceMemberResponse(BaseModel):
+    member: Member
+
+
+class User1(BaseModel):
+    id: str
+    name: str | None
+
+
+class LookUpWorkspaceUserResponse(BaseModel):
+    user: User1
+
+
 class GetMyAccessResponse(BaseModel):
     me: User | None
     rootRole: RoleOrNull
@@ -1585,6 +1641,18 @@ class CallMemoryToolResponse(BaseModel):
     """
 
 
+class WorkspaceMember(BaseModel):
+    id: str
+    name: str | None
+    role: WorkspaceRole
+    email: str | None = None
+    """
+    For Owners and Admins only.
+    """
+    createdAt: Timestamp | None = None
+    lastSeenAt: Timestamp | None = None
+
+
 class RunSkill(BaseModel):
     name: str
     mode: Literal["auto", "manual"]
@@ -1601,6 +1669,10 @@ class RunSkill(BaseModel):
     It ships scripts, which run only with SKILL_SCRIPTS=on on this server.
     """
     files: list[RunSkillFile]
+
+
+class ListWorkspaceMembersResponse(BaseModel):
+    members: list[WorkspaceMember]
 
 
 class RunSkillsResponse(BaseModel):

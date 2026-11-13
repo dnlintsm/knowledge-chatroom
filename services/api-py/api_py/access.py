@@ -6,6 +6,7 @@ Python side, with the same queries, so both servers answer alike.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import time
@@ -62,6 +63,15 @@ class Principal:
     user_id: str
     actor: Literal["user", "agent"] = "user"
     via: str | None = None
+    # The workspace a token is bound to: its `ws` claim, or LEGACY_TOKEN for a
+    # token minted without one (the default workspace). None for a signed-in
+    # user, whose request chooses (workspaces.py).
+    bound_ws: str | None = None
+
+
+# A storage or memory token without a `ws` claim: bound to the default workspace
+# until the compatibility cut-off (docs/workspaces.md, "Legacy tokens").
+LEGACY_TOKEN = "legacy:default"
 
 
 class ForbiddenError(Exception):
@@ -98,6 +108,12 @@ class AccessService:
         self._local_user: str | None = None
         self._subjects: dict[str, tuple[str, float]] = {}
 
+    def in_workspace(self, workspace_id: str) -> AccessService:
+        """The same service for another workspace, sharing the users it knows already."""
+        view = copy.copy(self)
+        view.workspace_id = workspace_id
+        return view
+
     async def local_user_id(self) -> str:
         """The built-in user of a deployment without login."""
         if self._local_user is None:
@@ -114,8 +130,9 @@ class AccessService:
     ) -> str:
         """
         The user for a login identity, created on first sight. Name and email
-        follow the provider. The first user to sign in to a workspace that only
-        the local user owns becomes its owner, so a new deployment can be set up.
+        follow the provider. The first user to sign in to the default workspace
+        before any signed-in owner becomes its owner, once, so a new deployment
+        can be set up; signing in never joins another workspace.
         """
         cached = self._subjects.get(subject)
         if cached:
@@ -142,21 +159,9 @@ class AccessService:
             )
             (user_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             user_id = str(user_id)
-            # Serialize first sign-ins so exactly one becomes the owner.
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))"
-            )
-            await conn.execute(
-                """
-                INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
-                SELECT %(ws)s, NULL, 'user', %(user)s, 'owner'
-                WHERE NOT EXISTS (
-                  SELECT 1 FROM grants g JOIN users u ON u.id = g.principal_id
-                  WHERE g.workspace_id = %(ws)s AND g.principal_type = 'user'
-                    AND g.role = 'owner' AND u.subject <> 'local')
-                ON CONFLICT DO NOTHING""",
-                {"ws": self.workspace_id, "user": user_id},
-            )
+            # The one-time owner bootstrap and the default workspace's open
+            # membership (023_workspace_members.sql), as userForSubject in access.ts.
+            await conn.execute("SELECT sign_in_memberships(%s)", (user_id,))
         self._subjects[subject] = (user_id, time.monotonic())
         return user_id
 
@@ -165,11 +170,21 @@ class AccessService:
         if node_id is not None and not is_uuid(node_id):
             return None
         async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT effective_role(%s, %s, %s::uuid)", (self.workspace_id, user_id, node_id)
-            )
+            if node_id is None:
+                cur = await conn.execute(
+                    "SELECT effective_role(%s, %s, NULL)", (self.workspace_id, user_id)
+                )
+            else:
+                # Only a node of this workspace: a root grant here says nothing
+                # about another workspace's nodes.
+                cur = await conn.execute(
+                    "SELECT effective_role(workspace_id, %s, id) FROM nodes WHERE id = %s AND workspace_id = %s",
+                    (user_id, node_id, self.workspace_id),
+                )
             row = await cur.fetchone()
         if row is None:
+            if node_id is not None:
+                return None
             raise RuntimeError("effective_role query returned no row")
         return _checked_role(row[0])
 
@@ -240,15 +255,20 @@ class AccessService:
         return {**row, "id": str(row["id"])} if row else None
 
     async def users(self) -> list[dict[str, Any]]:
+        """The workspace's members (workspace_members), not everyone who has signed in."""
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
-                "SELECT id, subject, email, name FROM users ORDER BY coalesce(name, email, subject)"
+                """
+                SELECT u.id, u.subject, u.email, u.name
+                FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = %s
+                ORDER BY coalesce(u.name, u.email, u.subject)""",
+                (self.workspace_id,),
             )
             return [{**row, "id": str(row["id"])} for row in await cur.fetchall()]
 
     async def people(self) -> list[dict[str, Any]]:
-        """Everyone who has signed in, with their workspace role and groups; not the built-in local user."""
+        """The workspace's members, with their root role and groups; not the built-in local user."""
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
@@ -260,6 +280,7 @@ class AccessService:
                                  FROM group_members m JOIN groups gr ON gr.id = m.group_id
                                  WHERE m.user_id = u.id AND gr.workspace_id = %(ws)s), '{}') AS group_ids
                 FROM users u
+                JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = %(ws)s
                 LEFT JOIN grants g ON g.workspace_id = %(ws)s AND g.node_id IS NULL
                   AND g.principal_type = 'user' AND g.principal_id = u.id
                 WHERE u.subject <> 'local'
@@ -367,6 +388,7 @@ class AccessService:
                 if not await cur.fetchone():
                     return False
                 if member:
+                    await self._need_member(conn, user_id)
                     cur = await conn.execute(
                         "INSERT INTO group_members (group_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (group_id, user_id),
@@ -439,6 +461,8 @@ class AccessService:
                     )
                 if not await cur.fetchone():
                     raise AccessError(f"Unknown {principal_type}")
+                if principal_type == "user":
+                    await self._need_member(conn, principal_id)
                 await self._keep_an_owner(conn, node_id, principal_type, principal_id, role)
                 cur = await conn.execute(
                     """
@@ -471,6 +495,15 @@ class AccessService:
             await conn.execute("DELETE FROM grants WHERE id = %s", (grant_id,))
             await in_tx(conn)
             return True
+
+    async def _need_member(self, conn: AsyncConnection, user_id: str) -> None:
+        """Grants and groups are for the workspace's members: add someone to the workspace first."""
+        cur = await conn.execute(
+            "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (self.workspace_id, user_id),
+        )
+        if not await cur.fetchone():
+            raise AccessError("They aren't a member of this workspace; add them to it first")
 
     async def _keep_an_owner(
         self,

@@ -58,6 +58,7 @@ from .skills import (
     UnknownSkillError,
     parse_admins,
 )
+from .storage import Storage
 from .storage_routes import (
     ALL_METHODS,
     MAX_JSON_BYTES,
@@ -68,6 +69,7 @@ from .storage_routes import (
     raw_path,
     read_body,
 )
+from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -80,16 +82,24 @@ def send(status: int, body: Any) -> JSONResponse:
     return JSONResponse(body, status_code=status, headers=_NO_STORE)
 
 
-def services(request: Request) -> tuple[SkillService, SkillHub]:
-    """This server's skill service and hub, made with storage (the blob cache lives as long as they do)."""
+def services(request: Request, storage: Storage | None = None) -> tuple[SkillService, SkillHub]:
+    """
+    This server's skill service and hub for a workspace's storage (the default
+    one's unless given), made once per workspace: the blob cache lives as long
+    as they do.
+    """
     state = request.app.state
-    made = getattr(state, "skills", None)
-    if made is None or made[0].storage is not state.storage:
+    storage = storage or state.storage
+    made_for = getattr(state, "skills", None)
+    if made_for is None or made_for[0] is not state.storage:
+        made_for = state.skills = (state.storage, {})
+    made = made_for[1].get(storage.workspace_id)
+    if made is None:
         settings = state.settings
-        service = SkillService(state.storage, settings.builtin_skills_dir, settings.skill_scripts)
-        made = state.skills = (
+        service = SkillService(storage, settings.builtin_skills_dir, settings.skill_scripts)
+        made = made_for[1][storage.workspace_id] = (
             service,
-            SkillHub(state.storage, service, parse_admins(settings.hub_admins)),
+            SkillHub(storage, service, parse_admins(settings.hub_admins)),
         )
     return made
 
@@ -196,6 +206,9 @@ async def skills_route(request: Request) -> Response:
         )
         if principal is None:
             return send(401, {"error": "Sign in first"})
+        ws, _ = await resolve(
+            request, request.app.state.workspaces, principal.user_id, principal.bound_ws
+        )
         try:
             parts = [
                 decode_component(p)
@@ -206,9 +219,11 @@ async def skills_route(request: Request) -> Response:
             return send(400, {"error": "Invalid skill name"})
         if len(parts) > 2:
             return send(404, {"error": "Not found"})
-        skills, hub = services(request)
+        skills, hub = services(request, storage.in_workspace(ws))
         route = route_hub if is_hub else route_skills
         return await route(request, skills, hub, principal.user_id, parts)
+    except WorkspaceError as err:
+        return send(err.status, {"error": str(err)})
     except (InvalidModeError, HubError) as err:
         return send(400, {"error": str(err)})
     except (UnknownSkillError, HubNotFoundError) as err:

@@ -148,9 +148,8 @@ async def propose_changes(
 
 
 _DUE = """
-    SELECT c.id, c.user_id, c.last_run_at::text AS last_run_at FROM chats c
-    WHERE c.workspace_id = %s
-      AND c.last_run_at IS NOT NULL
+    SELECT c.id, c.user_id, c.workspace_id, c.last_run_at::text AS last_run_at FROM chats c
+    WHERE c.last_run_at IS NOT NULL
       AND c.last_run_at < now() - %s * interval '1 minute'
       AND c.last_run_at > now() - %s * interval '1 day'
       AND NOT EXISTS (SELECT 1 FROM memory_learned_chats l WHERE l.chat_id = c.id AND l.through >= c.last_run_at)
@@ -204,10 +203,10 @@ class MemoryLearner:
         if not s:
             return []
         async with s.pool.connection() as conn:
-            cur = await conn.execute(_DUE, (s.workspace_id, self.idle, LOOKBACK_DAYS, limit))
+            cur = await conn.execute(_DUE, (self.idle, LOOKBACK_DAYS, limit))
             return [
-                {"id": id_, "user_id": str(user), "last_run_at": at}
-                for id_, user, at in await cur.fetchall()
+                {"id": id_, "user_id": str(user), "workspace_id": str(ws), "last_run_at": at}
+                for id_, user, ws, at in await cur.fetchall()
             ]
 
     async def sweep(self) -> int:
@@ -251,13 +250,15 @@ class MemoryLearner:
         if not s:
             return {"made": 0, "proposed": 0}
         user = chat["user_id"]
+        # In the chat's own workspace (a chat lives in one, issue #226).
+        s = s.in_workspace(chat.get("workspace_id") or s.workspace_id)
         session = Session(s, s.access, Principal(user_id=user))
         memory = MemoryService(session.scoped, s.workspace_id, user)
         made = proposed = 0
         error: str | None = None
         try:
             async with session.scoped() as conn:
-                found = await get_chat(conn, user, chat["id"])
+                found = await get_chat(conn, s.workspace_id, user, chat["id"])
             mode = (await memory.settings(chat["id"]))["mode"]
             if found and mode != "off":
                 notes, versions = await memory.notes_for_learning()

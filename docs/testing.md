@@ -87,7 +87,8 @@ integration does not fall back to `DATABASE_URL`.
 database and starts the agent on it with a throwaway `AUTH_SECRET`. In front of the agent
 it starts the Python API server (`services/api-py`, which needs uv), as `pnpm dev` does.
 Then it runs `packages/contracts/conformance/storage.test.ts` through the API server
-(`CONFORMANCE_TARGET=ts` runs it against the agent alone). That suite calls every operation in
+(`CONFORMANCE_TARGET=ts` runs it against the agent alone, which doesn't serve `/workspaces`
+or other workspaces, so those tests fail there). That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
 operation was never called. It only speaks HTTP, so it can check any backend that
@@ -98,12 +99,13 @@ workspace owner, with `HUB_ADMINS=conformance|alice`, since that user also moder
 the skill hub and memory packs, and with `MEMORY=on` (and `MEMORY_LEARN=off`). When you add or change a route, add its calls there too.
 
 After it, in the same run, `packages/contracts/conformance/workspaces.test.ts` checks workspace
-isolation against [the workspace design](workspaces.md) (issue #226). Its "today's rules"
-tests pass now: Viewer workflows, draft visibility, grants rechecked for tokens, and per-event
-filtering of `?watch`. Its multi-workspace tests are marked `todo` until the work that makes
-them pass lands: node:test runs them and lists them under `# todo` without failing the run.
-A PR that makes one pass removes its `todo`, so from then on it fails the run like any other
-test. It relies on storage.test.ts's owner (`CONFORMANCE_OWNER`, default `conformance|alice`),
+isolation against [the workspace design](workspaces.md) (issue #226): Viewer workflows,
+draft visibility, grants rechecked for tokens, per-event filtering of `?watch`, and two
+workspaces with two users across every surface. A test marked `todo` waits for work that
+hasn't landed: node:test runs it and lists it under `# todo` without failing the run. A PR
+that makes one pass removes its `todo`, so from then on it fails the run like any other
+test. The backfill and the one-time owner bootstrap need the database before and after the
+migration, so they are in `services/api-py/tests/test_workspaces.py`. It relies on storage.test.ts's owner (`CONFORMANCE_OWNER`, default `conformance|alice`),
 so run the two files in that order.
 
 With `CONFORMANCE_SAMPLES=<file>` the suite also writes every request and answer that

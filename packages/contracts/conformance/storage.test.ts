@@ -220,6 +220,28 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     bobId = users.data.users.find((u) => u.subject === "conformance|bob")!.id;
   });
 
+  step("workspaces", async () => {
+    // Every operation once; the isolation rules are in workspaces.test.ts.
+    const mine = await call<{ workspaces: Schema["Workspace"][] }>("GET", "/workspaces", { headers: alice, expect: 200 });
+    const defaultWs = mine.data.workspaces.find((w) => w.slug === "default")!;
+    assert.equal(defaultWs.role, "owner");
+    await call("GET", `/workspaces/${defaultWs.id}`, { headers: alice, expect: 200 });
+    const lab = (await call<Schema["Workspace"]>("POST", "/workspaces", { headers: alice, json: { name: `Lab ${stamp}` }, expect: 201 })).data;
+    await call("POST", "/workspaces", { headers: alice, json: { name: "" }, expect: 400 });
+    const found = await call<{ user: { id: string } }>("GET", `/workspaces/${lab.id}/lookup?email=BOB@example.com`, { headers: alice, expect: 200 });
+    assert.equal(found.data.user.id, bobId);
+    await call("GET", `/workspaces/${lab.id}/lookup?email=nobody@example.com`, { headers: alice, expect: 404 });
+    await call("POST", `/workspaces/${lab.id}/members`, { headers: alice, json: { userId: bobId, role: "member", access: "none" }, expect: 201 });
+    await call("POST", `/workspaces/${lab.id}/members`, { headers: alice, json: { userId: bobId, role: "admin" }, expect: 409 });
+    await call("POST", `/workspaces/${lab.id}/members`, { headers: alice, json: { userId: bobId, role: "owner" }, expect: 400 });
+    await call("GET", `/workspaces/${lab.id}/members`, { headers: alice, expect: 200 });
+    await call("GET", `/workspaces/${lab.id}/members`, { headers: bob, expect: 200 });
+    await call("GET", `/workspaces/${lab.id}/lookup?email=alice@example.com`, { headers: bob, expect: 403 });
+    await call("GET", "/workspaces/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
+    await call("GET", "/workspaces", { headers: storageToken("conformance|alice"), expect: 403 });
+    await call("GET", "/workspaces", { expect: 401 });
+  });
+
   step("knowledge nodes", async () => {
     tech = (await call<Schema["KnowledgeNode"]>("POST", "/nodes", { headers: alice, json: { parentId: null, name: `Tech ${stamp}` }, expect: 201 })).data;
     mod = (await call<Schema["KnowledgeNode"]>("POST", "/nodes", { headers: alice, json: { parentId: tech.id, name: "Module" }, expect: 201 })).data;
