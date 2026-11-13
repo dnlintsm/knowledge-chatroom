@@ -167,8 +167,9 @@ successful checks before merging and for preview-step limits.
 - `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
   including the cached real embedding-model test (`EMBEDDING_TEST=1`), then the storage
   API conformance suite against the running agent.
-- `ui-preview.yml`: the `preview` job: production build, explicit browser/storage/login
-  runs, artifacts and the combined outcome in the preview comment.
+- `ui-preview.yml`: browser, storage + login, and Python agent E2E in parallel jobs,
+  gated by the required `preview` job; then `publish` (not required) makes the GIF,
+  uploads the images and updates the preview comment. See [CI merge gates](ci.md).
 - `docker.yml`: checks the compose file and builds the demo images, one job per
   image, for the images a change can affect. `scripts/docker-changes.mjs` maps each
   path to the images whose Dockerfile copies it (a path without a rule builds every
