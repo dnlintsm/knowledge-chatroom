@@ -172,8 +172,11 @@ successful checks before merging and for preview-step limits.
 - `docker.yml`: checks the compose file and builds the demo images, one job per
   image, for the images a change can affect. `scripts/docker-changes.mjs` maps each
   path to the images whose Dockerfile copies it (a path without a rule builds every
-  image); add a rule and a case in `tests/unit/docker-changes.spec.ts` when an image
-  starts copying something new. Not a required check.
+  image). The Dockerfiles copy only named folders, never the whole repository, so the
+  map can match them exactly. That fallback doesn't cover a new file under a folder
+  that already has a rule, so when a Dockerfile starts copying something new, update
+  the map and `tests/unit/docker-changes.spec.ts` in the same change. Not a required
+  check.
 
 Inspect the first failed assertion and retained trace, not just the screenshot.
 Check test counts and skips in the list/TAP output. A prerequisite failure must

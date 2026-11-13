@@ -9,12 +9,17 @@
 // and a diff that cannot be computed also build everything.
 //
 // The rules follow what each Dockerfile copies:
-// - app (Dockerfile, target app): `COPY . .`, then `next build` of apps/web.
+// - app (Dockerfile, target app): the pnpm manifests, packages/contracts, apps/web.
 // - agent (Dockerfile, target agent): the pnpm manifests, packages/contracts, apps/agent.
 // - api-py: the uv workspace, packages/knowledge-py, services/api-py, and from
 //   apps/agent the storage migrations and the skills.
 // - agent-py, lab-tools, papers-mcp: the uv workspace, packages/knowledge-py, their service.
 // `compose` is the `docker compose config` check of docker-compose.yml.
+//
+// The no-rule fallback only covers paths no rule matches. A file under a directory
+// that already has a rule (say apps/web/** or a skipped e2e/**) follows that rule,
+// so when a Dockerfile starts copying something new, add or move a rule here and a
+// case in tests/unit/docker-changes.spec.ts in the same change.
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { matches } from "./ci-changes.mjs";
