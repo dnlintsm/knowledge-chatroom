@@ -133,6 +133,7 @@ Start with the guide that matches what you want to do:
 | [Deployment](docs/deployment.md) | Production build, private agent routing, authentication, HTTPS, and storage |
 | [Remote agent backend](docs/remote-agent.md) | Using an agent from a separate backend (`AGENT_URL`): what it receives and must do |
 | [CI merge gates](docs/ci.md) | The checks required before a PR merges, and preview limits |
+| [Workspaces (design)](docs/workspaces.md) | Proposed: multiple workspaces, membership roles, the operation matrix, and isolation |
 
 Two examples show how to bring outside tools in as MCP servers:
 [Python agent](examples/python-agent/README.md) (an existing agent's tools and prompt) and
