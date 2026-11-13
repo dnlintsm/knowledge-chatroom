@@ -5,7 +5,7 @@ import { MemoryLearner } from "./learn";
 type Chat = Awaited<ReturnType<MemoryLearner["due"]>>[number];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const chat = (id: string, user: string): Chat => ({ id, user_id: user, last_run_at: new Date().toISOString() });
+const chat = (id: string, user: string): Chat => ({ id, workspace_id: "default", user_id: user, last_run_at: new Date().toISOString() });
 
 test("MemoryLearner.sweep learns from different users' chats at the same time", async () => {
   const learner = new MemoryLearner(() => null as never);

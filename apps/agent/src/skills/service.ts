@@ -81,6 +81,14 @@ export class SkillService {
     private readonly builtins: () => Skill[] = builtinSkills,
   ) {}
 
+  /**
+   * This service acting in `storage`'s workspace (issue #226), sharing its
+   * caches: the run's skills and settings come from the run's workspace.
+   */
+  inWorkspace(storage: Storage): SkillService {
+    return Object.assign(Object.create(SkillService.prototype) as SkillService, this, { storage: () => storage });
+  }
+
   /** Every skill the user can see, with its modes (with `threadId`, that chat's too). */
   async list(userId: string | null, threadId?: string): Promise<SkillList> {
     const [skills, layers, role] = await Promise.all([

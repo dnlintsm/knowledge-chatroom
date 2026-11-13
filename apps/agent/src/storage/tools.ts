@@ -215,6 +215,10 @@ export function createFileTools(
     try {
       const userId = await user(current);
       if (!userId) return error("The user is not signed in, so the workspace is unavailable.");
+      // Each call checks membership again, as content access already is (issue #226).
+      if (!(await current.access.membership(userId))) {
+        return error("The user is no longer a member of this workspace, so it is unavailable.");
+      }
       const principal: Principal = { userId, actor: "agent" };
       return await fn(current.session(principal));
     } catch (err) {

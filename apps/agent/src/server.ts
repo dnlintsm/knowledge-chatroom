@@ -36,6 +36,7 @@ import { storageConfigFromEnv } from "./storage/config";
 import { createStorageHandler } from "./storage/http";
 import { clearWorkdir, syncWorkdir, workdirEnabled } from "./storage/workdir";
 import { IDENTITY_HEADER, identify, localMemoryToken, signIdentity, verifyIdentity } from "./storage/identity";
+import { namedSelectors, NOT_FOUND, resolveWorkspace, WorkspaceError } from "./storage/workspaces";
 import { SkillHub } from "./skills/hub";
 import { createSkillsHandler } from "./skills/http";
 import { createMemoryHandler } from "./memory/http";
@@ -96,7 +97,7 @@ const handleMemory = createMemoryHandler(currentStorage, storageState);
 // Learns from chats once they go quiet (MEMORY=on, storage; ./memory/learn.ts).
 if (storageConfig && learningEnabled()) new MemoryLearner(currentStorage).start();
 
-/** The run's skills: built-in ones, plus the workspace's when storage is up, in this chat's modes. */
+/** The run's skills: built-in ones, plus the run's workspace's when storage is up, in this chat's modes. */
 async function prepareSkills(
   storage: Storage | null,
   userId: string | null | undefined,
@@ -106,7 +107,10 @@ async function prepareSkills(
   if (storage && !userId) return null;
   const owner = storage ? userId! : null;
   try {
-    const run = await materialize(owner ?? "local", await skills.forRun(owner, threadId));
+    // A run folder per user and workspace (issue #226): skills and the working copy differ by workspace.
+    const folder = storage ? `${owner}@${storage.workspaceId}` : "local";
+    const service = storage ? skills.inWorkspace(storage) : skills;
+    const run = await materialize(folder, await service.forRun(owner, threadId));
     // Scripts run with a stand-in key; without the proxy, the run has no Bash.
     if (scriptsEnabled() && run.skills.some((s) => s.skill.needsExecution)) {
       run.keys = await keyRoute().catch((err) => {
@@ -148,17 +152,21 @@ function signedIn(req: http.IncomingMessage, res: http.ServerResponse): boolean 
  * server can't use it against the agent. storageAccess: a storage token via
  * "mcp:<server>", which only the storage API takes. memoryAccess: a memory
  * token for this chat, when the run has memory (`memory`), which only
- * /memory/agent takes. The app's header expires in minutes, so these last as
- * long as a run may. Without login only the memory token, unsigned.
+ * /memory/agent takes. Both are bound to the run's workspace (`ws`). The app's
+ * header expires in minutes, so these last as long as a run may. Without login
+ * only the memory token, unsigned.
  */
 function identityForTools(
   req: http.IncomingMessage,
   memory: { thread: string; node: string | null } | null,
+  /** The run's workspace, which storage and memory tokens are bound to (issue #226). */
+  workspace: string | null = null,
 ): RunTokens | undefined {
   const secret = authSecret;
+  const ws = workspace ? { ws: workspace } : {};
   if (!secret) {
     return (server, kind = "identity") =>
-      kind === "memory" && memory ? localMemoryToken({ via: `mcp:${server}`, ...memory }) : null;
+      kind === "memory" && memory ? localMemoryToken({ via: `mcp:${server}`, ...memory, ...ws }) : null;
   }
   const header = req.headers[IDENTITY_HEADER];
   const identity = typeof header === "string" ? verifyIdentity(header, secret) : null;
@@ -169,11 +177,11 @@ function identityForTools(
     const via = `mcp:${server}`;
     if (kind === "memory") {
       return memory
-        ? signIdentity({ ...user, aud: MEMORY_AUDIENCE, via, ...memory, exp: now + STORAGE_TOKEN_SECONDS }, secret)
+        ? signIdentity({ ...user, aud: MEMORY_AUDIENCE, via, ...memory, ...ws, exp: now + STORAGE_TOKEN_SECONDS }, secret)
         : null;
     }
     return kind === "storage"
-      ? signIdentity({ ...user, aud: STORAGE_AUDIENCE, via, exp: now + STORAGE_TOKEN_SECONDS }, secret)
+      ? signIdentity({ ...user, aud: STORAGE_AUDIENCE, via, ...ws, exp: now + STORAGE_TOKEN_SECONDS }, secret)
       : signIdentity({ ...user, aud: via, exp: now + TOOL_IDENTITY_SECONDS }, secret);
   };
 }
@@ -290,7 +298,7 @@ const server = http.createServer(async (req, res) => {
     if (!signedIn(req, res)) return;
     // Undefined while storage is still starting: the tools then decide when
     // called (the local user without login, nobody with it).
-    const storage = currentStorage();
+    let storage = currentStorage();
     let userId: string | null | undefined;
     if (storage) {
       try {
@@ -300,6 +308,30 @@ const server = http.createServer(async (req, res) => {
         userId = null;
       }
     }
+    // The run keeps the workspace it starts in (issue #226): its tools, skills,
+    // memory, working copy and tokens are all that workspace's.
+    const named = namedSelectors(req, url).length > 0;
+    if (named && !storage) {
+      res.writeHead(storageState() === "failed" ? 500 : 503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Storage is not available" }));
+      return;
+    }
+    if (storage && userId) {
+      try {
+        storage = (await resolveWorkspace(storage, req, url, userId)).storage;
+      } catch (err) {
+        if (!(err instanceof WorkspaceError)) throw err;
+        res.writeHead(err.status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    } else if (named) {
+      // Nobody to check membership for: no workspace either.
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: NOT_FOUND }));
+      return;
+    }
+    const runStorage = storage;
 
     const input = await readInput(req, res);
     if (!input) return;
@@ -329,7 +361,7 @@ const server = http.createServer(async (req, res) => {
     };
     const onSkillUse = (use: SkillUse) => {
       custom({ name: "skill_used", value: use });
-      void skills.record(storage ? (userId ?? null) : null, {
+      void (storage ? skills.inWorkspace(storage) : skills).record(storage ? (userId ?? null) : null, {
         threadId: input.threadId ?? "",
         runId: input.runId ?? "",
         ...use,
@@ -378,8 +410,13 @@ const server = http.createServer(async (req, res) => {
         }),
       runSkills,
       onSkillUse,
-      identityForTools(req, runMemory ? { thread: runMemory.run.threadId, node: runMemory.nodeId } : null),
+      identityForTools(
+        req,
+        runMemory ? { thread: runMemory.run.threadId, node: runMemory.nodeId } : null,
+        storage?.workspaceId ?? null,
+      ),
       runMemory,
+      runStorage ? () => runStorage : undefined,
     );
     return;
   }

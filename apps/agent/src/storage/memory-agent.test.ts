@@ -33,6 +33,7 @@ describe("memory for outside MCP servers", { skip: !TEST_DATABASE_URL && "TEST_D
   let shared: SharedMemoryService;
   let access: AccessService;
   let workspaceId: string;
+  let rowSecurity = false;
   let alice: string;
   let server: http.Server;
   let base: string;
@@ -42,10 +43,10 @@ describe("memory for outside MCP servers", { skip: !TEST_DATABASE_URL && "TEST_D
   const token = (claims: Record<string, unknown>) =>
     signIdentity({ sub: "test|alice", name: "Alice", aud: "memory", via: "mcp:lab", thread: "t-1", node: null, exp: exp(), ...claims } as never, SECRET);
 
-  const call = async (method: string, path: string, header: string | null, body?: unknown) => {
+  const call = async (method: string, path: string, header: string | null, body?: unknown, headers: Record<string, string> = {}) => {
     const res = await fetch(`${base}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(header ? { [MEMORY_HEADER]: header } : {}) },
+      headers: { "Content-Type": "application/json", ...(header ? { [MEMORY_HEADER]: header } : {}), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
@@ -58,7 +59,7 @@ describe("memory for outside MCP servers", { skip: !TEST_DATABASE_URL && "TEST_D
     await reset.end();
     sql = connect(TEST_DATABASE_URL!);
     await migrate(sql);
-    const rowSecurity = await prepareRowSecurity(sql);
+    rowSecurity = await prepareRowSecurity(sql);
     [{ id: workspaceId }] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
     memory = new MemoryService(sql, workspaceId, rowSecurity);
     shared = new SharedMemoryService(sql, workspaceId, rowSecurity);
@@ -68,15 +69,23 @@ describe("memory for outside MCP servers", { skip: !TEST_DATABASE_URL && "TEST_D
     await memory.save(alice, "reply-style", { description: "Short answers", type: "preference", body: "Lead with the result." }, "user");
 
     process.env.MEMORY = "on";
-    const storage = {
-      memory,
-      sharedMemory: shared,
-      memoryPacks: new MemoryPackHub(sql, workspaceId),
-      access,
-      get config() {
-        return { authSecret: secret };
-      },
-    } as unknown as Storage;
+    // Storage in one workspace, as initStorage's inWorkspace() builds it.
+    const inWorkspace = (id: string): Storage => {
+      const view = {
+        memory: id === workspaceId ? memory : new MemoryService(sql, id, rowSecurity),
+        sharedMemory: id === workspaceId ? shared : new SharedMemoryService(sql, id, rowSecurity),
+        memoryPacks: new MemoryPackHub(sql, id),
+        access: access.inWorkspace(id),
+        workspaceId: id,
+        defaultWorkspaceId: workspaceId,
+        inWorkspace: (other: string) => (other === workspaceId ? storage : inWorkspace(other)),
+        get config() {
+          return { authSecret: secret };
+        },
+      } as unknown as Storage;
+      return view;
+    };
+    const storage = inWorkspace(workspaceId);
     const handler = createMemoryHandler(() => storage, () => "ready");
     server = http.createServer((req, res) => void handler(req, res, new URL(req.url ?? "/", "http://x")));
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -139,6 +148,27 @@ describe("memory for outside MCP servers", { skip: !TEST_DATABASE_URL && "TEST_D
     assert.equal((await call("POST", "/memory/agent/tools/memory_search", token({}), { query: "short" })).status, 403);
     await memory.setMode(alice, "on");
     assert.equal((await call("POST", "/memory/agent/tools/memory_search", token({}), { query: "short" })).status, 200);
+  });
+
+  test("a token is bound to its run's workspace (issue #226)", async () => {
+    const [{ id: ws2 }] = await sql<{ id: string }[]>`
+      INSERT INTO workspaces (slug, name) VALUES ('memory-agent-second', 'Second') RETURNING id`;
+    await sql`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (${ws2}, ${alice}, 'member')`;
+    await new MemoryService(sql, ws2, rowSecurity).save(alice, "second-only", { description: "Second", type: "reference", body: "There." }, "user");
+
+    const there = await call("GET", "/memory/agent", token({ ws: ws2 }));
+    assert.equal(there.status, 200);
+    assert.match(String(there.body.prompt), /second-only/);
+    assert.doesNotMatch(String(there.body.prompt), /reply-style/);
+    const here = await call("GET", "/memory/agent", token({}));
+    assert.doesNotMatch(String(here.body.prompt), /second-only/, "a token without ws stays in the default workspace");
+
+    const ws2Header = { "X-Knowledge-Workspace": ws2 };
+    assert.equal((await call("GET", "/memory/agent", token({}), undefined, ws2Header)).status, 400, "a legacy token can't be pointed elsewhere");
+    assert.equal((await call("GET", "/memory/agent", token({ ws: ws2 }), undefined, ws2Header)).status, 200);
+    assert.equal((await call("GET", "/memory/agent", token({ ws: "00000000-0000-4000-8000-000000000000" }))).status, 404);
+    await sql`DELETE FROM workspace_members WHERE workspace_id = ${ws2} AND user_id = ${alice}`;
+    assert.equal((await call("GET", "/memory/agent", token({ ws: ws2 }))).status, 404, "not once she has left");
   });
 
   test("without login, the unsigned local token is the local user's", async () => {

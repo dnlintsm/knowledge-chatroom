@@ -38,8 +38,10 @@ export { ApiEmbedder, LocalEmbedder, SemanticIndex, type Embedder } from "./sema
 export interface Storage {
   config: StorageConfig;
   sql: Sql;
-  /** The one workspace this deployment serves. */
+  /** The workspace these services act in: the default one, or the one inWorkspace() named. */
   workspaceId: string;
+  /** The default workspace, which requests that name none use (docs/workspaces.md). */
+  defaultWorkspaceId: string;
   /** Files at the workspace root; .inNode(id) / .inExperiment(id) for others. */
   files: FileService;
   nodes: NodeService;
@@ -64,6 +66,13 @@ export interface Storage {
   rowSecurity: boolean;
   /** What `principal` may do; every API call and tool goes through one. */
   session(principal: Principal): Session;
+  /**
+   * The same storage acting in workspace `id` (issue #226): the services bound
+   * to it, sharing the connection pool, the object store and search by meaning.
+   * Doesn't check that the workspace exists or who belongs to it: resolve the
+   * workspace first (./workspaces.ts).
+   */
+  inWorkspace(id: string): Storage;
   close(): Promise<void>;
 }
 
@@ -99,46 +108,57 @@ export async function initStorage(
     const blobs = new S3BlobStore(config.s3);
     await blobs.ensureBucket();
 
-    // Login and access grants share the current single default workspace.
+    // Requests that name no workspace use the default one (docs/workspaces.md).
     const [ws] = await sql<{ id: string }[]>`SELECT id FROM workspaces WHERE slug = 'default'`;
     if (!ws) throw new Error("Workspace default not found");
-    const events = new EventHub(sql, ws.id);
-    const files = new FileService(sql, blobs, events, ws.id);
-    const nodes = new NodeService(sql, events, ws.id);
-    const experiments = new ExperimentService(sql, events, ws.id);
-    const access = new AccessService(sql, ws.id);
     const semantic = embedder && new SemanticIndex(sql, embedder);
-    const search = new SearchService(sql, blobs, ws.id, semantic);
-    const proposals = new ProposalService(sql, blobs, events, ws.id);
-    const chats = new ChatService(sql, ws.id, rowSecurity);
-    const memory = new MemoryService(sql, ws.id, rowSecurity);
-    const sharedMemory = new SharedMemoryService(sql, ws.id, rowSecurity);
-    const memoryPacks = new MemoryPackHub(sql, ws.id);
-    return {
-      config,
-      sql,
-      workspaceId: ws.id,
-      files,
-      nodes,
-      experiments,
-      access,
-      search,
-      proposals,
-      chats,
-      memory,
-      sharedMemory,
-      memoryPacks,
-      semantic,
-      events,
-      blobs,
-      rowSecurity,
-      session: (principal) =>
-        new Session({ files, nodes, experiments, access, search, proposals, sql, rowSecurity }, principal),
-      close: () => {
-        semantic?.stop();
-        return sql.end();
-      },
+    const access = new AccessService(sql, ws.id);
+    const views = new Map<string, Storage>();
+    const build = (id: string): Storage => {
+      const events = new EventHub(sql, id);
+      const files = new FileService(sql, blobs, events, id);
+      const nodes = new NodeService(sql, events, id);
+      const experiments = new ExperimentService(sql, events, id);
+      const scoped = access.inWorkspace(id);
+      const search = new SearchService(sql, blobs, id, semantic);
+      const proposals = new ProposalService(sql, blobs, events, id);
+      const view: Storage = {
+        config,
+        sql,
+        workspaceId: id,
+        defaultWorkspaceId: ws.id,
+        files,
+        nodes,
+        experiments,
+        access: scoped,
+        search,
+        proposals,
+        chats: new ChatService(sql, id, rowSecurity),
+        memory: new MemoryService(sql, id, rowSecurity),
+        sharedMemory: new SharedMemoryService(sql, id, rowSecurity),
+        memoryPacks: new MemoryPackHub(sql, id),
+        semantic,
+        events,
+        blobs,
+        rowSecurity,
+        session: (principal) =>
+          new Session({ files, nodes, experiments, access: scoped, search, proposals, sql, rowSecurity }, principal),
+        inWorkspace: (other) => {
+          const key = other.toLowerCase();
+          let found = views.get(key);
+          if (!found) views.set(key, (found = build(key)));
+          return found;
+        },
+        close: () => {
+          semantic?.stop();
+          return sql.end();
+        },
+      };
+      return view;
     };
+    const storage = build(ws.id);
+    views.set(ws.id, storage);
+    return storage;
   } catch (err) {
     await sql.end();
     throw err;

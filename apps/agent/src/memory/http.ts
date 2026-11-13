@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { identify, identifyMemory, REMOTE_VIA } from "../storage/identity";
+import { resolveWorkspace, WorkspaceError } from "../storage/workspaces";
 import type { Storage, StorageState } from "../storage";
 import {
   INDEX_CHARS,
@@ -312,9 +313,11 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
    * changes always wait in the inbox. Each answer lists the notes the call
    * read or changed (`events`), for the chat's "Used / Updated" line.
    */
-  async function agentRoute(req: IncomingMessage, res: ServerResponse, url: URL, s: Storage, parts: string[]) {
-    const grant = await identifyMemory(req, s);
+  async function agentRoute(req: IncomingMessage, res: ServerResponse, url: URL, base: Storage, parts: string[]) {
+    const grant = await identifyMemory(req, base);
     if (!grant) return send(res, 401, { error: "This needs the X-Knowledge-Memory token of a run (memoryAccess)" });
+    // The run's workspace, which the token is bound to (issue #226).
+    const { storage: s } = await resolveWorkspace(base, req, url, grant.userId, grant.ws);
     const chat = grant.via === REMOTE_VIA;
     const live = liveRunEvents(grant.thread);
     const events: MemoryEvent[] = [];
@@ -384,8 +387,10 @@ export function createMemoryHandler(storage: () => Storage | null, state: () => 
         return send(res, 400, { error: "Invalid memory name" });
       }
       if (parts.length > (parts[0] === "shared" ? 4 : 3)) return send(res, 404, { error: "Not found" });
-      return await route(req, res, url, s, principal.userId, parts);
+      const { storage: inWs } = await resolveWorkspace(s, req, url, principal.userId);
+      return await route(req, res, url, inWs, principal.userId, parts);
     } catch (err) {
+      if (err instanceof WorkspaceError) return send(res, err.status, { error: err.message });
       if (err instanceof MemoryError) return send(res, 400, { error: err.message });
       if (err instanceof MemoryNotFoundError) return send(res, 404, { error: err.message });
       if (err instanceof MemoryConflictError) return send(res, 409, { error: err.message });

@@ -2,10 +2,10 @@
 
 Status: **being built**, tracked in [#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), for the milestone in
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
-The backend in api-py is in (rollout step 4, below): memberships, the backfill and
-bootstrap, workspace creation, adding members, and the per-request workspace. The chat run
-on the TypeScript server still uses the default workspace (step 4b), and the app has no
-workspace screens yet (steps 5 and 6).
+The backend is in (rollout step 4, below): memberships, the backfill and bootstrap,
+workspace creation, adding members, the per-request workspace in api-py, and chat runs on
+the TypeScript server that keep their workspace. The app has no workspace screens yet
+(steps 5 and 6).
 
 This is the short spec and operation matrix that the milestone asks for before
 implementation. It covers creating, joining and switching workspaces, and the isolation that
@@ -393,15 +393,15 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 
 1. This spec.
 2. ~~Land #225, so api-py runs the migrations.~~ Done.
-3. ~~The tests above in the conformance suite, expected to fail at first.~~ Done: the
-   multi-workspace ones are marked `todo` until they pass.
+3. ~~The tests above in the conformance suite, expected to fail at first.~~ Done, and
+   all of them pass since step 4b.
 4. Backend: membership table and backfill, bootstrap change, per-request workspace and
    selectors, revalidation, events, search, member list and lookup, creator ownership,
-   audit redaction. Done in api-py. Still to do:
-   - 4b, the TypeScript agent: runs capture their workspace, tokens minted with `ws`, the
-     in-process tools and the working copy per workspace, and `/memory/agent` for outside
-     MCP servers. Until then api-py refuses (400) requests for other workspaces that it
-     would pass to that server, rather than let it serve them in the default workspace.
+   audit redaction. Done in api-py, and in the TypeScript agent (4b): runs keep their
+   workspace, tokens are minted with `ws`, the in-process tools check membership on
+   each call, the working copy is per user and workspace, and `/memory/agent` takes the
+   workspace from the token. Without api-py, that server serves its storage and skills
+   APIs for the default workspace only and refuses (400) the others.
 5. Frontend: `/w/<slug>` URLs and redirects, the shared request helper, saved state per
    workspace, switching.
 6. Screens: switcher, create, no-workspace onboarding, add member, no-access page.

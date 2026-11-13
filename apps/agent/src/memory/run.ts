@@ -24,6 +24,7 @@ import {
   type SharedMemoryService,
 } from "../storage/shared-memory";
 import type { ChatService } from "../storage/chats";
+import type { AccessService } from "../storage/access";
 import { recallFor, type MemoryRecall, type RecallHit } from "./recall";
 
 /**
@@ -74,6 +75,8 @@ export interface RunMemory {
   recall: MemoryRecall | null;
   /** The user's past chats, for chats_search and chats_read. */
   chats: ChatService | null;
+  /** The run's workspace: each call checks the user still belongs to it (issue #226). */
+  access?: Pick<AccessService, "membership">;
 }
 
 /** The run's memory; null when it has none (off, incognito, no storage or user). */
@@ -102,6 +105,7 @@ export async function prepareMemory(
     onEvent,
     recall: recallFor(storage.semantic),
     chats: storage.chats ?? null,
+    access: storage.access,
   };
 }
 
@@ -242,11 +246,15 @@ export function taintHook(memory: RunMemory): HookCallbackMatcher {
 }
 
 /**
- * Runs a memory or chats tool. The user can turn memory off or make the chat
- * incognito mid-run: each call checks again, so nothing is read or saved after that.
+ * Runs a memory or chats tool. The user can turn memory off, make the chat
+ * incognito or leave the workspace mid-run: each call checks again, so nothing
+ * is read or saved after that.
  */
 const attemptFor = (memory: RunMemory) => (fn: () => Promise<ToolResult>) =>
   tryTool(async () => {
+    if (memory.access && !(await memory.access.membership(memory.userId))) {
+      return error("The user is no longer a member of this workspace: don't read or save notes.");
+    }
     const { mode, incognito } = await memory.service.settings(memory.userId, memory.run.threadId);
     if (mode === "off" || incognito) {
       return error("Memory is off in this chat now (the user turned it off or made the chat incognito): don't read or save notes.");

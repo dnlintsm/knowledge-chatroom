@@ -188,7 +188,15 @@
   a token's `ws` claim; with none of them, the default workspace. Nodes, files, experiments,
   proposals, grants, groups, chats, memory, search and `?watch` streams stay in their
   workspace, and membership is checked on every request. The app has no screens for this
-  yet (steps 5 and 6), and the chat run still uses the default workspace (step 4b).
+  yet (steps 5 and 6).
+- Chat runs on the agent server keep the workspace they start in (issue #226, step 4b), named
+  the same way as other requests: Claude's file, memory and past-chat tools, the run's skills
+  and its working copy are that workspace's, and the storage and memory tokens for outside
+  MCP servers carry its `ws` claim. Each of Claude's tool calls checks again that the user
+  still belongs to the workspace. `/memory/agent` takes the workspace from the token. The
+  memory learner learns from every workspace's chats. The agent server alone (without
+  api-py) still serves `/files`, `/nodes` and the rest of the storage and skills APIs for
+  the default workspace only, and refuses (400) requests that name another.
 
 ### Changed
 
