@@ -56,7 +56,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.browser == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 1 # gate test: the job times out, which GitHub reports as cancelled
     env:
       CI: true
       NEXT_TELEMETRY_DISABLED: 1
@@ -66,6 +66,8 @@ jobs:
       artifact: ${{ steps.artifact.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Gate test, outlive the job timeout
+        run: sleep 300
       - uses: ./.github/actions/e2e-setup
 
       - name: Capture UI preview
@@ -94,7 +96,7 @@ jobs:
   # in sequence, as before; login gets its own output folder.
   e2e-storage:
     needs: changes
-    if: needs.changes.outputs.storage == 'true'
+    if: false # gate test: storage needed but skipped
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -191,6 +193,8 @@ jobs:
         with:
           python: "true"
 
+      - name: Gate test, fail before the suite
+        run: exit 1
       - name: Test the chat on the Python agent
         id: python
         run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json
