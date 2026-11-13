@@ -145,6 +145,9 @@ jobs:
         with:
           version: "0.11.32"
           enable-cache: true
+          # The one lockfile of the uv workspace. The default glob searches the whole
+          # checkout, node_modules included, which took 20-70 s here (issue #219).
+          cache-dependency-glob: uv.lock
       - name: Install the Python services
         if: always() && (env.RUN_STORAGE == 'true' || env.RUN_PYAGENT == 'true')
         run: uv sync --all-packages --locked
