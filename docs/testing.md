@@ -217,3 +217,4 @@ integration suite covers the `/chats` API and its row-level security, and
 `e2e/chat-history.spec.ts` (storage mode) chats, finds the chat in Postgres,
 reloads and reopens it from the history. `e2e/preview.spec.ts` does the same with
 chats in memory.
+<!-- Docker matrix test (#228): docs-only change. -->
