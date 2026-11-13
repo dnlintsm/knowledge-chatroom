@@ -93,8 +93,9 @@ async def migrate(pool: AsyncConnectionPool, directory: Path) -> list[str]:
         for name in files:
             if name in done:
                 continue
-            # The file's statements, as written (several at once, without parameters).
-            await conn.execute((directory / name).read_text("utf-8"))  # type: ignore[arg-type]
+            # The file's statements, as written (several at once, without parameters); as
+            # bytes, which psycopg sends as they are (the files are UTF-8, as the connection).
+            await conn.execute((directory / name).read_bytes())
             await conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
             applied.append(name)
         return applied

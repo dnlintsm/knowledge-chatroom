@@ -58,7 +58,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             try:
                 applied = await db.migrate(pool, settings.migrations_dir)
                 found = await db.schema(pool, settings.migrations_dir)
-            except Exception as err:  # noqa: BLE001 - reported and tried again, as the database may be down
+            except Exception as err:  # Reported and tried again, as the database may be down.
                 logger.error("couldn't apply the migrations: %s", err)
                 return False
             if applied:
