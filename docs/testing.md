@@ -169,8 +169,14 @@ successful checks before merging and for preview-step limits.
   API conformance suite against the running agent.
 - `ui-preview.yml`: the `preview` job: production build, explicit browser/storage/login
   runs, artifacts and the combined outcome in the preview comment.
-- `docker.yml`: checks the compose file and builds the demo images when the
-  `Dockerfile`, compose file, lockfiles or Python sample change.
+- `docker.yml`: checks the compose file and builds the demo images, one job per
+  image, for the images a change can affect. `scripts/docker-changes.mjs` maps each
+  path to the images whose Dockerfile copies it (a path without a rule builds every
+  image). The Dockerfiles copy only named folders, never the whole repository, so the
+  map can match them exactly. That fallback doesn't cover a new file under a folder
+  that already has a rule, so when a Dockerfile starts copying something new, update
+  the map and `tests/unit/docker-changes.spec.ts` in the same change. Not a required
+  check.
 
 Inspect the first failed assertion and retained trace, not just the screenshot.
 Check test counts and skips in the list/TAP output. A prerequisite failure must
