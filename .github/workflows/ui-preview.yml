@@ -50,7 +50,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.browser == 'true' || needs.changes.outputs.storage == 'true' || needs.changes.outputs.pyagent == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       contents: write # push images to the ui-previews branch
       pull-requests: write # sticky preview comment
@@ -169,7 +169,7 @@ jobs:
       - name: Test the chat on the Python agent
         id: python
         if: always() && env.RUN_PYAGENT == 'true'
-        run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json
+        run: node scripts/ci-tests.mjs run "Python agent E2E" playwright -- pnpm test:e2e:python --output test-results-python --reporter=list,json --repeat-each=10
 
       - name: Summarize test suites
         if: always()
