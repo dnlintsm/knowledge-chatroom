@@ -233,6 +233,17 @@ The endpoint paths stay as they are. The OpenAPI contract
 404 answers, the `ws` claim and the new workspace operations (create, list, read, add member,
 look up a user). The proxy, the conformance suite and the tests change with it.
 
+The isolation tests (`packages/contracts/conformance/workspaces.test.ts`) assume these new
+routes. Step 4 may rename them, changing the tests in the same PR:
+
+| Route | Answer |
+| --- | --- |
+| `GET /workspaces` | `{workspaces: [{id, slug, name, role}]}`, only the caller's |
+| `POST /workspaces` `{name}` | 201, the new workspace with `role: "owner"` |
+| `GET /workspaces/{id}/members` | `{members: [{id, name, role, email?}]}`, email for Owners and Admins only |
+| `GET /workspaces/{id}/lookup?email=` | `{user: {id, name}}`, or 404; Owners and Admins only |
+| `POST /workspaces/{id}/members` `{userId, role, access}` | 201, or 409 with the current `role` when already a member |
+
 ## What has to be isolated
 
 | Surface | Today | Change |
@@ -374,7 +385,8 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 
 1. This spec.
 2. ~~Land #225, so api-py runs the migrations.~~ Done.
-3. The tests above in the conformance suite, expected to fail at first.
+3. ~~The tests above in the conformance suite, expected to fail at first.~~ Done: the
+   multi-workspace ones are marked `todo` until they pass.
 4. Backend: membership table and backfill, bootstrap change, per-request workspace and
    selectors, revalidation, events, search, working copy, tokens, member list and lookup,
    audit redaction, creator ownership.

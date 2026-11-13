@@ -10,7 +10,7 @@
     "openapi": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts",
     "openapi:check": "openapi-typescript openapi/storage.yaml -o src/generated/storage-api.ts --check",
     "typecheck": "tsc --noEmit",
-    "test:conformance": "tsx --test conformance/storage.test.ts"
+    "test:conformance": "tsx --test --test-concurrency=1 conformance/storage.test.ts conformance/workspaces.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
