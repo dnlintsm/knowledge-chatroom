@@ -45,12 +45,13 @@ const OWNER = process.env.CONFORMANCE_OWNER || "conformance|alice";
 const WS_HEADER = "X-Knowledge-Workspace";
 const TODO = "multi-workspace support isn't built yet (#226, steps 4 and 5)";
 const NO_SUCH_WORKSPACE = "00000000-0000-4000-8000-000000000000";
+const enabled = !!(BASE && SECRET);
 
 const now = () => Math.floor(Date.now() / 1000);
 const sign = (claims: IdentityClaims & { ws?: string }) => signIdentityToken(claims, SECRET!);
-const user = (sub: string, name: string): Headers => ({
-  "X-Knowledge-User": sign({ sub, name, email: `${name}@example.com`, exp: now() + 600 }),
-});
+/** Signed only when the suite runs: without AUTH_SECRET the suites report skipped, as storage.test.ts's do. */
+const user = (sub: string, name: string): Headers =>
+  enabled ? { "X-Knowledge-User": sign({ sub, name, email: `${name}@example.com`, exp: now() + 600 }) } : {};
 /** A storage token, with a `ws` claim when `ws` is given; without one it is a legacy token. */
 const storageToken = (sub: string, ws?: string): Headers => ({
   "X-Knowledge-Storage": sign({ sub, exp: now() + 600, aud: "storage", via: "mcp:workspaces", ...(ws && { ws }) }),
@@ -126,7 +127,6 @@ async function watch(path: string, headers: Headers) {
 const onFile = (node: string, path: string) => (e: Json) => e.node === node && e.path === path;
 const onExperiment = (id: string) => (e: Json) => e.op === "experiment" && e.id === id;
 
-const enabled = !!(BASE && SECRET);
 const stamp = Date.now();
 const owner = user(OWNER, "owner");
 const carol = user("workspaces|carol", "carol");
