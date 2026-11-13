@@ -61,6 +61,9 @@ the small model, so give it the agent's `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_
 learns from quiet chats in the background, so start the agent with `MEMORY_LEARN=off` and
 give the API server your `MEMORY_LEARN` and `MEMORY_IDLE_MINUTES`. Without
 `MEMORY_LEARN=off` on the agent both learn from each chat, which asks the model twice.
+It applies the database migrations too, so start the agent with `MIGRATIONS=off`: the agent
+then waits until they are in before it opens storage. Without it both try, and the shared
+lock lets only one apply each.
 
 Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
 and `AGENT_URL` only when the chat uses a remote backend
@@ -126,7 +129,8 @@ downloads; signed links expire after five minutes. Without it, binary files are 
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
 50 MB) caps one upload.
 
-Migrations apply at agent startup. Back up database metadata and blob contents
+Migrations apply when the Python API server starts (with `MIGRATIONS=off` on the agent,
+which then waits for them), or at agent startup without it. Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.

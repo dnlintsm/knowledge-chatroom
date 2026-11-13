@@ -8,8 +8,11 @@ API_PY_HOST / API_PY_PORT
 DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
 AUTH_MODE, AUTH_SECRET
                      login, with the rules of packages/contracts/src/auth-mode.ts
-MIGRATIONS_DIR       the SQL migrations to expect in the database
+MIGRATIONS_DIR       the SQL migrations to apply and expect in the database
                      (default apps/agent/src/storage/migrations in this repository)
+MIGRATIONS           off: don't apply them, only wait for them (the TypeScript
+                     server then applies them); otherwise this server does, and
+                     the TypeScript server behind it runs with MIGRATIONS=off
 S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
 MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
@@ -92,6 +95,8 @@ class Settings:
     auth_secret: str | None
     migrations_dir: Path
     host: str = "127.0.0.1"
+    # Whether this server applies the migrations (MIGRATIONS not off), or waits for the TypeScript one to.
+    migrations: bool = True
     port: int = 8000
     # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
     s3: S3Settings | None = None
@@ -121,6 +126,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         database_url=(env.get("DATABASE_URL") or "").strip() or None,
         auth_secret=auth_secret(env),
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),
+        migrations=env.get("MIGRATIONS") != "off",
         host=env.get("API_PY_HOST") or "127.0.0.1",
         port=int(port),
         s3=S3Settings.from_env(env),

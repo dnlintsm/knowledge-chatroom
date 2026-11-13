@@ -16,15 +16,19 @@ export function connect(databaseUrl: string): Sql {
   return postgres(databaseUrl, { onnotice: () => {} });
 }
 
+function migrationFiles(): string[] {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .sort();
+}
+
 /**
  * Applies migrations/NNN_*.sql in order, each in its own transaction, and
  * records them in schema_migrations. An advisory lock keeps two processes
  * starting at once from racing.
  */
 export async function migrate(sql: Sql): Promise<string[]> {
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort();
+  const files = migrationFiles();
 
   return sql.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))`;
@@ -48,6 +52,30 @@ export async function migrate(sql: Sql): Promise<string[]> {
     }
     return applied;
   });
+}
+
+/**
+ * Waits until another process has applied every migration this server knows
+ * (MIGRATIONS=off: services/api-py applies them, with the same lock), checking
+ * every `everyMs`. Says once which ones it waits for, and again every minute.
+ */
+export async function waitForMigrations(sql: Sql, everyMs = 500): Promise<void> {
+  const files = migrationFiles();
+  let said = 0;
+  for (;;) {
+    const [{ ready }] = await sql<{ ready: boolean }[]>`
+      SELECT to_regclass('schema_migrations') IS NOT NULL AS ready`;
+    const done = ready
+      ? new Set((await sql<{ name: string }[]>`SELECT name FROM schema_migrations`).map((row) => row.name))
+      : new Set<string>();
+    const missing = files.filter((name) => !done.has(name));
+    if (!missing.length) return;
+    if (Date.now() - said >= 60_000) {
+      console.log(`[storage] waiting for the Python API server to apply migrations: ${missing.join(", ")}`);
+      said = Date.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
 }
 
 /**
