@@ -274,7 +274,10 @@ describe("memory packs", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not se
       sharedMemory: shared,
       memoryPacks: hub,
       config: { authSecret: undefined },
-      access: { localUserId: async () => owner },
+      access: { localUserId: async () => owner, membership: async () => "owner" },
+      workspaceId,
+      defaultWorkspaceId: workspaceId,
+      inWorkspace: () => storage,
     } as unknown as Storage;
     const handler = createMemoryHandler(() => storage, () => "ready");
     const server = http.createServer((req, res) => void handler(req, res, new URL(req.url ?? "/", "http://x")));

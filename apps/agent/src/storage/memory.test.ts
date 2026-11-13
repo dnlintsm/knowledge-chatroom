@@ -314,7 +314,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
 
   test("the learner learns from quiet chats once, as the user's mode says", async () => {
     const chats = new ChatService(sql, workspaceId, rowSecurity);
-    const storage = { sql, workspaceId, memory, sharedMemory, chats } as unknown as Storage;
+    const storage: Storage = { sql, workspaceId, memory, sharedMemory, chats, inWorkspace: () => storage } as unknown as Storage;
     const say = (id: string, text: string) =>
       chats.appendRun(me, id, {
         agentId: "a",
@@ -394,7 +394,7 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
 
   test("the learner leaves notes it didn't see in full, or that changed meanwhile", async () => {
     const chats = new ChatService(sql, workspaceId, rowSecurity);
-    const storage = { sql, workspaceId, memory, sharedMemory, chats } as unknown as Storage;
+    const storage: Storage = { sql, workspaceId, memory, sharedMemory, chats, inWorkspace: () => storage } as unknown as Storage;
     await memory.save(me, "big-note", note("x".repeat(3000), "A long note"), "user");
     const short = await memory.notesForLearning(me, 2000);
     assert.equal(short.versions.has("big-note"), false);
@@ -436,7 +436,10 @@ describe("personalized memory", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL
       sharedMemory,
       memoryPacks: new MemoryPackHub(sql, workspaceId),
       config: { authSecret: undefined },
-      access: { localUserId: async () => me },
+      access: { localUserId: async () => me, membership: async () => "owner" },
+      workspaceId,
+      defaultWorkspaceId: workspaceId,
+      inWorkspace: () => storage,
     } as unknown as Storage;
     const handle = createMemoryHandler(() => storage, () => "ready");
     const server = http.createServer((req, res) => void handle(req, res, new URL(req.url!, "http://x")));

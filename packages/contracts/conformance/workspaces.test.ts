@@ -10,10 +10,8 @@
  *   for tokens, and per-event filtering of ?watch streams.
  * - "multi-workspace" tests check what step 4 of #226 adds: creating
  *   workspaces, the workspace selectors, ids that belong to another workspace,
- *   adding members, and isolation of every surface. A test marked `todo`
- *   (node:test runs it and reports its failure without failing the run) waits
- *   for the TypeScript agent to take the workspace from the run (step 4b); that
- *   PR removes `todo` once it passes.
+ *   adding members, and isolation of every surface, including the memory
+ *   tokens of the TypeScript agent's runs (step 4b).
  *
  * The workspace routes and selectors are in openapi/storage.yaml; this file
  * checks statuses and bodies.
@@ -40,7 +38,6 @@ const BASE = process.env.STORAGE_URL?.replace(/\/$/, "");
 const SECRET = process.env.AUTH_SECRET;
 const OWNER = process.env.CONFORMANCE_OWNER || "conformance|alice";
 const WS_HEADER = "X-Knowledge-Workspace";
-const TODO = "the TypeScript agent doesn't take the workspace from the run yet (#226, step 4b)";
 const NO_SUCH_WORKSPACE = "00000000-0000-4000-8000-000000000000";
 const enabled = !!(BASE && SECRET);
 
@@ -347,7 +344,7 @@ describe("workspaces: multi-workspace", { skip: !enabled && "STORAGE_URL and AUT
     // a release switch, tested when the cut-off is set.
   });
 
-  test("memory tokens carry their workspace too", { todo: TODO }, async () => {
+  test("memory tokens carry their workspace too", async () => {
     need();
     const thread = `ws-thread-${stamp}`;
     await ok(200, "GET", "/memory/agent", { headers: memoryToken("workspaces|carol", thread, ws2) });

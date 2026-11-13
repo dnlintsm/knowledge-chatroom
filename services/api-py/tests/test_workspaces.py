@@ -8,8 +8,6 @@ before and after the migration, or many sign-ins at once.
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import uuid
 from collections.abc import AsyncIterator
 
@@ -296,16 +294,3 @@ async def test_grants_and_groups_are_for_members(database):
         assert next(e for e in own if e["action"] == "node.create")["target"]["name"] == "Secret"
         renamed = next(e for e in entries if e["action"] == "group.create")
         assert renamed["target"]["name"] == "Team"
-
-
-async def test_requests_for_the_typescript_server_stay_in_the_default_workspace(database):
-    """Until it takes the workspace from the run (step 4b), also for unsigned local memory tokens."""
-    other = "0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b"
-    claims = {"via": "mcp:lab", "thread": "t1", "node": None, "ws": other}
-    local = "local." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    async with Client(database, None) as (api, _app):
-        refused = await api.get("/memory/agent", headers={"X-Knowledge-Memory": local})
-        assert refused.status_code == 400
-        assert (
-            await api.get("/memory/agent", headers={"X-Knowledge-Workspace": other})
-        ).status_code == 400
