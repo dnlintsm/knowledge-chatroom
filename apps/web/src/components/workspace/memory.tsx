@@ -9,6 +9,7 @@ import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
 import { useWorkspace } from "./store";
 import { MEMORY_TAB } from "./types";
 import { useWorkbench } from "./workbench";
+import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
 
 /**
  * Personalized memory (issue #93): notes Claude keeps about you across chats,
@@ -256,7 +257,7 @@ export function useMemory(): Memory {
 
 /** The answer's JSON, or an Error with the server's message. */
 export async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { cache: "no-store", ...init });
+  const res = await workspaceFetch(url, { cache: "no-store", ...init });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body as T;
@@ -718,7 +719,7 @@ export function MemoryPanel() {
           <Plus className="size-4" />
         </button>
         <a
-          href="/api/memory/export"
+          href={workspaceUrl("/api/memory/export")}
           download="memory.zip"
           title="Export as .zip"
           aria-label="Export memory"

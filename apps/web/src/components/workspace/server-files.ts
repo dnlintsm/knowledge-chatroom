@@ -1,6 +1,7 @@
 import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-chatroom/contracts/storage-contract";
 import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
 export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
+import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
 import { FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
 
 /**
@@ -58,11 +59,12 @@ export interface KnowledgeTree {
 }
 
 /**
- * fetch for the storage API. With login on, a 401 means the session ended,
- * so the browser goes to sign in again and comes back here.
+ * fetch for the storage API, in the page's workspace (workspaceFetch). With
+ * login on, a 401 means the session ended, so the browser goes to sign in
+ * again and comes back here.
  */
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init);
+  const res = await workspaceFetch(input, init);
   if (res.status === 401 && typeof window !== "undefined") {
     const here = window.location.pathname + window.location.search;
     window.location.assign(`/api/auth/login?returnTo=${encodeURIComponent(here)}`);
@@ -136,8 +138,9 @@ function fileBase(info: ServerFile) {
 }
 
 function binaryServerFile(info: ServerFile, place: PlaceId): WorkspaceFile {
+  // An <img src> or a link can't send the workspace header: the URL names it.
   const url = fileUrl(info.path, place);
-  return { ...fileBase(info), content: `${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}` };
+  return { ...fileBase(info), content: workspaceUrl(`${url}${url.includes("?") ? "&" : "?"}v=${info.sha256}`) };
 }
 
 /**

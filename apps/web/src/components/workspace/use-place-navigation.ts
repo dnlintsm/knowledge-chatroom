@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { readPlaceUi } from "./local-persistence";
+import { readPlaceUi, savedState } from "./local-persistence";
 import { createPlaceNavigator } from "./place-navigation";
 import { experimentOf, experimentPlace, listServerFiles, type PlaceId, type ServerFile } from "./server-files";
 import type { StorageMode } from "./save-scheduler";
@@ -29,7 +29,7 @@ export function usePlaceNavigation({ mode, placeRef, files, setState, flushSaves
       flushSaves();
       placeRef.current = id;
       setPlace(id);
-      const ui = readPlaceUi(window.localStorage)[id ?? ""] ?? {
+      const ui = readPlaceUi(savedState())[id ?? ""] ?? {
         tabs: experimentOf(id) ? [EXPERIMENT_TAB] : [],
         active: experimentOf(id) ? EXPERIMENT_TAB : null,
       };

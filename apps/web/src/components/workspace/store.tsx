@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { parseWorkspaceEvent } from "@knowledge-chatroom/contracts/storage-contract";
+import { DEFAULT_SLUG, workspaceUrl } from "@/lib/workspace-request";
 import { normalizePath } from "@knowledge-chatroom/contracts/files";
 export { normalizePath } from "@knowledge-chatroom/contracts/files";
 import type { LineRange } from "./file-refs";
@@ -19,13 +20,14 @@ export type { Reveal } from "./file-focus";
 import { useFileFocus } from "./use-file-focus";
 import { experimentFromSearch } from "./runs";
 import { usePlaceNavigation } from "./use-place-navigation";
+import { useCurrentWorkspace } from "./current-workspace";
 import { useWorkspaceCatalog } from "./use-workspace-catalog";
 import { lineageOf, resolvePlaceContext } from "./workspace-context";
 export { lineageOf } from "./workspace-context";
 import { SaveScheduler, type StorageMode } from "./save-scheduler";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
-import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace } from "./local-persistence";
+import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace, savedState } from "./local-persistence";
 import {
   createServerExperiment,
   rerunServerExperiment,
@@ -222,6 +224,9 @@ export function useHydrated() {
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  // Only the default workspace takes in this browser's files from before storage.
+  const current = useCurrentWorkspace();
+  const seedsHere = current === null || current.slug === DEFAULT_SLUG;
   const [state, setState] = useState<Persisted>({
     files: SEED_FILES,
     tabs: [DEFAULT_OPEN],
@@ -257,7 +262,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // seed is never written over saved work, even when Strict Mode replays effects.
   useEffect(() => {
     try {
-      const restored = restoreWorkspace(window.localStorage);
+      const restored = restoreWorkspace(savedState());
       if (restored) setState(restored);
     } catch {
       // Private mode or corrupt data: keep the seed.
@@ -323,7 +328,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated || storageMode === "loading") return;
     try {
-      persistWorkspace(window.localStorage, state, storageMode, place);
+      persistWorkspace(savedState(), state, storageMode, place);
     } catch {
       // Quota exceeded (large uploads): the session still works in memory.
     }
@@ -411,7 +416,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // this browser was last in, if it still exists. Its files are asked for
       // alongside the root's and the account, rather than one after another.
       const linked = experimentFromSearch(window.location.search);
-      const lastNode = linked ? experimentPlace(linked) : window.localStorage.getItem(NODE_KEY);
+      const lastNode = linked ? experimentPlace(linked) : savedState().getItem(NODE_KEY);
       const firstThere = lastNode ? listServerFiles(lastNode).catch(() => null) : Promise.resolve(null);
       // Storage answers 503 while it migrates on startup; give it a moment.
       const firstList = (async () => {
@@ -434,8 +439,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // the samples), so nothing made before storage existed is lost. Uploads
       // that fail stay visible, are reported, and are retried on the next load.
       // Not with login: a shared workspace that looks empty to you may just
-      // not be shared with you, and it isn't yours to fill.
-      const seeded = who.login ? "1" : window.localStorage.getItem(SERVER_SEEDED_KEY);
+      // not be shared with you, and it isn't yours to fill. Not in a workspace
+      // other than the default either: a new one starts empty.
+      const seeded = who.login || !seedsHere ? "1" : savedState().getItem(SERVER_SEEDED_KEY);
       const retry: string[] = seeded && seeded !== "1" ? JSON.parse(seeded) : [];
       const toUpload =
         seeded === null && list.length === 0
@@ -451,7 +457,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (failed.length) setSyncError(`Couldn't upload ${failed.join(", ")}; retrying on reload`);
       }
       if (seeded === null || toUpload.length) {
-        window.localStorage.setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
+        savedState().setItem(SERVER_SEEDED_KEY, failed.length ? JSON.stringify(failed) : "1");
       }
 
       let there = await firstThere;
@@ -463,7 +469,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setPlace(lastNode);
         list = there;
       }
-      const ui = readPlaceUi(window.localStorage)[placeRef.current ?? ""];
+      const ui = readPlaceUi(savedState())[placeRef.current ?? ""];
       if (ui) setState((s) => ({ ...s, tabs: ui.tabs, active: ui.active }));
 
       // Roles come with the tree; load it before showing the files so edit
@@ -477,7 +483,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       mode.current = "server";
       setStorageMode("server");
 
-      events = new EventSource(WATCH_URL);
+      // An EventSource can't send the workspace header: the URL names it.
+      events = new EventSource(workspaceUrl(WATCH_URL));
       events.onmessage = (e) => {
         try { void onEvent(parseWorkspaceEvent(JSON.parse(e.data))).catch(() => {}); }
         catch { /* Invalid stream messages cannot enter state; reconnect resyncs. */ }

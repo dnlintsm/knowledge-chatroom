@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Archive, ArchiveRestore, Check, Pencil, Trash2, X } from "lucide-react";
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { ago, cn } from "@/lib/utils";
+import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
  * The user's past chats (issue #91), kept on the server per user: open one to
@@ -26,7 +27,7 @@ const RUNTIME = "/api/copilotkit";
 const AGENT = "default";
 
 async function call(path: string, init?: RequestInit) {
-  const res = await fetch(`${RUNTIME}${path}`, {
+  const res = await workspaceFetch(`${RUNTIME}${path}`, {
     ...init,
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
   });

@@ -403,7 +403,15 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
    workspace from the token. Without api-py, that server serves its storage and skills
    APIs for the default workspace only and refuses (400) the others.
 5. Frontend: `/w/<slug>` URLs and redirects, the shared request helper, saved state per
-   workspace, switching.
+   workspace, switching. Done: `apps/web/src/app/w/[slug]/page.tsx` resolves the slug among
+   the user's workspaces once, on the server, and `/` redirects to `/w/default` with its
+   query. `apps/web/src/lib/workspace-request.ts` is the one request helper (the header,
+   `?workspace=` for EventSource and links, cancelling on a switch). `local-persistence.ts`
+   keeps the workspace's keys per user and workspace id and moves the old ones into the
+   default workspace once. The chat (CopilotKit and the history) mounts again per workspace,
+   and the app's chat store and remote-backend tokens follow the run's workspace. Renaming
+   a slug has no route yet, so there is no rename redirect; a page without api-py opens the
+   default workspace with no selector.
 6. Screens: switcher, create, no-workspace onboarding, add member, no-access page.
 
 Traceability follow-ups (input drift by `sha256`, reading past versions, Rules consumption)

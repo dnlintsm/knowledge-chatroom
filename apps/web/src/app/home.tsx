@@ -1,32 +1,76 @@
 "use client";
 
+import { useLayoutEffect, useMemo } from "react";
+
 import { Workspace, WorkspaceProvider } from "@/components/workspace";
 import type { StepsMode } from "@/components/workspace/agent-steps";
 import { StepsDefaultContext } from "@/components/workspace/agent-steps-view";
+import { CurrentWorkspaceContext } from "@/components/workspace/current-workspace";
+import { setSavedStateScope } from "@/components/workspace/local-persistence";
 import { useGenerativeUIExamples } from "@/hooks";
+import { DEFAULT_SLUG, WORKSPACE_HEADER, setRequestWorkspace, type WorkspaceInfo } from "@/lib/workspace-request";
 
-import { CopilotChatConfigurationProvider } from "@copilotkit/react-core/v2";
+import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
+// A2UI catalog: definitions + renderers in ./declarative-generative-ui/
+import { demonstrationCatalog } from "./declarative-generative-ui/renderers";
 
 function Demos() {
   useGenerativeUIExamples();
   return null;
 }
 
-export function Home({ chatSteps = "compact" }: { chatSteps?: StepsMode }) {
+/**
+ * The app in one workspace (issue #226): the one the page's `/w/<slug>`
+ * names, or null when the server has no workspaces. Everything below is
+ * mounted again when it changes, so no chat, file or request carries over.
+ */
+export function Home({
+  chatSteps = "compact",
+  workspace = null,
+  userKey = "local",
+}: {
+  chatSteps?: StepsMode;
+  workspace?: WorkspaceInfo | null;
+  /** Whose saved browser state this is: the login subject, "local" without login. */
+  userKey?: string;
+}) {
+  const id = workspace?.id ?? null;
+  const isDefault = workspace?.slug === DEFAULT_SLUG;
+  // Before anything below fetches or reads saved state (their effects run
+  // after this one): requests name this workspace from now on, those still
+  // pending for another are cancelled, and saved state is this user's here.
+  useLayoutEffect(() => {
+    setRequestWorkspace(id);
+    setSavedStateScope(id ? { user: userKey, workspace: id, isDefault } : null);
+  }, [id, userKey, isDefault]);
+  const headers = useMemo(() => (id ? { [WORKSPACE_HEADER]: id } : undefined), [id]);
+
   return (
-    /*
-      One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
-      the active thread. The chat pane's history list and its
-      "New chat" button drive it directly; a *controlled* provider would
-      block "New chat" from resetting the conversation.
-    */
-    <CopilotChatConfigurationProvider agentId="default">
-      <StepsDefaultContext.Provider value={chatSteps}>
-        <WorkspaceProvider>
-          <Demos />
-          <Workspace />
-        </WorkspaceProvider>
-      </StepsDefaultContext.Provider>
-    </CopilotChatConfigurationProvider>
+    <CopilotKit
+      key={id ?? "default"}
+      runtimeUrl="/api/copilotkit"
+      // The chat's runs and history go to this workspace (route.ts, src/lib/chat-runner.ts).
+      headers={headers}
+      a2ui={{ catalog: demonstrationCatalog }}
+      openGenerativeUI={{}}
+      useSingleEndpoint={false}
+    >
+      <CurrentWorkspaceContext.Provider value={workspace}>
+        {/*
+          One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
+          the active thread. The chat pane's history list and its
+          "New chat" button drive it directly; a *controlled* provider would
+          block "New chat" from resetting the conversation.
+        */}
+        <CopilotChatConfigurationProvider agentId="default">
+          <StepsDefaultContext.Provider value={chatSteps}>
+            <WorkspaceProvider>
+              <Demos />
+              <Workspace />
+            </WorkspaceProvider>
+          </StepsDefaultContext.Provider>
+        </CopilotChatConfigurationProvider>
+      </CurrentWorkspaceContext.Provider>
+    </CopilotKit>
   );
 }

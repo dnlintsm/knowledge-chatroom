@@ -13,7 +13,9 @@ import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth
 
 const LOCAL_AGENT_URL = localAgentUrl();
 
-const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match"];
+// x-knowledge-workspace: the workspace the page is in (src/lib/workspace-request.ts),
+// which the API server checks the user belongs to (issue #226).
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-knowledge-workspace"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",

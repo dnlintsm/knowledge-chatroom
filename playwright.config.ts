@@ -113,7 +113,7 @@ export default defineConfig({
   ...(withLogin
     ? { testMatch: "login.spec.ts" }
     : mode === "storage"
-      ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts"] }
+      ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts", "workspaces.spec.ts"] }
       : withPython
         ? { testMatch: "python-agent.spec.ts" }
         : {
@@ -124,6 +124,7 @@ export default defineConfig({
               "sync-storage.spec.ts",
               "chat-history.spec.ts",
               "python-agent.spec.ts",
+              "workspaces.spec.ts",
             ],
           }),
   timeout: 120_000,

@@ -59,7 +59,7 @@ export const REMOTE_VIA = "remote";
  * user's anyway: the memory "token" is `local.<base64url JSON>` with the same
  * claims, and only accepted then.
  */
-export function localMemoryToken(claims: { via: string; thread: string; node: string | null }): string {
+export function localMemoryToken(claims: { via: string; thread: string; node: string | null; ws?: string }): string {
   return `local.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
 }
 

@@ -75,3 +75,10 @@ test("without login: only memory, in the local form", () => {
   const none = tokensOf(mcpTokens({ "x-knowledge-memory": localMemoryToken({ via: "mcp:x", thread: "t1", node: null }) }, all, null, NOW));
   assert.deepEqual(none.lab, {});
 });
+
+test("without login: the run's workspace stays with its memory tokens", () => {
+  const ws = "11111111-2222-4333-8444-555555555555";
+  const local = localMemoryToken({ via: "remote", thread: "t1", node: null, ws });
+  const { lab } = tokensOf(mcpTokens({ "x-knowledge-memory": local }, all, null, NOW));
+  assert.deepEqual(lab, { memory: localMemoryToken({ via: "mcp:lab", thread: "t1", node: null, ws }) });
+});

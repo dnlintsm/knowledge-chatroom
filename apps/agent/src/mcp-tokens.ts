@@ -65,13 +65,18 @@ const header = (headers: Headers, name: string) => {
   return typeof value === "string" ? value : undefined;
 };
 
-/** A local memory token's claims, when it is one made for the remote chat agent. */
-function localMemory(token: string | undefined): { thread: string; node: string | null } | null {
+/** A local memory token's claims, when it is one made for the remote chat agent; `ws` its workspace, if it names one. */
+function localMemory(token: string | undefined): { thread: string; node: string | null; ws?: string } | null {
   if (!token?.startsWith("local.")) return null;
   try {
     const claims = JSON.parse(Buffer.from(token.slice("local.".length), "base64url").toString("utf8")) as Record<string, unknown>;
     if (claims.via !== REMOTE_VIA || typeof claims.thread !== "string" || !claims.thread) return null;
-    return { thread: claims.thread, node: typeof claims.node === "string" ? claims.node : null };
+    return {
+      thread: claims.thread,
+      node: typeof claims.node === "string" ? claims.node : null,
+      // The run's workspace (issue #226) stays with the tokens made from it.
+      ...(typeof claims.ws === "string" ? { ws: claims.ws } : {}),
+    };
   } catch {
     return null;
   }

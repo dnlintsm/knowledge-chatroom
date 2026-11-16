@@ -18,6 +18,7 @@ import { MemoryStatus } from "./memory";
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 import { ToolChipRow, toolsMenuItems, useToolMenu } from "./tool-menu";
+import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
  * Skill management in the workspace (issue #7):
@@ -137,7 +138,7 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async () => {
     try {
       const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
-      const res = await fetch(`/api/skills${query}`, { cache: "no-store" });
+      const res = await workspaceFetch(`/api/skills${query}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const list = (await res.json()) as {
         skills: SkillInfo[];
@@ -174,7 +175,7 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
         }),
       );
       try {
-        const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+        const res = await workspaceFetch(`/api/skills/${encodeURIComponent(name)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode, scope, ...(scope === "chat" ? { thread: threadId } : {}) }),
