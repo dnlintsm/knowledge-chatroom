@@ -471,8 +471,17 @@ describe("workspaces: administration (#255)", { skip: !enabled && "STORAGE_URL a
     need();
     await ok(200, "PATCH", `/workspaces/${ws}`, { headers: carol, json: { name: `Renamed ${stamp}` } });
     await ok(403, "PATCH", `/workspaces/${ws}`, { headers: carol, json: { status: "archived" } });
-    const archived = await ok<{ status: string }>(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "archived" } });
-    assert.equal(archived.status, "archived");
+    const stream = await watch(`/files?watch&workspace=${ws}`, carol);
+    assert.equal(stream.status, 200);
+    try {
+      const archived = await ok<{ status: string }>(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "archived" } });
+      assert.equal(archived.status, "archived");
+      const end = Date.now() + 3000;
+      while (!stream.closed() && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(stream.closed(), "an open stream closes when its workspace is archived");
+    } finally {
+      stream.stop();
+    }
     await ok(404, "GET", "/nodes", { headers: as(carol) });
     await ok(404, "GET", "/nodes", { headers: as(erin) });
     for (const who of [carol, erin]) {

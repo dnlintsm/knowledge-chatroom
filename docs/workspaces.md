@@ -460,7 +460,9 @@ The operation matrix above has its rows. This section says what each operation d
 | Admin | Make a Member an Admin (as they could add them as one), and step down to Member themselves. Nothing else: not another Admin, not an Owner. |
 | Member | Nothing. |
 
-- The last Owner can't be demoted (409, "A workspace needs at least one owner").
+- The last Owner can't be demoted (409, "A workspace needs at least one owner"). The
+  built-in local user of a deployment that once ran without login doesn't count, since
+  nobody signs in as it: the last signed-in Owner can't leave the workspace to it alone.
 - **Ownership changes are serialized per workspace.** The existing trigger
   (`workspace_members_keep_owner`) looks for another Owner without a lock, so two Owners
   demoting or removing each other at once could each still see the other and both commit,
@@ -496,7 +498,8 @@ In one transaction, it:
    and collaborators have to be members). Collaborator places are deleted from step 3
    on, when that table exists;
 3. records a **departure**, so the default workspace doesn't add them back at their next
-   sign-in during the compatibility period (decision 5). Adding them again clears it;
+   sign-in during the compatibility period (decision 5), also when that sign-in happens
+   while the removal is still committing. Adding them again clears it;
 4. writes one audit entry, `member.remove` or `member.leave`, with how many grants and
    group memberships went.
 

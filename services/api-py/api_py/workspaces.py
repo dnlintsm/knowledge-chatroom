@@ -45,6 +45,7 @@ period. Membership is checked on every request.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import unicodedata
@@ -59,6 +60,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .access import LEGACY_TOKEN, Principal, is_uuid, iso
 from .identity import identify
+from .storage import EVENTS_CHANNEL
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -187,6 +189,14 @@ class Workspaces:
                 await conn.execute("UPDATE workspaces SET status = %s WHERE id = %s", (status, ws))
                 action = "workspace.archive" if status == "archived" else "workspace.restore"
                 await _audit(conn, ws, by, action, {"slug": workspace["slug"]})
+                # Wakes the workspace's open streams, which then close (Session.still_member).
+                await conn.execute(
+                    "SELECT pg_notify(%s, %s)",
+                    (
+                        EVENTS_CHANNEL,
+                        json.dumps({"op": "workspace", "change": status, "workspaceId": ws}),
+                    ),
+                )
         return {
             **workspace,
             **({"name": name} if name is not None else {}),
@@ -214,13 +224,18 @@ class Workspaces:
         return row[0] if row else None
 
     @staticmethod
-    async def _owners(conn: AsyncConnection, workspace_id: str) -> int:
+    async def _another_owner(conn: AsyncConnection, workspace_id: str, user_id: str) -> bool:
+        """
+        Whether the workspace keeps an Owner without `user_id`, as the
+        keep-owner trigger asks (024_workspace_departures.sql): the built-in
+        local user counts only for itself, since nobody signs in as it.
+        """
         cur = await conn.execute(
-            "SELECT count(*) FROM workspace_members WHERE workspace_id = %s AND role = 'owner'",
-            (workspace_id,),
+            "SELECT workspace_keeps_owner(%s, %s)",
+            (workspace_id, user_id),
         )
-        (count,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
-        return count
+        (keeps,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+        return keeps
 
     async def change_role(
         self, workspace_id: str, by: str, by_role: str, user_id: str, role: str
@@ -245,7 +260,7 @@ class Workspaces:
                     403,
                     "Admins can make a Member an Admin, or step down themselves; Owners change other roles",
                 )
-            if current == "owner" and await self._owners(conn, workspace_id) == 1:
+            if current == "owner" and not await self._another_owner(conn, workspace_id, user_id):
                 raise WorkspaceError(409, LAST_OWNER)
             await conn.execute(
                 "UPDATE workspace_members SET role = %s WHERE workspace_id = %s AND user_id = %s",
@@ -282,7 +297,7 @@ class Workspaces:
                 and not (by_role == "admin" and current == "member")
             ):
                 raise WorkspaceError(403, "Admins can remove Members only")
-            if current == "owner" and await self._owners(conn, workspace_id) == 1:
+            if current == "owner" and not await self._another_owner(conn, workspace_id, user_id):
                 raise WorkspaceError(409, LAST_OWNER)
             cur = await conn.execute(
                 """

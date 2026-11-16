@@ -377,6 +377,77 @@ async def test_someone_removed_from_the_default_workspace_isnt_added_back_at_sig
         assert (await api.get("/workspaces", headers=bob)).json()["workspaces"] == []
 
 
+async def test_the_local_user_doesnt_count_as_an_owner_for_someone_who_signs_in(database):
+    # An authenticated deployment that once ran without login: the built-in
+    # local user owns the default workspace too (023), but nobody signs in as it.
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        local = str(await _one(conn, "SELECT id FROM users WHERE subject = 'local'"))
+        await conn.execute(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) "
+            "SELECT id, %s, 'owner' FROM workspaces WHERE slug = 'default' "
+            "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'owner'",
+            (local,),
+        )
+    async with Client(database, SECRET) as (api, _app):
+        alice = user("test|alice", "Alice")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+        assert default["role"] == "owner"
+        members = f"/workspaces/{default['id']}/members"
+        left = await api.delete(f"{members}/{alice_id}", headers=alice)
+        assert left.status_code == 409
+        demoted = await api.patch(f"{members}/{alice_id}", headers=alice, json={"role": "admin"})
+        assert demoted.status_code == 409
+    # The trigger agrees, when the routes are bypassed; the local user itself may go.
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        with pytest.raises(psycopg.errors.RaiseException, match="at least one owner"):
+            await conn.execute(
+                "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (default["id"], alice_id),
+            )
+        await conn.execute(
+            "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], local),
+        )
+
+
+async def test_signing_in_while_being_removed_doesnt_add_them_back(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+    async with (
+        await psycopg.AsyncConnection.connect(database) as removing,
+        await psycopg.AsyncConnection.connect(database) as signing_in,
+    ):
+        # What remove_member does, held open at the point of committing.
+        await removing.execute(
+            "SELECT 1 FROM workspaces WHERE id = %s FOR UPDATE", (default["id"],)
+        )
+        await removing.execute(
+            "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], bob_id),
+        )
+        await removing.execute(
+            "INSERT INTO workspace_departures (workspace_id, user_id) VALUES (%s, %s)",
+            (default["id"], bob_id),
+        )
+        # Bob's sign-in on a server with a cold cache, while the removal is uncommitted.
+        waiting = asyncio.create_task(
+            signing_in.execute("SELECT sign_in_memberships(%s)", (bob_id,))
+        )
+        await asyncio.sleep(0.3)
+        await removing.commit()
+        await waiting
+        await signing_in.commit()
+        cur = await signing_in.execute(
+            "SELECT count(*) FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], bob_id),
+        )
+        assert (await cur.fetchone())[0] == 0  # pyrefly: ignore[unsupported-operation]
+
+
 async def test_two_owners_removing_each_other_at_once_keep_one(database):
     async with Client(database, SECRET) as (api, _app):
         alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")

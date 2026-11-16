@@ -1105,6 +1105,9 @@ async def watch(session: Session) -> Response:
                 waiting = waiting or asyncio.ensure_future(queue.get())
                 done, _ = await asyncio.wait({waiting}, timeout=max(0.0, next_ping - loop.time()))
                 if not done:
+                    # A quiet stream rechecks too, so it doesn't outlive the membership.
+                    if not await session.still_member():
+                        return
                     yield b": ping\n\n"
                     next_ping += HEARTBEAT_SECONDS
                     continue
