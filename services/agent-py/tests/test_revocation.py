@@ -95,6 +95,10 @@ def test_an_archived_workspace_counts_as_gone_and_a_storage_failure_doesnt():
     unreachable = Storage("http://storage.test", None, httpx.MockTransport(down))
     assert not asyncio.run(no_longer_member(unreachable))
 
+    # An agent server without storage routes answers a bare 404: not a revocation.
+    bare = Storage("http://storage.test", None, httpx.MockTransport(lambda _r: httpx.Response(404)))
+    assert not asyncio.run(no_longer_member(bare))
+
 
 def test_the_adapter_checks_first_before_each_call_and_after_each_batch():
     ws = Workspace()

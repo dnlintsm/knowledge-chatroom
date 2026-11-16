@@ -15,9 +15,11 @@ workspace tools, memory, skills, outside MCP servers):
   entries in the log), but the run stops there, so the model gets no turn
   after it.
 
-The storage API answers 404 for a workspace the user isn't a member of and for
-an archived one. Any other failure (storage down, a timeout) is not a
-revocation: the tools report it themselves.
+Both storage servers (api-py and apps/agent) answer 404 {"error": "Workspace
+not found"} for a workspace the user isn't a member of and for an archived one.
+Anything else is not a revocation: storage down, a timeout, or a 404 without
+that error, from an agent server that has no storage routes (the e2e mock, a
+server without a database). The tools report those themselves.
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ from collections.abc import Callable
 from claude_agent_sdk import HookContext, HookInput, HookJSONOutput, HookMatcher
 
 from .workspace import Storage, WorkspaceError
+
+# The error both storage servers send with that 404 (NOT_FOUND in api_py/workspaces.py
+# and apps/agent/src/storage/workspaces.ts).
+WORKSPACE_NOT_FOUND = "Workspace not found"
 
 NO_LONGER_MEMBER = (
     "The user is no longer a member of this workspace (they were removed, left, or it was "
@@ -39,7 +45,7 @@ async def no_longer_member(storage: Storage) -> bool:
     try:
         await storage.call("GET", "/access")
     except WorkspaceError as err:
-        return err.status == 404
+        return err.status == 404 and str(err) == WORKSPACE_NOT_FOUND
     return False
 
 
