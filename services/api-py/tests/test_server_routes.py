@@ -120,6 +120,13 @@ def test_without_login_only_memory_in_the_local_form():
     assert made(mcp_tokens({"x-knowledge-memory": other}, ALL, None, NOW))["lab"] == {}
 
 
+def test_without_login_the_run_workspace_stays_with_its_memory_tokens():
+    ws = "11111111-2222-4333-8444-555555555555"
+    local = local_memory_token("remote", "t1", None, ws)
+    lab = made(mcp_tokens({"x-knowledge-memory": local}, ALL, None, NOW))["lab"]
+    assert lab == {"memory": local_memory_token("mcp:lab", "t1", None, ws)}
+
+
 SUGGEST = {
     "name": "copilotkitSuggest",
     "description": "Suggest what the user could say next.",

@@ -59,16 +59,17 @@ def parse_request(body: Any) -> dict[str, set[str]] | None:
     return wanted
 
 
-def local_memory_token(via: str, thread: Any, node: Any) -> str:
+def local_memory_token(via: str, thread: Any, node: Any, ws: str | None = None) -> str:
     """localMemoryToken in identity-token.ts: `local.` and the claims' JSON, base64url."""
-    claims = json.dumps(
-        {"via": via, "thread": thread, "node": node}, separators=(",", ":"), ensure_ascii=False
-    )
+    fields: dict[str, Any] = {"via": via, "thread": thread, "node": node}
+    if ws is not None:
+        fields["ws"] = ws
+    claims = json.dumps(fields, separators=(",", ":"), ensure_ascii=False)
     return "local." + base64.urlsafe_b64encode(claims.encode()).rstrip(b"=").decode()
 
 
 def _local_memory(token: str | None) -> dict[str, Any] | None:
-    """A local memory token's chat, when it is one made for the remote chat agent."""
+    """A local memory token's chat (and its workspace, `ws`, if it names one), when it is one made for the remote chat agent."""
     if not token or not token.startswith("local."):
         return None
     data = token[len("local.") :]
@@ -82,7 +83,13 @@ def _local_memory(token: str | None) -> dict[str, Any] | None:
     thread, node = claims.get("thread"), claims.get("node")
     if not isinstance(thread, str) or not thread:
         return None
-    return {"thread": thread, "node": node if isinstance(node, str) else None}
+    ws = claims.get("ws")
+    return {
+        "thread": thread,
+        "node": node if isinstance(node, str) else None,
+        # The run's workspace (issue #226) stays with the tokens made from it.
+        "ws": ws if isinstance(ws, str) else None,
+    }
 
 
 def _seconds(value: Any) -> Any:
@@ -112,7 +119,11 @@ def mcp_tokens(
         memory = _local_memory(headers.get(tokens.MEMORY_HEADER))
         for name, kinds in wanted.items():
             made[name] = (
-                {"memory": local_memory_token(f"mcp:{name}", memory["thread"], memory["node"])}
+                {
+                    "memory": local_memory_token(
+                        f"mcp:{name}", memory["thread"], memory["node"], memory["ws"]
+                    )
+                }
                 if memory and "memory" in kinds
                 else {}
             )

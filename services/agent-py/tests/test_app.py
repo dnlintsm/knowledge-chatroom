@@ -225,3 +225,26 @@ def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
     assert "copilotkit" in options.mcp_servers
     assert "mcp__copilotkit__read_file" in options.allowed_tools
     assert adapter_tokens["t1"] == "tok-1"
+
+
+def test_the_runs_workspace_goes_with_its_storage_calls(claude):
+    """Without login there is no storage token: the app's workspace header names it (issue #226)."""
+    ws = "11111111-2222-4333-8444-555555555555"
+    seen: list[httpx.Request] = []
+
+    def server(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return no_skills(request)
+
+    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    with TestClient(
+        create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(server)))
+    ) as c:
+        events(
+            c.post(
+                "/agent/report", json=run_input(user=LOCAL), headers={"X-Knowledge-Workspace": ws}
+            )
+        )
+        storage = c.app.state.adapter._storage("t1")
+    assert storage.workspace == ws and storage.token is None
+    assert [r.headers.get("x-knowledge-workspace") for r in seen] == [ws]

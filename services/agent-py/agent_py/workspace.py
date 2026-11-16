@@ -7,7 +7,9 @@ goes to the storage API on LOCAL_AGENT_URL with the run's X-Knowledge-Storage
 token, which acts as Claude for the signed-in user: only what they can reach,
 writes in a knowledge node (and to skills) as proposals, no renaming, deleting
 or sharing (docs/remote-agent.md). Without login there is no token and the API
-answers as the local user.
+answers as the local user. Each call also names the run's workspace (issue #226)
+with the X-Knowledge-Workspace header the app sent with the run, so a chat in
+one workspace never works on another's files, with or without login.
 
 The tools take the place (node / experiment) as parameters rather than fixing
 it when the chat starts: the user moves around during a chat.
@@ -34,6 +36,7 @@ from .text import MAX_READ_CHARS, EditError, apply_edit, read_lines
 # (mcp__copilotkit__read_file, ...) with either agent.
 SERVER_NAME = "copilotkit"
 STORAGE_HEADER = "X-Knowledge-Storage"
+WORKSPACE_HEADER = "X-Knowledge-Workspace"
 DEFAULT_STORAGE_URL = "http://localhost:8000"
 EDIT_CONTEXT_LINES = 2
 MAX_EDIT_PREVIEW_CHARS = 4_000
@@ -77,11 +80,12 @@ class WorkspaceError(Exception):
 
 @dataclass
 class Storage:
-    """The storage API for one run: its base URL and the run's token."""
+    """The storage API for one run: its base URL, the run's token and its workspace (None: the default one)."""
 
     base_url: str
     token: str | None
     transport: httpx.AsyncBaseTransport | None = None
+    workspace: str | None = None
 
     async def call(
         self,
@@ -92,7 +96,7 @@ class Storage:
         content: bytes | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        """`headers` replace the storage token (memory calls send their own)."""
+        """`headers` replace the storage token (memory calls send their own); the workspace always goes."""
         headers = (
             dict(headers)
             if headers is not None
@@ -100,6 +104,8 @@ class Storage:
             if self.token
             else {}
         )
+        if self.workspace:
+            headers[WORKSPACE_HEADER] = self.workspace
         if content is not None:
             headers["Content-Type"] = "application/octet-stream"
         query = {k: v for k, v in (params or {}).items() if v is not None}

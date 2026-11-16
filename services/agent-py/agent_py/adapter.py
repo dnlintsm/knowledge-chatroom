@@ -105,6 +105,8 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._notes: OrderedDict[str, str] = OrderedDict()
         # thread_id -> the storage token of the thread's latest run.
         self._tokens: OrderedDict[str, str | None] = OrderedDict()
+        # Each thread's workspace, as the app named it with the latest run (issue #226).
+        self._workspaces: OrderedDict[str, str | None] = OrderedDict()
 
     def build_options(
         self,
@@ -170,13 +172,16 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         storage_token: str | None = None,
         user: str = "local",
         memory_token: str | None = None,
+        workspace: str | None = None,
     ) -> AsyncIterator[BaseEvent]:
         """Runs `input_data` for `user` (their id).
 
-        `storage_token` is its X-Knowledge-Storage header (with login), `memory_token` its X-Knowledge-Memory.
+        `storage_token` is its X-Knowledge-Storage header (with login), `memory_token` its
+        X-Knowledge-Memory, `workspace` its X-Knowledge-Workspace (None: the default workspace).
         """
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
+        remember(self._workspaces, thread_id, workspace, self._max_workers)
         run = Run()
         if self._skills_root is not None:
             run.skills = await self._skills_for(thread_id)
@@ -224,8 +229,13 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
 
     def _storage(self, thread_id: str) -> Storage:
-        """The storage API with the thread's latest token: tools read it when called, not when the chat began."""
-        return Storage(self._storage_url or "", self._tokens.get(thread_id), self._transport)
+        """The storage API with the thread's latest token and workspace: tools read them when called, not when the chat began."""
+        return Storage(
+            self._storage_url or "",
+            self._tokens.get(thread_id),
+            self._transport,
+            self._workspaces.get(thread_id),
+        )
 
     def _memory(self, thread_id: str) -> RunMemory | None:
         """The memory of the thread's latest run: its tools use that run's token and state."""

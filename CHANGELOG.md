@@ -207,7 +207,10 @@
   user and workspace; what it kept before moves into the default workspace once. Layout and
   chat preferences stay the same everywhere. A workspace that doesn't exist or isn't yours
   shows "Workspace not found". Without api-py the app opens the default workspace as
-  before. There is no switcher yet (step 6): open a workspace by its URL.
+  before. There is no switcher yet (step 6): open a workspace by its URL. The Python chat
+  agent (`services/agent-py`) sends the run's workspace with its storage, skills and memory
+  calls, also without login, and api-py's `/identity/mcp-tokens` keeps it in local memory
+  tokens.
 
 ### Changed
 

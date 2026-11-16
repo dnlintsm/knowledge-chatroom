@@ -36,13 +36,21 @@ test("each workspace has its own page, files and saved state", async ({ page, re
   ).toBe(true);
 
   // Every /api call from the page names its workspace: fetches by header,
-  // the change stream and file links by ?workspace=.
-  const named: { path: string; ws: string | null }[] = [];
+  // the change stream and file links by ?workspace=. Each is checked against
+  // the page that sent it (its Referer): one the page before a navigation
+  // sends late is that page's own.
+  const named: { path: string; page: string; ws: string | null }[] = [];
   page.on("request", (req) => {
     const url = new URL(req.url());
     if (!url.pathname.startsWith("/api/") || url.pathname.startsWith("/api/auth/")) return;
-    named.push({ path: url.pathname, ws: req.headers()[HEADER] ?? url.searchParams.get("workspace") });
+    const from = req.headers()["referer"];
+    named.push({
+      path: url.pathname,
+      page: from ? new URL(from).pathname : "",
+      ws: req.headers()[HEADER] ?? url.searchParams.get("workspace"),
+    });
   });
+  const from = (slug: string) => named.filter((r) => r.page === `/w/${slug}`);
 
   try {
     // A URL without a workspace goes to the default one, keeping its query.
@@ -51,16 +59,16 @@ test("each workspace has its own page, files and saved state", async ({ page, re
     await loaded(page);
     await expect(page.getByRole("treeitem", { name: /only-in-default\.md/ })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /only-in-research\.md/ })).toHaveCount(0);
-    expect(named.length).toBeGreaterThan(0);
-    expect(named.filter((r) => r.ws !== home.id)).toEqual([]);
+    expect(from("default").length).toBeGreaterThan(0);
+    expect(from("default").filter((r) => r.ws !== home.id)).toEqual([]);
 
-    named.length = 0;
     await page.goto(`/w/${other.slug}`);
     await loaded(page);
     await expect(page.getByRole("treeitem", { name: /only-in-research\.md/ })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /only-in-default\.md/ })).toHaveCount(0);
-    expect(named.some((r) => r.path === "/api/files")).toBe(true);
-    expect(named.filter((r) => r.ws !== other.id)).toEqual([]);
+    expect(from(other.slug).some((r) => r.path === "/api/files")).toBe(true);
+    expect(from(other.slug).filter((r) => r.ws !== other.id)).toEqual([]);
+    expect(named.filter((r) => r.page !== "/w/default" && r.page !== `/w/${other.slug}`)).toEqual([]);
 
     // The tabs it opened are kept for this user in this workspace.
     await page.getByRole("treeitem", { name: /only-in-research\.md/ }).click();

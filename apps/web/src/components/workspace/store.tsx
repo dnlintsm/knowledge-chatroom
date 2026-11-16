@@ -248,11 +248,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tree, experiments, proposals, account, setExperiments, setProposals, setAccount,
     refreshTree, refreshExperiments, refreshProposals,
   } = useWorkspaceCatalog();
+  // Saves go to the workspace they were made in, also when one is still
+  // waiting to be sent once the page has moved to another workspace.
+  const workspaceId = current?.id ?? null;
   const [sync] = useState(() => new SaveScheduler({
     getMode: () => mode.current,
     getPlace: () => placeRef.current,
     getFile: (path) => files.current.find((file) => file.path === path),
-    put: putServerFile,
+    put: (file, at) => putServerFile(file, at, { workspace: workspaceId }),
     onError: setSyncError,
   }));
   const { busy, schedule: scheduleSave, flush: flushSaves, settle: settleSaves } = sync;
@@ -450,7 +453,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       let failed: string[] = [];
       if (toUpload.length) {
         failed = (
-          await Promise.all(toUpload.map((f) => putServerFile(f).then(() => null, () => f.path)))
+          await Promise.all(toUpload.map((f) => putServerFile(f, null, { workspace: workspaceId }).then(() => null, () => f.path)))
         ).filter((p): p is string => p !== null);
         const again = await listServerFiles();
         if (Array.isArray(again)) list = again;
@@ -612,7 +615,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         sync.beginWrite(path, at);
         let lost = false;
         try {
-          const info = await putServerFile(file, at, { createOnly: true });
+          const info = await putServerFile(file, at, { createOnly: true, workspace: workspaceId });
           sync.remember(path, info.sha256, at);
         } catch (err) {
           if (!(err instanceof FileExistsError)) throw err;
@@ -635,7 +638,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       upsert(file);
       return file;
     },
-    [upsert, resync, sync],
+    [upsert, resync, sync, workspaceId],
   );
 
   const remove = useCallback(

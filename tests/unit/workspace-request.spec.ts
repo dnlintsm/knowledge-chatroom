@@ -72,6 +72,19 @@ test.describe("workspace requests", () => {
     expect(seen?.aborted).toBe(false);
   });
 
+  test("a request that names its workspace keeps it after a switch", async () => {
+    // A save scheduled in WS1 that is sent once the page is in WS2 still goes to WS1.
+    const sent: { ws: string | null; aborted: boolean | undefined }[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ ws: new Headers(init?.headers).get(WORKSPACE_HEADER), aborted: init?.signal?.aborted });
+      return new Response("{}");
+    }) as typeof fetch;
+    setRequestWorkspace(WS2);
+    const res = await workspaceFetch("/api/files/notes/a.md", { method: "PUT", headers: { [WORKSPACE_HEADER]: WS1 } });
+    expect(res.ok).toBe(true);
+    expect(sent).toEqual([{ ws: WS1, aborted: undefined }]);
+  });
+
   test("the caller's own signal still cancels", async () => {
     globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) =>

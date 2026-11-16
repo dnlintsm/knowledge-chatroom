@@ -1,7 +1,7 @@
 import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-chatroom/contracts/storage-contract";
 import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
 export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
-import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
+import { WORKSPACE_HEADER, workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
 import { FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
 
 /**
@@ -165,12 +165,13 @@ export async function loadServerText(path: string, place: PlaceId = null): Promi
 
 /**
  * Saves a file. With `createOnly` the server refuses to replace an existing
- * file (FileExistsError).
+ * file (FileExistsError). With `workspace` it is saved there, even when the
+ * page has moved to another workspace meanwhile (a delayed save).
  */
 export async function putServerFile(
   file: Pick<WorkspaceFile, "path" | "mime" | "content">,
   place: PlaceId = null,
-  opts: { createOnly?: boolean } = {},
+  opts: { createOnly?: boolean; workspace?: string | null } = {},
 ): Promise<ServerFile> {
   await deleted(file.path, place);
   // Binary uploads arrive as data: URLs; send their bytes.
@@ -180,6 +181,7 @@ export async function putServerFile(
       : file.content;
   const headers: Record<string, string> = { "Content-Type": file.mime };
   if (opts.createOnly) headers["If-None-Match"] = "*";
+  if (opts.workspace) headers[WORKSPACE_HEADER] = opts.workspace;
   const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
   if (res.status === 412) throw new FileExistsError(file.path);
   if (res.status === 403) throw new Error(`You can't change files here (${file.path})`);

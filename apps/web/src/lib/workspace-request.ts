@@ -69,11 +69,18 @@ export function workspaceUrl(url: string, id: string | null = current.id): strin
  * X-Knowledge-Workspace header. Cancelled when the workspace changes, along
  * with `init.signal`; an answer that comes after the change throws an
  * AbortError instead of being returned.
+ *
+ * A request that already names its workspace (the header in `init.headers`,
+ * e.g. a save scheduled before a switch) goes to that workspace as it is,
+ * never to the page's, and a switch doesn't cancel it.
  */
 export async function workspaceFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const { id, controller } = current;
   const headers = new Headers(init.headers);
-  if (id && isAppApi(input)) headers.set(WORKSPACE_HEADER, id);
+  const named = headers.get(WORKSPACE_HEADER);
+  if (id && !named && isAppApi(input)) headers.set(WORKSPACE_HEADER, id);
+  // Bound to its own workspace: no switch can move it, so none cancels it.
+  if (named) return fetch(input, { ...init, headers });
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const res = await fetch(input, { ...init, headers, signal });
   if (controller.signal.aborted) {
