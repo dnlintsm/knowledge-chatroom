@@ -247,6 +247,20 @@
   tool boundary: a tool call already running ends and keeps its result, then the run
   ends without another model turn; a later tool call, of any kind, is refused. A grant or
   group membership written while its user is being removed goes with them.
+- Experiment maintainers and collaborators on both servers (issue #255, step 3). An
+  Experiment keeps its author as provenance, and has a **maintainer**, who is responsible
+  for it now: its author, until they hand it over with `PUT /experiments/{id}/maintainer`
+  (`keepAsCollaborator` keeps them on, by default). The maintainer adds and removes
+  **collaborators** with `PUT` and `DELETE /experiments/{id}/collaborators/{userId}`, and a
+  collaborator may leave. Both must be members who can view its node. Collaborators edit
+  it, its files and its runs, and see it while it is a draft; only the maintainer changes
+  its status, deletes it or chooses who works on it. Owners and Admins hand over shared or
+  archived Experiments, never drafts. Each Experiment says `maintainerId`,
+  `maintainerName`, `maintainerIsMember` and `collaborators`, and `mine` now means you
+  maintain it. Removing someone from a workspace also ends their collaborator places
+  (`collaborations` in the answer and the preview, which lists what they maintain).
+  Storage tokens can't use these routes. Migration `025_experiment_maintainers.sql` makes
+  every existing Experiment's author its maintainer, with no change in who sees what.
 
 ### Changed
 

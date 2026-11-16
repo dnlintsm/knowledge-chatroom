@@ -495,8 +495,7 @@ In one transaction, it:
    groups** and their **Experiment collaborator places** there, so being added again later
    starts from the starting grant, as for anyone new: nothing someone else gave them comes
    back on its own (grants and group memberships are already refused for non-members,
-   and collaborators have to be members). Collaborator places are deleted from step 3
-   on, when that table exists;
+   and collaborators have to be members);
 3. records a **departure**, so the default workspace doesn't add them back at their next
    sign-in during the compatibility period (decision 5), also when that sign-in happens
    while the removal is still committing. Adding them again clears it;
@@ -712,12 +711,16 @@ rules.
    adds the departures, keeps `sign_in_memberships` from re-adding someone who left, and
    makes `workspace_members_keep_owner` lock the workspace's row before it looks. The
    routes take that lock first too, so two Owners demoting or removing each other at once
-   leave one. The removal preview lists Experiments by author until
-   step 3 adds maintainers. On the agent server, `membershipHook`
+   leave one. On the agent server, `membershipHook`
    (`apps/agent/src/storage/revocation.ts`) checks membership before every tool call of a
    run and stops the run once it is gone.
 3. Backend, Experiments: the migration, maintainer and collaborators in api-py and in the
-   TypeScript server's session and tools.
+   TypeScript server's session and tools. Done: `025_experiment_maintainers.sql` adds
+   `maintainer_id` (backfilled from the author) and `experiment_collaborators`, rewrites
+   `experiment_access`, and adds a trigger that keeps the column rules (author fixed;
+   status, deletion and handover for the maintainer, handover also for Owners and Admins
+   on shared ones) for users' own queries under row-level security. Both servers serve
+   the handover and collaborator routes, and removal deletes collaborator places.
 4. Backend, workspace inventory and adding an Owner.
 5. Screens: people, transfer, leave, settings, archived workspaces.
 6. Screens: the Experiment header and the read-only reasons.

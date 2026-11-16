@@ -98,12 +98,20 @@ _COLUMNS = """
     e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
     e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
     (SELECT count(*) FROM files f WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
-    experiment_access(%(user)s, e.id) AS access, e.author_id = %(user)s AS mine"""
+    experiment_access(%(user)s, e.id) AS access, e.maintainer_id = %(user)s AS mine,
+    e.maintainer_id, mu.name AS maintainer_name,
+    workspace_member(e.workspace_id, e.maintainer_id) AS maintainer_is_member,
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('id', c.user_id, 'name', cu.name)
+                               ORDER BY lower(coalesce(cu.name, cu.email, '')), c.created_at), '[]')
+     FROM experiment_collaborators c JOIN users cu ON cu.id = c.user_id
+     WHERE c.experiment_id = e.id) AS collaborators"""
+# The joins _COLUMNS needs: the author's and the maintainer's names.
+_PEOPLE = "LEFT JOIN users u ON u.id = e.author_id LEFT JOIN users mu ON mu.id = e.maintainer_id"
 
 
 def _to_experiment(row: tuple[Any, ...]) -> dict[str, Any]:
     (id_, node, author, author_name, title, hypothesis, params, results, status, state, forked, updated, provenance,
-     files, access, mine) = row  # fmt: skip
+     files, access, mine, maintainer, maintainer_name, maintainer_is_member, collaborators) = row  # fmt: skip
     return {
         "id": str(id_),
         "nodeId": str(node) if node else None,
@@ -121,6 +129,10 @@ def _to_experiment(row: tuple[Any, ...]) -> dict[str, Any]:
         "provenance": provenance,
         "access": access,
         "mine": mine,
+        "maintainerId": str(maintainer),
+        "maintainerName": maintainer_name,
+        "maintainerIsMember": maintainer_is_member,
+        "collaborators": [{"id": str(c["id"]), "name": c["name"]} for c in collaborators],
     }
 
 
@@ -152,7 +164,7 @@ async def list_experiments(
         SELECT * FROM (
           SELECT {_COLUMNS}
           FROM experiments e LEFT JOIN nodes n ON n.id = e.node_id
-          LEFT JOIN users u ON u.id = e.author_id
+          {_PEOPLE}
           WHERE e.workspace_id = %(ws)s AND e.deleted_at IS NULL
             AND (e.node_id IS NULL OR n.deleted_at IS NULL)
             {on_node}
@@ -172,7 +184,7 @@ async def get(
     cur = await conn.execute(
         f"""
         SELECT {_COLUMNS}
-        FROM experiments e LEFT JOIN users u ON u.id = e.author_id
+        FROM experiments e {_PEOPLE}
         WHERE e.id = %(id)s AND e.workspace_id = %(ws)s AND e.deleted_at IS NULL""",
         {"user": user_id, "ws": workspace_id, "id": experiment_id},
     )

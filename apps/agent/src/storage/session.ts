@@ -40,6 +40,10 @@ import type { SearchHit, SearchOptions, SearchService } from "./search";
 /** What a role lets you do, for refusals: "You can only view here; ...". */
 const ROLE_VERB: Record<Role, string> = { viewer: "view", editor: "edit", owner: "manage" };
 
+const NOT_WORKER = "Only the experiment's maintainer and collaborators can change it";
+const ONLY_MAINTAINER = "Only the experiment's maintainer can do this";
+const CANT_WORK = "They can't view this experiment's node. Share it with them first.";
+
 /** A file a run reads: where it is now, and (optionally) its name under inputs/. */
 export interface RunInputSource {
   path: string;
@@ -209,8 +213,9 @@ export class Session {
   }
 
   // Experiments: anyone who can view a node (or the workspace root) may start
-  // their own experiment there; only its author changes it (see
-  // 005_experiments.sql). An experiment with a report.md is a run.
+  // their own experiment there; its maintainer and collaborators change it
+  // (005_experiments.sql, 025_experiment_maintainers.sql). An experiment with
+  // a report.md is a run.
 
   /** Experiments you can see, on one node (null: at the root) or anywhere. */
   async experiments(nodeId?: string | null): Promise<Experiment[]> {
@@ -455,11 +460,12 @@ export class Session {
    * Adds input files to an existing run or experiment (issue #114): each is
    * linked in read only under inputs/ at its current version and appended to
    * the inputs its provenance records, so a rerun reads them too. Only its
-   * author can, while it isn't archived; a finished run stays as it ended.
+   * maintainer and collaborators can, while it isn't archived; a finished run
+   * stays as it ended.
    */
   async addRunInputs(id: string, inputs: RunInputSource[]): Promise<Experiment> {
     const current = await this.experiment(id);
-    this.needAuthor(current);
+    this.needWorker(current);
     if (current.status === "archived") {
       throw new ForbiddenError("This experiment is archived; restore it to change it");
     }
@@ -527,7 +533,7 @@ export class Session {
   /**
    * Records a run's results and how it ended (done or failed), and refreshes
    * the record in its report.md front matter (creating the report if it has
-   * none). Only its author can; see updateExperiment. A finished run stays
+   * none). Its maintainer and collaborators can; see updateExperiment. A finished run stays
    * as it ended (a rerun is a new run): the same call again, say a retry
    * after a lost answer, changes nothing, and a different one is refused.
    */
@@ -537,7 +543,7 @@ export class Session {
     state: "done" | "failed",
   ): Promise<Experiment> {
     const current = await this.experiment(id);
-    this.needAuthor(current);
+    this.needWorker(current);
     if (current.status === "archived") {
       throw new ForbiddenError("This experiment is archived; restore it to change it");
     }
@@ -575,10 +581,15 @@ export class Session {
     if (after !== before) await files.write(REPORT_PATH, new TextEncoder().encode(after));
   }
 
-  /** Archived experiments are read only, apart from changing the status back. */
+  /**
+   * Its maintainer and collaborators edit it; only the maintainer changes its
+   * status (shares, archives or restores it). Archived experiments are read
+   * only, apart from changing the status back.
+   */
   async updateExperiment(id: string, input: ExperimentInput): Promise<Experiment> {
     const current = await this.experiment(id);
-    this.needAuthor(current);
+    this.needWorker(current);
+    if (input.status !== undefined && input.status !== current.status) this.needMaintainer(current);
     const archived = current.status === "archived" && (input.status ?? "archived") === "archived";
     if (archived && Object.keys(input).some((k) => k !== "status")) {
       throw new ForbiddenError("This experiment is archived; restore it to change it");
@@ -598,16 +609,96 @@ export class Session {
   }
 
   async deleteExperiment(id: string): Promise<boolean> {
-    this.needAuthor(await this.experiment(id));
+    this.needMaintainer(await this.experiment(id));
     return this.scoped((db) =>
       on(this.parts.experiments, db).remove(id, this.audit("experiment.delete", { experiment: id })),
     );
   }
 
-  private needAuthor(experiment: Experiment) {
-    if (!experiment.mine) {
-      throw new ForbiddenError("Only the experiment's author can change it");
+  /** Whether the principal is its maintainer or a collaborator. */
+  private worksOn(experiment: Experiment) {
+    const userId = this.principal.userId;
+    return experiment.mine || experiment.collaborators.some((c) => c.id === userId);
+  }
+
+  private needWorker(experiment: Experiment) {
+    if (!this.worksOn(experiment)) throw new ForbiddenError(NOT_WORKER);
+  }
+
+  private needMaintainer(experiment: Experiment) {
+    if (!experiment.mine) throw new ForbiddenError(ONLY_MAINTAINER);
+  }
+
+  /** A collaborator or new maintainer: a member who can view the experiment's node. */
+  private async needCanWork(experiment: Experiment, userId: string) {
+    if (!(await this.parts.experiments.canWork(userId, experiment.nodeId))) throw new ExperimentError(CANT_WORK);
+  }
+
+  /**
+   * Adds or removes a collaborator (docs/workspaces.md, "Experiment handover"):
+   * the maintainer adds members who can view the node and removes anyone; a
+   * collaborator removes themselves. Whether anything changed.
+   */
+  async setCollaborator(id: string, userId: string, add: boolean): Promise<boolean> {
+    const current = await this.experiment(id);
+    userId = userId.toLowerCase();
+    if (add) {
+      this.needMaintainer(current);
+      if (userId === current.maintainerId) throw new ExperimentError("They maintain this experiment already");
+      await this.needCanWork(current, userId);
+    } else {
+      if (userId !== this.principal.userId) this.needMaintainer(current);
+      if (!isNodeId(userId)) return false;
     }
+    const action = add ? "experiment.collaborator.add" : "experiment.collaborator.remove";
+    return this.scoped((db) =>
+      on(this.parts.experiments, db).setCollaborator(
+        current,
+        userId,
+        add,
+        this.principal.userId,
+        this.audit(action, { experiment: id, user: userId }),
+      ),
+    );
+  }
+
+  /**
+   * Makes someone else its maintainer: the maintainer can, and an Owner or
+   * Admin for one that isn't a draft. The new maintainer must be a member who
+   * can view the node. The previous one stays on as a collaborator when
+   * `keep`, but only while they are still a member. The experiment after, or
+   * null once the caller can't see it (say, a draft they handed over).
+   */
+  async handOver(id: string, userId: string, keep = true): Promise<Experiment | null> {
+    const current = await this.experiment(id);
+    if (!current.mine) {
+      const membership = await this.parts.access.membership(this.principal.userId);
+      if (current.status === "draft" || (membership !== "owner" && membership !== "admin")) {
+        throw new ForbiddenError(
+          "Only the experiment's maintainer can hand it over (an Owner or Admin can, once it is shared)",
+        );
+      }
+    }
+    userId = userId.toLowerCase();
+    const previous = current.maintainerId;
+    if (userId === previous) return current;
+    await this.needCanWork(current, userId);
+    await this.scoped((db) =>
+      on(this.parts.experiments, db).handOver(
+        current,
+        userId,
+        keep && current.maintainerIsMember,
+        this.principal.userId,
+        this.audit("experiment.maintainer", { experiment: id, from: previous, user: userId }),
+      ),
+    );
+    return this.experimentIfVisible(id);
+  }
+
+  /** The experiment, or null once the caller can't see it. */
+  async experimentIfVisible(id: string): Promise<Experiment | null> {
+    const userId = this.principal.userId;
+    return this.scoped((db) => on(this.parts.experiments, db).get(userId, id));
   }
 
   // Files
@@ -620,7 +711,7 @@ export class Session {
     return this.filesSession(service, role, { node: nodeId });
   }
 
-  /** An experiment's files: its author edits them, others who may see it read them. */
+  /** An experiment's files: its maintainer and collaborators edit them, others who may see it read them. */
   async experimentFiles(id: string): Promise<FilesSession> {
     const access = await this.parts.experiments.access(this.principal.userId, id);
     const service = access && (await this.parts.files.inExperiment(id));
@@ -686,12 +777,12 @@ export class Session {
 
   /**
    * Proposes an experiment's changed files (all of them, or those in `paths`)
-   * to its node, for someone who can edit there to accept. Only its author
-   * promotes it, and not once it is archived.
+   * to its node, for someone who can edit there to accept. Its maintainer
+   * and collaborators promote it, and not once it is archived.
    */
   async promote(experimentId: string, paths?: string[], note?: string): Promise<Proposal[]> {
     const experiment = await this.experiment(experimentId);
-    this.needAuthor(experiment);
+    this.needWorker(experiment);
     if (experiment.access !== "writer") {
       throw new ForbiddenError("This experiment is archived; restore it to propose its files");
     }
@@ -906,7 +997,7 @@ export class FilesSession {
     if (atLeast(this.role, "editor")) return;
     throw new ForbiddenError(
       this.experimentId
-        ? "Only the experiment's author can change its files, and not once it is archived"
+        ? "Only the experiment's maintainer and collaborators can change its files, and not once it is archived"
         : `You can only ${ROLE_VERB[this.role]} here; this needs editor access`,
     );
   }

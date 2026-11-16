@@ -221,7 +221,7 @@ class AccessService:
         async with self.pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT e.author_id = %(user)s
+                SELECT experiment_works(%(user)s, e.id, e.maintainer_id)
                     OR ((e.status <> 'draft' OR %(change)s = 'status')
                         AND effective_role(e.workspace_id, %(user)s, e.node_id) IS NOT NULL)
                 FROM experiments e

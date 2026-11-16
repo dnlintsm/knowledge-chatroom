@@ -32,6 +32,9 @@ from .storage import Storage
 # What a role lets you do, for refusals: "You can only view here; ...".
 ROLE_VERB: dict[str, str] = {"viewer": "view", "editor": "edit", "owner": "manage"}
 ARCHIVED = "This experiment is archived; restore it to change it"
+NOT_WORKER = "Only the experiment's maintainer and collaborators can change it"
+ONLY_MAINTAINER = "Only the experiment's maintainer can do this"
+CANT_WORK = "They can't view this experiment's node. Share it with them first."
 # The node name an upload uses for a level its path leaves empty ("Etch/Module 3//").
 EMPTY_LEVEL_NAME = "None"
 # What an audit target says about content, hidden from a reader who can't see it.
@@ -181,7 +184,7 @@ class Session:
             )
 
     # Experiments: anyone who can view a node (or the workspace root) may start
-    # their own experiment there; only its author changes it (see
+    # their own experiment there; its maintainer and collaborators change it (see
     # 005_experiments.sql). An experiment with a report.md is a run.
 
     async def experiments(self, node_id: str | None | object = ANYWHERE) -> list[dict[str, Any]]:
@@ -466,10 +469,11 @@ class Session:
         Adds input files to an existing run or experiment (issue #114): each is
         linked in read only under inputs/ at its current version and appended to
         the inputs its provenance records, so a rerun reads them too. Only its
-        author can, while it isn't archived; a finished run stays as it ended.
+        maintainer and collaborators can, while it isn't archived; a finished
+        run stays as it ended.
         """
         current = await self.experiment(experiment_id)
-        self._need_author(current)
+        self._need_worker(current)
         if current["status"] == "archived":
             raise ForbiddenError(ARCHIVED)
         if current["state"] in ("done", "failed"):
@@ -552,10 +556,10 @@ class Session:
         Records a run's results and how it ended (done or failed), and refreshes
         the record in its report.md (creating the report if it has none). A
         finished run stays as it ended: the same call again changes nothing,
-        and a different one is refused.
+        and a different one is refused. Its maintainer and collaborators can.
         """
         current = await self.experiment(experiment_id)
-        self._need_author(current)
+        self._need_worker(current)
         if current["status"] == "archived":
             raise ForbiddenError(ARCHIVED)
         if current["state"] in ("done", "failed"):
@@ -601,9 +605,15 @@ class Session:
             await files.write(REPORT_PATH, after.encode())
 
     async def update_experiment(self, experiment_id: str, given: dict[str, Any]) -> dict[str, Any]:
-        """Archived experiments are read only, apart from changing the status back."""
+        """
+        Its maintainer and collaborators edit it; only the maintainer changes its
+        status (shares, archives or restores it). Archived experiments are read
+        only, apart from changing the status back.
+        """
         current = await self.experiment(experiment_id)
-        self._need_author(current)
+        self._need_worker(current)
+        if "status" in given and given["status"] != current["status"]:
+            self._need_maintainer(current)
         archived = current["status"] == "archived" and given.get("status", "archived") == "archived"
         if archived and any(key != "status" for key in given):
             raise ForbiddenError(ARCHIVED)
@@ -618,7 +628,7 @@ class Session:
         return updated
 
     async def delete_experiment(self, experiment_id: str) -> bool:
-        self._need_author(await self.experiment(experiment_id))
+        self._need_maintainer(await self.experiment(experiment_id))
         async with self.scoped() as conn:
             return await experiments.remove(
                 conn,
@@ -627,10 +637,135 @@ class Session:
                 self._audit("experiment.delete", {"experiment": experiment_id}),
             )
 
+    def _works_on(self, experiment: dict[str, Any]) -> bool:
+        """Whether the principal is its maintainer or a collaborator."""
+        user = self.principal.user_id
+        return experiment["mine"] or any(c["id"] == user for c in experiment["collaborators"])
+
+    def _need_worker(self, experiment: dict[str, Any]) -> None:
+        if not self._works_on(experiment):
+            raise ForbiddenError(NOT_WORKER)
+
     @staticmethod
-    def _need_author(experiment: dict[str, Any]) -> None:
+    def _need_maintainer(experiment: dict[str, Any]) -> None:
         if not experiment["mine"]:
-            raise ForbiddenError("Only the experiment's author can change it")
+            raise ForbiddenError(ONLY_MAINTAINER)
+
+    async def _need_can_work(self, experiment: dict[str, Any], user_id: str) -> None:
+        """A collaborator or new maintainer: a member who can view the experiment's node."""
+        ok = False
+        if is_uuid(user_id):
+            async with self.storage.pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT workspace_member(%(ws)s, %(user)s) AND effective_role(%(ws)s, %(user)s, %(node)s) IS NOT NULL",
+                    {"ws": self.ws, "user": user_id, "node": experiment["nodeId"]},
+                )
+                row = await cur.fetchone()
+                ok = bool(row and row[0])
+        if not ok:
+            raise ExperimentError(CANT_WORK)
+
+    async def set_collaborator(self, experiment_id: str, user_id: str, add: bool) -> bool:
+        """
+        Adds or removes a collaborator (docs/workspaces.md, "Experiment handover"):
+        the maintainer adds members who can view the node and removes anyone; a
+        collaborator removes themselves. Whether anything changed.
+        """
+        current = await self.experiment(experiment_id)
+        user_id = user_id.lower()
+        if add:
+            self._need_maintainer(current)
+            if user_id == current["maintainerId"]:
+                raise ExperimentError("They maintain this experiment already")
+            await self._need_can_work(current, user_id)
+        else:
+            if user_id != self.principal.user_id:
+                self._need_maintainer(current)
+            if not is_uuid(user_id):
+                return False
+        action = "experiment.collaborator.add" if add else "experiment.collaborator.remove"
+        async with self.scoped() as conn:
+            if add:
+                cur = await conn.execute(
+                    """
+                    INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
+                    VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (experiment_id, user_id, self.principal.user_id),
+                )
+            else:
+                cur = await conn.execute(
+                    "DELETE FROM experiment_collaborators WHERE experiment_id = %s AND user_id = %s",
+                    (experiment_id, user_id),
+                )
+            changed = cur.rowcount > 0
+            if changed:
+                await self._audit(action, {"experiment": experiment_id, "user": user_id})(conn)
+                await self.storage.notify(
+                    conn,
+                    {
+                        "op": "experiment",
+                        "change": "update",
+                        "id": experiment_id,
+                        "node": current["nodeId"],
+                    },
+                )
+        return changed
+
+    async def hand_over(
+        self, experiment_id: str, user_id: str, keep: bool = True
+    ) -> dict[str, Any] | None:
+        """
+        Makes someone else its maintainer: the maintainer can, and an Owner or
+        Admin for one that isn't a draft. The new maintainer must be a member
+        who can view the node. The previous one stays on as a collaborator when
+        `keep`, but only while they are still a member.
+        """
+        current = await self.experiment(experiment_id)
+        manages = self.membership in ("owner", "admin") and current["status"] != "draft"
+        if not current["mine"] and not manages:
+            raise ForbiddenError(
+                "Only the experiment's maintainer can hand it over (an Owner or Admin can, once it is shared)"
+            )
+        user_id = user_id.lower()
+        previous = current["maintainerId"]
+        if user_id == previous:
+            return current
+        await self._need_can_work(current, user_id)
+        async with self.scoped() as conn:
+            if keep and current["maintainerIsMember"]:
+                await conn.execute(
+                    """
+                    INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
+                    VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (experiment_id, previous, self.principal.user_id),
+                )
+            await conn.execute(
+                "DELETE FROM experiment_collaborators WHERE experiment_id = %s AND user_id = %s",
+                (experiment_id, user_id),
+            )
+            await conn.execute(
+                "UPDATE experiments SET maintainer_id = %s, updated_at = now() WHERE id = %s",
+                (user_id, experiment_id),
+            )
+            await self._audit(
+                "experiment.maintainer",
+                {"experiment": experiment_id, "from": previous, "user": user_id},
+            )(conn)
+            await self.storage.notify(
+                conn,
+                {
+                    "op": "experiment",
+                    "change": "update",
+                    "id": experiment_id,
+                    "node": current["nodeId"],
+                },
+            )
+        return await self.experiment_if_visible(experiment_id)
+
+    async def experiment_if_visible(self, experiment_id: str) -> dict[str, Any] | None:
+        """The experiment, or None once the caller can't see it (say, a draft they handed over)."""
+        async with self.scoped() as conn:
+            return await experiments.get(conn, self.ws, self.principal.user_id, experiment_id)
 
     # Files
 
@@ -644,7 +779,7 @@ class Session:
         return FilesSession(self, service, role)
 
     async def experiment_files(self, experiment_id: str) -> FilesSession:
-        """An experiment's files: its author edits them, others who may see it read them."""
+        """An experiment's files: its maintainer and collaborators edit them, others who may see it read them."""
         access = await self.access.experiment_access(self.principal.user_id, experiment_id)
         service = None
         if access:
@@ -733,11 +868,11 @@ class Session:
     ) -> list[dict[str, Any]]:
         """
         Proposes an experiment's changed files (all of them, or those in `paths`)
-        to its node, for someone who can edit there to accept. Only its author
-        promotes it, and not once it is archived.
+        to its node, for someone who can edit there to accept. Its maintainer
+        and collaborators promote it, and not once it is archived.
         """
         experiment = await self.experiment(experiment_id)
-        self._need_author(experiment)
+        self._need_worker(experiment)
         if experiment["access"] != "writer":
             raise ForbiddenError("This experiment is archived; restore it to propose its files")
         candidates = await self.promotable(experiment_id)
@@ -1064,7 +1199,7 @@ class FilesSession:
         if at_least(self.role, "editor"):
             return
         raise ForbiddenError(
-            "Only the experiment's author can change its files, and not once it is archived"
+            "Only the experiment's maintainer and collaborators can change its files, and not once it is archived"
             if self.experiment_id
             else f"You can only {ROLE_VERB[self.role]} here; this needs editor access"
         )

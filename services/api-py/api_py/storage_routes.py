@@ -42,6 +42,9 @@
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
     POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
     POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
+    PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?} -> {experiment|null}
+    PUT    /experiments/<id>/collaborators/<user>  add one -> {experiment}
+    DELETE /experiments/<id>/collaborators/<user>  remove one (or yourself) -> {experiment|null}
     POST   /experiments/upload      multipart: a "meta" part {id, path, title, ...} and
                                     one part per file -> {experiment, lineage, created,
                                     files} (201)
@@ -275,6 +278,8 @@ def agent_refusal(request: Request) -> str | None:
             return None
         if method == "POST" and re.fullmatch(r"[^/]+/(inputs|finish)", sub):
             return None
+        if re.fullmatch(r"[^/]+/(maintainer|collaborators/[^/]+)", sub):
+            return "Claude doesn't hand experiments over or choose who works on them"
         return "Claude doesn't delete experiments or move folders into them"
     if section == "proposals":
         return (
@@ -985,6 +990,26 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         if not isinstance(results, dict) or state not in ("done", "failed"):
             return error(400, "Expected {results: object, state?: done|failed}")
         return json_response(200, await session.finish_run(finish_of.group(1), results, state))
+
+    maintainer_of = re.fullmatch(r"([^/]+)/maintainer", experiment_id)
+    if maintainer_of:
+        if method != "PUT":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        user_id = body.get("userId") if body else None
+        keep = body.get("keepAsCollaborator", True) if body else None
+        if not isinstance(user_id, str) or not isinstance(keep, bool):
+            return error(400, "Expected {userId: string, keepAsCollaborator?: boolean}")
+        handed = await session.hand_over(maintainer_of.group(1), user_id, keep)
+        return json_response(200, {"experiment": handed})
+
+    collaborator_of = re.fullmatch(r"([^/]+)/collaborators/([^/]+)", experiment_id)
+    if collaborator_of:
+        if method not in ("PUT", "DELETE"):
+            return error(405, "Method not allowed")
+        exp, user_id = collaborator_of.groups()
+        await session.set_collaborator(exp, user_id, method == "PUT")
+        return json_response(200, {"experiment": await session.experiment_if_visible(exp)})
 
     inputs_of = re.fullmatch(r"([^/]+)/inputs", experiment_id)
     if inputs_of:

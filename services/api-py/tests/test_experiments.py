@@ -157,10 +157,12 @@ async def test_experiments_fork_list_change_and_delete(api):
     seen = (await api.get(f"/experiments/{exp['id']}", headers=BOB)).json()
     assert (seen["access"], seen["mine"]) == ("reader", False)
     refused = await api.patch(f"/experiments/{exp['id']}", headers=BOB, json={"title": "Mine"})
-    assert refused.json() == {"error": "Only the experiment's author can change it"}
+    assert refused.json() == {
+        "error": "Only the experiment's maintainer and collaborators can change it"
+    }
     write = await api.put(f"/files/x.md?experiment={exp['id']}", headers=BOB, content=b"x")
     assert (write.status_code, write.json()["error"]) == (
-        403, "Only the experiment's author can change its files, and not once it is archived",
+        403, "Only the experiment's maintainer and collaborators can change its files, and not once it is archived",
     )  # fmt: skip
     assert (
         await api.get(f"/files/notes/a.md?experiment={exp['id']}", headers=BOB)
