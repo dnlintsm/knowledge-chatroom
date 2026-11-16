@@ -23,7 +23,7 @@ import { keepFailureReason } from "./run-errors";
 import { queryData } from "./query";
 import { searchFlights } from "./a2ui_fixed_schema";
 import { generateA2ui } from "./a2ui_dynamic_schema";
-import { currentStorage } from "./storage";
+import { currentStorage, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { createFileTools } from "./storage/tools";
 import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
@@ -131,6 +131,8 @@ interface RunContext {
   identity?: RunTokens;
   /** The user's memory for this run (./memory/run.ts); null = none. */
   memory?: RunMemory | null;
+  /** Storage in the run's workspace (issue #226); unset = the default one. */
+  storage?: () => Storage | null;
 }
 
 const runContext = new AsyncLocalStorage<RunContext>();
@@ -145,6 +147,7 @@ const CHATROOM_PROPS = "knowledge_chatroom";
  * `skills` are the skills prepared for the run, and `onSkillUse` hears each
  * one it uses. `identity` signs the run's user for each outside MCP server
  * that asks for it (./mcp.ts). `memory` is the user's memory for the run.
+ * `storage` is storage in the run's workspace, which the file tools act in.
  */
 export const runAs = <T>(
   userId: string | null | undefined,
@@ -153,7 +156,8 @@ export const runAs = <T>(
   onSkillUse: (use: SkillUse) => void = () => {},
   identity?: RunTokens,
   memory: RunMemory | null = null,
-): T => runContext.run({ userId, skills, onSkillUse, identity, memory }, fn);
+  storage?: () => Storage | null,
+): T => runContext.run({ userId, skills, onSkillUse, identity, memory, storage }, fn);
 
 // The adapter's own extra arguments (profile options, frontend tool results).
 type OptionsRest = Parameters<ClaudeAgentAdapter["buildOptions"]> extends [unknown, ...infer R] ? R : never;
@@ -244,7 +248,7 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
     const memory = ctx.memory;
     const tools = [
       ...baseTools,
-      ...createFileTools(currentStorage, async () => userId, workdir?.cwd, {
+      ...createFileTools(ctx.storage ?? currentStorage, async () => userId, workdir?.cwd, {
         chat: input.threadId ?? null,
         model: options.model ?? resolveModel(),
         skills: ctx.skills?.skills.map((s) => s.skill),

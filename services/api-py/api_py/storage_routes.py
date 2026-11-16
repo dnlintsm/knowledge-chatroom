@@ -118,6 +118,7 @@ from .proxy import forward
 from .run_report import js_json, js_number
 from .search import SearchError
 from .session import Session
+from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -287,17 +288,26 @@ def agent_refusal(request: Request) -> str | None:
 
 
 async def _session(request: Request) -> Session | Response:
-    """This request's Session, or the answer when it is refused."""
-    storage = request.app.state.storage
-    secret = request.app.state.settings.auth_secret
-    principal = await identify(request, storage.access, secret, storage_tokens=True)
+    """This request's Session, in its workspace (workspaces.resolve), or the answer when it is refused."""
+    state = request.app.state
+    storage = state.storage
+    principal = await identify(
+        request, storage.access, state.settings.auth_secret, storage_tokens=True
+    )
     if principal is None:
         return error(401, "Sign in to use the workspace")
     if principal.via:
         refusal = agent_refusal(request)
         if refusal:
             return error(403, refusal)
-    return Session(storage, storage.access, principal)
+    try:
+        ws, membership = await resolve(
+            request, state.workspaces, principal.user_id, principal.bound_ws
+        )
+    except WorkspaceError as err:
+        return error(err.status, str(err))
+    here = storage.in_workspace(ws)
+    return Session(here, here.access, principal, membership)
 
 
 async def _serve(request: Request, handler, typescript_serves=None) -> Response:
@@ -1077,12 +1087,12 @@ async def handle_proposals(request: Request, session: Session) -> Response:
 
 async def watch(session: Session) -> Response:
     """
-    The changes this principal may see, as server-sent events, in order: each is
-    checked before the next. Subscribes before answering, so a failure still
+    The changes this principal may see in the session's workspace, as server-sent
+    events, in order: each is checked before the next, membership first. Subscribes before answering, so a failure still
     gets a normal error answer.
     """
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    unsubscribe = await session.storage.require_events().subscribe(queue.put_nowait)
+    unsubscribe = await session.storage.require_events().subscribe(session.ws, queue.put_nowait)
 
     async def stream():
         loop = asyncio.get_running_loop()
@@ -1100,6 +1110,9 @@ async def watch(session: Session) -> Response:
                     continue
                 event, waiting = waiting.result(), None
                 try:
+                    # Membership first: once it's gone, so is the stream (docs/workspaces.md).
+                    if not await session.still_member():
+                        return
                     if await session.can_see(event):
                         data = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
                         yield f"data: {data}\n\n".encode()

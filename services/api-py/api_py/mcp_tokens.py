@@ -138,8 +138,12 @@ def mcp_tokens(
         and memory.get("via") == tokens.REMOTE_VIA
         and memory.get("sub") == storage["sub"]
         and _truthy(memory.get("thread"))
+        and memory.get("ws") == storage.get("ws")
         else None
     )
+    # The run's workspace (issue #226) stays with every token made from its own:
+    # the same `ws` claim, or none for a token minted without one.
+    ws = {"ws": storage["ws"]} if isinstance(storage.get("ws"), str) else {}
     # { sub, email, name } from the storage token: missing ones are left out, as undefined is.
     user = {k: storage[k] for k in ("sub", "email", "name") if k in storage}
 
@@ -150,12 +154,13 @@ def mcp_tokens(
             exp = min(storage["exp"], seconds + IDENTITY_SECONDS)
             these["identity"] = tokens.sign({**user, "aud": via, "exp": _seconds(exp)}, secret)
         if "storage" in kinds:
-            claims = {**user, "aud": tokens.STORAGE_AUDIENCE, "via": via}
+            claims = {**user, **ws, "aud": tokens.STORAGE_AUDIENCE, "via": via}
             these["storage"] = tokens.sign({**claims, "exp": _seconds(storage["exp"])}, secret)
         if "memory" in kinds and chat:
             node = chat.get("node")
             claims = {
                 **user,
+                **ws,
                 "aud": tokens.MEMORY_AUDIENCE,
                 "via": via,
                 "thread": chat["thread"],

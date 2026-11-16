@@ -139,6 +139,7 @@ export async function proposeChanges(
 
 interface ChatRow {
   id: string;
+  workspace_id: string;
   user_id: string;
   /** As text, to the microsecond, so `through` matches it exactly. */
   last_run_at: string;
@@ -165,14 +166,13 @@ export class MemoryLearner {
     this.timer = null;
   }
 
-  /** Chats due for learning: quiet, with runs not learned from yet, memory on, not incognito. */
+  /** Chats due for learning, in every workspace: quiet, with runs not learned from yet, memory on, not incognito. */
   async due(limit = BATCH): Promise<ChatRow[]> {
     const s = this.storage();
     if (!s) return [];
     return s.sql<ChatRow[]>`
-      SELECT c.id, c.user_id, c.last_run_at::text AS last_run_at FROM chats c
-      WHERE c.workspace_id = ${s.workspaceId}
-        AND c.last_run_at IS NOT NULL
+      SELECT c.id, c.workspace_id, c.user_id, c.last_run_at::text AS last_run_at FROM chats c
+      WHERE c.last_run_at IS NOT NULL
         AND c.last_run_at < now() - make_interval(mins => ${idleMinutes()})
         AND c.last_run_at > now() - make_interval(days => ${LOOKBACK_DAYS})
         AND NOT EXISTS (SELECT 1 FROM memory_learned_chats l WHERE l.chat_id = c.id AND l.through >= c.last_run_at)
@@ -227,8 +227,10 @@ export class MemoryLearner {
 
   /** Learns from one chat, as its user, and records how far it got. */
   async learn(chat: ChatRow): Promise<{ made: number; proposed: number; error?: string }> {
-    const s = this.storage();
-    if (!s) return { made: 0, proposed: 0 };
+    const base = this.storage();
+    if (!base) return { made: 0, proposed: 0 };
+    // In the chat's own workspace (issue #226).
+    const s = base.inWorkspace(chat.workspace_id);
     const memory = s.memory;
     const userId = chat.user_id;
     let made = 0;
@@ -241,7 +243,7 @@ export class MemoryLearner {
         const notes = await memory.notesForLearning(userId);
         const changes = await proposeChanges(notes.text, found.messages as Message[], this.create);
         for (const change of changes) {
-          const done = await this.apply(userId, chat.id, mode, change, notes.versions);
+          const done = await this.apply(memory, userId, chat.id, mode, change, notes.versions);
           if (done === "made") made++;
           if (done === "proposed") proposed++;
         }
@@ -260,13 +262,14 @@ export class MemoryLearner {
 
   /** Makes or proposes one change; a change that no longer fits the notes is skipped. */
   private async apply(
+    /** The chat's own workspace's memory. */
+    memory: Storage["memory"],
     userId: string,
     chatId: string,
     mode: Exclude<MemoryMode, "off">,
     change: LearnChange,
     versions: Map<string, number>,
   ): Promise<"made" | "proposed" | "skipped"> {
-    const memory = this.storage()!.memory;
     const input = { description: change.description ?? "", type: change.type ?? "", body: change.body ?? "" };
     // The model saw this version of the note; a note it didn't see in full,
     // or one changed since (the user may edit while the model works), stays.

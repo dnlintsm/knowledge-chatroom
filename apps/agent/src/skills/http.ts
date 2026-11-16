@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { identify } from "../storage/identity";
+import { onlyDefault } from "../storage/workspaces";
 import type { Storage, StorageState } from "../storage";
 import { HubConflictError, HubError, HubNotFoundError, MAX_ZIP_BYTES, type SkillHub } from "./hub";
 import { InvalidModeError, SkillForbiddenError, UnknownSkillError, type SkillService, type SkillTrigger } from "./service";
@@ -240,6 +241,9 @@ export function createSkillsHandler(
           (req.method === "GET" && path === "/skills/run") || (req.method === "POST" && path === "/skills/used");
         const principal = await identify(req, s, "user", { storageTokens: forRun });
         if (!principal) return send(res, 401, { error: "Sign in first" });
+        // Other workspaces are served by the Python API server in front (issue #226).
+        const elsewhere = onlyDefault(s, req, url, principal.boundWs);
+        if (elsewhere) return send(res, 400, { error: elsewhere });
         userId = principal.userId;
       }
 

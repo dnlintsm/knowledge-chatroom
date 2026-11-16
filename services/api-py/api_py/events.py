@@ -25,24 +25,26 @@ Listener = Callable[[dict[str, Any]], None]
 
 
 class EventHub:
-    def __init__(self, conninfo: str, workspace_id: str, channel: str) -> None:
+    """One LISTEN connection for every workspace; each subscriber hears its own workspace's events."""
+
+    def __init__(self, conninfo: str, channel: str) -> None:
         self._conninfo = conninfo
-        self._workspace_id = workspace_id
         self._channel = channel
-        self._listeners: set[Listener] = set()
+        self._listeners: set[tuple[str, Listener]] = set()
         self._task: asyncio.Task[None] | None = None
         self._ready: asyncio.Future[None] | None = None
 
-    async def subscribe(self, listener: Listener) -> Callable[[], None]:
-        """Calls `listener` with each event of this workspace; returns the unsubscribe function."""
+    async def subscribe(self, workspace_id: str, listener: Listener) -> Callable[[], None]:
+        """Calls `listener` with each event of the workspace; returns the unsubscribe function."""
         if self._task is None or self._task.done():
             self._ready = asyncio.get_running_loop().create_future()
             self._task = asyncio.create_task(self._listen(self._ready))
         assert self._ready is not None
         # Fails here, so the request gets a normal error answer, when the first LISTEN can't be set up.
         await asyncio.shield(self._ready)
-        self._listeners.add(listener)
-        return lambda: self._listeners.discard(listener)
+        entry = (workspace_id, listener)
+        self._listeners.add(entry)
+        return lambda: self._listeners.discard(entry)
 
     async def _listen(self, ready: asyncio.Future[None]) -> None:
         while True:
@@ -67,10 +69,12 @@ class EventHub:
             event = json.loads(payload)
         except ValueError:
             return
-        if not isinstance(event, dict) or event.pop("workspaceId", None) != self._workspace_id:
+        if not isinstance(event, dict):
             return
-        for listener in list(self._listeners):
-            listener(event)
+        workspace_id = event.pop("workspaceId", None)
+        for ws, listener in list(self._listeners):
+            if ws == workspace_id:
+                listener(dict(event))
 
     async def close(self) -> None:
         if self._task:

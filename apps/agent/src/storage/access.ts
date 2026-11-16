@@ -19,6 +19,8 @@ export interface Principal {
   actor: "user" | "agent";
   /** Claude through an outside service (a storage token's `via`), e.g. "mcp:lab". */
   via?: string;
+  /** The workspace a storage token is bound to (./workspaces.ts, tokenWorkspace); unset without one. */
+  boundWs?: string;
 }
 
 /** Signed in, but not allowed to do this. */
@@ -94,29 +96,50 @@ function explain(err: unknown): never {
 /** How often a user's last_seen_at is refreshed, at most. */
 const SEEN_EVERY_MS = 5 * 60_000;
 
-export class AccessService {
-  private localUser: Promise<string> | null = null;
-  private readonly subjects = new Map<string, { id: string; seen: number }>();
+/** A user's membership role in a workspace (docs/workspaces.md). */
+export type Membership = "owner" | "admin" | "member";
 
+/** Who is who, the same in every workspace: shared by AccessService.inWorkspace's views. */
+interface Users {
+  local: Promise<string> | null;
+  subjects: Map<string, { id: string; seen: number }>;
+}
+
+export class AccessService {
   constructor(
     private readonly sql: Sql,
     private readonly workspaceId: string,
+    private readonly known: Users = { local: null, subjects: new Map() },
   ) {}
+
+  /** This service acting in workspace `id`, sharing what it knows about users. */
+  inWorkspace(id: string): AccessService {
+    return id === this.workspaceId ? this : new AccessService(this.sql, id, this.known);
+  }
+
+  /** The user's role in this workspace, while it is active; null when they aren't a member. */
+  async membership(userId: string): Promise<Membership | null> {
+    const [row] = await this.sql<{ role: Membership }[]>`
+      SELECT m.role FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+      WHERE m.workspace_id = ${this.workspaceId} AND m.user_id = ${userId} AND w.status = 'active'`;
+    return row?.role ?? null;
+  }
 
   /** The built-in user of a deployment without login. */
   localUserId(): Promise<string> {
-    this.localUser ??= this.sql<{ id: string }[]>`
+    this.known.local ??= this.sql<{ id: string }[]>`
       SELECT id FROM users WHERE subject = 'local'`.then(([row]) => row.id);
-    return this.localUser;
+    return this.known.local;
   }
 
   /**
    * The user for a login identity, created on first sight. Name and email
-   * follow the provider. The first user to sign in to a workspace that only
-   * the local user owns becomes its owner, so a new deployment can be set up.
+   * follow the provider. The first user to sign in to the default workspace
+   * before any signed-in owner becomes its owner, once, so a new deployment
+   * can be set up; signing in never joins another workspace.
    */
   async userForSubject(subject: string, profile: { email?: string; name?: string } = {}) {
-    const cached = this.subjects.get(subject);
+    const cached = this.known.subjects.get(subject);
     if (cached) {
       const now = Date.now();
       if (now - cached.seen >= SEEN_EVERY_MS) {
@@ -134,28 +157,29 @@ export class AccessService {
               name = coalesce(EXCLUDED.name, users.name),
               last_seen_at = now()
         RETURNING id`;
-      // Serialize first sign-ins so exactly one becomes the owner.
-      await tx`SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))`;
-      await tx`
-        INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
-        SELECT ${this.workspaceId}, NULL, 'user', ${user.id}, 'owner'
-        WHERE NOT EXISTS (
-          SELECT 1 FROM grants g JOIN users u ON u.id = g.principal_id
-          WHERE g.workspace_id = ${this.workspaceId} AND g.principal_type = 'user'
-            AND g.role = 'owner' AND u.subject <> 'local')
-        ON CONFLICT DO NOTHING`;
+      // The one-time owner bootstrap and the default workspace's open
+      // membership (023_workspace_members.sql), as api-py's user_for_subject.
+      await tx`SELECT sign_in_memberships(${user.id})`;
       return user.id;
     });
-    this.subjects.set(subject, { id, seen: Date.now() });
+    this.known.subjects.set(subject, { id, seen: Date.now() });
     return id;
   }
 
   /** The user's best role on a node (null = workspace root), or null if none. */
   async role(userId: string, nodeId: string | null): Promise<Role | null> {
-    if (nodeId !== null && !isUuid(nodeId)) return null;
+    if (nodeId === null) {
+      const [row] = await this.sql<{ role: Role | null }[]>`
+        SELECT effective_role(${this.workspaceId}, ${userId}, NULL) AS role`;
+      return row.role;
+    }
+    if (!isUuid(nodeId)) return null;
+    // Only a node of this workspace: a root grant here says nothing about
+    // another workspace's nodes (issue #226).
     const [row] = await this.sql<{ role: Role | null }[]>`
-      SELECT effective_role(${this.workspaceId}, ${userId}, ${nodeId}::uuid) AS role`;
-    return row.role;
+      SELECT effective_role(workspace_id, ${userId}, id) AS role FROM nodes
+      WHERE id = ${nodeId} AND workspace_id = ${this.workspaceId}`;
+    return row?.role ?? null;
   }
 
   /**

@@ -43,6 +43,8 @@ export interface IdentityClaims {
   /** Memory tokens: the chat and the knowledge node the run is in. */
   thread?: string;
   node?: string | null;
+  /** Storage and memory tokens: the workspace they are bound to (issue #226); without it, the default one. */
+  ws?: string;
 }
 
 export const STORAGE_HEADER = "x-knowledge-storage";

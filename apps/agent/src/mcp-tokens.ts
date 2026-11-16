@@ -100,8 +100,11 @@ export function mcpTokens(headers: Headers, body: unknown, secret: string | null
   }
   const memoryToken = header(headers, MEMORY_HEADER);
   const memory = memoryToken ? verifyIdentity(memoryToken, secret, now, MEMORY_AUDIENCE) : null;
-  const chat = memory && memory.via === REMOTE_VIA && memory.sub === storage.sub && memory.thread ? memory : null;
+  const chat =
+    memory && memory.via === REMOTE_VIA && memory.sub === storage.sub && memory.thread && memory.ws === storage.ws ? memory : null;
   const user = { sub: storage.sub, email: storage.email, name: storage.name };
+  // The run's workspace (issue #226) stays with the storage and memory tokens made from its own.
+  const ws = typeof storage.ws === "string" ? { ws: storage.ws } : {};
   const until = (token: Identity, limit: number) => Math.min(token.exp, seconds + limit);
 
   for (const [name, kinds] of wanted) {
@@ -111,11 +114,11 @@ export function mcpTokens(headers: Headers, body: unknown, secret: string | null
       made.identity = signIdentity({ ...user, aud: via, exp: until(storage, IDENTITY_SECONDS) }, secret);
     }
     if (kinds.has("storage")) {
-      made.storage = signIdentity({ ...user, aud: STORAGE_AUDIENCE, via, exp: storage.exp }, secret);
+      made.storage = signIdentity({ ...user, ...ws, aud: STORAGE_AUDIENCE, via, exp: storage.exp }, secret);
     }
     if (kinds.has("memory") && chat) {
       made.memory = signIdentity(
-        { ...user, aud: MEMORY_AUDIENCE, via, thread: chat.thread, node: chat.node ?? null, exp: Math.min(chat.exp, storage.exp) },
+        { ...user, ...ws, aud: MEMORY_AUDIENCE, via, thread: chat.thread, node: chat.node ?? null, exp: Math.min(chat.exp, storage.exp) },
         secret,
       );
     }

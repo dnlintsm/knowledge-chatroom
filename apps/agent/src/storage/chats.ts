@@ -193,7 +193,7 @@ export class ChatService {
     return this.as(userId, async (db) => {
       const [row] = await db<(ChatRow & { messages: unknown[] })[]>`
         SELECT ${COLUMNS(db)}, messages FROM chats
-        WHERE id = ${id} AND user_id = ${userId}`;
+        WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId}`;
       return row ? { chat: toSummary(row), messages: row.messages } : null;
     });
   }
@@ -202,7 +202,7 @@ export class ChatService {
   runs(userId: string, id: string): Promise<ChatRun[] | null> {
     if (!validChatId(id)) return Promise.resolve(null);
     return this.as(userId, async (db) => {
-      const [chat] = await db`SELECT 1 FROM chats WHERE id = ${id} AND user_id = ${userId}`;
+      const [chat] = await db`SELECT 1 FROM chats WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId}`;
       if (!chat) return null;
       const rows = await db<{ run_id: string; parent_run_id: string | null; events: unknown[]; created_at: Date }[]>`
         SELECT run_id, parent_run_id, events, created_at FROM chat_runs
@@ -315,7 +315,8 @@ export class ChatService {
         ON CONFLICT (id) DO NOTHING`;
       // Locks the chat, so two runs saved at once get their own seq. Another
       // user's chat isn't found (row security hides it, the user_id test too).
-      const [chat] = await db`SELECT 1 FROM chats WHERE id = ${id} AND user_id = ${userId} FOR UPDATE`;
+      const [chat] = await db`
+        SELECT 1 FROM chats WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId} FOR UPDATE`;
       if (!chat) throw new ChatTakenError();
       await db`
         INSERT INTO chat_runs (chat_id, seq, run_id, parent_run_id, events)
@@ -342,7 +343,7 @@ export class ChatService {
         UPDATE chats SET
           name = ${name === undefined ? db`name` : name},
           archived = ${changes.archived === undefined ? db`archived` : changes.archived}
-        WHERE id = ${id} AND user_id = ${userId}
+        WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId}
         RETURNING ${COLUMNS(db)}`;
       return row ? toSummary(row) : null;
     });
@@ -352,7 +353,7 @@ export class ChatService {
   remove(userId: string, id: string): Promise<boolean> {
     if (!validChatId(id)) return Promise.resolve(false);
     return this.as(userId, async (db) => {
-      const rows = await db`DELETE FROM chats WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+      const rows = await db`DELETE FROM chats WHERE id = ${id} AND user_id = ${userId} AND workspace_id = ${this.workspaceId} RETURNING id`;
       return rows.length > 0;
     });
   }
