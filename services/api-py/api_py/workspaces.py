@@ -37,9 +37,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from . import tokens
 from .access import LEGACY_TOKEN, Principal, is_uuid, iso
-from .identity import identify, memory_claims, token_ws
+from .identity import identify
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -305,47 +304,6 @@ async def resolve(
     if role is None:
         raise WorkspaceError(404, NOT_FOUND)
     return ws, role
-
-
-async def typescript_refusal(request: Request) -> Response | None:
-    """
-    Why a request that goes on to the TypeScript server is refused, or None.
-    That server serves the default workspace only until it takes the workspace
-    from the run (#226, step 4b), so a request that names another workspace,
-    by selector or token, is refused here rather than served in the wrong one.
-    """
-    state = request.app.state
-    workspaces: Workspaces | None = getattr(state, "workspaces", None)
-    if workspaces is None:
-        return None
-    named = set(named_selectors(request))
-    secret = state.settings.auth_secret
-    storage_token = request.headers.get(tokens.STORAGE_HEADER)
-    found = [
-        tokens.verify(storage_token, secret, tokens.STORAGE_AUDIENCE)
-        if storage_token and secret
-        else None,
-        # Signed, or without login the app's unsigned local.<...> memory token.
-        memory_claims(request, secret),
-    ]
-    for claims in found:
-        if claims:
-            bound = token_ws(claims)
-            named.add(LEGACY_TOKEN if bound == LEGACY_TOKEN else bound.lower())
-    if not named:
-        return None
-    try:
-        default = await workspaces.default_id()
-    except Exception:  # No database yet: nothing but the default workspace exists.
-        return None
-    named = {default if ws == LEGACY_TOKEN else ws for ws in named}
-    if len(named) > 1:
-        return JSONResponse({"error": "The request names more than one workspace"}, status_code=400)
-    if named != {default}:
-        return JSONResponse(
-            {"error": "This can only be used in the default workspace for now"}, status_code=400
-        )
-    return None
 
 
 def _send(status: int, body: Any) -> JSONResponse:

@@ -88,7 +88,7 @@ database and starts the agent on it with a throwaway `AUTH_SECRET`. In front of 
 it starts the Python API server (`services/api-py`, which needs uv), as `pnpm dev` does.
 Then it runs `packages/contracts/conformance/storage.test.ts` through the API server
 (`CONFORMANCE_TARGET=ts` runs it against the agent alone, which doesn't serve `/workspaces`
-or other workspaces, so those tests fail there). That suite calls every operation in
+and refuses other workspaces' storage requests, so those tests fail there). That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
 operation was never called. It only speaks HTTP, so it can check any backend that

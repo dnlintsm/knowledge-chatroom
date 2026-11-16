@@ -7,6 +7,7 @@ import { ChatError, ChatTakenError } from "./chats";
 import type { EventHub, WorkspaceEvent } from "./events";
 import { ExperimentError, ExperimentExistsError, type ExperimentInput } from "./experiments";
 import { identify } from "./identity";
+import { onlyDefault } from "./workspaces";
 import type { Storage, StorageState } from "./index";
 import { FileExistsError } from "./files";
 import { NodeError, NodeNotFoundError } from "./nodes";
@@ -991,6 +992,12 @@ export function createStorageHandler(
       const principal = await identify(req, current, "user", { storageTokens: true });
       if (!principal) {
         json(res, 401, { error: "Sign in to use the workspace" });
+        return;
+      }
+      // Other workspaces are served by the Python API server in front (issue #226).
+      const elsewhere = onlyDefault(current, req, url, principal.boundWs);
+      if (elsewhere) {
+        json(res, 400, { error: elsewhere });
         return;
       }
       if (principal.via) {

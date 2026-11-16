@@ -13,6 +13,7 @@ import {
 
 import type { Principal } from "./access";
 import type { Storage } from "./index";
+import { tokenWorkspace } from "./workspaces";
 
 /**
  * Who a request is from. Without AUTH_SECRET there is no login: every request
@@ -88,7 +89,7 @@ export async function identify(
         ? verifyIdentity(storageHeader, secret, Date.now(), STORAGE_AUDIENCE)
         : null;
     if (!identity || typeof identity.via !== "string" || !identity.via) return null;
-    return { userId: await userFor(storage, identity), actor: "agent", via: identity.via };
+    return { userId: await userFor(storage, identity), actor: "agent", via: identity.via, boundWs: tokenWorkspace(identity) };
   }
   const header = req.headers[IDENTITY_HEADER];
   const identity = typeof header === "string" ? verifyIdentity(header, secret) : null;
@@ -105,6 +106,8 @@ export interface MemoryGrant {
   via: string;
   thread: string;
   node: string | null;
+  /** The workspace the token is bound to (./workspaces.ts, tokenWorkspace). */
+  ws: string;
 }
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -127,5 +130,5 @@ export async function identifyMemory(req: Pick<IncomingMessage, "headers">, stor
   if (!claims || typeof claims.via !== "string" || !claims.via || typeof claims.thread !== "string" || !claims.thread) return null;
   const node = typeof claims.node === "string" && UUID.test(claims.node) ? claims.node : null;
   const userId = secret ? await userFor(storage, claims as Identity) : await storage.access.localUserId();
-  return { userId, via: claims.via, thread: claims.thread, node };
+  return { userId, via: claims.via, thread: claims.thread, node, ws: tokenWorkspace(claims) };
 }

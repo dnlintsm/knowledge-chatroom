@@ -32,9 +32,11 @@ import { ChatError, ChatTakenError, type ChatSummary, type NewRun } from "./chat
 import { anyWords, chunkText, extractText, SearchService, snippetFor } from "./search";
 import { SemanticIndex, type Embedder } from "./semantic";
 import { createFileTools, numberLines } from "./tools";
+import { LEGACY_TOKEN, onlyDefault, resolveWorkspace, WorkspaceError, WS_HEADER } from "./workspaces";
 import { clearWorkdir, confineTools, syncWorkdir, writeRunInputs } from "./workdir";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
+import { LEARN_TOOL, MemoryLearner } from "../memory/learn";
 import { createSkillsHandler } from "../skills/http";
 import { HubConflictError, HubError, HubNotFoundError, SkillHub } from "../skills/hub";
 import { InvalidModeError, SkillForbiddenError, SkillService } from "../skills/service";
@@ -2909,6 +2911,125 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
+    });
+  });
+
+  describe("workspaces (issue #226)", () => {
+    let ws2: string;
+    let erin: string;
+    let finn: string;
+    const tools = (s: () => Storage | null, user: string) =>
+      Object.fromEntries(createFileTools(s, async () => user).map((t) => [t.name, t]));
+    const call = async (tool: { handler: unknown }, args: Record<string, unknown>) =>
+      (await (tool.handler as (a: unknown, e: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(args, {}));
+    const req = (headers: Record<string, string> = {}) => ({ headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])) });
+    const url = (query = "") => new URL(`http://x/${query}`);
+
+    before(async () => {
+      erin = await storage.access.userForSubject("workspaces|erin", { name: "Erin" });
+      finn = await storage.access.userForSubject("workspaces|finn", { name: "Finn" });
+      [{ id: ws2 }] = await storage.sql<{ id: string }[]>`
+        INSERT INTO workspaces (slug, name, created_by) VALUES (${`second-${Date.now()}`}, 'Second', ${erin}) RETURNING id`;
+      await storage.sql`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (${ws2}, ${erin}, 'owner')`;
+      await storage.sql`
+        INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
+        VALUES (${ws2}, NULL, 'user', ${erin}, 'owner')`;
+    });
+
+    test("a view acts in its own workspace and shares the rest", () => {
+      const other = storage.inWorkspace(ws2);
+      assert.equal(other.workspaceId, ws2);
+      assert.equal(other.defaultWorkspaceId, storage.workspaceId);
+      assert.equal(storage.inWorkspace(ws2.toUpperCase()), other, "one view per workspace");
+      assert.equal(other.inWorkspace(storage.workspaceId), storage);
+      assert.equal(other.sql, storage.sql);
+      assert.equal(other.blobs, storage.blobs);
+    });
+
+    test("the header, the parameter and a token's ws pick the workspace, and must agree", async () => {
+      const pick = async (headers: Record<string, string>, query: string, user: string, bound?: string) =>
+        (await resolveWorkspace(storage, req(headers), url(query), user, bound)).storage.workspaceId;
+      const refused = async (status: number, headers: Record<string, string>, query: string, user: string, bound?: string) =>
+        assert.rejects(resolveWorkspace(storage, req(headers), url(query), user, bound), (err: unknown) =>
+          err instanceof WorkspaceError && err.status === status);
+
+      assert.equal(await pick({}, "", erin), storage.workspaceId, "none: the default workspace");
+      assert.equal(await pick({ [WS_HEADER]: ws2 }, "", erin), ws2);
+      assert.equal(await pick({}, `?workspace=${ws2.toUpperCase()}`, erin), ws2);
+      assert.equal(await pick({}, "", erin, ws2), ws2);
+      assert.equal(await pick({ [WS_HEADER]: storage.workspaceId }, "", erin, LEGACY_TOKEN), storage.workspaceId);
+      assert.equal((await resolveWorkspace(storage, req(), url(), erin, ws2)).membership, "owner");
+
+      await refused(400, { [WS_HEADER]: ws2 }, `?workspace=${storage.workspaceId}`, erin);
+      await refused(400, { [WS_HEADER]: ws2 }, "", erin, LEGACY_TOKEN);
+      await refused(400, { [WS_HEADER]: storage.workspaceId }, "", erin, ws2);
+      // Unknown, malformed and foreign workspaces look alike.
+      await refused(404, { [WS_HEADER]: "00000000-0000-4000-8000-000000000000" }, "", erin);
+      await refused(404, { [WS_HEADER]: "not-a-workspace" }, "", erin);
+      await refused(404, { [WS_HEADER]: ws2 }, "", finn);
+      await refused(404, {}, "", finn, ws2);
+    });
+
+    test("only the default workspace is served where api-py serves the others", () => {
+      assert.equal(onlyDefault(storage, req(), url()), null);
+      assert.equal(onlyDefault(storage, req({ [WS_HEADER]: storage.workspaceId }), url(), LEGACY_TOKEN), null);
+      assert.match(onlyDefault(storage, req({ [WS_HEADER]: ws2 }), url())!, /default workspace only/);
+      assert.match(onlyDefault(storage, req(), url(), ws2)!, /default workspace only/);
+      assert.match(onlyDefault(storage, req({ [WS_HEADER]: ws2 }), url(), LEGACY_TOKEN)!, /more than one workspace/);
+    });
+
+    test("Claude's file tools stay in the run's workspace, and check membership on every call", async () => {
+      const other = storage.inWorkspace(ws2);
+      const inWs2 = tools(() => other, erin);
+      const written = await call(inWs2.write_file, { path: "artifacts/ws2-only.md", content: "# Second\n" });
+      assert.equal(written.isError, undefined, written.content[0].text);
+      assert.match((await call(inWs2.list_files, {})).content[0].text, /ws2-only\.md/);
+      // Not in the default workspace, where erin has her own access.
+      const listed = await call(tools(() => storage, erin).list_files, {});
+      assert.doesNotMatch(listed.content[0].text, /ws2-only\.md/);
+
+      // finn isn't a member of ws2: nothing, even with a grant left behind.
+      await storage.sql`
+        INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role)
+        VALUES (${ws2}, NULL, 'user', ${finn}, 'viewer')`;
+      const refused = await call(tools(() => other, finn).list_files, {});
+      assert.equal(refused.isError, true);
+      assert.match(refused.content[0].text, /no longer a member of this workspace/);
+      await storage.sql`DELETE FROM grants WHERE workspace_id = ${ws2} AND principal_id = ${finn}`;
+    });
+
+    test("the memory learner reads and writes each chat's own workspace", async () => {
+      const other = storage.inWorkspace(ws2);
+      await other.memory.setMode(erin, "on");
+      await other.chats.appendRun(erin, "ws2-learn", {
+        agentId: "a",
+        runId: "run-ws2-learn",
+        events: [],
+        messages: [
+          { id: "1", role: "user", content: "I run the etch line in the second workspace." },
+          { id: "2", role: "assistant", content: "Noted." },
+        ],
+      });
+      await storage.sql`UPDATE chats SET last_run_at = now() - interval '1 hour' WHERE id = 'ws2-learn'`;
+      const create = (async () => ({
+        content: [{
+          type: "tool_use",
+          id: "t",
+          name: LEARN_TOOL,
+          input: { changes: [{ op: "add", name: "ws2-role", description: "Runs the etch line", type: "profile", body: "Etch.", reason: "Said so" }] },
+        }],
+      })) as never;
+      const learner = new MemoryLearner(() => storage, create);
+      process.env.MEMORY = "on";
+      try {
+        const [due] = (await learner.due()).filter((c) => c.id === "ws2-learn");
+        assert.equal(due?.workspace_id, ws2);
+        assert.deepEqual(await learner.learn(due), { made: 1, proposed: 0 });
+      } finally {
+        delete process.env.MEMORY;
+      }
+      assert.equal((await other.memory.get(erin, "ws2-role"))?.createdBy, "agent");
+      assert.equal(await storage.memory.get(erin, "ws2-role"), null, "nothing in the default workspace");
     });
   });
 });
