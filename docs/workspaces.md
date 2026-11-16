@@ -460,9 +460,18 @@ The operation matrix above has its rows. This section says what each operation d
 | Admin | Make a Member an Admin (as they could add them as one), and step down to Member themselves. Nothing else: not another Admin, not an Owner. |
 | Member | Nothing. |
 
-- The last Owner can't be demoted (409, "A workspace needs at least one owner"). The
-  database already refuses it (`workspace_members_keep_owner`); the route answers it
-  in words.
+- The last Owner can't be demoted (409, "A workspace needs at least one owner").
+- **Ownership changes are serialized per workspace.** The existing trigger
+  (`workspace_members_keep_owner`) looks for another Owner without a lock, so two Owners
+  demoting or removing each other at once could each still see the other and both commit,
+  leaving none. So:
+  - every route that can take away an Owner (a role change, a removal, leaving) first
+    locks the workspace's row (`SELECT … FOR UPDATE`) in its transaction, then counts the
+    Owners and answers 409 when the change would leave none. Adding an Owner from the
+    [workspace inventory](#workspace-inventory) takes the same lock;
+  - the migration changes the trigger to take that lock too before it looks, so any other
+    path that writes `workspace_members` (the TypeScript server, a script) is serialized
+    the same way and rechecks after the other transaction commits.
 - A role change never changes a grant. Workspace roles are administrative; content access
   stays with grants (decision 1).
 - **Transferring ownership** is two role changes: make the other person Owner, then lower
@@ -480,9 +489,12 @@ leave unless they are the last Owner (409).
 In one transaction, it:
 
 1. deletes the membership;
-2. deletes the person's **direct grants** in the workspace and their **memberships of its
-   groups**, so being added again later starts from the starting grant, as for anyone new
-   (grants and group memberships are already refused for non-members);
+2. deletes the person's **direct grants** in the workspace, their **memberships of its
+   groups** and their **Experiment collaborator places** there, so being added again later
+   starts from the starting grant, as for anyone new: nothing someone else gave them comes
+   back on its own (grants and group memberships are already refused for non-members,
+   and collaborators have to be members). Collaborator places are deleted from step 3
+   on, when that table exists;
 3. records a **departure**, so the default workspace doesn't add them back at their next
    sign-in during the compatibility period (decision 5). Adding them again clears it;
 4. writes one audit entry, `member.remove` or `member.leave`, with how many grants and
@@ -499,7 +511,14 @@ What stays, unchanged:
   Experiment they maintain shows its maintainer as "no longer a member" and can be handed
   over (below).
 - Their own drafts, chats, memory notes and settings in the workspace. Nobody else can see
-  them, as before. If they are added again, they find them.
+  them, as before.
+
+If they are added again, what was given to them stays gone (grants, groups, collaborator
+places). What is **their own** comes back: their chats, memory and the Experiments they
+still maintain, drafts included, as their chats do. Maintaining is responsibility for
+their own work, not access someone granted, and it still needs Can view on the node,
+which only a new grant gives them. An Experiment handed over while they were away stays
+with its new maintainer.
 
 What stops (see [Revalidation](#revalidation)):
 
@@ -558,7 +577,9 @@ never gets around a node they can't read (#178).
 - **Handing over** (`PUT /experiments/{id}/maintainer` `{userId, keepAsCollaborator?}`)
   needs a new maintainer who is a member and can view the node, the same 400 otherwise.
   The previous maintainer stays on as a collaborator unless `keepAsCollaborator` is
-  false. Audited as `experiment.maintainer`, with both people.
+  false, **and only while they are still a member**: handing over a departed maintainer's
+  Experiment never makes them a collaborator, so no dormant place waits for them if they
+  are added again. Audited as `experiment.maintainer`, with both people.
 - **Owners and Admins** can hand over a shared or archived Experiment they can see, for
   example when its maintainer has left. They can't see drafts, so they can't hand one
   over: a departed member's drafts stay private, as their chats do (see the
@@ -587,12 +608,22 @@ and `HUB_ADMINS` do). In local mode the local user is one. Nobody is one by defa
   status, who created it and when, how many members, its Owners (names and emails), and
   when someone last used it. No content: no node names, files, Experiments, chats or
   member lists beyond the Owners.
-- `POST /platform/workspaces/{id}/owners` `{userId}` makes someone who has signed in an
-  Owner of that workspace, adding them as a member if they aren't one. It is for a
-  workspace whose Owners can no longer sign in. It gives no grant: the new Owner gets
-  content through Share or groups, which the [Admin trust model](#admin-trust-model)
-  already makes visible. Audited in that workspace's log as `platform.owner`, with the
-  deployment admin as the actor, so the workspace's Owners and Admins see it.
+- `POST /platform/workspaces/{id}/owners` `{userId, fullAccess?}` makes someone who has
+  signed in an Owner of that workspace, adding them as a member if they aren't one. It is
+  for a workspace whose Owners can no longer sign in. It takes the workspace lock, as
+  role changes do.
+- **Restoring content administration.** Being Owner alone isn't always enough to recover:
+  Share needs Full access, and in a new workspace the creator's direct root Full access
+  grant is often the only one. If that creator can no longer sign in, groups can't help
+  either, since no group holds Full access to join. So `fullAccess: true` also gives the
+  designated Owner, and only them, Full access on the workspace root, in the same
+  transaction. It is a direct grant like any other, visible in Share and the Admin panel,
+  never to the deployment admin, and never on a single node. The screen offers it, and
+  preselects it when no member who has signed in within `RECOVERY_IDLE_DAYS` (90 by
+  default) holds Full access on the root.
+- Both are audited in that workspace's log, with the deployment admin as the actor:
+  `platform.owner`, and `grant.set` with `recovery: true` for the grant. The workspace's
+  Owners and Admins see both.
 - Being a deployment admin gives nothing else: no membership, no content, no audit log.
 
 ### Audit
@@ -624,17 +655,28 @@ In the conformance suite, against the same backend as before:
   memberships gone, the removed member's requests, tokens and streams refused or closed,
   their drafts still invisible to the Owner, and adding them again starts from the starting
   grant.
+- Last Owner under concurrency: two Owners demoting each other, and two removing each
+  other, at the same time. Exactly one change succeeds, the other gets 409, and the
+  workspace keeps one Owner. Also with the routes bypassed (two transactions updating
+  `workspace_members` directly), which the trigger's lock must catch.
 - Archiving: Owners only, the default workspace refused, members get 404 and lose it from
   `GET /workspaces`, the Owner sees it with `?archived=true` and restores it.
 - Experiments: a collaborator edits content and files but can't change the visibility,
   delete, or manage collaborators; a collaborator sees a draft; losing Can view on the node
   takes collaborator access away; handover by the maintainer; an Owner or Admin hands over
-  a shared one but gets 404 for a draft; the new maintainer or collaborator must be able to
+  a shared one but gets 404 for a draft; a collaborator on someone's draft who is removed
+  and added again with Can view doesn't see or edit that draft; handing over a removed
+  maintainer's Experiment with `keepAsCollaborator` doesn't make them a collaborator, also
+  after they are added again; the new maintainer or collaborator must be able to
   view the node; agent tokens can't manage collaborators. These run in the default
   workspace, so they also run with `CONFORMANCE_TARGET=ts`, which checks the TypeScript
   server's own rules.
 - Workspace inventory: refused to anyone not in `PLATFORM_ADMINS`, no content in the
   answer, adding an Owner is audited in the workspace.
+- Recovery where the unavailable creator held the only direct root Full access grant and
+  no group holds Full access: an Owner added without `fullAccess` can't Share (403); one
+  added with it can, the grant is theirs alone, and the deployment admin still gets 404
+  in the workspace.
 
 In `services/api-py/tests` (they need the database): the migration sets every maintainer to
 the author and changes nobody's access to any Experiment, and a member removed from the
