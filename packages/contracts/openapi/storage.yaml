@@ -3458,22 +3458,27 @@ components:
         grants: { type: integer, description: Their direct grants in the workspace. }
         groups:
           type: array
-          items:
-            type: object
-            required: [id, name]
-            properties:
-              id: { type: string }
-              name: { type: string }
+          items: { $ref: "#/components/schemas/MemberRemovalGroup" }
         experiments:
           type: array
           description: Shared or archived Experiments they started that you can see.
-          items:
-            type: object
-            required: [id, title, nodeId]
-            properties:
-              id: { type: string }
-              title: { type: string }
-              nodeId: { type: [string, "null"] }
+          items: { $ref: "#/components/schemas/MemberRemovalExperiment" }
+
+    # Named, so the generated models don't take the names Group and Experiment.
+    MemberRemovalGroup:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+
+    MemberRemovalExperiment:
+      type: object
+      required: [id, title, nodeId]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        nodeId: { type: [string, "null"] }
 
     AlreadyMember:
       type: object

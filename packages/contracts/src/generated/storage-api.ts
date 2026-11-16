@@ -1688,16 +1688,18 @@ export interface components {
         MemberRemoval: {
             /** @description Their direct grants in the workspace. */
             grants: number;
-            groups: {
-                id: string;
-                name: string;
-            }[];
+            groups: components["schemas"]["MemberRemovalGroup"][];
             /** @description Shared or archived Experiments they started that you can see. */
-            experiments: {
-                id: string;
-                title: string;
-                nodeId: string | null;
-            }[];
+            experiments: components["schemas"]["MemberRemovalExperiment"][];
+        };
+        MemberRemovalGroup: {
+            id: string;
+            name: string;
+        };
+        MemberRemovalExperiment: {
+            id: string;
+            title: string;
+            nodeId: string | null;
         };
         AlreadyMember: {
             error: string;

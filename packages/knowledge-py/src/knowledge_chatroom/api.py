@@ -29,27 +29,15 @@ class Workspace(BaseModel):
     status: WorkspaceStatus
 
 
-class Group(BaseModel):
+class MemberRemovalGroup(BaseModel):
     id: str
     name: str
 
 
-class Experiment(BaseModel):
+class MemberRemovalExperiment(BaseModel):
     id: str
     title: str
     nodeId: str | None
-
-
-class MemberRemoval(BaseModel):
-    grants: int
-    """
-    Their direct grants in the workspace.
-    """
-    groups: list[Group]
-    experiments: list[Experiment]
-    """
-    Shared or archived Experiments they started that you can see.
-    """
 
 
 class AlreadyMember(BaseModel):
@@ -214,7 +202,7 @@ class ExperimentInput(BaseModel):
     state: ExperimentState | None = None
 
 
-class Experiment1(BaseModel):
+class Experiment(BaseModel):
     id: str
     nodeId: str | None
     """
@@ -262,7 +250,7 @@ class ExperimentUploadMeta(ExperimentInput):
 
 
 class ExperimentUpload(BaseModel):
-    experiment: Experiment1
+    experiment: Experiment
     lineage: list[KnowledgeNode]
     """
     The node it sits on and that node's ancestors, top level first.
@@ -424,7 +412,7 @@ class Person(User):
     groupIds: list[str]
 
 
-class Group1(BaseModel):
+class Group(BaseModel):
     id: str
     parentId: str | None
     name: str
@@ -1053,7 +1041,7 @@ class DeleteNodeResponse(BaseModel):
 
 
 class ListExperimentsResponse(BaseModel):
-    experiments: list[Experiment1]
+    experiments: list[Experiment]
 
 
 class CreateExperimentRequest(ExperimentInput):
@@ -1279,7 +1267,7 @@ class ListPeopleResponse(BaseModel):
 
 
 class ListGroupsResponse(BaseModel):
-    groups: list[Group1]
+    groups: list[Group]
 
 
 class CreateGroupRequest(BaseModel):
@@ -1697,6 +1685,18 @@ class CallMemoryToolResponse(BaseModel):
     tainted: bool
     """
     Whether the run's later changes wait in the inbox (reading a shared note or a past chat sets it).
+    """
+
+
+class MemberRemoval(BaseModel):
+    grants: int
+    """
+    Their direct grants in the workspace.
+    """
+    groups: list[MemberRemovalGroup]
+    experiments: list[MemberRemovalExperiment]
+    """
+    Shared or archived Experiments they started that you can see.
     """
 
 
