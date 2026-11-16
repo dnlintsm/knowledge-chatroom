@@ -1179,6 +1179,12 @@ Level = TypeAliasType("Level", Annotated[str, Field(min_length=1)])
 
 class CreateWorkspaceRequest(BaseModel):
     name: Annotated[str, Field(max_length=200, min_length=1)]
+    slug: Annotated[
+        str | None, Field(max_length=48, pattern="^[a-z0-9]+(-[a-z0-9]+)*$")
+    ] = None
+    """
+    The address in `/w/<slug>`; lower-case letters and digits in dash-separated runs.
+    """
     levels: Annotated[list[Level] | None, Field(max_length=10)] = None
 
 

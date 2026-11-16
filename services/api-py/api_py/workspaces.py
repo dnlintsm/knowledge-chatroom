@@ -1,8 +1,9 @@
 """Workspaces and their members (issue #226, docs/workspaces.md).
 
     GET    /workspaces                       {workspaces: [{id, slug, name, role}]}: yours
-    POST   /workspaces                       {name, levels?} -> the new workspace (201),
-                                             with you as its Owner
+    POST   /workspaces                       {name, slug?, levels?} -> the new workspace
+                                             (201), with you as its Owner; 409 when
+                                             the slug asked for is taken
     GET    /workspaces/<id>                  {id, slug, name, role}: one of yours
     GET    /workspaces/<id>/members          {members: [{id, name, role, email?,
                                              createdAt?, lastSeenAt?}]}: names for
@@ -49,16 +50,28 @@ MEMBER_ROLES = ("owner", "admin", "member")
 # A new workspace's knowledge levels, unless the request names others.
 DEFAULT_LEVELS = ("tech", "module", "loop", "process")
 NOT_FOUND = "Workspace not found"
+SLUG_TAKEN = "Another workspace already has this address"
+# A slug asked for: what slugify() makes, lower-case letters and digits in dash-separated runs.
+SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+SLUG_MAX = 48
 NO_SUCH_EMAIL = "No one with that email has signed in yet. They need to sign in once first."
 _ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
 class WorkspaceError(Exception):
-    """A request's workspace can't be used: 400 (selectors disagree) or 404 (not yours, or no such workspace)."""
+    """
+    A request's workspace can't be used: 400 (selectors disagree) or 404 (not
+    yours, or no such workspace); or one can't be created (400, 409).
+    """
 
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+def _is_slug(value: object) -> bool:
+    """Whether `value` is a slug someone may ask for (SLUG, at most SLUG_MAX characters)."""
+    return isinstance(value, str) and len(value) <= SLUG_MAX and SLUG.fullmatch(value) is not None
 
 
 def slugify(name: str) -> str:
@@ -125,13 +138,17 @@ class Workspaces:
             rows = await cur.fetchall()
         return [{**r, "id": str(r["id"])} for r in rows]
 
-    async def create(self, user_id: str, name: str, levels: list[str]) -> dict[str, Any]:
+    async def create(
+        self, user_id: str, name: str, levels: list[str], asked: str | None = None
+    ) -> dict[str, Any]:
         """
         A new workspace, with its creator as Owner and with Full access on its
         root, all in one transaction (decision 4), and its knowledge levels.
+        Its slug is `asked` (409 when taken), or one made from the name, with a
+        number added when that is taken.
         """
-        base = slugify(name)
-        for attempt in range(1, 100):
+        base = asked or slugify(name)
+        for attempt in range(1, 2 if asked else 100):
             slug = base if attempt == 1 else f"{base[:44]}-{attempt}"
             try:
                 async with self.pool.connection() as conn, conn.transaction():
@@ -163,6 +180,8 @@ class Workspaces:
             except errors.UniqueViolation as err:
                 if "slug" not in str(err):
                     raise
+                if asked:
+                    raise WorkspaceError(409, SLUG_TAKEN) from err
         raise WorkspaceError(400, "Choose another name: too many workspaces have this one")
 
     async def members(
@@ -360,9 +379,11 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
                 else ""
             )
             levels = body.get("levels", list(DEFAULT_LEVELS)) if body else None
+            slug = body.get("slug") if body else None
             if (
                 not name
                 or len(name) > 200
+                or (slug is not None and not _is_slug(slug))
                 or not isinstance(levels, list)
                 or len(levels) > 10
                 or not all(isinstance(level, str) and level.strip() for level in levels)
@@ -370,10 +391,11 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
                 return _send(
                     400,
                     {
-                        "error": "Expected {name: string (at most 200 characters), levels?: string[]}"
+                        "error": "Expected {name: string (at most 200 characters), slug?: string "
+                        "(lower-case letters, digits and dashes, at most 48), levels?: string[]}"
                     },
                 )
-            created = await workspaces.create(user, name, [level.strip() for level in levels])
+            created = await workspaces.create(user, name, [level.strip() for level in levels], slug)
             return _send(201, created)
         return _send(405, {"error": "Method not allowed"})
 

@@ -201,19 +201,63 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   // He comes back to the run he was last in, which he only reads; the new
   // role is for the workspace itself.
   await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("r1");
-  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Workspace" }).click();
+  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "My workspace", exact: true }).click();
   await showFiles(bob);
   await expect(bob.getByRole("button", { name: "New file", exact: true })).toBeVisible();
 
-  // Alice hands ownership to Bob and steps down to editor: the app reloads
-  // with her new access, so the Admin button goes away.
+  // Alice hands Owner access to Bob and steps down to editor. She stays the
+  // workspace's Owner (issue #226), which is what the Admin panel needs.
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
   await admin.getByLabel("Workspace role for Bob Builder").selectOption("owner");
   await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("owner");
   alice.once("dialog", (d) => void d.accept());
   await admin.getByLabel("Workspace role for Alice Admin").selectOption("editor");
-  await expect(alice.getByRole("button", { name: "Account" })).toBeVisible();
-  await expect(alice.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
+  await expect(admin.getByLabel("Workspace role for Alice Admin")).toHaveValue("editor");
+  await expect(admin.getByRole("table", { name: "People" })).toContainText("Owner");
+  await admin.getByRole("button", { name: "Close" }).click();
+  await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
+
+  // A workspace of her own (docs/workspaces.md, "Screens"): Alice creates it
+  // from the switcher and lands there; Bob can't open it until she adds him.
+  const lab = `Lab ${Date.now()}`;
+  await alice.getByRole("button", { name: "Switch workspace" }).click();
+  await alice.getByRole("menuitem", { name: "Create workspace" }).click();
+  const create = alice.getByRole("dialog", { name: "Create a workspace" });
+  await create.getByLabel("Name").fill(lab);
+  await expect(create.getByLabel("Address")).toHaveValue(/^lab-\d+$/);
+  await create.getByLabel("Address").fill(`the-${lab.toLowerCase().replace(" ", "-")}`);
+  await create.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alice).toHaveURL(new RegExp(`/w/the-lab-\\d+$`));
+  const labUrl = new URL(alice.url()).pathname;
+  await expect(alice.getByRole("navigation", { name: "Location" }).getByRole("button", { name: lab, exact: true })).toBeVisible();
+  await bob.goto(labUrl);
+  await expect(bob.getByTestId("workspace-no-access")).toBeVisible();
+  await expect(bob.getByTestId("workspace-no-access")).not.toContainText(lab);
+
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  const add = admin.getByRole("form", { name: "Add a member" });
+  await add.getByLabel("Email").fill("nobody@example.com");
+  await add.getByRole("button", { name: "Add" }).click();
+  await expect(add.getByRole("alert")).toContainText("has signed in yet");
+  await add.getByLabel("Email").fill("BOB@example.com");
+  await add.getByLabel("Starting access").selectOption("editor");
+  await add.getByRole("button", { name: "Add" }).click();
+  await expect(add.getByRole("status")).toContainText("Added Bob Builder as Member");
+  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("editor");
+  await add.getByLabel("Email").fill("bob@example.com");
+  await add.getByLabel("Role").selectOption("admin");
+  await add.getByRole("button", { name: "Add" }).click();
+  await expect(add.getByRole("alert")).toContainText("already in this workspace, as Member");
+  await shot(alice, "22-admin-add-member");
+  await admin.getByRole("button", { name: "Close" }).click();
+
+  // Now he can, from the switcher too.
+  await bob.goto("/");
+  await expect(bob.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await bob.getByRole("button", { name: "Switch workspace" }).click();
+  await bob.getByRole("menu", { name: "Workspaces" }).getByRole("menuitem", { name: new RegExp(lab) }).click();
+  await expect(bob).toHaveURL(new RegExp(`${labUrl}$`));
+  await expect(bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: lab, exact: true })).toBeVisible();
 
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();

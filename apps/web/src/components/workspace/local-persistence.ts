@@ -82,6 +82,11 @@ export function setSavedStateScope(s: SavedStateScope | null) {
   }
 }
 
+/** Whose state in which workspace the page keeps now; null without workspaces. */
+export function savedStateScope(): SavedStateScope | null {
+  return scope;
+}
+
 /**
  * This browser's localStorage for the page's workspace: its workspace keys
  * kept per user and workspace. Throws, as localStorage does, when the browser

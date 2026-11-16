@@ -163,6 +163,12 @@ interface WorkspaceValue {
   /** A failed save, retained until all failed files have saved successfully. */
   syncError: string | null;
   /**
+   * Leaving the workspace (docs/workspaces.md, "Switching with unsaved
+   * edits"): whether an edit hasn't saved yet; saving them all (throws with a
+   * message when one can't); or dropping those still waiting.
+   */
+  edits: { unsaved: () => boolean; save: () => Promise<void>; discard: () => void };
+  /**
    * Where the user is: a knowledge node (also when in one of its experiments),
    * or null for the workspace root.
    */
@@ -259,6 +265,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     onError: setSyncError,
   }));
   const { busy, schedule: scheduleSave, flush: flushSaves, settle: settleSaves } = sync;
+  const [edits] = useState(() => ({ unsaved: sync.unsaved, save: sync.settleAll, discard: sync.discard }));
 
   // Restore after mount so server and client render the same seed first.
   // Saving waits for `hydrated` (set in the same commit as the restore), so the
@@ -860,6 +867,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSelection,
       storageMode,
       syncError,
+      edits,
       node,
       experiment,
       lineage,
@@ -886,7 +894,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [
     state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
-    syncError, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
+    syncError, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
     updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);

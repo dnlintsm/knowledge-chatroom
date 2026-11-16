@@ -368,7 +368,7 @@ test("the Actions block starts a new chat about the run", async ({ page, request
   );
 
   // Outside a run there are no actions.
-  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Workspace" }).click();
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "My workspace", exact: true }).click();
   await expect(page).not.toHaveURL(/experiment=/);
   await expect(page.getByTestId("actions")).toHaveCount(0);
 });

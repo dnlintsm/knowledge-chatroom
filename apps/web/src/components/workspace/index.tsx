@@ -36,6 +36,7 @@ import { useWorkspace, WorkspaceProvider } from "./store";
 import { EXPERIMENT_TAB, REVIEW_TAB } from "./types";
 import { useWorkbench, WorkbenchProvider } from "./workbench";
 import { useCurrentWorkspace } from "./current-workspace";
+import { WorkspaceSwitcher } from "./workspace-switcher";
 import { DEFAULT_SLUG } from "@/lib/workspace-request";
 
 export { WorkspaceProvider, useWorkspace };
@@ -251,9 +252,13 @@ function StorageStatus() {
   );
 }
 
-/** Where in the knowledge tree the workspace is; each step goes back there. */
+/**
+ * Where in the knowledge tree the workspace is; each step goes back there.
+ * Its root is the workspace switcher when the server has workspaces.
+ */
 function PlaceBreadcrumb() {
   const { storageMode, lineage, experiment, enterNode, proposals, node } = useWorkspace();
+  const workspace = useCurrentWorkspace();
   const { editor } = useWorkbench();
   const [listScope, setListScope] = useListScope();
   if (storageMode !== "server") return null;
@@ -263,8 +268,10 @@ function PlaceBreadcrumb() {
     void enterNode(id);
   };
   const toReview = experiment ? 0 : proposals.filter((p) => p.node === node && p.canDecide).length;
+  // With workspaces, the root is the switcher, named after the workspace.
+  const switcher = workspace !== null;
   const steps = [
-    { id: null as string | null, name: "Workspace", go: () => goTo(null) },
+    ...(switcher ? [] : [{ id: null as string | null, name: "Workspace", go: () => goTo(null) }]),
     ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => goTo(n.id) })),
     ...(experiment
       ? [{ id: `x:${experiment.id}`, name: experiment.title, go: () => editor.open(EXPERIMENT_TAB) }]
@@ -272,11 +279,16 @@ function PlaceBreadcrumb() {
   ];
   return (
     <nav aria-label="Location" className="ml-3 flex min-w-0 items-center gap-1 text-xs text-[var(--muted-foreground)]">
+      {switcher && (
+        <span className={cn("flex min-w-0 items-center gap-1", steps.length > 0 && "max-sm:hidden")}>
+          <WorkspaceSwitcher onRoot={() => goTo(null)} current={steps.length === 0} />
+        </span>
+      )}
       {steps.map((step, i) => {
         const last = i === steps.length - 1;
         return (
           <span key={step.id ?? "root"} className={cn("flex min-w-0 items-center gap-1", !last && "max-sm:hidden")}>
-            {i > 0 && <ChevronRight className="size-3 shrink-0" />}
+            {(i > 0 || switcher) && <ChevronRight className="size-3 shrink-0" />}
             <button
               type="button"
               aria-current={last ? "location" : undefined}

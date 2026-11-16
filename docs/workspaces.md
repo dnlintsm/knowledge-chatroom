@@ -412,7 +412,18 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
    and the app's chat store and remote-backend tokens follow the run's workspace. Renaming
    a slug has no route yet, so there is no rename redirect; a page without api-py opens the
    default workspace with no selector.
-6. Screens: switcher, create, no-workspace onboarding, add member, no-access page.
+6. Screens: switcher, create, no-workspace onboarding, add member, no-access page. Done:
+   the switcher is the breadcrumb's root (`components/workspace/workspace-switcher.tsx`),
+   with the save, discard or stay prompt, which saves through the save scheduler
+   (`settleAll`, retrying failed saves in the current place) or drops what is still
+   waiting (`discard`). Recent workspaces are kept per user in this browser
+   (`lib/workspace-choice.ts`). Create (`create-workspace.tsx`) sends `POST /workspaces`
+   with a `slug` when one is given, which api-py now takes (409 when taken). Add member is
+   in the Admin panel (`add-member.tsx`), which is for the workspace's Owners and Admins.
+   `app/w/[slug]/page.tsx` shows onboarding to a user with no workspace and the no-access
+   page to one asking for a workspace that isn't theirs, and `/` opens the default
+   workspace only for its members. A node or experiment link the user can't open still
+   shows the workspace without it, not this page.
 
 Traceability follow-ups (input drift by `sha256`, reading past versions, Rules consumption)
 stay separate and don't block this.

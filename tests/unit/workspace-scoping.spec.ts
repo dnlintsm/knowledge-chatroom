@@ -14,7 +14,7 @@ import {
 import { handleChatRoute } from "../../apps/web/src/lib/chat-routes";
 import { ChatRunner } from "../../apps/web/src/lib/chat-runner";
 import { AgentChatStore, AutoChatStore, MemoryChatStore } from "../../apps/web/src/lib/chat-store";
-import { defaultWorkspacePath, findWorkspace } from "../../apps/web/src/lib/workspaces";
+import { defaultWorkspacePath, findWorkspace, homeWorkspacePath } from "../../apps/web/src/lib/workspaces";
 
 /** Saved state, chats and the page's workspace, per workspace (issue #226, docs/workspaces.md). */
 
@@ -100,8 +100,12 @@ test.describe("the page's workspace", () => {
       status: "found",
       workspace: { id: WS2, slug: "research", name: "Research", role: "owner" },
     });
-    expect(await findWorkspace(null, "elsewhere", "http://agent.test")).toEqual({ status: "missing" });
-    expect(await findWorkspace(null, "broken", "http://agent.test")).toEqual({ status: "missing" });
+    // A miss names nothing of what was asked for, and lists the user's own.
+    const mine = listed.workspaces.slice(0, 2);
+    expect(await findWorkspace(null, "elsewhere", "http://agent.test")).toEqual({ status: "missing", mine });
+    expect(await findWorkspace(null, "broken", "http://agent.test")).toEqual({ status: "missing", mine });
+    answer(200, { workspaces: [] });
+    expect(await findWorkspace(null, "default", "http://agent.test")).toEqual({ status: "missing", mine: [] });
   });
 
   test("is unavailable without the workspaces API, or without an answer", async () => {
@@ -119,6 +123,18 @@ test.describe("the page's workspace", () => {
     expect(defaultWorkspacePath()).toBe("/w/default");
     expect(defaultWorkspacePath("experiment=e1&list=all")).toBe("/w/default?experiment=e1&list=all");
     expect(defaultWorkspacePath("?experiment=e1")).toBe("/w/default?experiment=e1");
+  });
+
+  test("/ goes to the default workspace when the user is in it, otherwise to their first", async () => {
+    answer(200, listed);
+    expect(await homeWorkspacePath(null, "list=all", "http://agent.test")).toBe("/w/default?list=all");
+    answer(200, { workspaces: [listed.workspaces[1]] });
+    expect(await homeWorkspacePath(null, "list=all", "http://agent.test")).toBe("/w/research?list=all");
+    // None of their own (that page offers to create one), or no answer.
+    answer(200, { workspaces: [] });
+    expect(await homeWorkspacePath(null, "", "http://agent.test")).toBe("/w/default");
+    answer(404, { error: "Not found" });
+    expect(await homeWorkspacePath(null, "", "http://agent.test")).toBe("/w/default");
   });
 });
 

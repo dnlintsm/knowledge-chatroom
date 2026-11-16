@@ -156,3 +156,39 @@ test("deleting one failed file reports the remaining failure without clearing it
   await expect(sync.settle(null)).resolves.toBeUndefined();
   expect(errors.at(-1)).toBeNull();
 });
+
+test("leaving the workspace: unsaved edits are known, saved with failed ones retried, or discarded", async () => {
+  const { sync, writes, errors, transport, tick, timers } = fixture();
+  expect(sync.unsaved()).toBe(false);
+  sync.schedule("notes/a.md");
+  expect(sync.unsaved()).toBe(true);
+  // Save: the waiting edit goes now, without its debounce.
+  await sync.settleAll();
+  expect(writes).toEqual([{ content: "first", at: null }]);
+  expect(sync.unsaved()).toBe(false);
+
+  // A failed save is still unsaved; Save tries it once more.
+  transport.fail = true;
+  sync.schedule("notes/a.md");
+  await tick();
+  await Promise.resolve();
+  expect(sync.unsaved()).toBe(true);
+  await expect(sync.settleAll()).rejects.toThrow(/haven't saved yet/);
+  transport.fail = false;
+  const sent = writes.length;
+  await sync.settleAll();
+  expect(writes).toHaveLength(sent + 1);
+  expect(sync.unsaved()).toBe(false);
+  expect(errors.at(-1)).toBeNull();
+
+  // Discard: the waiting edit is never sent, and failures are forgotten.
+  sync.schedule("notes/a.md");
+  transport.fail = true;
+  sync.schedule("notes/b.md");
+  sync.discard();
+  expect(timers.size).toBe(0);
+  expect(sync.unsaved()).toBe(false);
+  sync.flush();
+  await Promise.resolve();
+  expect(writes).toHaveLength(sent + 1);
+});

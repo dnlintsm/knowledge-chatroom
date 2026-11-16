@@ -228,6 +228,10 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/workspaces/${defaultWs.id}`, { headers: alice, expect: 200 });
     const lab = (await call<Schema["Workspace"]>("POST", "/workspaces", { headers: alice, json: { name: `Lab ${stamp}` }, expect: 201 })).data;
     await call("POST", "/workspaces", { headers: alice, json: { name: "" }, expect: 400 });
+    const named = (await call<Schema["Workspace"]>("POST", "/workspaces", { headers: alice, json: { name: "Named", slug: `named-${stamp}` }, expect: 201 })).data;
+    assert.equal(named.slug, `named-${stamp}`);
+    await call("POST", "/workspaces", { headers: alice, json: { name: "Again", slug: named.slug }, expect: 409 });
+    await call("POST", "/workspaces", { headers: alice, json: { name: "Bad", slug: "Not A Slug" }, expect: 400 });
     const found = await call<{ user: { id: string } }>("GET", `/workspaces/${lab.id}/lookup?email=BOB@example.com`, { headers: alice, expect: 200 });
     assert.equal(found.data.user.id, bobId);
     await call("GET", `/workspaces/${lab.id}/lookup?email=nobody@example.com`, { headers: alice, expect: 404 });

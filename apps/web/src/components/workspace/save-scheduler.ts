@@ -108,10 +108,42 @@ export class SaveScheduler {
   };
 
   /** Fork/archive/promote must not use the server's copy before edits save. */
-  settle = async (at: PlaceId) => {
-    this.flush();
+  settle = (at: PlaceId) => {
     const prefix = `${at ?? ""}\n`;
-    const mine = (keys: Iterable<string>) => [...keys].filter((key) => key.startsWith(prefix));
+    return this.settleWhere((key) => key.startsWith(prefix));
+  };
+
+  /**
+   * Leaving the workspace with "Save" (docs/workspaces.md, Screens): every
+   * edit, in every place, with those here that failed tried once more.
+   */
+  settleAll = () => {
+    const here = this.options.getPlace();
+    for (const key of this.failed) {
+      const split = key.indexOf("\n");
+      const at = key.slice(0, split) || null;
+      if (at === here) this.scheduleAt(key.slice(split + 1), at);
+    }
+    return this.settleWhere(() => true);
+  };
+
+  /** Whether any edit hasn't saved yet: waiting, being sent, or failed. */
+  unsaved = () => this.pending.size > 0 || this.inflight.size > 0 || this.failed.size > 0;
+
+  /**
+   * Leaving the workspace with "Discard": edits still waiting are never sent,
+   * and failed ones aren't retried. One already being sent can't be called back.
+   */
+  discard = () => {
+    for (const { timer } of this.pending.values()) this.clock.clearTimeout(timer);
+    this.pending.clear();
+    this.failed.clear();
+    this.reportFailures();
+  };
+
+  private settleWhere = async (matches: (key: string) => boolean) => {
+    this.flush();
+    const mine = (keys: Iterable<string>) => [...keys].filter(matches);
     const onWire = () => mine(this.inflight.keys()).length > 0;
     for (let i = 0; i < 200 && onWire(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
     if (onWire() || mine(this.pending.keys()).length || mine(this.failed).length) {

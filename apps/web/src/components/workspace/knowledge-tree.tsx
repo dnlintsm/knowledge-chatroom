@@ -9,6 +9,7 @@ import { FileTree } from "./sidebar";
 import { useListScope } from "./list-scope";
 import { ALL_EXPERIMENTS } from "./runs";
 import { useWorkspace } from "./store";
+import { useCurrentWorkspace } from "./current-workspace";
 
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const atLeast = (role: Role | null, min: Role) => role !== null && RANK[role] >= RANK[min];
@@ -27,6 +28,7 @@ type Editing =
  */
 export function KnowledgeTree() {
   const ws = useWorkspace();
+  const workspace = useCurrentWorkspace();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Editing>(null);
   const [error, setError] = useState<string | null>(null);
@@ -291,7 +293,7 @@ export function KnowledgeTree() {
         )}
       >
         <House className="size-4 text-[var(--muted-foreground)]" />
-        <span className="min-w-0 flex-1 truncate font-medium">Workspace</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{workspace?.name ?? "Workspace"}</span>
         {ws.rootRole && (
           <RowAction label="Start an experiment in the workspace" onClick={() => setEditing({ mode: "experiment", nodeId: null })}>
             <FlaskConical className="size-3.5" />
