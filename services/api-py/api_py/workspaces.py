@@ -213,13 +213,22 @@ class Workspaces:
         await conn.execute("SELECT 1 FROM workspaces WHERE id = %s FOR UPDATE", (workspace_id,))
 
     @staticmethod
-    async def _member_role(conn: AsyncConnection, workspace_id: str, user_id: str) -> str | None:
+    async def _member_role(
+        conn: AsyncConnection, workspace_id: str, user_id: str, lock: bool = False
+    ) -> str | None:
+        """
+        Their role, or None. With `lock`, holds the membership row first, so
+        grant and group writes for them (access.py, _need_member) finish
+        before a removal deletes what they hold, or find them gone.
+        """
         if not is_uuid(user_id):
             return None
-        cur = await conn.execute(
-            "SELECT role FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
-            (workspace_id, user_id),
+        query = (
+            "SELECT role FROM workspace_members WHERE workspace_id = %s AND user_id = %s FOR UPDATE"
+            if lock
+            else "SELECT role FROM workspace_members WHERE workspace_id = %s AND user_id = %s"
         )
+        cur = await conn.execute(query, (workspace_id, user_id))
         row = await cur.fetchone()
         return row[0] if row else None
 
@@ -288,7 +297,7 @@ class Workspaces:
         leaving = user_id == by
         async with self.pool.connection() as conn, conn.transaction():
             await self._lock(conn, workspace_id)
-            current = await self._member_role(conn, workspace_id, user_id)
+            current = await self._member_role(conn, workspace_id, user_id, lock=True)
             if current is None:
                 raise WorkspaceError(404, NOT_A_MEMBER)
             if (

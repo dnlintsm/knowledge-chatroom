@@ -242,8 +242,11 @@
   back when they sign in. `GET .../removal` previews that. `PATCH /workspaces/{id}` renames
   a workspace (Owners and Admins) or archives and restores it (Owners; not the default
   workspace), and `GET /workspaces?archived=true` lists the archived ones you own. Every
-  workspace in the answers has a `status`. An agent run whose user is removed, leaves, or
-  whose workspace is archived stops at its next tool call, of any kind.
+  workspace in the answers has a `status`. A chat run, with the TypeScript or the Python
+  agent, whose user is removed, leaves, or whose workspace is archived stops at its next
+  tool boundary: a tool call already running ends and keeps its result, then the run
+  ends without another model turn; a later tool call, of any kind, is refused. A grant or
+  group membership written while its user is being removed goes with them.
 
 ### Changed
 

@@ -157,7 +157,15 @@ test("a run stops at its next tool call once its user is no longer a member (#25
   assert.equal(stopped.continue, false);
   assert.match(String(stopped.stopReason), /no longer a member/);
   assert.equal(stopped.hookSpecificOutput?.permissionDecision, "deny");
-  // A run with no user to check has no such hook.
+  // And after each batch of calls, before the next model turn.
+  const after = options.hooks?.PostToolBatch?.[0];
+  assert.ok(after && after.matcher === undefined);
+  const ended = (await after.hooks[0]({ hook_event_name: "PostToolBatch", tool_calls: [] } as never, undefined, {
+    signal: new AbortController().signal,
+  })) as { continue?: boolean };
+  assert.equal(ended.continue, false);
+  // A run with no user to check has no such hooks.
   const none = runAs(null, () => adapter.buildOptions(input));
   assert.ok(!none.hooks?.PreToolUse?.some((m) => m.matcher === undefined));
+  assert.ok(!none.hooks?.PostToolBatch?.length);
 });

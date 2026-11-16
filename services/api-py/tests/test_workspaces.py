@@ -17,7 +17,8 @@ from psycopg import conninfo
 from support import SECRET, URL, Client, user
 
 from api_py import db
-from api_py.access import AccessService
+from api_py import workspaces as workspaces_module
+from api_py.access import AccessError, AccessService
 from api_py.config import DEFAULT_MIGRATIONS_DIR
 
 pytestmark = [
@@ -533,3 +534,106 @@ async def test_two_owners_demoting_each_other_at_once_keep_one(database):
         assert sorted(a.status_code for a in answers) == [200, 409]
         members = (await api.get(f"/workspaces/{lab['id']}/members", headers=alice)).json()
         assert sorted(m["role"] for m in members["members"]) == ["admin", "owner"]
+
+
+async def _lab_with_a_privileged_group(api, alice, bob):
+    """alice's workspace with bob a Member without access, and a group with Full access on its root."""
+    alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+    bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+    lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()["id"]
+    in_lab = {**alice, "X-Knowledge-Workspace": lab}
+    await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "none"},
+    )
+    group = (
+        await api.post("/access/groups", headers=in_lab, json={"parentId": None, "name": "Admins"})
+    ).json()["id"]
+    granted = await api.post(
+        "/access/grants",
+        headers=in_lab,
+        json={"node": None, "principalType": "group", "principalId": group, "role": "owner"},
+    )
+    assert granted.status_code == 200
+    return lab, alice_id, bob_id, group
+
+
+def _write(access: AccessService, kind: str, group: str, bob_id: str, alice_id: str, in_tx):
+    """What a member-only permission write does: add bob to the group, or grant him a role."""
+    if kind == "group":
+        return access.set_member(group, bob_id, True, in_tx)
+    return access.set_grant(None, "user", bob_id, "owner", alice_id, in_tx)
+
+
+async def _no_access_once_added_back(api, alice, bob, lab: str, bob_id: str) -> None:
+    added = await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "none"},
+    )
+    assert added.status_code == 201
+    me = (await api.get("/access", headers={**bob, "X-Knowledge-Workspace": lab})).json()
+    assert me["rootRole"] is None, "nothing written during the removal comes back"
+
+
+@pytest.mark.parametrize("kind", ["group", "grant"])
+async def test_a_removal_waits_for_a_permission_write_and_takes_it_too(database, kind):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, alice_id, bob_id, group = await _lab_with_a_privileged_group(api, alice, bob)
+        access = app.state.storage.access.in_workspace(lab)
+        paused, release = asyncio.Event(), asyncio.Event()
+
+        async def hold(_conn) -> None:
+            paused.set()
+            await release.wait()
+
+        # The write has checked bob is a member and written, but not committed.
+        writing = asyncio.create_task(_write(access, kind, group, bob_id, alice_id, hold))
+        await paused.wait()
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await asyncio.sleep(0.3)
+        assert not removing.done(), "the removal waits for the write"
+        release.set()
+        await writing
+        removed = await removing
+        assert removed["groups" if kind == "group" else "grants"] == 1
+        await _no_access_once_added_back(api, alice, bob, lab, bob_id)
+
+
+@pytest.mark.parametrize("kind", ["group", "grant"])
+async def test_a_permission_write_after_a_removal_finds_no_member(database, kind, monkeypatch):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, alice_id, bob_id, group = await _lab_with_a_privileged_group(api, alice, bob)
+        access = app.state.storage.access.in_workspace(lab)
+        paused, release = asyncio.Event(), asyncio.Event()
+        audit = workspaces_module._audit
+
+        async def held_audit(*args, **kwargs):
+            paused.set()
+            await release.wait()
+            return await audit(*args, **kwargs)
+
+        # The removal has locked bob's membership and deleted what he holds, but not committed.
+        monkeypatch.setattr(workspaces_module, "_audit", held_audit)
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await paused.wait()
+
+        async def nothing(_conn) -> None:
+            return None
+
+        writing = asyncio.create_task(_write(access, kind, group, bob_id, alice_id, nothing))
+        await asyncio.sleep(0.3)
+        assert not writing.done(), "the write waits for the removal"
+        release.set()
+        await removing
+        with pytest.raises(AccessError, match="aren't a member"):
+            await writing
+        monkeypatch.setattr(workspaces_module, "_audit", audit)
+        await _no_access_once_added_back(api, alice, bob, lab, bob_id)
