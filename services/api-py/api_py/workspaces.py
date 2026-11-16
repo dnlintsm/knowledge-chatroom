@@ -1,9 +1,12 @@
 """Workspaces and their members (issue #226, docs/workspaces.md).
 
-    GET    /workspaces                       {workspaces: [{id, slug, name, role}]}: yours
+    GET    /workspaces                       {workspaces: [{id, slug, name, role}],
+                                             canCreate}: yours, and whether you may
+                                             create one
     POST   /workspaces                       {name, slug?, levels?} -> the new workspace
                                              (201), with you as its Owner; 409 when
-                                             the slug asked for is taken
+                                             the slug asked for is taken, 403 when
+                                             WORKSPACE_CREATORS doesn't name you
     GET    /workspaces/<id>                  {id, slug, name, role}: one of yours
     GET    /workspaces/<id>/members          {members: [{id, name, role, email?,
                                              createdAt?, lastSeenAt?}]}: names for
@@ -50,6 +53,7 @@ MEMBER_ROLES = ("owner", "admin", "member")
 # A new workspace's knowledge levels, unless the request names others.
 DEFAULT_LEVELS = ("tech", "module", "loop", "process")
 NOT_FOUND = "Workspace not found"
+CANNOT_CREATE = "Creating workspaces is limited on this server. Ask its administrator, or an Owner or Admin to add you to theirs."
 SLUG_TAKEN = "Another workspace already has this address"
 # A slug asked for: what slugify() makes, lower-case letters and digits in dash-separated runs.
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -211,6 +215,26 @@ class Workspaces:
             members.append(member)
         return members
 
+    async def may_create(self, user_id: str, creators: frozenset[str] | None) -> bool:
+        """
+        Whether the user may create a workspace (decision 4): anyone signed in
+        unless WORKSPACE_CREATORS names who may (their email or login
+        subject); the local user always may (decision 3).
+        """
+        if creators is None:
+            return True
+        async with self.pool.connection() as conn:
+            cur = await conn.execute("SELECT subject, email FROM users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+        if row is None:
+            return False
+        subject, email = row
+        return (
+            subject == "local"
+            or subject.lower() in creators
+            or bool(email and email.lower() in creators)
+        )
+
     async def lookup(self, email: str) -> dict[str, Any] | None:
         """Someone who has signed in with exactly this email (case ignored): {id, name}, or None."""
         address = email.strip()
@@ -325,6 +349,12 @@ async def resolve(
     return ws, role
 
 
+def _creators(value: str | None) -> frozenset[str] | None:
+    """WORKSPACE_CREATORS: emails or login subjects, by commas or spaces; None when unset or empty."""
+    names = frozenset(v.lower() for v in re.split(r"[\s,]+", value or "") if v)
+    return names or None
+
+
 def _send(status: int, body: Any) -> JSONResponse:
     return JSONResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
 
@@ -369,9 +399,18 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
     user = principal.user_id
 
     if not parts:
+        creators = _creators(request.app.state.settings.workspace_creators)
         if method == "GET":
-            return _send(200, {"workspaces": await workspaces.mine(user)})
+            return _send(
+                200,
+                {
+                    "workspaces": await workspaces.mine(user),
+                    "canCreate": await workspaces.may_create(user, creators),
+                },
+            )
         if method == "POST":
+            if not await workspaces.may_create(user, creators):
+                return _send(403, {"error": CANNOT_CREATE})
             body = await _read_json(request)
             name = (
                 re.sub(r"\s+", " ", body["name"]).strip()

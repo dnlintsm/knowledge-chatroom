@@ -35,10 +35,14 @@ interface Grant {
   role: Role;
 }
 
+/**
+ * Content access as the UI names it (docs/workspaces.md, Terms): verb
+ * phrases, so it doesn't read like the Owner / Admin / Member workspace roles.
+ */
 export const ROLES: { role: Role; label: string }[] = [
   { role: "viewer", label: "Can view" },
   { role: "editor", label: "Can edit" },
-  { role: "owner", label: "Owner" },
+  { role: "owner", label: "Full access" },
 ];
 
 export async function access<T>(path: string, init?: RequestInit): Promise<T> {

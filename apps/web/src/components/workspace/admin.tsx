@@ -43,7 +43,7 @@ type Tab = "people" | "groups" | "activity";
 
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const roleLabel = (r: Role) => ROLES.find((x) => x.role === r)!.label;
-const ACCESS: Record<Role, string> = { viewer: "view", editor: "edit", owner: "owner" };
+const ACCESS: Record<Role, string> = { viewer: "view", editor: "edit", owner: "full" };
 
 /** Whether someone in `workspace` with `rootRole` there can open the admin panel. */
 export function managesWorkspace(workspace: WorkspaceInfo | null, rootRole: Role | null): boolean {
@@ -219,7 +219,7 @@ function PeopleTab({
       role !== "owner" &&
       !window.confirm(
         memberRoles
-          ? "Give up Owner access to everything in the workspace? You keep your workspace role."
+          ? "Give up Full access to everything in the workspace? You keep your workspace role."
           : "Give up owning the workspace? You will lose this panel unless a group makes you an owner.",
       )
     ) {
@@ -280,7 +280,7 @@ function PeopleTab({
                     onChange={(e) => void setRole(p, e.target.value as Role | "")}
                     className="h-8 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 text-sm"
                   >
-                    <option value="">No workspace role</option>
+                    <option value="">{memberRoles ? "No access" : "No workspace role"}</option>
                     {ROLES.map((r) => (
                       <option key={r.role} value={r.role}>
                         {r.label}

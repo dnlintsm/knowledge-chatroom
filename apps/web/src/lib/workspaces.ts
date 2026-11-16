@@ -10,14 +10,14 @@ import { DEFAULT_SLUG, type WorkspaceInfo } from "./workspace-request";
  * - found: the user belongs to it.
  * - missing: there is no such workspace, or it isn't the user's (the same
  *   answer for both, as the API server gives); with the user's own, which
- *   may be none.
+ *   may be none, and whether they may create one.
  * - unavailable: the server has no workspaces (the agent server alone, or no
  *   storage, answers 404), or can't be reached right now. The default
  *   workspace still opens then, as before workspaces; others can't.
  */
 export type WorkspaceLookup =
   | { status: "found"; workspace: WorkspaceInfo }
-  | { status: "missing"; mine: WorkspaceInfo[] }
+  | { status: "missing"; mine: WorkspaceInfo[]; canCreate: boolean }
   | { status: "unavailable"; reason: "none" | "down" };
 
 const ROLES = new Set(["owner", "admin", "member"]);
@@ -33,11 +33,14 @@ function parseWorkspaces(body: unknown): WorkspaceInfo[] | null {
   });
 }
 
-/** The user's workspaces, or why there are none to list. `user` is null without login. */
+/**
+ * The user's workspaces and whether they may create one (the server's
+ * WORKSPACE_CREATORS), or why there are none to list. `user` is null without login.
+ */
 export async function listWorkspaces(
   user: SessionUser | null,
   base = localAgentUrl(),
-): Promise<WorkspaceInfo[] | { unavailable: "none" | "down" }> {
+): Promise<{ workspaces: WorkspaceInfo[]; canCreate: boolean } | { unavailable: "none" | "down" }> {
   const headers = new Headers();
   if (user && authSecret()) headers.set(IDENTITY_HEADER, identityHeader(user));
   let res: Response;
@@ -50,18 +53,23 @@ export async function listWorkspaces(
     await res.body?.cancel();
     return { unavailable: "none" };
   }
-  const list = res.ok ? parseWorkspaces(await res.json().catch(() => null)) : null;
+  const body: unknown = res.ok ? await res.json().catch(() => null) : null;
   if (!res.ok) await res.body?.cancel();
-  return list ?? { unavailable: "down" };
+  const list = parseWorkspaces(body);
+  if (!list) return { unavailable: "down" };
+  // A server from before the setting says nothing: everyone may.
+  return { workspaces: list, canCreate: (body as { canCreate?: unknown }).canCreate !== false };
 }
 
 /** The workspace `/w/<slug>` names for `user`. */
 export async function findWorkspace(user: SessionUser | null, slug: string, base?: string): Promise<WorkspaceLookup> {
   const listed = await listWorkspaces(user, base);
-  if (!Array.isArray(listed)) return { status: "unavailable", reason: listed.unavailable };
+  if ("unavailable" in listed) return { status: "unavailable", reason: listed.unavailable };
   const wanted = slug.toLowerCase();
-  const workspace = listed.find((w) => w.slug === wanted);
-  return workspace ? { status: "found", workspace } : { status: "missing", mine: listed };
+  const workspace = listed.workspaces.find((w) => w.slug === wanted);
+  return workspace
+    ? { status: "found", workspace }
+    : { status: "missing", mine: listed.workspaces, canCreate: listed.canCreate };
 }
 
 /** Where `/` and other URLs without a workspace go: the default workspace, keeping the query. */
@@ -82,8 +90,7 @@ function workspacePathWith(slug: string, search: string): string {
  */
 export async function homeWorkspacePath(user: SessionUser | null, search = "", base?: string): Promise<string> {
   const listed = await listWorkspaces(user, base);
-  if (!Array.isArray(listed) || listed.length === 0 || listed.some((w) => w.slug === DEFAULT_SLUG)) {
-    return defaultWorkspacePath(search);
-  }
-  return workspacePathWith(listed[0].slug, search);
+  const mine = "unavailable" in listed ? [] : listed.workspaces;
+  if (mine.length === 0 || mine.some((w) => w.slug === DEFAULT_SLUG)) return defaultWorkspacePath(search);
+  return workspacePathWith(mine[0].slug, search);
 }

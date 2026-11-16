@@ -102,10 +102,11 @@ test.describe("the page's workspace", () => {
     });
     // A miss names nothing of what was asked for, and lists the user's own.
     const mine = listed.workspaces.slice(0, 2);
-    expect(await findWorkspace(null, "elsewhere", "http://agent.test")).toEqual({ status: "missing", mine });
-    expect(await findWorkspace(null, "broken", "http://agent.test")).toEqual({ status: "missing", mine });
-    answer(200, { workspaces: [] });
-    expect(await findWorkspace(null, "default", "http://agent.test")).toEqual({ status: "missing", mine: [] });
+    expect(await findWorkspace(null, "elsewhere", "http://agent.test")).toEqual({ status: "missing", mine, canCreate: true });
+    expect(await findWorkspace(null, "broken", "http://agent.test")).toEqual({ status: "missing", mine, canCreate: true });
+    // With whether they may create one (WORKSPACE_CREATORS); a server that doesn't say lets them.
+    answer(200, { workspaces: [], canCreate: false });
+    expect(await findWorkspace(null, "default", "http://agent.test")).toEqual({ status: "missing", mine: [], canCreate: false });
   });
 
   test("is unavailable without the workspaces API, or without an answer", async () => {

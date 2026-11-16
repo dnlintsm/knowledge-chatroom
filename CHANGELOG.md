@@ -225,6 +225,12 @@
   A workspace that doesn't exist or isn't yours shows one page for both, which names
   nothing of the workspace and lists your own. `/` opens the default workspace when you
   belong to it, otherwise your first.
+- `WORKSPACE_CREATORS` on the API server limits who may create workspaces (emails or login
+  subjects; unset, every signed-in user may, and the local user always may).
+  `GET /workspaces` says `canCreate`, and the switcher and onboarding offer Create only
+  then (issue #226).
+- Share and the Admin panel call the top content access **Full access** instead of
+  Owner, so it doesn't read like the Owner workspace role next to it (issue #226).
 
 ### Changed
 

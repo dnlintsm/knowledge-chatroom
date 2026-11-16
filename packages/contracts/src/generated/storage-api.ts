@@ -450,7 +450,8 @@ export interface paths {
          *     Its slug is `slug` when given (409 when another workspace has it), otherwise
          *     one made from the name (a number is added when it is taken). Without
          *     `levels`, its knowledge levels are tech, module, loop and process; `[]` gives none.
-         *     Storage tokens can't create workspaces (403).
+         *     Storage tokens can't create workspaces (403), nor can people the server's
+         *     WORKSPACE_CREATORS doesn't name, when it is set (403).
          */
         post: operations["createWorkspace"];
         delete?: never;
@@ -3675,7 +3676,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Your workspaces, with your role in each. */
+            /** @description Your workspaces, with your role in each, and whether you may create one. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3683,6 +3684,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         workspaces: components["schemas"]["Workspace"][];
+                        /** @description False when the server's WORKSPACE_CREATORS doesn't name you. */
+                        canCreate: boolean;
                     };
                 };
             };

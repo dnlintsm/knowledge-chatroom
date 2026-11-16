@@ -40,7 +40,8 @@ Confirmed on 2026-11-13, refined after the review on #227.
 3. **Local mode (no login):** the local user can create more workspaces and owns all of
    them, as it owns the default workspace today.
 4. **Creating a workspace:** any signed-in user can, unless a deployment setting restricts
-   it. The default is open. The creator becomes Owner with Full access on the root, in the
+   it (`WORKSPACE_CREATORS` on api-py: the emails or login subjects that may). The
+   default is open. The creator becomes Owner with Full access on the root, in the
    same transaction that creates the workspace.
 5. **Old links, tokens and saved state keep working** while no workspace is named:
    - URLs without a workspace redirect to the default workspace.
@@ -423,7 +424,11 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
    `app/w/[slug]/page.tsx` shows onboarding to a user with no workspace and the no-access
    page to one asking for a workspace that isn't theirs, and `/` opens the default
    workspace only for its members. A node or experiment link the user can't open still
-   shows the workspace without it, not this page.
+   shows the workspace without it, not this page. Follow-ups that close the milestone:
+   `WORKSPACE_CREATORS` (decision 4), with `canCreate` on `GET /workspaces` so the
+   switcher and onboarding offer Create only to those who may; the UI names the `owner`
+   grant Full access; and the login e2e shares an Experiment link in a second workspace
+   with a colleague, before and after they are added.
 
 Traceability follow-ups (input drift by `sha256`, reading past versions, Rules consumption)
 stay separate and don't block this.

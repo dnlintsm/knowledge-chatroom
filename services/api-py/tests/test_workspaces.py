@@ -271,6 +271,34 @@ async def test_a_new_workspace_can_ask_for_its_slug(database):
         assert sorted(w["slug"] for w in mine) == ["default", "the-lab-2026"]
 
 
+async def test_a_deployment_can_limit_who_creates_workspaces(database):
+    # Any signed-in user may, without the setting.
+    async with Client(database, SECRET) as (api, _app):
+        bob = user("test|bob", "Bob")
+        assert (await api.get("/workspaces", headers=bob)).json()["canCreate"] is True
+    # With it, only the people it names, by login subject or email (case ignored).
+    async with Client(database, SECRET, workspace_creators="test|alice, Carol@Example.com") as (
+        api,
+        _app,
+    ):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        carol = user("test|carol", "Carol")
+        await api.get("/access", headers=alice)
+        assert (await api.get("/workspaces", headers=alice)).json()["canCreate"] is True
+        listed = (await api.get("/workspaces", headers=bob)).json()
+        assert listed["canCreate"] is False and [w["slug"] for w in listed["workspaces"]] == [
+            "default"
+        ]
+        refused = await api.post("/workspaces", headers=bob, json={"name": "Mine"})
+        assert refused.status_code == 403 and "limited" in refused.json()["error"]
+        assert (
+            await api.post("/workspaces", headers=alice, json={"name": "Lab"})
+        ).status_code == 201
+        assert (
+            await api.post("/workspaces", headers=carol, json={"name": "Fab"})
+        ).status_code == 201
+
+
 async def test_grants_and_groups_are_for_members(database):
     async with Client(database, SECRET) as (api, _app):
         alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
