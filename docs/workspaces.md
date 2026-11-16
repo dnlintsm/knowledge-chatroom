@@ -1,16 +1,17 @@
 # Workspaces (design)
 
-Status: **being built**, tracked in [#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), for the milestone in
-[#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
-The backend is in (rollout step 4, below): memberships, the backfill and bootstrap,
-workspace creation, adding members, the per-request workspace in api-py, and chat runs on
-the TypeScript server that keep their workspace. The app has no workspace screens yet
-(steps 5 and 6).
+Status: creating, joining and switching workspaces is **done**
+([#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), the milestone in
+[#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479)).
+Administration and handover is **being specified**, tracked in
+[#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255): see
+[Administration and handover](#administration-and-handover).
 
-This is the short spec and operation matrix that the milestone asks for before
-implementation. It covers creating, joining and switching workspaces, and the isolation that
-has to be in place first. Removing members, changing roles, Experiment handover, restricted
-Knowledge nodes, Guest membership and the Experiment/Run split come later.
+This is the short spec and operation matrix that #178 asks for before implementation. It
+covers creating, joining and switching workspaces, the isolation that has to be in place
+first, and then removing members, changing roles, transferring ownership, archiving
+workspaces and handing Experiments over. Restricted Knowledge nodes, Guest membership,
+commenting and the Experiment/Run split come later.
 
 ## Terms
 
@@ -19,7 +20,8 @@ Knowledge nodes, Guest membership and the Experiment/Run split come later.
 | Workspace | The boundary for collaboration and authorization. Every node, file, Experiment, chat, memory note, grant, group and audit entry belongs to exactly one. It has an immutable id (UUID) and a unique slug that can change. |
 | Membership | Whether a user belongs to a workspace, and as what: **Owner**, **Admin** or **Member**. A non-member gets nothing in that workspace. |
 | Content access | What a member can do with Knowledge, through the grants that exist today. The UI calls the three grant roles **Can view** (`viewer`), **Can edit** (`editor`) and **Full access** (`owner`). |
-| Experiment visibility | A draft Experiment is visible only to its author. Shared and archived Experiments are visible to whoever can view their node. This rule exists today (`005_experiments.sql`) and doesn't change. |
+| Experiment visibility | A draft Experiment is visible only to its maintainer and collaborators. Shared and archived Experiments are visible to whoever can view their node. Until #255 the maintainer was always the author, the rule in `005_experiments.sql`. |
+| Author, maintainer, collaborator | An Experiment's **author** is who created it, and never changes: it is provenance. Its **maintainer** is the one person responsible for it now, the author until they hand it over. **Collaborators** are people the maintainer adds to work on it with them (#255). |
 
 Every protected operation needs current membership, and then the content access or
 Experiment visibility it needs. A Member with no grants can open the workspace and use their
@@ -81,8 +83,9 @@ makes it visible instead:
 
 What an Admin still **cannot** reach through administration:
 
-- Other users' draft Experiments. Drafts are visible only to their author, whatever the
-  grants are.
+- Other users' draft Experiments. Drafts are visible only to their maintainer and
+  collaborators, whatever the grants are. Owners and Admins can't hand a draft over
+  either (see [Experiment handover](#experiment-handover)).
 - Other users' chats and memory notes, which belong to the user and not to grants.
 - Owner-only actions: making someone Owner, transferring ownership, archiving or deleting the
   workspace.
@@ -108,13 +111,17 @@ administration would then cross a boundary that is meant to hold.
 | See members' emails, sign-up and last-active times | ✓ | ✓ | ✗ | ✗ |
 | Rename it, change settings | ✓ | ✓ | ✗ | ✗ |
 | Add an existing user as Member or Admin, with a starting grant | ✓ | ✓ | ✗ | ✗ |
-| Make someone Owner, transfer ownership | ✓ *next* | ✗ | ✗ | ✗ |
-| Remove a member, change a role | ✓ *next* | Members only, *next* | ✗ | ✗ |
-| Leave the workspace | ✓ unless last Owner, *next* | ✓ *next* | ✓ *next* | n/a |
-| Archive or delete the workspace | ✓ *next* | ✗ | ✗ | ✗ |
+| Make someone Owner, transfer ownership | ✓ #255 | ✗ | ✗ | ✗ |
+| Change a role | ✓ any member's, unless it demotes the last Owner, #255 | Make a Member Admin; step down to Member yourself, #255 | ✗ | ✗ |
+| Remove a member | ✓ anyone but the last Owner, #255 | Members only, #255 | ✗ | ✗ |
+| Leave the workspace | ✓ unless last Owner, #255 | ✓ #255 | ✓ #255 | n/a |
+| Archive or restore the workspace (not the default one) | ✓ #255 | ✗ | ✗ | ✗ |
+| Delete the workspace for good | ✗ later, with a retention policy | ✗ | ✗ | ✗ |
+| See an archived workspace | ✓ to restore it, #255 | ✗ | ✗ | ✗ |
 | Groups: create, rename, delete, set members | ✓ | ✓ | ✗ | ✗ |
 | Read the audit log (redacted, below) | ✓ | ✓ | ✗ | ✗ |
 | Create a new workspace | Any signed-in user, unless restricted (decision 4) | | | |
+| List every workspace in the deployment; add an Owner to one | Deployment admins only (`PLATFORM_ADMINS`), never content, #255 | | | |
 
 Today the people, group and audit operations need a root `owner` grant
 (`services/api-py/api_py/session.py`, the `need(None, "owner")` calls). They move to Owner or
@@ -132,7 +139,9 @@ Admin membership. Everyone who passes today's check keeps passing (see Backfill)
 | Accept or reject a proposal | Can edit on the node | Same (`canDecide`) |
 | Delete a node | Full access on the node | Same |
 | Share: add, change or remove grants on a node | Full access on the node (the root, for workspace-wide grants) | Same |
-| Edit an Experiment's content, change its visibility, archive or restore it | Its author | Same; a transferable maintainer comes *next* |
+| Edit an Experiment's content and files, add run inputs, finish a run, propose its files to the node | Its maintainer or a collaborator, while it isn't archived | Its author (#255 adds collaborators) |
+| Change an Experiment's visibility, archive, restore or delete it; add or remove collaborators | Its maintainer | Its author |
+| Hand an Experiment over to another maintainer | Its maintainer; an Owner or Admin for a shared or archived one, never a draft | n/a (#255) |
 | Rerun an Experiment as your own | The source Experiment visible to you, and Can view on the node where the new run goes | Same (since #188) |
 | Your own chats and memory | Membership only | Same, minus the membership check |
 
@@ -170,7 +179,8 @@ grants.
 - **Signed download links** stay valid until they expire (`DOWNLOAD_LINK_SECONDS`, 300 s
   today). Revoking access doesn't recall a link already handed out.
 
-Cancelling running work on revocation, and the UI for it, come with the next batch.
+What happens to running work when someone is removed, or a workspace is archived, is in
+[Removing a member](#removing-a-member-or-leaving) (#255).
 
 ## Audit log visibility
 
@@ -301,8 +311,9 @@ to:
   again, then adds that user as Owner, adds their root Full access grant and sets the
   timestamp, all in one transaction. Concurrent first sign-ins produce exactly one Owner.
 - **Once it is set,** it is never cleared. Later sign-ins, and later ownership changes, don't
-  reopen bootstrap. A workspace that loses all its signed-in Owners is recovered by the
-  ownership tools in the next batch, not by the next person to sign in.
+  reopen bootstrap. A workspace whose Owners can no longer sign in is recovered by a
+  deployment admin adding an Owner (see [Workspace inventory](#workspace-inventory),
+  #255), not by the next person to sign in.
 - **Local mode** is unaffected. The `local` user owns the default workspace and every
   workspace it creates.
 - New workspaces never use bootstrap. Their creator becomes Owner when they are created
@@ -339,8 +350,8 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 
 - `workspace_members (workspace_id, user_id, role, created_at, created_by)`, with `role` in
   `owner`, `admin`, `member`, and at least one `owner` per workspace.
-- `workspaces.created_by`, `workspaces.auth_bootstrapped_at`, and a status column for
-  archiving later.
+- `workspaces.created_by`, `workspaces.auth_bootstrapped_at`, and a `status` column
+  (`active` or `archived`), which #255 starts using.
 - The backfill above, idempotent, changing no grant.
 - Creating a workspace inserts the workspace, the creator's Owner membership and their root
   Full access grant in one transaction.
@@ -390,7 +401,7 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
   4. Events for someone else's draft Experiment never arrive.
   5. Removing workspace membership closes the stream.
 
-## Rollout
+## Rollout (#226)
 
 1. This spec.
 2. ~~Land #225, so api-py runs the migrations.~~ Done.
@@ -432,3 +443,260 @@ Admins also see email, sign-up and last-active times. OIDC subjects aren't retur
 
 Traceability follow-ups (input drift by `sha256`, reading past versions, Rules consumption)
 stay separate and don't block this.
+
+## Administration and handover
+
+Tracked in [#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255), section 4 of
+the [#178 plan](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
+The operation matrix above has its rows. This section says what each operation does.
+
+### Changing a role
+
+`PATCH /workspaces/{id}/members/{userId}` `{role}` answers the member with their new role.
+
+| Who | May |
+| --- | --- |
+| Owner | Give any member any role: Member, Admin or Owner. |
+| Admin | Make a Member an Admin (as they could add them as one), and step down to Member themselves. Nothing else: not another Admin, not an Owner. |
+| Member | Nothing. |
+
+- The last Owner can't be demoted (409, "A workspace needs at least one owner").
+- **Ownership changes are serialized per workspace.** The existing trigger
+  (`workspace_members_keep_owner`) looks for another Owner without a lock, so two Owners
+  demoting or removing each other at once could each still see the other and both commit,
+  leaving none. So:
+  - every route that can take away an Owner (a role change, a removal, leaving) first
+    locks the workspace's row (`SELECT … FOR UPDATE`) in its transaction, then counts the
+    Owners and answers 409 when the change would leave none. Adding an Owner from the
+    [workspace inventory](#workspace-inventory) takes the same lock;
+  - the migration changes the trigger to take that lock too before it looks, so any other
+    path that writes `workspace_members` (the TypeScript server, a script) is serialized
+    the same way and rechecks after the other transaction commits.
+- A role change never changes a grant. Workspace roles are administrative; content access
+  stays with grants (decision 1).
+- **Transferring ownership** is two role changes: make the other person Owner, then lower
+  your own role. The screen does both, in that order, so there is always an Owner, and
+  offers to give the new Owner Full access on the root through Share if they don't have it.
+  Owners are peers: there can be several, and any of them can change another's role.
+- Audited as `member.role`, with the old and new role.
+
+### Removing a member, or leaving
+
+`DELETE /workspaces/{id}/members/{userId}` removes someone. With your own id it is leaving.
+An Owner removes anyone but the last Owner, an Admin removes Members only, and anyone may
+leave unless they are the last Owner (409).
+
+In one transaction, it:
+
+1. deletes the membership;
+2. deletes the person's **direct grants** in the workspace, their **memberships of its
+   groups** and their **Experiment collaborator places** there, so being added again later
+   starts from the starting grant, as for anyone new: nothing someone else gave them comes
+   back on its own (grants and group memberships are already refused for non-members,
+   and collaborators have to be members). Collaborator places are deleted from step 3
+   on, when that table exists;
+3. records a **departure**, so the default workspace doesn't add them back at their next
+   sign-in during the compatibility period (decision 5). Adding them again clears it;
+4. writes one audit entry, `member.remove` or `member.leave`, with how many grants and
+   group memberships went.
+
+`GET /workspaces/{id}/members/{userId}/removal` previews it for the confirmation: the
+grants and groups that go, and the shared or archived Experiments they maintain that the
+caller can see. It never counts drafts.
+
+What stays, unchanged:
+
+- Experiments they authored or maintain, files they wrote, and proposals they made. Their
+  open proposals can still be accepted or rejected by editors on the node. A shared
+  Experiment they maintain shows its maintainer as "no longer a member" and can be handed
+  over (below).
+- Their own drafts, chats, memory notes and settings in the workspace. Nobody else can see
+  them, as before.
+
+If they are added again, what was given to them stays gone (grants, groups, collaborator
+places). What is **their own** comes back: their chats, memory and the Experiments they
+still maintain, drafts included, as their chats do. Maintaining is responsibility for
+their own work, not access someone granted, and it still needs Can view on the node,
+which only a new grant gives them. An Experiment handed over while they were away stays
+with its new maintainer.
+
+What stops (see [Revalidation](#revalidation)):
+
+- Every request, tool call and memory call in the workspace, including tokens already
+  minted: 404, as for any non-member. Their open `?watch` streams close.
+- **Their running chat runs in that workspace end at their next step.** A tool call that
+  was already accepted runs to its end and keeps its result and audit entry. The run
+  doesn't start another model turn: it stops, and the chat records why ("You're no longer a
+  member of this workspace"). An Experiment run left in the `running` state stays so; its
+  maintainer, after a handover, can finish it as failed.
+- Signed download links expire as before (`DOWNLOAD_LINK_SECONDS`).
+
+### Renaming and archiving a workspace
+
+`PATCH /workspaces/{id}` `{name?, status?}`:
+
+- `name`: Owners and Admins. The slug doesn't change, so links keep working. Changing the
+  slug, with its redirect, stays out of this batch. Audited as `workspace.rename`.
+- `status: "archived"`: Owners only. The **default workspace can't be archived** (400),
+  since requests that name no workspace go there. Archiving hides the workspace from
+  everyone: it leaves the switcher, every request and token in it gets 404, open streams
+  close and running runs end at their next step, as for a removed member. Nothing is
+  deleted. Audited as `workspace.archive`.
+- `status: "active"`: Owners only, from the archived list. Audited as `workspace.restore`.
+
+`GET /workspaces?archived=true` adds the archived workspaces the caller owns, each with
+`status: "archived"`, so an Owner can find one to restore. Admins and Members of an archived
+workspace don't see it. Every entry of `GET /workspaces` gains `status`.
+
+Deleting a workspace for good waits for a retention policy (#178), and isn't in this batch.
+
+### Experiment handover
+
+An Experiment has an immutable **author** and a **maintainer** who is responsible for it
+now. The migration sets every maintainer to the author, so nothing changes for existing
+Experiments.
+
+| Operation | Maintainer | Collaborator | Others who can see it | Owner or Admin who can see it |
+| --- | --- | --- | --- | --- |
+| See it while it's a draft | ✓ | ✓ | ✗ | ✗ |
+| Edit its content and files, add run inputs, finish a run, propose its files to the node | ✓ unless archived | ✓ unless archived | ✗ | ✗ |
+| Change its visibility (draft, shared), archive, restore, delete | ✓ | ✗ | ✗ | ✗ |
+| Add or remove collaborators | ✓ | Remove themselves | ✗ | ✗ |
+| Hand it over to a new maintainer | ✓ | ✗ | ✗ | Shared or archived only |
+| Rerun it as their own | ✓ | ✓ | ✓ | ✓ |
+
+Everyone in this table also needs workspace membership and Can view on the Experiment's node
+(or the root, for one with no node), as today. So losing access to the node takes away a
+maintainer's or collaborator's access to its Experiments too, and adding a collaborator
+never gets around a node they can't read (#178).
+
+- **Adding a collaborator** (`PUT /experiments/{id}/collaborators/{userId}`) needs a member
+  who can view the node, or the answer is 400, "They can't view this experiment's node.
+  Share it with them first." `DELETE` on the same path removes one. Audited as
+  `experiment.collaborator.add` and `.remove`.
+- **Handing over** (`PUT /experiments/{id}/maintainer` `{userId, keepAsCollaborator?}`)
+  needs a new maintainer who is a member and can view the node, the same 400 otherwise.
+  The previous maintainer stays on as a collaborator unless `keepAsCollaborator` is
+  false, **and only while they are still a member**: handing over a departed maintainer's
+  Experiment never makes them a collaborator, so no dormant place waits for them if they
+  are added again. Audited as `experiment.maintainer`, with both people.
+- **Owners and Admins** can hand over a shared or archived Experiment they can see, for
+  example when its maintainer has left. They can't see drafts, so they can't hand one
+  over: a departed member's drafts stay private, as their chats do (see the
+  [Admin trust model](#admin-trust-model)). The UI offers this when the maintainer is no
+  longer a member, and in a member's removal preview.
+- **The answer** for an Experiment gains `maintainerId`, `maintainerName`,
+  `collaborators: [{id, name}]`, and whether the maintainer is still a member.
+  `authorId` and `authorName` stay as they are. `mine` now means "you maintain it",
+  which is what it meant until now, since the author was the maintainer. `access` is
+  `writer` for the maintainer and collaborators while it isn't archived.
+- **Agent tokens** can do what their user can do as a maintainer or collaborator, except
+  manage collaborators or hand over, as they can't manage grants today.
+- Search, proposals, file access and audit redaction decide visibility through the SQL
+  function `experiment_access`, and the RLS policies on `experiments` check the author too.
+  Those, and the event filter (`hears_experiment` in api-py, `ExperimentService.hears` in
+  the agent, which also check the author), move to "maintainer or collaborator" together,
+  in one migration and in both servers.
+
+### Workspace inventory
+
+For whoever runs the deployment, who isn't necessarily a member of every workspace.
+`PLATFORM_ADMINS` on api-py names them (emails or login subjects, as `WORKSPACE_CREATORS`
+and `HUB_ADMINS` do). In local mode the local user is one. Nobody is one by default.
+
+- `GET /platform/workspaces` lists every workspace, active and archived: name, slug,
+  status, who created it and when, how many members, its Owners (names and emails), and
+  when someone last used it. No content: no node names, files, Experiments, chats or
+  member lists beyond the Owners.
+- `POST /platform/workspaces/{id}/owners` `{userId, fullAccess?}` makes someone who has
+  signed in an Owner of that workspace, adding them as a member if they aren't one. It is
+  for a workspace whose Owners can no longer sign in. It takes the workspace lock, as
+  role changes do.
+- **Restoring content administration.** Being Owner alone isn't always enough to recover:
+  Share needs Full access, and in a new workspace the creator's direct root Full access
+  grant is often the only one. If that creator can no longer sign in, groups can't help
+  either, since no group holds Full access to join. So `fullAccess: true` also gives the
+  designated Owner, and only them, Full access on the workspace root, in the same
+  transaction. It is a direct grant like any other, visible in Share and the Admin panel,
+  never to the deployment admin, and never on a single node. The screen offers it, and
+  preselects it when no member who has signed in within `RECOVERY_IDLE_DAYS` (90 by
+  default) holds Full access on the root.
+- Both are audited in that workspace's log, with the deployment admin as the actor:
+  `platform.owner`, and `grant.set` with `recovery: true` for the grant. The workspace's
+  Owners and Admins see both.
+- Being a deployment admin gives nothing else: no membership, no content, no audit log.
+
+### Audit
+
+Every operation in this section writes one entry in the workspace's audit log, readable by
+its Owners and Admins with the [redaction](#audit-log-visibility) that already applies: an
+Experiment's title shows only to readers who can see that Experiment.
+
+### Screens
+
+| Screen | Notes |
+| --- | --- |
+| People (Admin panel) | Each member's role is a menu with only the roles the viewer may set. Remove opens a confirmation from the removal preview: the grants and groups that go, and the shared Experiments they maintain, with a link to hand them over. |
+| Transfer ownership | On another member: "Make Owner", then asks whether to stay as Admin or Member, and whether to give them Full access on the root if they lack it. |
+| Leave workspace | In the switcher's menu for the current workspace. Says what happens (your access goes; your drafts, chats and memory stay private and come back if you're added again). The last Owner is told to make someone else Owner first. |
+| Workspace settings | Rename (Owners and Admins). Archive (Owners, not the default workspace), confirmed by typing the workspace's name. |
+| Archived workspaces | A section of the switcher, for Owners, with Restore. |
+| Experiment header | "Maintained by Alice · started by Bob" when they differ, and the collaborators. The maintainer adds and removes collaborators from members who can view the node, and hands over. "No longer a member" by a departed maintainer, with Hand over for Owners and Admins. |
+| Read-only reasons (`read-only.ts`) | "Only Alice and the collaborators can edit this experiment", and the archived reason names the maintainer. |
+| Workspace inventory | A page for deployment admins only, with the list and "Add an Owner". |
+
+### Tests this batch asks for
+
+In the conformance suite, against the same backend as before:
+
+- Role changes: every caller role against every target role, including Admins on Admins and
+  Owners, self-demotion, and the last Owner (409).
+- Removal and leaving: who may remove whom, the last Owner (409), grants and group
+  memberships gone, the removed member's requests, tokens and streams refused or closed,
+  their drafts still invisible to the Owner, and adding them again starts from the starting
+  grant.
+- Last Owner under concurrency: two Owners demoting each other, and two removing each
+  other, at the same time. Exactly one change succeeds, the other gets 409, and the
+  workspace keeps one Owner. Also with the routes bypassed (two transactions updating
+  `workspace_members` directly), which the trigger's lock must catch.
+- Archiving: Owners only, the default workspace refused, members get 404 and lose it from
+  `GET /workspaces`, the Owner sees it with `?archived=true` and restores it.
+- Experiments: a collaborator edits content and files but can't change the visibility,
+  delete, or manage collaborators; a collaborator sees a draft; losing Can view on the node
+  takes collaborator access away; handover by the maintainer; an Owner or Admin hands over
+  a shared one but gets 404 for a draft; a collaborator on someone's draft who is removed
+  and added again with Can view doesn't see or edit that draft; handing over a removed
+  maintainer's Experiment with `keepAsCollaborator` doesn't make them a collaborator, also
+  after they are added again; the new maintainer or collaborator must be able to
+  view the node; agent tokens can't manage collaborators. These run in the default
+  workspace, so they also run with `CONFORMANCE_TARGET=ts`, which checks the TypeScript
+  server's own rules.
+- Workspace inventory: refused to anyone not in `PLATFORM_ADMINS`, no content in the
+  answer, adding an Owner is audited in the workspace.
+- Recovery where the unavailable creator held the only direct root Full access grant and
+  no group holds Full access: an Owner added without `fullAccess` can't Share (403); one
+  added with it can, the grant is theirs alone, and the deployment admin still gets 404
+  in the workspace.
+
+In `services/api-py/tests` (they need the database): the migration sets every maintainer to
+the author and changes nobody's access to any Experiment, and a member removed from the
+default workspace isn't added back at sign-in.
+
+In `apps/agent`: a run whose user is removed mid-run finishes the accepted tool call, gets
+the next one refused, and ends without another model turn; the in-process tools follow the
+maintainer and collaborator rules.
+
+### Rollout (#255)
+
+1. This section.
+2. Backend, people: role changes, removal and leaving, departures, rename, archive and
+   restore, runs ending on removal. The routes go into `openapi/storage.yaml`.
+3. Backend, Experiments: the migration, maintainer and collaborators in api-py and in the
+   TypeScript server's session and tools.
+4. Backend, workspace inventory and adding an Owner.
+5. Screens: people, transfer, leave, settings, archived workspaces.
+6. Screens: the Experiment header and the read-only reasons.
+7. Screen: workspace inventory.
+
+Each backend step brings its tests. The legacy fallback's cut-off release gets its own
+issue.
