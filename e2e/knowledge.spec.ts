@@ -81,7 +81,7 @@ test("knowledge tree", async ({ page }) => {
   await shot(page, "15b-knowledge-file-rename");
 
   // Back at the root, the module's note is not listed.
-  await location.getByRole("button", { name: "Workspace" }).click();
+  await location.getByRole("button", { name: "My workspace", exact: true }).click();
   await expect(location).not.toContainText(MODULE);
   await expect(tree.getByRole("treeitem", { name: /recipe\.md/ })).toHaveCount(0);
 });

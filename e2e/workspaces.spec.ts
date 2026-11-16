@@ -91,8 +91,67 @@ test("each workspace has its own page, files and saved state", async ({ page, re
 test("a workspace that isn't yours, or doesn't exist, doesn't open", async ({ page, request }) => {
   await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
   await page.goto("/w/no-such-workspace");
-  await expect(page.getByTestId("workspace-not-found")).toBeVisible();
+  // One page for both, which names nothing of what was asked for and lists the user's own.
+  const refused = page.getByTestId("workspace-no-access");
+  await expect(refused).toBeVisible();
+  await expect(refused).not.toContainText("no-such-workspace");
+  await expect(refused.getByRole("list", { name: "Your workspaces" })).toContainText("My workspace");
   // A request naming a workspace that isn't one answers 404, never the default's.
   const res = await request.get("/api/files", { headers: { [HEADER]: "00000000-0000-4000-8000-000000000000" } });
   expect(res.status()).toBe(404);
+});
+
+test("the switcher moves to another workspace, asking first about unsaved edits", async ({ page, request }) => {
+  await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
+  const name = `Switch ${Date.now()}`;
+  const other: { id: string; slug: string } = await (await request.post("/api/workspaces", { data: { name } })).json();
+  const path = `notes/switch-${Date.now()}.md`;
+
+  await page.goto("/w/default");
+  await loaded(page);
+  const location = page.getByRole("navigation", { name: "Location" });
+  await expect(location.getByRole("button", { name: "My workspace", exact: true })).toBeVisible();
+  const menu = page.getByRole("menu", { name: "Workspaces" });
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  await expect(menu.getByRole("menuitem", { name: /My workspace/ })).toHaveAttribute("aria-current", "page");
+  await expect(menu.getByRole("menuitem", { name: new RegExp(name) })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Create workspace" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  // An edit that can't save: switching asks first.
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await page.getByRole("textbox", { name: "New file path" }).fill(path);
+  await page.getByRole("textbox", { name: "New file path" }).press("Enter");
+  await expect.poll(async () => (await request.get(`/api/files/${path}`)).status()).toBe(200);
+  await page.route("**/api/files/**", (route) => (route.request().method() === "PUT" ? route.abort() : route.continue()));
+  await page.getByTestId("file-editor").fill("# Kept\n\nSaved before the switch.");
+  await expect(page.getByRole("status").filter({ hasText: "Not saved" })).toBeVisible();
+
+  const pick = async () => {
+    await page.getByRole("button", { name: "Switch workspace" }).click();
+    await menu.getByRole("menuitem", { name: new RegExp(name) }).click();
+  };
+  const prompt = page.getByRole("dialog", { name: "Unsaved edits" });
+  await pick();
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole("button", { name: "Stay" }).click();
+  await expect(prompt).toHaveCount(0);
+  await expect(page).toHaveURL(/\/w\/default$/);
+
+  // Save tries again; while it still can't, it says so and stays.
+  await pick();
+  await prompt.getByRole("button", { name: "Save" }).click();
+  await expect(prompt.getByRole("alert")).toContainText("haven't saved yet");
+  await expect(page).toHaveURL(/\/w\/default$/);
+  await page.unroute("**/api/files/**");
+  await prompt.getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(new RegExp(`/w/${other.slug}$`));
+  await loaded(page);
+  await expect(location.getByRole("button", { name, exact: true })).toBeVisible();
+  try {
+    expect(await (await request.get(`/api/files/${path}`)).text()).toBe("# Kept\n\nSaved before the switch.");
+  } finally {
+    await request.delete(`/api/files/${path}`);
+  }
 });

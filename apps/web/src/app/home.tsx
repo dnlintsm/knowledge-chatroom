@@ -8,6 +8,7 @@ import { StepsDefaultContext } from "@/components/workspace/agent-steps-view";
 import { CurrentWorkspaceContext } from "@/components/workspace/current-workspace";
 import { setSavedStateScope } from "@/components/workspace/local-persistence";
 import { useGenerativeUIExamples } from "@/hooks";
+import { recordVisit } from "@/lib/workspace-choice";
 import { DEFAULT_SLUG, WORKSPACE_HEADER, setRequestWorkspace, type WorkspaceInfo } from "@/lib/workspace-request";
 
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
@@ -42,6 +43,14 @@ export function Home({
   useLayoutEffect(() => {
     setRequestWorkspace(id);
     setSavedStateScope(id ? { user: userKey, workspace: id, isDefault } : null);
+    // For the switcher's recent workspaces.
+    if (id) {
+      try {
+        recordVisit(window.localStorage, userKey, id);
+      } catch {
+        // Site storage blocked or full: the switcher lists them all, without recent ones.
+      }
+    }
   }, [id, userKey, isDefault]);
   const headers = useMemo(() => (id ? { [WORKSPACE_HEADER]: id } : undefined), [id]);
 

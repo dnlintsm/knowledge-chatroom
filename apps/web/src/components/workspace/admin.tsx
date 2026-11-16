@@ -6,12 +6,19 @@ import { ago, cn } from "@/lib/utils";
 import type { Role } from "./server-files";
 import { access, personLabel, ROLES, type Group, type Person } from "./sharing";
 import { useWorkspace } from "./store";
+import { AddMember } from "./add-member";
+import { useCurrentWorkspace } from "./current-workspace";
+import { apiFetch } from "./server-files";
+import { MEMBER_ROLE_LABEL } from "@/lib/workspace-choice";
+import type { WorkspaceInfo } from "@/lib/workspace-request";
 
 /**
- * Admin panel for workspace owners (#67): who has signed in and their
- * workspace role, the org tree of groups and its members, and recent access
- * changes. Everything goes through the agent's /access API, which checks the
- * caller owns the workspace; this only hides the button from everyone else.
+ * Admin panel (#67): the people and their access to the whole workspace, the
+ * org tree of groups and its members, and recent access changes. With
+ * workspaces (issue #226) it is for the workspace's Owners and Admins, who
+ * also add members here; without them, for the owners of the workspace root.
+ * Everything goes through the server's /access and /workspaces APIs, which
+ * check the caller; this only hides the button from everyone else.
  */
 
 interface PersonRow extends Person {
@@ -38,11 +45,17 @@ const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const roleLabel = (r: Role) => ROLES.find((x) => x.role === r)!.label;
 const ACCESS: Record<Role, string> = { viewer: "view", editor: "edit", owner: "owner" };
 
-/** Opens the admin panel; only workspace owners (with login on) see it. */
+/** Whether someone in `workspace` with `rootRole` there can open the admin panel. */
+export function managesWorkspace(workspace: WorkspaceInfo | null, rootRole: Role | null): boolean {
+  return workspace ? workspace.role === "owner" || workspace.role === "admin" : rootRole === "owner";
+}
+
+/** Opens the admin panel; only the workspace's Owners and Admins (with login on) see it. */
 export function AdminButton() {
   const { account, rootRole, storageMode } = useWorkspace();
+  const workspace = useCurrentWorkspace();
   const [open, setOpen] = useState(false);
-  if (!account.login || storageMode !== "server" || rootRole !== "owner") return null;
+  if (!account.login || storageMode !== "server" || !managesWorkspace(workspace, rootRole)) return null;
   return (
     <>
       <button
@@ -58,7 +71,9 @@ export function AdminButton() {
 }
 
 function AdminDialog({ onClose }: { onClose: () => void }) {
+  const workspace = useCurrentWorkspace();
   const [tab, setTab] = useState<Tab>("people");
+  const [memberRoles, setMemberRoles] = useState<Map<string, WorkspaceInfo["role"]>>(new Map());
   const [people, setPeople] = useState<PersonRow[] | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
@@ -77,7 +92,12 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
     setGroups(g.groups);
     setEntries(a.entries);
     setMe(who.me?.id ?? null);
-  }, []);
+    if (workspace) {
+      const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/members`);
+      const body = (await res.json().catch(() => ({}))) as { members?: { id: string; role: WorkspaceInfo["role"] }[] };
+      setMemberRoles(new Map((body.members ?? []).map((m) => [m.id, m.role])));
+    }
+  }, [workspace]);
 
   useEffect(() => {
     load().catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -87,10 +107,12 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
   const run = async (action: () => Promise<unknown>) => {
     try {
       await action();
-      // A change can take away your own ownership (your role, or a group's).
-      // The panel's reads need it, so reload the app with your new access.
+      // Without workspaces, a change can take away your own ownership (your
+      // role, or a group's). The panel's reads need it, so reload the app
+      // with your new access. With them, your membership role decides, and
+      // nothing here changes it.
       const { rootRole } = await access<{ rootRole: Role | null }>("");
-      if (rootRole !== "owner") {
+      if (!workspace && rootRole !== "owner") {
         window.location.reload();
         return;
       }
@@ -151,7 +173,12 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <div role="tabpanel" aria-label={tabs.find((t) => t.id === tab)!.label} className="min-h-0 flex-1 overflow-auto p-4">
-          {tab === "people" && <PeopleTab people={people} groups={groups} me={me} run={run} />}
+          {tab === "people" && (
+            <>
+              {workspace && <AddMember workspace={workspace} onAdded={() => load().catch(() => {})} />}
+              <PeopleTab people={people} groups={groups} me={me} run={run} memberRoles={workspace ? memberRoles : null} />
+            </>
+          )}
           {tab === "groups" && <GroupsTab people={people ?? []} groups={groups} run={run} />}
           {tab === "activity" && <ActivityTab entries={entries} people={people ?? []} groups={groups} />}
         </div>
@@ -172,11 +199,14 @@ function PeopleTab({
   groups,
   me,
   run,
+  memberRoles,
 }: {
   people: PersonRow[] | null;
   groups: Group[];
   me: string | null;
   run: Run;
+  /** With workspaces: each member's role in the workspace. */
+  memberRoles: Map<string, WorkspaceInfo["role"]> | null;
 }) {
   if (!people) return <p className="text-[var(--muted-foreground)]">Loading…</p>;
   const groupName = (id: string) => groups.find((g) => g.id === id)?.name ?? "Unknown group";
@@ -184,7 +214,11 @@ function PeopleTab({
     if (
       p.id === me &&
       role !== "owner" &&
-      !window.confirm("Give up owning the workspace? You will lose this panel unless a group makes you an owner.")
+      !window.confirm(
+        memberRoles
+          ? "Give up Owner access to everything in the workspace? You keep your workspace role."
+          : "Give up owning the workspace? You will lose this panel unless a group makes you an owner.",
+      )
     ) {
       return;
     }
@@ -200,14 +234,16 @@ function PeopleTab({
   return (
     <>
       <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-        Everyone who has signed in. A workspace role covers everything in the workspace; owners can open this panel.
-        People get access to single places through Share, and through their groups.
+        {memberRoles
+          ? "The workspace's members. Its Owners and Admins can open this panel. The access here covers everything in the workspace; people get access to single places through Share, and through their groups."
+          : "Everyone who has signed in. A workspace role covers everything in the workspace; owners can open this panel. People get access to single places through Share, and through their groups."}
       </p>
       <table aria-label="People" className="w-full text-left">
         <thead className="text-xs text-[var(--muted-foreground)]">
           <tr>
             <th className="py-1 font-normal">Person</th>
-            <th className="py-1 font-normal">Workspace role</th>
+            {/* With workspaces, the role is the badge by the name; this is their access. */}
+            <th className="py-1 font-normal">{memberRoles ? "Access to the workspace" : "Workspace role"}</th>
             <th className="py-1 font-normal">Groups</th>
             <th className="py-1 font-normal">Last active</th>
             <th className="py-1 font-normal">Joined</th>
@@ -224,6 +260,11 @@ function PeopleTab({
                   <div className="truncate font-medium">
                     {label}
                     {p.id === me && <span className="ml-1 text-xs text-[var(--muted-foreground)]">(you)</span>}
+                    {memberRoles?.get(p.id) && memberRoles.get(p.id) !== "member" && (
+                      <span className="ml-1.5 rounded bg-[var(--secondary)] px-1.5 py-0.5 text-[10px] font-normal">
+                        {MEMBER_ROLE_LABEL[memberRoles.get(p.id)!]}
+                      </span>
+                    )}
                   </div>
                   {p.email && p.email !== label && (
                     <div className="truncate text-xs text-[var(--muted-foreground)]">{p.email}</div>

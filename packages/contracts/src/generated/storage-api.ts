@@ -447,7 +447,8 @@ export interface paths {
         /**
          * Create a workspace, with you as its Owner
          * @description You become its Owner, with Full access on its root, in the same transaction.
-         *     Its slug comes from the name (a number is added when it is taken). Without
+         *     Its slug is `slug` when given (409 when another workspace has it), otherwise
+         *     one made from the name (a number is added when it is taken). Without
          *     `levels`, its knowledge levels are tech, module, loop and process; `[]` gives none.
          *     Storage tokens can't create workspaces (403).
          */
@@ -3702,6 +3703,8 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
+                    /** @description The address in `/w/<slug>`; lower-case letters and digits in dash-separated runs. */
+                    slug?: string;
                     levels?: string[];
                 };
             };
@@ -3719,6 +3722,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
+            /** @description Another workspace already has the slug asked for. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

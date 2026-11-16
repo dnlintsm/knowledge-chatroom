@@ -205,12 +205,26 @@
   one. Chats, the chat history and a remote backend's storage and memory tokens are that
   workspace's. What the browser keeps (open tabs, the last place, folded folders) is kept per
   user and workspace; what it kept before moves into the default workspace once. Layout and
-  chat preferences stay the same everywhere. A workspace that doesn't exist or isn't yours
-  shows "Workspace not found". Without api-py the app opens the default workspace as
-  before. There is no switcher yet (step 6): open a workspace by its URL. The Python chat
+  chat preferences stay the same everywhere. Without api-py the app opens the default
+  workspace as before. The Python chat
   agent (`services/agent-py`) sends the run's workspace with its storage, skills and memory
   calls, also without login, and api-py's `/identity/mcp-tokens` keeps it in local memory
   tokens.
+- The workspace screens (issue #226, step 6). The root of the breadcrumb is now the
+  workspace switcher: the workspace's name (the knowledge tree's root shows it too) and a
+  menu of your workspaces, with recent ones first once the list is long, and Create
+  workspace. Switching while an edit hasn't saved asks to save (failed saves are tried
+  once more), discard or stay. Creating a workspace takes its name, an address made from
+  the name that you can edit, and its starting levels (tech, module, loop, process, or
+  none), and opens it; `POST /workspaces` takes an optional `slug` for this and answers
+  409 when another workspace has it. Owners and Admins add members in the Admin panel, by
+  the exact email they signed in with, as a Member or an Admin, with no access, Can view or
+  Can edit on the whole workspace; the panel shows who is an Owner or Admin, and is for a
+  workspace's Owners and Admins rather than owners of its root. Someone who belongs to no
+  workspace is offered to create one, and told that an Owner or Admin adds them to theirs.
+  A workspace that doesn't exist or isn't yours shows one page for both, which names
+  nothing of the workspace and lists your own. `/` opens the default workspace when you
+  belong to it, otherwise your first.
 
 ### Changed
 

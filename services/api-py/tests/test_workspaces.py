@@ -249,6 +249,28 @@ async def test_a_new_workspace_never_bootstraps_and_signing_in_joins_nothing_els
         assert tree["types"] == []
 
 
+async def test_a_new_workspace_can_ask_for_its_slug(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice = user("test|alice", "Alice")
+        await api.get("/access", headers=alice)
+        made = await api.post(
+            "/workspaces", headers=alice, json={"name": "Lab", "slug": "the-lab-2026"}
+        )
+        assert made.status_code == 201 and made.json()["slug"] == "the-lab-2026"
+        # A slug asked for that is taken is refused, never numbered.
+        taken = await api.post(
+            "/workspaces", headers=alice, json={"name": "Lab", "slug": "default"}
+        )
+        assert taken.status_code == 409 and "address" in taken.json()["error"]
+        for slug in ("Lab", "lab_1", "-lab", "lab-", "a--b", "", "x" * 49, 7):
+            refused = await api.post(
+                "/workspaces", headers=alice, json={"name": "Lab", "slug": slug}
+            )
+            assert refused.status_code == 400, slug
+        mine = (await api.get("/workspaces", headers=alice)).json()["workspaces"]
+        assert sorted(w["slug"] for w in mine) == ["default", "the-lab-2026"]
+
+
 async def test_grants_and_groups_are_for_members(database):
     async with Client(database, SECRET) as (api, _app):
         alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")

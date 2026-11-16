@@ -1055,7 +1055,8 @@ paths:
       summary: Create a workspace, with you as its Owner
       description: |
         You become its Owner, with Full access on its root, in the same transaction.
-        Its slug comes from the name (a number is added when it is taken). Without
+        Its slug is `slug` when given (409 when another workspace has it), otherwise
+        one made from the name (a number is added when it is taken). Without
         `levels`, its knowledge levels are tech, module, loop and process; `[]` gives none.
         Storage tokens can't create workspaces (403).
       requestBody:
@@ -1067,6 +1068,11 @@ paths:
               required: [name]
               properties:
                 name: { type: string, minLength: 1, maxLength: 200 }
+                slug:
+                  type: string
+                  maxLength: 48
+                  pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+                  description: The address in `/w/<slug>`; lower-case letters and digits in dash-separated runs.
                 levels:
                   type: array
                   maxItems: 10
@@ -1080,6 +1086,11 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Another workspace already has the slug asked for.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
