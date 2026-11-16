@@ -72,6 +72,7 @@ export function AdminButton() {
 
 function AdminDialog({ onClose }: { onClose: () => void }) {
   const workspace = useCurrentWorkspace();
+  const { rootRole: currentRootRole, refresh: refreshContent } = useWorkspace();
   const [tab, setTab] = useState<Tab>("people");
   const [memberRoles, setMemberRoles] = useState<Map<string, WorkspaceInfo["role"]>>(new Map());
   const [people, setPeople] = useState<PersonRow[] | null>(null);
@@ -107,15 +108,17 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
   const run = async (action: () => Promise<unknown>) => {
     try {
       await action();
-      // Without workspaces, a change can take away your own ownership (your
-      // role, or a group's). The panel's reads need it, so reload the app
-      // with your new access. With them, your membership role decides, and
-      // nothing here changes it.
+      // A change can change your own access (your role, or a group's).
+      // Without workspaces the panel's reads need ownership, so losing it
+      // reloads the app with your new access. With them, your membership
+      // role keeps the panel open, and the app takes your new access to the
+      // workspace's content (what you may edit) from the tree, read again.
       const { rootRole } = await access<{ rootRole: Role | null }>("");
       if (!workspace && rootRole !== "owner") {
         window.location.reload();
         return;
       }
+      if (rootRole !== currentRootRole) await refreshContent();
       setError(null);
       await load();
     } catch (err) {
