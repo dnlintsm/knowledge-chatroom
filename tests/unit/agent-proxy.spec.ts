@@ -47,6 +47,7 @@ test.describe("agentProxy", () => {
         accept: "text/plain",
         "if-none-match": '"00000"',
         "x-custom-browser-header": "dropped",
+        "x-knowledge-workspace": "11111111-2222-4333-8444-555555555555",
       },
     });
 
@@ -68,6 +69,8 @@ test.describe("agentProxy", () => {
     expect(forwardedReqHeaders.get("accept")).toBe("text/plain");
     expect(forwardedReqHeaders.get("if-none-match")).toBe('"00000"');
     expect(forwardedReqHeaders.get("x-custom-browser-header")).toBeNull();
+    // The page's workspace goes on unchanged; the API server checks it (issue #226).
+    expect(forwardedReqHeaders.get("x-knowledge-workspace")).toBe("11111111-2222-4333-8444-555555555555");
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/plain");

@@ -5,6 +5,7 @@ import { ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store,
 import { cn } from "@/lib/utils";
 import { Diff } from "./review-panel";
 import { ScriptsBadge, useSkills, type SkillInfo } from "./skills";
+import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
 
 /**
  * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
@@ -86,7 +87,7 @@ const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
 
 /** Calls the skills or hub API; throws the server's error message. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { cache: "no-store", ...init });
+  const res = await workspaceFetch(path, { cache: "no-store", ...init });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
@@ -349,7 +350,7 @@ export function SkillActions({ skill, notify }: { skill: SkillInfo; notify: Noti
       )}
       <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-xs">
         <a
-          href={`/api/skills/${name}/export`}
+          href={workspaceUrl(`/api/skills/${name}/export`)}
           download={`${skill.name}.zip`}
           title="Download as a .zip (works in Claude Code too)"
           className={cn(linkButton, "inline-flex items-center gap-0.5")}

@@ -40,7 +40,7 @@ import {
   type Folder,
 } from "./file-tree";
 import { KnowledgeTree } from "./knowledge-tree";
-import { persistCollapsedFolders, readCollapsedFolders } from "./local-persistence";
+import { persistCollapsedFolders, readCollapsedFolders, savedState } from "./local-persistence";
 import { experimentPlace, type PlaceId } from "./server-files";
 import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
@@ -488,9 +488,9 @@ function FlatList({
 const NO_FOLDERS = new Set<string>();
 
 /** Reading localStorage itself throws when the browser blocks site storage. */
-function localStorageOrNull(): Storage | null {
+function localStorageOrNull() {
   try {
-    return window.localStorage;
+    return savedState();
   } catch {
     return null;
   }

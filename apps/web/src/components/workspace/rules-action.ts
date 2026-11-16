@@ -3,6 +3,7 @@ import type { ActionContext, ActionDef } from "./actions";
 import { parseRulesResponse, RULES_FILE, rulesToMarkdown } from "./rules";
 import { experimentPlace, serverFileExists } from "./server-files";
 import { FileExistsError } from "./types";
+import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
  * Generate Rules → Open Rules. Without the run's models/general_rules.md the
@@ -48,7 +49,7 @@ async function generateOrOpenRules({ run, workbench, workspace }: ActionContext)
     if (await serverFileExists(path, experimentPlace(run.id))) return alreadyGenerated();
 
     const query = new URLSearchParams({ run: run.title, experiment: run.id });
-    const res = await fetch(`/api/rules?${query}`, { cache: "no-store" });
+    const res = await workspaceFetch(`/api/rules?${query}`, { cache: "no-store" });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const message = (json as { error?: unknown } | null)?.error;

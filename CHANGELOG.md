@@ -197,6 +197,20 @@
   memory learner learns from every workspace's chats. The agent server alone (without
   api-py) still serves `/files`, `/nodes` and the rest of the storage and skills APIs for
   the default workspace only, and refuses (400) requests that name another.
+- The app works in one workspace at a time (issue #226, step 5): its page is `/w/<slug>`,
+  and `/` and links made before workspaces (such as `/?experiment=<id>`) go to
+  `/w/default` with their query. Every call the page makes names its workspace, by the
+  `X-Knowledge-Workspace` header or, for the change stream, file links and downloads,
+  `?workspace=`, and opening another workspace cancels what was still loading for the old
+  one. Chats, the chat history and a remote backend's storage and memory tokens are that
+  workspace's. What the browser keeps (open tabs, the last place, folded folders) is kept per
+  user and workspace; what it kept before moves into the default workspace once. Layout and
+  chat preferences stay the same everywhere. A workspace that doesn't exist or isn't yours
+  shows "Workspace not found". Without api-py the app opens the default workspace as
+  before. There is no switcher yet (step 6): open a workspace by its URL. The Python chat
+  agent (`services/agent-py`) sends the run's workspace with its storage, skills and memory
+  calls, also without login, and api-py's `/identity/mcp-tokens` keeps it in local memory
+  tokens.
 
 ### Changed
 

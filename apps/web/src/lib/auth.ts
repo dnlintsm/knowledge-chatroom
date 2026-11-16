@@ -113,11 +113,12 @@ export function identityHeader(user: SessionUser): string {
  * An X-Knowledge-Storage token for a remote backend (`via` "remote"): it lets
  * the backend use the storage API as Claude acting for this user for as long
  * as a run may take (STORAGE_TOKEN_SECONDS), where X-Knowledge-User lasts
- * minutes. docs/remote-agent.md.
+ * minutes. With `ws` it is bound to that workspace (issue #226): the run's;
+ * without, to the default one. docs/remote-agent.md.
  */
-export function storageHeader(user: SessionUser, via: string): string {
+export function storageHeader(user: SessionUser, via: string, ws: string | null = null): string {
   return signIdentityToken(
-    { ...user, aud: STORAGE_AUDIENCE, via, exp: now() + storageTokenSeconds() },
+    { ...user, ...(ws ? { ws } : {}), aud: STORAGE_AUDIENCE, via, exp: now() + storageTokenSeconds() },
     authSecret()!,
   );
 }
@@ -127,10 +128,11 @@ export function storageHeader(user: SessionUser, via: string): string {
  * (`via` "remote"): the user's memory in chat `thread`, through the agent
  * server's /memory/agent, as Claude has it there. The agent server checks on
  * each call that memory is on and the chat isn't incognito. Without login
- * (`user` null) it is the unsigned local form. docs/remote-agent.md.
+ * (`user` null) it is the unsigned local form. With `ws`, the chat's
+ * workspace (issue #226); without, the default one. docs/remote-agent.md.
  */
-export function memoryHeader(user: SessionUser | null, thread: string, node: string | null): string {
-  const claims = { via: REMOTE_VIA, thread, node };
+export function memoryHeader(user: SessionUser | null, thread: string, node: string | null, ws: string | null = null): string {
+  const claims = { via: REMOTE_VIA, thread, node, ...(ws ? { ws } : {}) };
   const secret = authSecret();
   if (!secret) return localMemoryToken(claims);
   if (!user) throw new Error("A memory token with login on needs the signed-in user");

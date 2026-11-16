@@ -94,7 +94,7 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
 
   // Home: the workspace root's Runs view lists every run.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/w\/default$/);
   await expect(list).toContainText("etch-2026-10-01");
   await shot(page, "19-home-link");
   await list.getByRole("button").filter({ hasText: "litho-2026-10-03" }).click();
@@ -102,7 +102,7 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
 
   // Back and forward move between runs, each with its own report.
   await page.goBack();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/w\/default$/);
   await page.goBack();
   await expect(page).toHaveURL(etchUrl);
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");

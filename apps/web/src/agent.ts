@@ -1,6 +1,7 @@
 import { HttpAgent, type RunAgentInput } from "@ag-ui/client";
 import { chatAgentUrl, localAgentUrl, localSuggester, remoteAgentUrl } from "@/lib/agent-target";
 import { IDENTITY_HEADER, MEMORY_HEADER, authSecret, memoryHeader, readIdentityHeader, type SessionUser } from "@/lib/auth";
+import { workspaceFromHeaders } from "@/lib/workspace-request";
 import { CHATROOM_PROPS, LOCAL_USER, withChatroomUser, type ChatroomUser } from "@/lib/chatroom-props";
 
 /**
@@ -23,7 +24,9 @@ class ChatroomAgent extends HttpAgent {
     const init = super.requestInit(withChatroomUser(input, user));
     if (!user || !input.threadId || !remoteAgentUrl() || this.url !== chatAgentUrl()) return init;
     const headers = new Headers(init.headers);
-    headers.set(MEMORY_HEADER, memoryHeader(signedIn, input.threadId, runNode(input)));
+    // The run's workspace, as the page named it (route.ts checked its form).
+    const ws = workspaceFromHeaders(this.headers) ?? null;
+    headers.set(MEMORY_HEADER, memoryHeader(signedIn, input.threadId, runNode(input), ws));
     return { ...init, headers };
   }
 

@@ -145,7 +145,8 @@ Sent with `X-Knowledge-User` when login is on, for the storage API at `LOCAL_AGE
 unchanged. It is
 the same token format with `aud` `storage` and `via` `remote`, valid for
 `STORAGE_TOKEN_SECONDS` (default an hour) so a long run keeps access. Requests with it act as
-Claude for the signed-in user:
+Claude for the signed-in user, in the workspace the run started in (its `ws` claim, issue #226;
+without one, the default workspace):
 
 - Only what that user can read or edit.
 - Writes in a knowledge node (and to skills at the workspace root) need `&propose`, as below.
@@ -161,8 +162,8 @@ to it.
 ### `X-Knowledge-Memory`
 
 Sent on every run, for the user's memory in this chat through `/memory/agent` at
-`LOCAL_AGENT_URL`. It has `aud` `memory`, `via` `remote`, the run's `thread` and `node`, and
-lasts as long as the storage token. Without login it is `local.<base64url JSON>` with the same
+`LOCAL_AGENT_URL`. It has `aud` `memory`, `via` `remote`, the run's `thread` and `node`, its
+workspace `ws` when the page named one, and lasts as long as the storage token. Without login it is `local.<base64url JSON>` with the same
 claims, accepted only by an agent server without login. Pass it on unchanged:
 
 - `GET /memory/agent` gives `{prompt, tools}`: the system prompt's memory section (with the

@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from agent_py.text import EditError, apply_edit, read_lines
-from agent_py.workspace import Storage, file_route, file_tools, format_tree
+from agent_py.workspace import Storage, WorkspaceError, file_route, file_tools, format_tree
 
 NODE = "6d0e0000-0000-0000-0000-000000000001"
 
@@ -116,6 +116,22 @@ def test_each_call_carries_the_runs_storage_token(api):
     assert api.requests[-1].headers["x-knowledge-storage"] == "tok"
     call(api, "write_file", token=None, path="notes/a.md", content="hi")
     assert "x-knowledge-storage" not in api.requests[-1].headers
+    assert "x-knowledge-workspace" not in api.requests[-1].headers
+
+
+def test_each_call_names_the_runs_workspace_with_or_without_a_token(api):
+    ws = "11111111-2222-4333-8444-555555555555"
+    for token in ("tok", None):
+        storage = Storage(
+            "http://storage.test", token, transport=httpx.MockTransport(api.handle), workspace=ws
+        )
+        tools = {t.name: t for t in file_tools(lambda s=storage: s, {"chat": "chat-1"})}
+        asyncio.run(tools["write_file"].handler({"path": "notes/a.md", "content": "hi"}))
+        assert api.requests[-1].headers["x-knowledge-workspace"] == ws
+    # Memory calls send their own token, and the workspace too.
+    with pytest.raises(WorkspaceError):  # this fake has no memory
+        asyncio.run(storage.call("GET", "/memory/agent", headers={"X-Knowledge-Memory": "m"}))
+    assert api.requests[-1].headers["x-knowledge-workspace"] == ws
 
 
 def test_writes_at_the_root_and_in_an_experiment_change_the_file(api):

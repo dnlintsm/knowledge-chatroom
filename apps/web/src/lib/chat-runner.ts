@@ -11,6 +11,7 @@ import { Observable, ReplaySubject } from "rxjs";
 
 import { IDENTITY_HEADER, authSecret, readIdentityHeader } from "./auth";
 import { ChatTakenError, type ChatStore, type ChatUser, type StoredRun } from "./chat-store";
+import { workspaceFromHeaders } from "./workspace-request";
 
 /**
  * Runs the chat and keeps each user's chats (issue #91). In place of
@@ -26,13 +27,15 @@ import { ChatTakenError, type ChatStore, type ChatUser, type StoredRun } from ".
  *
  * Who a run is for comes from the X-Knowledge-User header the app's route
  * signed (route.ts); without login everyone is the local user. A thread id
- * that is someone else's chat is refused. The history routes themselves are
- * answered by src/lib/chat-routes.ts.
+ * that is someone else's chat is refused. The workspace a run is in comes
+ * from the page's X-Knowledge-Workspace header, read when it starts (issue
+ * #226); its chat is kept there. The history routes themselves are answered
+ * by src/lib/chat-routes.ts.
  */
 
 interface LiveRun {
   runId: string;
-  /** Whose run it is: the user's login subject, "local" without login. */
+  /** Whose run it is, and in which workspace (runOwner). */
   owner: string;
   agent: AbstractAgent;
   events: ReplaySubject<BaseEvent>;
@@ -41,7 +44,8 @@ interface LiveRun {
   discarded: boolean;
 }
 
-const ownerKey = (user: ChatUser) => user?.sub ?? "local";
+/** Whose a live run is: the user's login subject ("local" without login), and the workspace unless it's the default. */
+export const runOwner = (user: ChatUser, ws: string | null) => `${user?.sub ?? "local"}${ws ? `@${ws}` : ""}`;
 
 /** The user an X-Knowledge-User header names; undefined when login is on and it names nobody. */
 export function chatUserFrom(headers: Record<string, string> | undefined): ChatUser | undefined {
@@ -106,20 +110,28 @@ export class ChatRunner extends AgentRunner {
   run({ threadId, agent, input }: AgentRunnerRunRequest): Observable<BaseEvent> {
     if (this.live.has(threadId)) throw new Error("Thread already running");
     // An HttpAgent's clone carries the request's x-* headers (src/agent.ts).
-    const user = chatUserFrom((agent as { headers?: Record<string, string> }).headers);
+    const headers = (agent as { headers?: Record<string, string> }).headers;
+    const user = chatUserFrom(headers);
+    const ws = workspaceFromHeaders(headers);
     const events = new ReplaySubject<BaseEvent>(Infinity);
-    if (user === undefined) {
-      events.next({ type: EventType.RUN_ERROR, message: "Sign in first" } as BaseEvent);
+    if (user === undefined || ws === undefined) {
+      events.next({ type: EventType.RUN_ERROR, message: user === undefined ? "Sign in first" : "Workspace not found" } as BaseEvent);
       events.complete();
       return events.asObservable();
     }
-    const live: LiveRun = { runId: input.runId, owner: ownerKey(user), agent, events, stopRequested: false, discarded: false };
+    const live: LiveRun = { runId: input.runId, owner: runOwner(user, ws), agent, events, stopRequested: false, discarded: false };
     this.live.set(threadId, live);
-    void this.execute(threadId, user, live, input);
+    void this.execute(threadId, user, this.store.inWorkspace(ws), live, input);
     return events.asObservable();
   }
 
-  private async execute(threadId: string, user: ChatUser, live: LiveRun, input: AgentRunnerRunRequest["input"]) {
+  private async execute(
+    threadId: string,
+    user: ChatUser,
+    store: ChatStore,
+    live: LiveRun,
+    input: AgentRunnerRunRequest["input"],
+  ) {
     const { agent, events } = live;
     const seen: BaseEvent[] = [];
     const emit = (original: BaseEvent) => {
@@ -132,7 +144,7 @@ export class ChatRunner extends AgentRunner {
     const save = this.saved(agent.agentId ?? "default");
     let past: StoredRun[] = [];
     try {
-      if (save) past = await this.store.runs(user, threadId);
+      if (save) past = await store.runs(user, threadId);
     } catch (err) {
       this.live.delete(threadId);
       const taken = err instanceof ChatTakenError;
@@ -170,7 +182,7 @@ export class ChatRunner extends AgentRunner {
     // finds it. A failed save loses this run's history, not the reply.
     if (save && seen.length && !live.discarded) {
       try {
-        await this.store.save(user, threadId, {
+        await store.save(user, threadId, {
           agentId: agent.agentId ?? "default",
           runId: input.runId,
           parentRunId: past[past.length - 1]?.runId ?? null,
@@ -189,15 +201,17 @@ export class ChatRunner extends AgentRunner {
   connect({ threadId, headers }: AgentRunnerConnectRequest): Observable<BaseEvent> {
     const out = new ReplaySubject<BaseEvent>(Infinity);
     const user = chatUserFrom(headers);
-    if (user === undefined) {
+    const ws = workspaceFromHeaders(headers);
+    if (user === undefined || ws === undefined) {
       out.complete();
       return out.asObservable();
     }
     // Looked up before reading the store: a run that finishes in between is
     // then replayed from memory rather than missed.
     const live = this.live.get(threadId);
-    const mine = live && live.owner === ownerKey(user) ? live : undefined;
+    const mine = live && live.owner === runOwner(user, ws) ? live : undefined;
     this.store
+      .inWorkspace(ws)
       .runs(user, threadId)
       .catch((err) => {
         if (!(err instanceof ChatTakenError)) console.error("[chat] reading chat history failed:", err);
@@ -226,10 +240,10 @@ export class ChatRunner extends AgentRunner {
     return out.asObservable();
   }
 
-  /** Before `user` deletes the chat: stops its live run, which then isn't saved. */
-  discard(threadId: string, user: ChatUser) {
+  /** Before `user` deletes the chat in workspace `ws`: stops its live run, which then isn't saved. */
+  discard(threadId: string, user: ChatUser, ws: string | null = null) {
     const live = this.live.get(threadId);
-    if (!live || live.owner !== ownerKey(user)) return;
+    if (!live || live.owner !== runOwner(user, ws)) return;
     live.discarded = true;
     void this.stop({ threadId });
   }

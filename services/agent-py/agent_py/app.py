@@ -37,7 +37,7 @@ from .memory import MEMORY_HEADER
 from .model import resolve_model
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
-from .workspace import STORAGE_HEADER, storage_url
+from .workspace import STORAGE_HEADER, WORKSPACE_HEADER, storage_url
 
 logger = logging.getLogger("agent_py")
 
@@ -123,6 +123,8 @@ def create_app(
                 storage_token=request.headers.get(STORAGE_HEADER),
                 user=user.sub,
                 memory_token=request.headers.get(MEMORY_HEADER),
+                # The page's workspace (issue #226): storage, skills and memory calls name it.
+                workspace=request.headers.get(WORKSPACE_HEADER) or None,
             ):
                 yield encoder.encode(event)
 

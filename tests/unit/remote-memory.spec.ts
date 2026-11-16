@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import type { RunAgentInput } from "@ag-ui/client";
 
-import { MEMORY_AUDIENCE, readIdentityToken } from "@knowledge-chatroom/contracts/identity-token";
+import { MEMORY_AUDIENCE, STORAGE_AUDIENCE, readIdentityToken } from "@knowledge-chatroom/contracts/identity-token";
 import { createDefaultAgent, createSuggesterAgent } from "../../apps/web/src/agent";
-import { IDENTITY_HEADER, identityHeader, readIdentityHeader } from "../../apps/web/src/lib/auth";
+import { IDENTITY_HEADER, identityHeader, readIdentityHeader, storageHeader } from "../../apps/web/src/lib/auth";
 
 /**
  * A remote backend's chat agent gets an X-Knowledge-Memory token for the run's
@@ -76,6 +76,27 @@ test.describe("memory tokens for a remote chat agent", () => {
     expect(token?.startsWith("local.")).toBe(true);
     const claims = JSON.parse(Buffer.from(token!.slice("local.".length), "base64url").toString("utf8"));
     expect(claims).toEqual({ via: "remote", thread: "t1", node: NODE });
+  });
+
+  test("bound to the run's workspace when the page names one", () => {
+    const ws = "11111111-2222-4333-8444-555555555555";
+    process.env.AUTH_MODE = "local";
+    delete process.env.AUTH_SECRET;
+    const local = memoryHeaderOf(createDefaultAgent(), { "x-knowledge-workspace": ws });
+    expect(JSON.parse(Buffer.from(local!.slice("local.".length), "base64url").toString("utf8"))).toEqual({
+      via: "remote",
+      thread: "t1",
+      node: NODE,
+      ws,
+    });
+
+    Object.assign(process.env, LOGIN_ENV);
+    const user = { sub: "kc|alice", email: "alice@example.com", name: "Alice" };
+    const signed = memoryHeaderOf(createDefaultAgent(), { [IDENTITY_HEADER]: identityHeader(user), "x-knowledge-workspace": ws });
+    expect(readIdentityToken(signed ?? undefined, SECRET)).toMatchObject({ aud: MEMORY_AUDIENCE, thread: "t1", ws });
+    const storage = readIdentityToken(storageHeader(user, "remote", ws), SECRET);
+    expect(storage).toMatchObject({ aud: STORAGE_AUDIENCE, via: "remote", ws });
+    expect(readIdentityToken(storageHeader(user, "remote"), SECRET)).not.toHaveProperty("ws");
   });
 
   test("only for the remote chat agent", () => {

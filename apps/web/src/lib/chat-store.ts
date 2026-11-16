@@ -1,5 +1,6 @@
 import { localAgentUrl } from "./agent-target";
 import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from "./auth";
+import { WORKSPACE_HEADER } from "./workspace-request";
 
 /**
  * Where each user's chat history is kept (issue #91). With server storage
@@ -7,6 +8,10 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
  * (apps/agent/src/storage/chats.ts), in Postgres, so chats survive restarts.
  * Without it, this process's memory: lost on restart, but still one history
  * per user. src/lib/chat-runner.ts saves runs here and replays them.
+ *
+ * Chats belong to a workspace (issue #226): `inWorkspace(id)` is the store
+ * for the one a request names, and the store itself is the default
+ * workspace's (requests that name none).
  */
 
 /** Who a chat is for: a signed-in user, or null without login (the local user). */
@@ -60,6 +65,8 @@ export interface ChatStore {
   get(user: ChatUser, id: string): Promise<{ chat: ChatSummary; messages: unknown[] } | null>;
   update(user: ChatUser, id: string, changes: { name?: string | null; archived?: boolean }): Promise<boolean>;
   remove(user: ChatUser, id: string): Promise<boolean>;
+  /** The same store for workspace `ws` (its id); null for the default workspace. */
+  inWorkspace(ws: string | null): ChatStore;
 }
 
 /** A store that can't be reached right now. */
@@ -70,12 +77,21 @@ const TIMEOUT_MS = 15_000;
 
 /** The agent server's /chats API, which keeps chats in Postgres. */
 export class AgentChatStore implements ChatStore {
-  constructor(private readonly base = localAgentUrl()) {}
+  constructor(
+    private readonly base = localAgentUrl(),
+    private readonly ws: string | null = null,
+  ) {}
+
+  inWorkspace(ws: string | null): ChatStore {
+    return new AgentChatStore(this.base, ws);
+  }
 
   private async call(user: ChatUser, path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     // Signed now, not taken from the request: a run may outlast its header.
     if (user && authSecret()) headers.set(IDENTITY_HEADER, identityHeader(user));
+    // The API server checks that the user belongs to it; a workspace that isn't theirs answers 404.
+    if (this.ws) headers.set(WORKSPACE_HEADER, this.ws);
     if (init.body) headers.set("Content-Type", "application/json");
     try {
       return await fetch(`${this.base}/chats${path}`, {
@@ -147,34 +163,43 @@ export class AgentChatStore implements ChatStore {
 }
 
 interface MemoryChat extends ChatSummary {
+  /** The user and workspace it is kept for (ownerKey). */
   owner: string;
+  ws: string | null;
   /** Who it is for, to hand it on to the server store (AutoChatStore). */
   user: ChatUser;
   runs: StoredRun[];
   messages: unknown[];
 }
 
-const ownerKey = (user: ChatUser) => user?.sub ?? "local";
+const ownerKey = (user: ChatUser, ws: string | null) => `${user?.sub ?? "local"}${ws ? `@${ws}` : ""}`;
 
 /**
  * Chats in this process's memory, one history per user, for deployments
  * without server storage. The oldest are dropped past `maxChats`.
  */
 export class MemoryChatStore implements ChatStore {
-  private readonly chats = new Map<string, MemoryChat>();
+  constructor(
+    private readonly maxChats = 1000,
+    private readonly ws: string | null = null,
+    /** Every workspace's chats, shared by the store's workspace views. */
+    private readonly chats = new Map<string, MemoryChat>(),
+  ) {}
 
-  constructor(private readonly maxChats = 1000) {}
+  inWorkspace(ws: string | null): MemoryChatStore {
+    return new MemoryChatStore(this.maxChats, ws, this.chats);
+  }
 
   private mine(user: ChatUser, id: string): MemoryChat | null {
     const chat = this.chats.get(id);
     if (!chat) return null;
-    if (chat.owner !== ownerKey(user)) throw new ChatTakenError();
+    if (chat.owner !== ownerKey(user, this.ws)) throw new ChatTakenError();
     return chat;
   }
 
   private find(user: ChatUser, id: string): MemoryChat | null {
     const chat = this.chats.get(id);
-    return chat && chat.owner === ownerKey(user) ? chat : null;
+    return chat && chat.owner === ownerKey(user, this.ws) ? chat : null;
   }
 
   async runs(user: ChatUser, id: string) {
@@ -187,7 +212,8 @@ export class MemoryChatStore implements ChatStore {
     if (!chat) {
       chat = {
         id,
-        owner: ownerKey(user),
+        owner: ownerKey(user, this.ws),
+        ws: this.ws,
         user,
         name: null,
         agentId: run.agentId,
@@ -214,7 +240,7 @@ export class MemoryChatStore implements ChatStore {
 
   async list(user: ChatUser, { agentId, includeArchived, limit = 50, cursor }: ListOptions) {
     const all = [...this.chats.values()]
-      .filter((c) => c.owner === ownerKey(user) && (!agentId || c.agentId === agentId) && (includeArchived || !c.archived))
+      .filter((c) => c.owner === ownerKey(user, this.ws) && (!agentId || c.agentId === agentId) && (includeArchived || !c.archived))
       .reverse();
     const start = cursor ? Math.max(Number.parseInt(cursor, 10) || 0, 0) : 0;
     const page = all.slice(start, start + limit);
@@ -241,11 +267,11 @@ export class MemoryChatStore implements ChatStore {
     return this.find(user, id) ? this.chats.delete(id) : false;
   }
 
-  /** Hands every chat, oldest first, to `save` run by run, and forgets those it took. */
-  async handOver(save: (user: ChatUser, id: string, run: NewRun) => Promise<void>) {
+  /** Hands every chat of every workspace, oldest first, to `save` run by run, and forgets those it took. */
+  async handOver(save: (user: ChatUser, ws: string | null, id: string, run: NewRun) => Promise<void>) {
     for (const chat of [...this.chats.values()]) {
       for (const [i, run] of chat.runs.entries()) {
-        await save(chat.user, chat.id, {
+        await save(chat.user, chat.ws, chat.id, {
           ...run,
           agentId: chat.agentId,
           messages: i === chat.runs.length - 1 ? chat.messages : [],
@@ -275,29 +301,41 @@ const summary = ({ id, name, agentId, archived, createdAt, updatedAt, lastRunAt 
  * server once that is ready.
  */
 export class AutoChatStore implements ChatStore {
-  private chosen: ChatStore | null = null;
-  private handingOver: Promise<void> | null = null;
-
   constructor(
     private readonly server: ChatStore = new AgentChatStore(),
     private readonly memory = new MemoryChatStore(),
     private readonly probe: () => Promise<number | null> = () => probeAgent(localAgentUrl()),
+    private readonly ws: string | null = null,
+    /** Which store was chosen, shared by the workspace views. */
+    private readonly choice: { chosen: ChatStore | null; handingOver: Promise<void> | null } = {
+      chosen: null,
+      handingOver: null,
+    },
   ) {}
 
+  inWorkspace(ws: string | null): ChatStore {
+    return new AutoChatStore(this.server, this.memory, this.probe, ws, this.choice);
+  }
+
   private async store(): Promise<ChatStore> {
-    if (this.chosen) return this.chosen;
+    return (await this.choose()).inWorkspace(this.ws);
+  }
+
+  private async choose(): Promise<ChatStore> {
+    const choice = this.choice;
+    if (choice.chosen) return choice.chosen;
     const status = await this.probe();
-    if (status === 404 || status === 500) this.chosen = this.memory;
+    if (status === 404 || status === 500) choice.chosen = this.memory;
     else if (status !== null && status !== 503) {
-      this.handingOver ??= this.memory
-        .handOver((user, id, run) => this.server.save(user, id, run))
+      choice.handingOver ??= this.memory
+        .handOver((user, ws, id, run) => this.server.inWorkspace(ws).save(user, id, run))
         .catch((err) => console.error("[chat] moving chats kept in memory to the server failed:", err))
         .then(() => {
-          this.chosen = this.server;
+          choice.chosen = this.server;
         });
-      await this.handingOver;
+      await choice.handingOver;
     }
-    return this.chosen ?? this.memory;
+    return choice.chosen ?? this.memory;
   }
 
   async runs(user: ChatUser, id: string) {

@@ -35,6 +35,8 @@ import { ALL_EXPERIMENTS } from "./runs";
 import { useWorkspace, WorkspaceProvider } from "./store";
 import { EXPERIMENT_TAB, REVIEW_TAB } from "./types";
 import { useWorkbench, WorkbenchProvider } from "./workbench";
+import { useCurrentWorkspace } from "./current-workspace";
+import { DEFAULT_SLUG } from "@/lib/workspace-request";
 
 export { WorkspaceProvider, useWorkspace };
 export { useWorkbench, type Workbench } from "./workbench";
@@ -191,16 +193,17 @@ function TitleBar() {
 /**
  * The app name, which goes home: the workspace root with the Experiments view,
  * which there lists every experiment. Leaving a run changes the URL, so Back returns to
- * it. Open tabs and chats stay as they are. A real link to "/", so a
- * middle-click or Ctrl-click opens a new tab.
+ * it. Open tabs and chats stay as they are. A real link to the workspace's
+ * page (/w/<slug>), so a middle-click or Ctrl-click opens a new tab.
  */
 function HomeLink() {
+  const workspace = useCurrentWorkspace();
   const { sidebar } = useWorkbench();
   const { enterNode } = useWorkspace();
   const [, setListScope] = useListScope();
   return (
     <a
-      href="/"
+      href={`/w/${encodeURIComponent(workspace?.slug ?? DEFAULT_SLUG)}`}
       title="Home: all experiments"
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

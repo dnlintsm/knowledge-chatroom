@@ -197,6 +197,7 @@ test("store read failures emit RUN_ERROR and cleanup live state", async () => {
     get: async () => null,
     update: async () => false,
     remove: async () => false,
+    inWorkspace: () => failingStore,
   };
 
   const runner = new ChatRunner(failingStore);
@@ -223,6 +224,7 @@ test("store read failures emit RUN_ERROR and cleanup live state", async () => {
     runs: async () => {
       throw new ChatTakenError();
     },
+    inWorkspace: () => takenStore,
   };
   const runnerTaken = new ChatRunner(takenStore);
   const takenEvents = await all(

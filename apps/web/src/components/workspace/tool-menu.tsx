@@ -13,6 +13,7 @@ import {
 import { BookOpen, Database, Globe, Search, Wrench, X, type LucideIcon } from "lucide-react";
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { chipsOn, readChips, setChip, writeChips, type ChipsByChat, type ToolMenuItem } from "./tool-chips";
+import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
  * The chat's "+" menu of outside tools (issue #151). The agent lists the MCP
@@ -71,7 +72,7 @@ export function ToolMenuProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setAll(readChips(browserStorage()));
     let live = true;
-    fetch("/api/tools", { cache: "no-store" })
+    workspaceFetch("/api/tools", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : { tools: [] }))
       .then((body: { tools?: ToolMenuItem[] }) => {
         if (live) setMenu(Array.isArray(body.tools) ? body.tools : []);
@@ -98,7 +99,7 @@ export function ToolMenuProvider({ children }: { children: ReactNode }) {
   );
 
   const callTool = useCallback(async (server: string, tool: string, args: Record<string, unknown>) => {
-    const res = await fetch(`/api/tools/${encodeURIComponent(server)}/${encodeURIComponent(tool)}`, {
+    const res = await workspaceFetch(`/api/tools/${encodeURIComponent(server)}/${encodeURIComponent(tool)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ arguments: args }),

@@ -17,8 +17,9 @@ import {
 } from "@/lib/auth";
 import { remoteAgentUrl } from "@/lib/agent-target";
 import { handleChatRoute } from "@/lib/chat-routes";
-import { ChatRunner } from "@/lib/chat-runner";
+import { ChatRunner, runOwner } from "@/lib/chat-runner";
 import { AutoChatStore } from "@/lib/chat-store";
+import { workspaceFromHeaders } from "@/lib/workspace-request";
 import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server and speaks AG-UI directly
@@ -98,23 +99,30 @@ const handler = handle(app);
 // run's forwardedProps. With login on, chat needs a signed-in user. A remote
 // backend also gets an X-Knowledge-Storage token, to reach the user's files
 // through the storage API for the whole run (issue #88), and src/agent.ts
-// adds an X-Knowledge-Memory token for the run's chat (issue #176). Without
-// Intelligence, the history routes come from the user's own chats
-// (src/lib/chat-routes.ts), and only a run's own user may stop it.
+// adds an X-Knowledge-Memory token for the run's chat (issue #176). The
+// page's X-Knowledge-Workspace header (src/lib/workspace-request.ts) goes on
+// to the agent too, which checks the user belongs to it, and both tokens are
+// bound to it (issue #226). Without Intelligence, the history routes come
+// from the user's own chats in that workspace (src/lib/chat-routes.ts), and
+// only a run's own user may stop it.
 async function withUser(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete(IDENTITY_HEADER);
   headers.delete(STORAGE_HEADER);
   headers.delete(MEMORY_HEADER);
+  const ws = workspaceFromHeaders(req.headers);
+  if (ws === undefined) return Response.json({ error: "Workspace not found" }, { status: 404 });
   const user = authSecret() ? sessionFrom(req) : null;
   if (authSecret()) {
     if (!user) return Response.json({ error: "Sign in first" }, { status: 401 });
     headers.set(IDENTITY_HEADER, identityHeader(user));
-    if (remoteAgentUrl()) headers.set(STORAGE_HEADER, storageHeader(user, "remote"));
+    if (remoteAgentUrl()) headers.set(STORAGE_HEADER, storageHeader(user, "remote", ws));
   }
   if (!intelligence) {
     const path = req.nextUrl.pathname.slice(BASE_PATH.length);
-    const answered = await handleChatRoute(req, path, user, chats, (id) => chatRunner.discard(id, user));
+    const answered = await handleChatRoute(req, path, user, chats.inWorkspace(ws), (id) =>
+      chatRunner.discard(id, user, ws),
+    );
     if (answered) return answered;
     const stop = path.match(/^\/agent\/[^/]+\/stop\/([^/]+)\/?$/);
     if (stop) {
@@ -125,7 +133,7 @@ async function withUser(req: NextRequest) {
         // the runtime answers malformed ids itself
       }
       const owner = chatRunner.liveOwner(threadId);
-      if (owner && owner !== (user?.sub ?? "local")) {
+      if (owner && owner !== runOwner(user, ws)) {
         return Response.json({ error: "Thread not found" }, { status: 404 });
       }
     }
