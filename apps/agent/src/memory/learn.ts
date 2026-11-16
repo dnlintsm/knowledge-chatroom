@@ -243,7 +243,7 @@ export class MemoryLearner {
         const notes = await memory.notesForLearning(userId);
         const changes = await proposeChanges(notes.text, found.messages as Message[], this.create);
         for (const change of changes) {
-          const done = await this.apply(userId, chat.id, mode, change, notes.versions);
+          const done = await this.apply(memory, userId, chat.id, mode, change, notes.versions);
           if (done === "made") made++;
           if (done === "proposed") proposed++;
         }
@@ -262,13 +262,14 @@ export class MemoryLearner {
 
   /** Makes or proposes one change; a change that no longer fits the notes is skipped. */
   private async apply(
+    /** The chat's own workspace's memory. */
+    memory: Storage["memory"],
     userId: string,
     chatId: string,
     mode: Exclude<MemoryMode, "off">,
     change: LearnChange,
     versions: Map<string, number>,
   ): Promise<"made" | "proposed" | "skipped"> {
-    const memory = this.storage()!.memory;
     const input = { description: change.description ?? "", type: change.type ?? "", body: change.body ?? "" };
     // The model saw this version of the note; a note it didn't see in full,
     // or one changed since (the user may edit while the model works), stays.

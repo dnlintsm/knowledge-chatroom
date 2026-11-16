@@ -36,6 +36,7 @@ import { LEGACY_TOKEN, onlyDefault, resolveWorkspace, WorkspaceError, WS_HEADER 
 import { clearWorkdir, confineTools, syncWorkdir, writeRunInputs } from "./workdir";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
+import { LEARN_TOOL, MemoryLearner } from "../memory/learn";
 import { createSkillsHandler } from "../skills/http";
 import { HubConflictError, HubError, HubNotFoundError, SkillHub } from "../skills/hub";
 import { InvalidModeError, SkillForbiddenError, SkillService } from "../skills/service";
@@ -2995,6 +2996,40 @@ describe("storage", { skip: !TEST_DATABASE_URL && "TEST_DATABASE_URL not set" },
       assert.equal(refused.isError, true);
       assert.match(refused.content[0].text, /no longer a member of this workspace/);
       await storage.sql`DELETE FROM grants WHERE workspace_id = ${ws2} AND principal_id = ${finn}`;
+    });
+
+    test("the memory learner reads and writes each chat's own workspace", async () => {
+      const other = storage.inWorkspace(ws2);
+      await other.memory.setMode(erin, "on");
+      await other.chats.appendRun(erin, "ws2-learn", {
+        agentId: "a",
+        runId: "run-ws2-learn",
+        events: [],
+        messages: [
+          { id: "1", role: "user", content: "I run the etch line in the second workspace." },
+          { id: "2", role: "assistant", content: "Noted." },
+        ],
+      });
+      await storage.sql`UPDATE chats SET last_run_at = now() - interval '1 hour' WHERE id = 'ws2-learn'`;
+      const create = (async () => ({
+        content: [{
+          type: "tool_use",
+          id: "t",
+          name: LEARN_TOOL,
+          input: { changes: [{ op: "add", name: "ws2-role", description: "Runs the etch line", type: "profile", body: "Etch.", reason: "Said so" }] },
+        }],
+      })) as never;
+      const learner = new MemoryLearner(() => storage, create);
+      process.env.MEMORY = "on";
+      try {
+        const [due] = (await learner.due()).filter((c) => c.id === "ws2-learn");
+        assert.equal(due?.workspace_id, ws2);
+        assert.deepEqual(await learner.learn(due), { made: 1, proposed: 0 });
+      } finally {
+        delete process.env.MEMORY;
+      }
+      assert.equal((await other.memory.get(erin, "ws2-role"))?.createdBy, "agent");
+      assert.equal(await storage.memory.get(erin, "ws2-role"), null, "nothing in the default workspace");
     });
   });
 });
