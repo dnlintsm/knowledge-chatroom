@@ -1033,6 +1033,11 @@ paths:
       tags: [workspaces]
       operationId: listWorkspaces
       summary: The workspaces you belong to, the default one first
+      parameters:
+        - name: archived
+          in: query
+          description: "`true` adds the archived workspaces you own, after the active ones, so you can restore them."
+          schema: { type: string, enum: ["true", "false"] }
       responses:
         "200":
           description: Your workspaces, with your role in each, and whether you may create one.
@@ -1103,6 +1108,7 @@ paths:
       tags: [workspaces]
       operationId: getWorkspace
       summary: One of your workspaces
+      description: An archived workspace answers only for its Owners; for everyone else it is 404.
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -1111,6 +1117,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Workspace" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [workspaces]
+      operationId: updateWorkspace
+      summary: Rename (Owners and Admins), archive or restore (Owners) a workspace
+      description: |
+        Renaming keeps the slug, so links keep working. Archiving hides the workspace from
+        everyone: it leaves `GET /workspaces`, and every request, token and stream in it
+        gets 404, until an Owner restores it (`status: active`). Nothing is deleted. The
+        default workspace can't be archived (400). Each change is audited.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                status: { $ref: "#/components/schemas/WorkspaceStatus" }
+      responses:
+        "200":
+          description: The workspace as it is now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1190,6 +1229,122 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AlreadyMember" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces/{id}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [workspaces]
+      operationId: changeWorkspaceMemberRole
+      summary: Change a member's role (Owners; Admins in part)
+      description: |
+        Owners give any member any role. Admins can make a Member an Admin, and step down
+        to Member themselves; nothing else (403). The last Owner can't be demoted (409).
+        A role change never changes a grant. Transferring ownership is two changes: make
+        the other person Owner, then lower your own role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/WorkspaceRole" }
+      responses:
+        "200":
+          description: The member's role now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [member]
+                properties:
+                  member:
+                    type: object
+                    required: [id, role]
+                    properties:
+                      id: { type: string }
+                      role: { $ref: "#/components/schemas/WorkspaceRole" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It would leave the workspace without an Owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [workspaces]
+      operationId: removeWorkspaceMember
+      summary: Remove a member, or leave (your own id)
+      description: |
+        Owners remove anyone, Admins remove Members only (403 otherwise), and anyone may
+        leave. Nobody removes the last Owner, themselves included (409). In one
+        transaction it deletes the membership, the person's direct grants in the
+        workspace and their memberships of its groups, and records the departure, so the
+        default workspace doesn't add them back when they sign in. Their own drafts,
+        chats and memory stay, private as before. From then on their requests, tokens and
+        streams in the workspace get 404, and their runs there stop at the next tool call.
+      responses:
+        "200":
+          description: Removed; how many direct grants and group memberships went with it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed:
+                    type: object
+                    required: [grants, groups]
+                    properties:
+                      grants: { type: integer }
+                      groups: { type: integer }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: They are the workspace's last Owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /workspaces/{id}/members/{userId}/removal:
+    get:
+      tags: [workspaces]
+      operationId: previewWorkspaceMemberRemoval
+      summary: What removing a member would take away (Owners and Admins, or yourself)
+      description: |
+        For the confirmation: how many direct grants they have in the workspace, the groups
+        they belong to, and the shared or archived Experiments they started that you can
+        see. Drafts are never counted.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: What would go.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberRemoval" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -3282,14 +3437,43 @@ components:
       type: string
       enum: [owner, admin, member]
 
+    WorkspaceStatus:
+      type: string
+      enum: [active, archived]
+
     Workspace:
       type: object
-      required: [id, slug, name, role]
+      required: [id, slug, name, role, status]
       properties:
         id: { type: string, description: The immutable id that selectors and tokens carry. }
         slug: { type: string, description: "For page URLs (/w/<slug>/); it can change." }
         name: { type: string }
         role: { $ref: "#/components/schemas/WorkspaceRole" }
+        status: { $ref: "#/components/schemas/WorkspaceStatus" }
+
+    MemberRemoval:
+      type: object
+      required: [grants, groups, experiments]
+      properties:
+        grants: { type: integer, description: Their direct grants in the workspace. }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
+        experiments:
+          type: array
+          description: Shared or archived Experiments they started that you can see.
+          items:
+            type: object
+            required: [id, title, nodeId]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              nodeId: { type: [string, "null"] }
 
     AlreadyMember:
       type: object

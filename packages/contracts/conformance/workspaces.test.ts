@@ -360,3 +360,134 @@ describe("workspaces: multi-workspace", { skip: !enabled && "STORAGE_URL and AUT
     await ok(404, "GET", `/experiments/${run.id}`, { headers: storageToken("workspaces|carol", defaultWs) });
   });
 });
+
+describe("workspaces: administration (#255)", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
+  // erin's workspace: erin is its Owner, carol an Admin and dave a Member.
+  let ws = "";
+  let node = "";
+  const as = (who: Headers) => ({ ...who, ...inWs(ws) });
+  const role = (headers: Headers, userId: string, to: string, status: number) =>
+    ok(status, "PATCH", `/workspaces/${ws}/members/${userId}`, { headers, json: { role: to } });
+  const roles = async () => {
+    const { members } = await ok<{ members: { id: string; role: string }[] }>(200, "GET", `/workspaces/${ws}/members`, { headers: erin });
+    return Object.fromEntries(members.map((m) => [m.id, m.role]));
+  };
+  const need = () => assert.ok(ws && node, "needs the first test to pass");
+
+  test("setup: a workspace with an Owner, an Admin and a Member", async () => {
+    ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: erin, json: { name: `Erin's admin lab ${stamp}` } })).id;
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.carol, role: "admin", access: "none" } });
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.dave, role: "member", access: "viewer" } });
+    node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(erin), json: { parentId: null, name: `Admin lab node ${stamp}` } })).id;
+  });
+
+  test("Owners change any role; Admins make Members Admins and step down; never the last Owner", async () => {
+    need();
+    // An Admin promotes a Member, but can't demote another Admin or touch an Owner.
+    await role(carol, ids.dave, "admin", 200);
+    await role(carol, ids.dave, "member", 403);
+    await role(carol, ids.dave, "owner", 403);
+    await role(carol, ids.erin, "member", 403);
+    await role(erin, ids.dave, "member", 200);
+    // A Member changes nothing, not even their own role.
+    await role(dave, ids.dave, "admin", 403);
+    await role(dave, ids.carol, "member", 403);
+    // An Admin may step down; an Owner brings them back.
+    await role(carol, ids.carol, "member", 200);
+    await role(erin, ids.carol, "admin", 200);
+    // The last Owner can't be demoted, by anyone.
+    await role(erin, ids.erin, "admin", 409);
+    // Transferring ownership: make them Owner, then step down.
+    await role(erin, ids.carol, "owner", 200);
+    await role(erin, ids.erin, "admin", 200);
+    assert.deepEqual(await roles(), { [ids.erin]: "admin", [ids.carol]: "owner", [ids.dave]: "member" });
+    // Owners are peers: carol makes erin Owner again, and erin steps carol back to Admin.
+    await role(carol, ids.erin, "owner", 200);
+    await role(erin, ids.carol, "admin", 200);
+    // Not a member: 404, the same as any unknown id.
+    await role(erin, NO_SUCH_WORKSPACE, "member", 404);
+    // A role change never changes a grant: dave still reads with the viewer grant he was added with.
+    await ok(200, "GET", `/files?node=${node}`, { headers: as(dave) });
+  });
+
+  test("removing a member takes their grants and groups, closes their streams and refuses their tokens", async () => {
+    need();
+    const g = (await ok<{ id: string }>(201, "POST", "/access/groups", { headers: as(erin), json: { parentId: null, name: `Admin lab team ${stamp}` } })).id;
+    await ok(200, "PUT", `/access/groups/${g}/members/${ids.dave}`, { headers: as(erin) });
+    await grant(node, ids.dave, "editor", as(erin));
+    const draft = (await ok<{ id: string }>(201, "POST", "/experiments", { headers: as(dave), json: { nodeId: node, title: "Dave's private draft" } })).id;
+    const shared = (await ok<{ id: string }>(201, "POST", "/experiments", { headers: as(dave), json: { nodeId: node, title: "Dave's shared one" } })).id;
+    await ok(200, "PATCH", `/experiments/${shared}`, { headers: as(dave), json: { status: "shared" } });
+
+    // The preview: grants, groups, and only the Experiments the caller can see.
+    const preview = await ok<{ grants: number; groups: { id: string }[]; experiments: { id: string }[] }>(200, "GET", `/workspaces/${ws}/members/${ids.dave}/removal`, { headers: carol });
+    assert.equal(preview.grants, 2, "the root grant he was added with, and the node grant");
+    assert.deepEqual(preview.groups.map((x) => x.id), [g]);
+    assert.ok(!preview.experiments.some((e) => e.id === draft), "a draft is never listed");
+    await ok(403, "GET", `/workspaces/${ws}/members/${ids.erin}/removal`, { headers: dave });
+
+    const stream = await watch(`/files?watch&workspace=${ws}`, dave);
+    assert.equal(stream.status, 200);
+    const token = storageToken("workspaces|dave", ws);
+    await ok(200, "GET", `/files?node=${node}`, { headers: token });
+    try {
+      // An Admin removes Members only.
+      await ok(403, "DELETE", `/workspaces/${ws}/members/${ids.erin}`, { headers: carol });
+      const removed = await ok<{ removed: { grants: number; groups: number } }>(200, "DELETE", `/workspaces/${ws}/members/${ids.dave}`, { headers: carol });
+      assert.deepEqual(removed.removed, { grants: 2, groups: 1 });
+      await ok(404, "GET", "/nodes", { headers: as(dave) });
+      await ok(404, "GET", `/files?node=${node}`, { headers: token });
+      await ok(200, "PUT", `/files/notes/after-removal.md?node=${node}`, { headers: as(erin), body: "x" });
+      const end = Date.now() + 3000;
+      while (!stream.closed() && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(stream.closed(), "the removed member's stream closes");
+      assert.ok(!stream.events.some(onFile(node, "notes/after-removal.md")));
+    } finally {
+      stream.stop();
+    }
+    // Their draft stays private; their shared Experiment stays.
+    await ok(404, "GET", `/experiments/${draft}`, { headers: as(erin) });
+    await ok(200, "GET", `/experiments/${shared}`, { headers: as(erin) });
+    const group = await ok<{ groups: { id: string; members?: string[] }[] }>(200, "GET", "/access/groups", { headers: as(erin) });
+    assert.ok(!JSON.stringify(group.groups.find((x) => x.id === g)).includes(ids.dave), "no longer in the group");
+
+    // Added again, they start from the starting grant: the old editor grant is gone.
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.dave, role: "member", access: "none" } });
+    const back = await req("GET", `/files?node=${node}`, { headers: as(dave) });
+    assert.ok([403, 404].includes(back.status), `no access until shared again, got ${back.status}`);
+  });
+
+  test("anyone may leave, except the last Owner", async () => {
+    need();
+    await ok(200, "DELETE", `/workspaces/${ws}/members/${ids.dave}`, { headers: dave });
+    await ok(404, "GET", `/workspaces/${ws}`, { headers: dave });
+    await ok(409, "DELETE", `/workspaces/${ws}/members/${ids.erin}`, { headers: erin });
+    const log = await ok<{ entries: { action: string }[] }>(200, "GET", "/access/audit", { headers: as(erin) });
+    const actions = new Set(log.entries.map((e) => e.action));
+    for (const action of ["member.role", "member.remove", "member.leave"]) assert.ok(actions.has(action), action);
+  });
+
+  test("an Owner renames, archives and restores; archived workspaces vanish for everyone else", async () => {
+    need();
+    await ok(200, "PATCH", `/workspaces/${ws}`, { headers: carol, json: { name: `Renamed ${stamp}` } });
+    await ok(403, "PATCH", `/workspaces/${ws}`, { headers: carol, json: { status: "archived" } });
+    const archived = await ok<{ status: string }>(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "archived" } });
+    assert.equal(archived.status, "archived");
+    await ok(404, "GET", "/nodes", { headers: as(carol) });
+    await ok(404, "GET", "/nodes", { headers: as(erin) });
+    for (const who of [carol, erin]) {
+      const { workspaces } = await ok<{ workspaces: { id: string }[] }>(200, "GET", "/workspaces", { headers: who });
+      assert.ok(!workspaces.some((w) => w.id === ws), "gone from the switcher");
+    }
+    const carols = await ok<{ workspaces: { id: string }[] }>(200, "GET", "/workspaces?archived=true", { headers: carol });
+    assert.ok(!carols.workspaces.some((w) => w.id === ws), "an Admin doesn't see it archived");
+    const erins = await ok<{ workspaces: { id: string; status: string }[] }>(200, "GET", "/workspaces?archived=true", { headers: erin });
+    assert.equal(erins.workspaces.find((w) => w.id === ws)?.status, "archived");
+    await ok(404, "PATCH", `/workspaces/${ws}`, { headers: carol, json: { status: "active" } });
+    await ok(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "active" } });
+    await ok(200, "GET", "/nodes", { headers: as(carol) });
+    const log = await ok<{ entries: { action: string }[] }>(200, "GET", "/access/audit", { headers: as(erin) });
+    const actions = new Set(log.entries.map((e) => e.action));
+    for (const action of ["workspace.rename", "workspace.archive", "workspace.restore"]) assert.ok(actions.has(action), action);
+  });
+});

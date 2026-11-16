@@ -10,6 +10,7 @@ import { Observable } from "rxjs";
 process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL || "postgres://localhost/unused";
 process.env.MCP_SERVERS = JSON.stringify({ lab: { url: "http://lab/mcp", forwardIdentity: true } });
 const { adapter, runAs } = await import("./agent");
+type Storage = import("./storage").Storage;
 
 const input = {
   threadId: "t",
@@ -135,4 +136,28 @@ test("every turn keeps its thinking block after the reply finishes (#156)", asyn
   // The chat sends earlier thinking back; the adapter never gets it.
   assert.equal(inputs.length, 3);
   assert.ok(inputs.every((i) => i.messages.every((m) => m.role !== "reasoning")));
+});
+
+test("a run stops at its next tool call once its user is no longer a member (#255)", async () => {
+  let role: string | null = "member";
+  const storage = () => ({ access: { membership: async () => role } }) as unknown as Storage;
+  const options = runAs("alice", () => adapter.buildOptions(input), null, () => {}, undefined, null, storage);
+  // The first PreToolUse hook covers every tool: no matcher.
+  const first = options.hooks?.PreToolUse?.[0];
+  assert.ok(first && first.matcher === undefined);
+  const call = () =>
+    first.hooks[0](
+      { hook_event_name: "PreToolUse", tool_name: "mcp__lab__search", tool_input: {} } as never,
+      "tool-1",
+      { signal: new AbortController().signal },
+    );
+  assert.deepEqual(await call(), {});
+  role = null;
+  const stopped = (await call()) as { continue?: boolean; stopReason?: string; hookSpecificOutput?: { permissionDecision?: string } };
+  assert.equal(stopped.continue, false);
+  assert.match(String(stopped.stopReason), /no longer a member/);
+  assert.equal(stopped.hookSpecificOutput?.permissionDecision, "deny");
+  // A run with no user to check has no such hook.
+  const none = runAs(null, () => adapter.buildOptions(input));
+  assert.ok(!none.hooks?.PreToolUse?.some((m) => m.matcher === undefined));
 });

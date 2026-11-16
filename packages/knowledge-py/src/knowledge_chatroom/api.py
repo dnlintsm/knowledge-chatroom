@@ -12,6 +12,9 @@ from typing_extensions import TypeAliasType
 WorkspaceRole = TypeAliasType("WorkspaceRole", Literal["owner", "admin", "member"])
 
 
+WorkspaceStatus = TypeAliasType("WorkspaceStatus", Literal["active", "archived"])
+
+
 class Workspace(BaseModel):
     id: str
     """
@@ -23,6 +26,30 @@ class Workspace(BaseModel):
     """
     name: str
     role: WorkspaceRole
+    status: WorkspaceStatus
+
+
+class Group(BaseModel):
+    id: str
+    name: str
+
+
+class Experiment(BaseModel):
+    id: str
+    title: str
+    nodeId: str | None
+
+
+class MemberRemoval(BaseModel):
+    grants: int
+    """
+    Their direct grants in the workspace.
+    """
+    groups: list[Group]
+    experiments: list[Experiment]
+    """
+    Shared or archived Experiments they started that you can see.
+    """
 
 
 class AlreadyMember(BaseModel):
@@ -187,7 +214,7 @@ class ExperimentInput(BaseModel):
     state: ExperimentState | None = None
 
 
-class Experiment(BaseModel):
+class Experiment1(BaseModel):
     id: str
     nodeId: str | None
     """
@@ -235,7 +262,7 @@ class ExperimentUploadMeta(ExperimentInput):
 
 
 class ExperimentUpload(BaseModel):
-    experiment: Experiment
+    experiment: Experiment1
     lineage: list[KnowledgeNode]
     """
     The node it sits on and that node's ancestors, top level first.
@@ -397,7 +424,7 @@ class Person(User):
     groupIds: list[str]
 
 
-class Group(BaseModel):
+class Group1(BaseModel):
     id: str
     parentId: str | None
     name: str
@@ -1026,7 +1053,7 @@ class DeleteNodeResponse(BaseModel):
 
 
 class ListExperimentsResponse(BaseModel):
-    experiments: list[Experiment]
+    experiments: list[Experiment1]
 
 
 class CreateExperimentRequest(ExperimentInput):
@@ -1192,6 +1219,11 @@ class CreateWorkspaceRequest(BaseModel):
     levels: Annotated[list[Level] | None, Field(max_length=10)] = None
 
 
+class UpdateWorkspaceRequest(BaseModel):
+    name: Annotated[str | None, Field(max_length=200, min_length=1)] = None
+    status: WorkspaceStatus | None = None
+
+
 class AddWorkspaceMemberRequest(BaseModel):
     userId: str
     role: Literal["member", "admin"]
@@ -1205,6 +1237,23 @@ class Member(BaseModel):
 
 class AddWorkspaceMemberResponse(BaseModel):
     member: Member
+
+
+class ChangeWorkspaceMemberRoleRequest(BaseModel):
+    role: WorkspaceRole
+
+
+class ChangeWorkspaceMemberRoleResponse(BaseModel):
+    member: Member
+
+
+class Removed(BaseModel):
+    grants: int
+    groups: int
+
+
+class RemoveWorkspaceMemberResponse(BaseModel):
+    removed: Removed
 
 
 class User1(BaseModel):
@@ -1230,7 +1279,7 @@ class ListPeopleResponse(BaseModel):
 
 
 class ListGroupsResponse(BaseModel):
-    groups: list[Group]
+    groups: list[Group1]
 
 
 class CreateGroupRequest(BaseModel):

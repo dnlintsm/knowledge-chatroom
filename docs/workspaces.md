@@ -526,8 +526,8 @@ What stops (see [Revalidation](#revalidation)):
   minted: 404, as for any non-member. Their open `?watch` streams close.
 - **Their running chat runs in that workspace end at their next step.** A tool call that
   was already accepted runs to its end and keeps its result and audit entry. The run
-  doesn't start another model turn: it stops, and the chat records why ("You're no longer a
-  member of this workspace"). An Experiment run left in the `running` state stays so; its
+  doesn't start another model turn: the next tool call is refused and the run stops,
+  with the reason ("no longer a member of this workspace"). An Experiment run left in the `running` state stays so; its
   maintainer, after a handover, can finish it as failed.
 - Signed download links expire as before (`DOWNLOAD_LINK_SECONDS`).
 
@@ -690,7 +690,15 @@ maintainer and collaborator rules.
 
 1. This section.
 2. Backend, people: role changes, removal and leaving, departures, rename, archive and
-   restore, runs ending on removal. The routes go into `openapi/storage.yaml`.
+   restore, runs ending on removal. The routes go into `openapi/storage.yaml`. Done:
+   `services/api-py/api_py/workspaces.py` serves them, `024_workspace_departures.sql`
+   adds the departures, keeps `sign_in_memberships` from re-adding someone who left, and
+   makes `workspace_members_keep_owner` lock the workspace's row before it looks. The
+   routes take that lock first too, so two Owners demoting or removing each other at once
+   leave one. The removal preview lists Experiments by author until
+   step 3 adds maintainers. On the agent server, `membershipHook`
+   (`apps/agent/src/storage/revocation.ts`) checks membership before every tool call of a
+   run and stops the run once it is gone.
 3. Backend, Experiments: the migration, maintainer and collaborators in api-py and in the
    TypeScript server's session and tools.
 4. Backend, workspace inventory and adding an Owner.

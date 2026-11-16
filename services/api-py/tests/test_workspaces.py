@@ -344,3 +344,121 @@ async def test_grants_and_groups_are_for_members(database):
         assert next(e for e in own if e["action"] == "node.create")["target"]["name"] == "Secret"
         renamed = next(e for e in entries if e["action"] == "group.create")
         assert renamed["target"]["name"] == "Team"
+
+
+async def test_someone_removed_from_the_default_workspace_isnt_added_back_at_sign_in(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+        assert default["slug"] == "default" and default["status"] == "active"
+        removed = await api.delete(f"/workspaces/{default['id']}/members/{bob_id}", headers=alice)
+        assert removed.status_code == 200
+    # A new server, so bob's sign-in runs again (it is cached per process).
+    async with Client(database, SECRET) as (api, _app):
+        assert (await api.get("/workspaces", headers=bob)).json()["workspaces"] == []
+        assert (await api.get("/nodes", headers=bob)).status_code == 404
+        # Added again, the departure is gone: signing in keeps him a member.
+        added = await api.post(
+            f"/workspaces/{default['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        assert added.status_code == 201
+    async with Client(database, SECRET) as (api, _app):
+        mine = (await api.get("/workspaces", headers=bob)).json()["workspaces"]
+        assert [w["slug"] for w in mine] == ["default"]
+        # Leaving works the same way.
+        assert (
+            await api.delete(f"/workspaces/{default['id']}/members/{bob_id}", headers=bob)
+        ).status_code == 200
+    async with Client(database, SECRET) as (api, _app):
+        assert (await api.get("/workspaces", headers=bob)).json()["workspaces"] == []
+
+
+async def test_two_owners_removing_each_other_at_once_keep_one(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+        answers = await asyncio.gather(
+            api.delete(f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice),
+            api.delete(f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 409]
+        stays = alice if answers[0].status_code == 200 else bob
+        members = (await api.get(f"/workspaces/{lab['id']}/members", headers=stays)).json()
+        assert [m["role"] for m in members["members"]] == ["owner"]
+
+
+async def test_the_trigger_keeps_an_owner_when_the_routes_are_bypassed(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+    demote = "UPDATE workspace_members SET role = 'member' WHERE workspace_id = %s AND user_id = %s"
+    async with (
+        await psycopg.AsyncConnection.connect(database) as first,
+        await psycopg.AsyncConnection.connect(database) as second,
+    ):
+        await first.execute(demote, (lab["id"], alice_id))
+        # The second waits on the workspace lock the first holds, then sees its change.
+        waiting = asyncio.create_task(second.execute(demote, (lab["id"], bob_id)))
+        await asyncio.sleep(0.3)
+        assert not waiting.done()
+        await first.commit()
+        with pytest.raises(psycopg.errors.RaiseException, match="at least one owner"):
+            await waiting
+        await second.rollback()
+        cur = await first.execute(
+            "SELECT count(*) FROM workspace_members WHERE workspace_id = %s AND role = 'owner'",
+            (lab["id"],),
+        )
+        assert (await cur.fetchone())[0] == 1  # pyrefly: ignore[unsupported-operation]
+
+
+async def test_two_owners_demoting_each_other_at_once_keep_one(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+        answers = await asyncio.gather(
+            api.patch(
+                f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "admin"}
+            ),
+            api.patch(
+                f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob, json={"role": "admin"}
+            ),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 409]
+        members = (await api.get(f"/workspaces/{lab['id']}/members", headers=alice)).json()
+        assert sorted(m["role"] for m in members["members"]) == ["admin", "owner"]

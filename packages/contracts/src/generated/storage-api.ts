@@ -467,14 +467,24 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One of your workspaces */
+        /**
+         * One of your workspaces
+         * @description An archived workspace answers only for its Owners; for everyone else it is 404.
+         */
         get: operations["getWorkspace"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Rename (Owners and Admins), archive or restore (Owners) a workspace
+         * @description Renaming keeps the slug, so links keep working. Archiving hides the workspace from
+         *     everyone: it leaves `GET /workspaces`, and every request, token and stream in it
+         *     gets 404, until an Owner restores it (`status: active`). Nothing is deleted. The
+         *     default workspace can't be archived (400). Each change is audited.
+         */
+        patch: operations["updateWorkspace"];
         trace?: never;
     };
     "/workspaces/{id}/members": {
@@ -499,6 +509,64 @@ export interface paths {
          *     replaces a grant they already have.
          */
         post: operations["addWorkspaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a member, or leave (your own id)
+         * @description Owners remove anyone, Admins remove Members only (403 otherwise), and anyone may
+         *     leave. Nobody removes the last Owner, themselves included (409). In one
+         *     transaction it deletes the membership, the person's direct grants in the
+         *     workspace and their memberships of its groups, and records the departure, so the
+         *     default workspace doesn't add them back when they sign in. Their own drafts,
+         *     chats and memory stay, private as before. From then on their requests, tokens and
+         *     streams in the workspace get 404, and their runs there stop at the next tool call.
+         */
+        delete: operations["removeWorkspaceMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a member's role (Owners; Admins in part)
+         * @description Owners give any member any role. Admins can make a Member an Admin, and step down
+         *     to Member themselves; nothing else (403). The last Owner can't be demoted (409).
+         *     A role change never changes a grant. Transferring ownership is two changes: make
+         *     the other person Owner, then lower your own role.
+         */
+        patch: operations["changeWorkspaceMemberRole"];
+        trace?: never;
+    };
+    "/workspaces/{id}/members/{userId}/removal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What removing a member would take away (Owners and Admins, or yourself)
+         * @description For the confirmation: how many direct grants they have in the workspace, the groups
+         *     they belong to, and the shared or archived Experiments they started that you can
+         *     see. Drafts are never counted.
+         */
+        get: operations["previewWorkspaceMemberRemoval"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1606,6 +1674,8 @@ export interface components {
     schemas: {
         /** @enum {string} */
         WorkspaceRole: "owner" | "admin" | "member";
+        /** @enum {string} */
+        WorkspaceStatus: "active" | "archived";
         Workspace: {
             /** @description The immutable id that selectors and tokens carry. */
             id: string;
@@ -1613,6 +1683,21 @@ export interface components {
             slug: string;
             name: string;
             role: components["schemas"]["WorkspaceRole"];
+            status: components["schemas"]["WorkspaceStatus"];
+        };
+        MemberRemoval: {
+            /** @description Their direct grants in the workspace. */
+            grants: number;
+            groups: {
+                id: string;
+                name: string;
+            }[];
+            /** @description Shared or archived Experiments they started that you can see. */
+            experiments: {
+                id: string;
+                title: string;
+                nodeId: string | null;
+            }[];
         };
         AlreadyMember: {
             error: string;
@@ -3669,7 +3754,10 @@ export interface operations {
     };
     listWorkspaces: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description `true` adds the archived workspaces you own, after the active ones, so you can restore them. */
+                archived?: "true" | "false";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3765,6 +3853,41 @@ export interface operations {
             503: components["responses"]["Starting"];
         };
     };
+    updateWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    status?: components["schemas"]["WorkspaceStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The workspace as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
     listWorkspaceMembers: {
         parameters: {
             query?: never;
@@ -3842,6 +3965,125 @@ export interface operations {
                     "application/json": components["schemas"]["AlreadyMember"];
                 };
             };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    removeWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed; how many direct grants and group memberships went with it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        removed: {
+                            grants: number;
+                            groups: number;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description They are the workspace's last Owner. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    changeWorkspaceMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: components["schemas"]["WorkspaceRole"];
+                };
+            };
+        };
+        responses: {
+            /** @description The member's role now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        member: {
+                            id: string;
+                            role: components["schemas"]["WorkspaceRole"];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description It would leave the workspace without an Owner. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    previewWorkspaceMemberRemoval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What would go. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberRemoval"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
