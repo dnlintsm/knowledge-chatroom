@@ -205,7 +205,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await showFiles(bob);
   await expect(bob.getByRole("button", { name: "New file", exact: true })).toBeVisible();
 
-  // Alice hands Owner access to Bob and steps down to editor. She stays the
+  // Alice gives Bob Full access and steps down to Can edit. She stays the
   // workspace's Owner (issue #226), which is what the Admin panel needs.
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
   await admin.getByLabel("Workspace role for Bob Builder").selectOption("owner");
@@ -213,6 +213,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   alice.once("dialog", (d) => void d.accept());
   await admin.getByLabel("Workspace role for Alice Admin").selectOption("editor");
   await expect(admin.getByLabel("Workspace role for Alice Admin")).toHaveValue("editor");
+  await expect(admin.getByLabel("Workspace role for Bob Builder").locator("option:checked")).toHaveText("Full access");
   await expect(admin.getByRole("table", { name: "People" })).toContainText("Owner");
   await admin.getByRole("button", { name: "Close" }).click();
   await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
@@ -230,9 +231,27 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(alice).toHaveURL(new RegExp(`/w/the-lab-\\d+$`));
   const labUrl = new URL(alice.url()).pathname;
   await expect(alice.getByRole("navigation", { name: "Location" }).getByRole("button", { name: lab, exact: true })).toBeVisible();
-  await bob.goto(labUrl);
+
+  // She shares an experiment there by its link (the milestone of #226).
+  const labWs = ((await (await alice.request.get("/api/workspaces")).json()).workspaces as { id: string; slug: string }[]).find(
+    (w) => labUrl === `/w/${w.slug}`,
+  )!;
+  const inLab = { "X-Knowledge-Workspace": labWs.id };
+  const finding = (await (
+    await alice.request.post("/api/experiments", { headers: inLab, data: { nodeId: null, title: "Lab finding" } })
+  ).json()) as { id: string };
+  expect((await alice.request.patch(`/api/experiments/${finding.id}`, { headers: inLab, data: { status: "shared" } })).ok()).toBe(true);
+  const findingUrl = `${labUrl}?experiment=${finding.id}`;
+  await alice.goto(findingUrl);
+  await expect(alice.getByRole("navigation", { name: "Location" })).toContainText("Lab finding");
+  // In the default workspace there is no such experiment.
+  expect((await alice.request.get(`/api/experiments/${finding.id}`)).status()).toBe(404);
+
+  // Bob isn't a member yet: the link opens the no-access page, which names nothing.
+  await bob.goto(findingUrl);
   await expect(bob.getByTestId("workspace-no-access")).toBeVisible();
   await expect(bob.getByTestId("workspace-no-access")).not.toContainText(lab);
+  await expect(bob.getByTestId("workspace-no-access")).not.toContainText("Lab finding");
 
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
   const add = admin.getByRole("form", { name: "Add a member" });
@@ -258,6 +277,11 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await bob.getByRole("menu", { name: "Workspaces" }).getByRole("menuitem", { name: new RegExp(lab) }).click();
   await expect(bob).toHaveURL(new RegExp(`${labUrl}$`));
   await expect(bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: lab, exact: true })).toBeVisible();
+  // And Alice's link opens her experiment there.
+  await bob.goto(findingUrl);
+  const bobLocation = bob.getByRole("navigation", { name: "Location" });
+  await expect(bobLocation.getByRole("button", { name: lab, exact: true })).toBeVisible();
+  await expect(bobLocation).toContainText("Lab finding");
 
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();

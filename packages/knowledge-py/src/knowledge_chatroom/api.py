@@ -1172,6 +1172,10 @@ class SaveChatRunRequest(BaseModel):
 
 class ListWorkspacesResponse(BaseModel):
     workspaces: list[Workspace]
+    canCreate: bool
+    """
+    False when the server's WORKSPACE_CREATORS doesn't name you.
+    """
 
 
 Level = TypeAliasType("Level", Annotated[str, Field(min_length=1)])

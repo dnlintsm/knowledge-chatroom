@@ -56,7 +56,9 @@ export default async function WorkspacePage({
     return <Home chatSteps={chatSteps} workspace={null} userKey={userKey} />;
   }
   if (found.status === "unavailable") return <Unavailable />;
-  if (found.mine.length === 0) return <NoWorkspaceYet email={user?.email ?? null} login={Boolean(user)} />;
+  if (found.mine.length === 0) {
+    return <NoWorkspaceYet email={user?.email ?? null} login={Boolean(user)} canCreate={found.canCreate} />;
+  }
   return <NoAccess mine={found.mine} />;
 }
 

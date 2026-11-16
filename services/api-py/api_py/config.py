@@ -20,6 +20,8 @@ EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
                      search by meaning, as the TypeScript server reads them
                      (semantic.py); this server runs the indexer
 HUB_ADMINS           who moderates the skill hub: emails or login subjects
+WORKSPACE_CREATORS   who may create workspaces: emails or login subjects
+                     (unset: every signed-in user; the local user always may)
 SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
                      runs chats; /skills here says so)
 BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
@@ -105,6 +107,8 @@ class Settings:
     embedding: EmbeddingSettings | None = None
     # The skill hub's admins (HUB_ADMINS, as given), whether skills' scripts run, and the built-in skills.
     hub_admins: str | None = None
+    # Who may create workspaces (WORKSPACE_CREATORS, as given); None: every signed-in user.
+    workspace_creators: str | None = None
     skill_scripts: bool = False
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
     # Personalized memory (MEMORY=on); off leaves /memory to the TypeScript server, which answers 404.
@@ -133,6 +137,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         max_upload_bytes=max_upload_bytes(env),
         embedding=embedding_settings(env),
         hub_admins=env.get("HUB_ADMINS"),
+        workspace_creators=env.get("WORKSPACE_CREATORS"),
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
         tools=_tools(env),

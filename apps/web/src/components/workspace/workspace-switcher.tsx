@@ -17,7 +17,8 @@ import { useWorkspace } from "./store";
  * docs/workspaces.md, "Screens"): the workspace's name, which goes to its
  * root as the fixed word "Workspace" did, and a menu of the user's
  * workspaces, recent ones first, with Create. Shown whenever the server has
- * workspaces, also with only one, so Create is always there.
+ * workspaces, also with only one, so Create is always there for those the
+ * server lets create one (WORKSPACE_CREATORS).
  */
 export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; current: boolean }) {
   const workspace = useCurrentWorkspace();
@@ -91,6 +92,8 @@ function SwitcherMenu({
   onClose: () => void;
 }) {
   const [listed, setListed] = useState<WorkspaceInfo[] | null>(null);
+  // Whether the server lets this user create one (WORKSPACE_CREATORS); unknown until listed.
+  const [canCreate, setCanCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
 
@@ -99,8 +102,9 @@ function SwitcherMenu({
     workspaceFetch("/api/workspaces", { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Couldn't list your workspaces (${res.status})`);
-        const body = (await res.json()) as { workspaces?: WorkspaceInfo[] };
+        const body = (await res.json()) as { workspaces?: WorkspaceInfo[]; canCreate?: boolean };
         setListed(body.workspaces ?? []);
+        setCanCreate(body.canCreate !== false);
       })
       .catch((err) => {
         if (!isAborted(err)) setError(err instanceof Error ? err.message : String(err));
@@ -176,15 +180,19 @@ function SwitcherMenu({
           {error}
         </p>
       )}
-      <div className="my-1 border-t border-[var(--border)]" />
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onCreate}
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer"
-      >
-        <Plus className="size-3.5" /> Create workspace
-      </button>
+      {canCreate && (
+        <>
+          <div className="my-1 border-t border-[var(--border)]" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onCreate}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer"
+          >
+            <Plus className="size-3.5" /> Create workspace
+          </button>
+        </>
+      )}
     </div>
   );
 }
