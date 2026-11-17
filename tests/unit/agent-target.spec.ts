@@ -20,12 +20,17 @@ import {
  * tells it (apps/web/src/lib/chatroom-props.ts); docs/remote-agent.md is the contract.
  */
 
-test("without AGENT_URL the chat uses this repo's agent server", () => {
-  expect(remoteAgentUrl({})).toBeNull();
-  expect(chatAgentUrl({})).toBe("http://localhost:8000/");
-  expect(chatAgentUrl({ LOCAL_AGENT_URL: "http://agent:8000/" })).toBe("http://agent:8000/");
+test("without AGENT_URL the chat uses the Python chat agent", () => {
+  expect(remoteAgentUrl({})).toBe("http://127.0.0.1:9300");
+  expect(chatAgentUrl({})).toBe("http://127.0.0.1:9300/agent/report");
   // Blank counts as unset, as docker compose passes ${AGENT_URL:-}.
-  expect(chatAgentUrl({ AGENT_URL: "  " })).toBe("http://localhost:8000/");
+  expect(chatAgentUrl({ AGENT_URL: "  " })).toBe("http://127.0.0.1:9300/agent/report");
+});
+
+test("AGENT_URL=local keeps the chat on the legacy agent server", () => {
+  expect(remoteAgentUrl({ AGENT_URL: "local" })).toBeNull();
+  expect(chatAgentUrl({ AGENT_URL: "Local" })).toBe("http://localhost:8000/");
+  expect(chatAgentUrl({ AGENT_URL: "local", LOCAL_AGENT_URL: "http://agent:8000/" })).toBe("http://agent:8000/");
 });
 
 test("AGENT_URL sends the chat to the backend's /agent/report", () => {

@@ -436,3 +436,22 @@ async def test_outside_servers_and_bad_tokens_go_to_typescript(memory_api, datab
         }
         assert support.forwarded == ["GET /memory/agent"] * 2
         support.forwarded.clear()
+
+
+@needs_database
+async def test_standalone_api_serves_mcp_memory_and_rejects_unsigned_calls(memory_api):
+    api, app = memory_api
+    legacy_http = app.state.http
+    app.state.http = None
+    try:
+        got = await api.get("/memory/agent", headers=token(via="mcp:lab"))
+        assert got.status_code == 200, got.text
+        assert "Short answers" in got.json()["prompt"]
+        view = await tool(api, "memory_view", {"name": "reply-style"}, via="mcp:lab")
+        assert "Lead with the result." in view["text"]
+        assert (await api.get("/memory/agent")).status_code == 401
+        assert (
+            await api.get("/memory/agent", headers={tokens.MEMORY_HEADER: "bad"})
+        ).status_code == 401
+    finally:
+        app.state.http = legacy_http

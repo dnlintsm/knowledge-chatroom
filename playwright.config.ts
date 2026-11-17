@@ -5,13 +5,13 @@ import { defineConfig, devices } from "@playwright/test";
 // sends the chat to services/agent-py (AGENT_URL) running a real Claude Code
 // engine against a scripted model (e2e/mock-anthropic.mjs); it needs uv.
 const mode = process.env.E2E_MODE ?? "browser";
-if (!["browser", "storage", "login", "live", "python"].includes(mode)) {
+if (!["browser", "storage", "login", "live", "python", "python-storage"].includes(mode)) {
   throw new Error(`Unknown E2E_MODE: ${mode}`);
 }
 const useRealAgent = mode === "live";
-const withStorage = mode === "storage" || mode === "login" || (useRealAgent && Boolean(process.env.DATABASE_URL));
+const withStorage = mode === "storage" || mode === "login" || mode === "python-storage" || (useRealAgent && Boolean(process.env.DATABASE_URL));
 const withLogin = mode === "login";
-const withPython = mode === "python";
+const withPython = mode === "python" || mode === "python-storage";
 if (useRealAgent && !process.env.ANTHROPIC_API_KEY) {
   throw new Error("Live smoke tests require ANTHROPIC_API_KEY.");
 }
@@ -27,22 +27,23 @@ function port(name: string, fallback: number) {
 const UI_PORT = port("E2E_UI_PORT", 3000);
 const AGENT_PORT = port("E2E_AGENT_PORT", 8000);
 const STORAGE_PORT = port("E2E_STORAGE_PORT", 8001);
-// The TypeScript agent server behind api-py (services/api-py, issue #190), which
-// serves storage at STORAGE_PORT; E2E_API_PY=off serves it from TypeScript alone.
-const TS_STORAGE_PORT = port("E2E_TS_STORAGE_PORT", 8002);
+// Python serves storage directly. E2E_API_PY=off is a legacy comparison only.
 const withApiPy = process.env.E2E_API_PY !== "off";
 const OIDC_PORT = port("E2E_OIDC_PORT", 9400);
 const PY_AGENT_PORT = port("E2E_PY_AGENT_PORT", 9300);
 const MODEL_PORT = port("E2E_MODEL_PORT", 9500);
 const baseURL = `http://localhost:${UI_PORT}`;
-process.env.LOCAL_AGENT_URL = `http://localhost:${AGENT_PORT}`;
+process.env.LOCAL_AGENT_URL = `http://localhost:${mode === "python-storage" ? STORAGE_PORT : AGENT_PORT}`;
 // The chat goes to this repo's agent (or the mock), or in "python" mode to
 // services/agent-py; never a remote backend from the environment.
-process.env.AGENT_URL = withPython ? `http://localhost:${PY_AGENT_PORT}` : "";
+process.env.AGENT_URL = withPython ? `http://localhost:${PY_AGENT_PORT}` : "local";
 process.env.AGENT_PORT = String(AGENT_PORT);
 if (!useRealAgent) {
   process.env.ANTHROPIC_API_KEY = "";
   process.env.CPK_INTELLIGENCE_API_KEY = "";
+  // The example MCP app is outside the mock suites' coverage. Refuse discovery
+  // locally rather than depending on an external demo server and DNS timeouts.
+  process.env.MCP_SERVER_URL = `${process.env.LOCAL_AGENT_URL}/mcp`;
 }
 if (!withStorage) process.env.DATABASE_URL = "";
 // CI serves a production build, which needs the login mode spelled out.
@@ -64,15 +65,29 @@ const pythonAgent = [
   `ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}`,
   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
   "CLAUDE_MODEL= ANTHROPIC_MODEL= KNOWLEDGE_PUBLIC_KEY= MCP_SERVERS=",
-  `LOCAL_AGENT_URL=http://localhost:${AGENT_PORT}`,
+  `LOCAL_AGENT_URL=http://localhost:${mode === "python-storage" ? STORAGE_PORT : AGENT_PORT}`,
   `AGENT_PY_PORT=${PY_AGENT_PORT}`,
 ].join(" ");
+
+const storageServers = withStorage
+  ? withApiPy
+    ? [{
+        // With login, Alice runs the deployment (the workspace inventory, #255).
+        command: `cd services/api-py && ${mode === "python-storage" ? `ANTHROPIC_API_KEY=mock-key ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}` : ""} TS_AGENT_URL= API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
+        url: `http://localhost:${STORAGE_PORT}/health`,
+      }]
+    : [{
+        command: `AGENT_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
+        url: `http://localhost:${STORAGE_PORT}/health`,
+      }]
+  : [];
 
 const agentServers = useRealAgent
   ? [{ command: "pnpm -C apps/agent start", url: `http://localhost:${AGENT_PORT}/health` }]
   : withPython
     ? [
-        { command: "node e2e/mock-agent.mjs", url: `http://localhost:${AGENT_PORT}/health` },
+        ...storageServers,
+        ...(withStorage ? [] : [{ command: "node e2e/mock-agent.mjs", url: `http://localhost:${AGENT_PORT}/health` }]),
         { command: `MOCK_MODEL_PORT=${MODEL_PORT} node e2e/mock-anthropic.mjs`, url: `http://localhost:${MODEL_PORT}/health` },
         {
           command: `cd services/agent-py && ${pythonAgent} uv run --locked python -m agent_py.app`,
@@ -80,27 +95,7 @@ const agentServers = useRealAgent
         },
       ]
     : [
-      ...(withStorage
-        ? [
-            {
-              // Scripts on only shows them as runnable, and memory only shows its API:
-              // chat goes to the mock agent.
-              // Behind api-py, which then runs the search indexer and applies the migrations.
-              command: `AGENT_PORT=${withApiPy ? `${TS_STORAGE_PORT} SEARCH_INDEXER=off MEMORY_LEARN=off MIGRATIONS=off` : STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on pnpm -C apps/agent start`,
-              url: `http://localhost:${withApiPy ? TS_STORAGE_PORT : STORAGE_PORT}/health`,
-            },
-            ...(withApiPy
-              ? [
-                  {
-                    // In front of it, as in `pnpm dev` and compose: the routes moved to Python so far.
-                    // With login, Alice runs the deployment (the workspace inventory, #255).
-                    command: `cd services/api-py && TS_AGENT_URL=http://localhost:${TS_STORAGE_PORT} API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
-                    url: `http://localhost:${STORAGE_PORT}/health`,
-                  },
-                ]
-              : []),
-          ]
-        : []),
+      ...storageServers,
       {
         command: withStorage
           ? `STORAGE_URL=http://localhost:${STORAGE_PORT} node e2e/mock-agent.mjs`
@@ -116,7 +111,7 @@ export default defineConfig({
     : mode === "storage"
       ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts", "workspaces.spec.ts"] }
       : withPython
-        ? { testMatch: "python-agent.spec.ts" }
+        ? { testMatch: mode === "python-storage" ? "python-storage.spec.ts" : "python-agent.spec.ts" }
         : {
             testIgnore: [
               "login.spec.ts",
@@ -125,6 +120,7 @@ export default defineConfig({
               "sync-storage.spec.ts",
               "chat-history.spec.ts",
               "python-agent.spec.ts",
+              "python-storage.spec.ts",
               "workspaces.spec.ts",
             ],
           }),

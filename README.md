@@ -87,24 +87,26 @@ starts over. There is no login: one built-in user owns everything.
 Two optional profiles add sample MCP servers: `--profile papers` (paper search) and
 `--profile python-sample` (the Python agent's tools). Each also needs the `MCP_SERVERS`
 line from the comment above its service in `docker-compose.yml`, copied into `.env`.
-`--profile python-agent` with `AGENT_URL=http://agent-py:9300` serves the chat from the
-Python chat agent (`services/agent-py`) instead.
+The demo uses the Python chat agent (`services/agent-py`) by default.
 
 ### Run from source
 
-Use **Node 22** (`.nvmrc`) and pnpm (`corepack enable` picks the version in
-`package.json`). Add an Anthropic API key to `.env` for real chat.
+Use **Node 26 LTS** (`.nvmrc`) and the pinned pnpm version. Node 26 does not bundle
+Corepack. Add an Anthropic API key to `.env` for real chat.
 
 ```bash
+npm install --global pnpm@12.18.0
 cp .env.example .env
-pnpm install                   # the UI, the agent and packages/ from one lockfile
-pnpm dev                       # UI :3000, API :8000 (services/api-py) and agent server :8100
+pnpm install --filter @knowledge-chatroom/web... --filter @knowledge-chatroom/contracts
+uv sync --all-packages --locked
+pnpm dev                       # UI :3000, Python API :8000, Python chat agent :9300
 ```
 
-`pnpm dev` needs [uv](https://docs.astral.sh/uv/) for the Python API server, which is taking
-over the agent server's routes (issue #190). `pnpm dev:ts` runs without it.
-`pnpm dev:python` also starts the Python chat agent (`services/agent-py`, :9300, needs
-[uv](https://docs.astral.sh/uv/)) and sends the chat there.
+`pnpm dev` (also `pnpm dev:python`) needs [uv](https://docs.astral.sh/uv/).
+It starts `api-py` and `agent-py` directly, with no TypeScript agent process or API
+fallback. Storage, skills and persistent chat history need PostgreSQL and S3 below.
+The retired TypeScript backend remains available only through explicit legacy commands
+such as `pnpm dev:ts`; it is not part of the Node 26 frontend validation.
 
 Open <http://localhost:3000>. Without server storage, files stay in your browser. Runs,
 the knowledge tree, sharing and memory need it: `docker compose up -d` starts
@@ -145,7 +147,7 @@ Two examples show how to bring outside tools in as MCP servers:
 Before opening a PR, run:
 
 ```bash
-pnpm check                  # lint, UI/agent types, and service-free units
+pnpm check:web              # frontend lint, types and service-free units
 pnpm build                  # production compile with TypeScript checks
 ```
 
@@ -158,16 +160,16 @@ changed and how you validated it.
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | The Next.js UI (`@knowledge-chatroom/web`) |
-| `apps/agent` | The TypeScript agent: Claude Agent SDK over AG-UI, plus the storage, skills and memory APIs |
+| `apps/agent` | Retired TypeScript backend, kept for legacy comparisons and shared SQL/skill assets |
 | `apps/web/src/app` | Next.js routes, providers, authentication, and storage proxies |
 | `apps/web/src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
 | `apps/web/src/app/declarative-generative-ui`, `apps/web/src/hooks` | Starter examples and A2UI renderers |
-| `apps/agent/src` | Claude SDK adapter, AG-UI server, storage services, and tools |
+| `apps/agent/src` | Legacy Claude SDK adapter, server, storage and tools |
 | `apps/agent/src/storage/migrations` | Database schema and access policies |
 | `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
 | `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) |
 | `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
-| `services/api-py` | The agent server's HTTP API in Python, in front of it at `LOCAL_AGENT_URL` while routes move (issue #190) |
+| `services/api-py` | Python storage, access, skills, memory and suggestions API at `LOCAL_AGENT_URL` |
 | `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (issue #176) |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
 | `services/lab-tools` | The Python agent sample's tools as an MCP server |

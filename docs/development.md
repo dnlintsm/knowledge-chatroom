@@ -1,20 +1,23 @@
 # Development
 
-Use Node 22 from `.nvmrc` and pnpm: `corepack enable` once gives you the version in
-`package.json` (`packageManager`). `pnpm install` at the root installs the UI, the agent
-and `packages/contracts` from the one `pnpm-lock.yaml`; CI uses `--frozen-lockfile`.
-Add a dependency with `pnpm -C apps/agent add <name>` (or `apps/web`), and commit the
-lockfile. `.env` stays at the repository root; the UI and the agent both read it.
+Use Node 26 LTS from `.nvmrc` and install the pinned package manager with
+`npm install --global pnpm@12.18.0` (Node 26 has no bundled Corepack).
+`pnpm install --filter @knowledge-chatroom/web... --filter @knowledge-chatroom/contracts`
+installs the frontend and shared contracts from `pnpm-lock.yaml`; CI adds `--frozen-lockfile`.
+The repository root `.env` is shared by the frontend and Python services.
 
-Copy `.env.example` to `.env`. For real chat set `ANTHROPIC_API_KEY`;
-`CLAUDE_MODEL` defaults to `claude-sonnet-5`. `pnpm dev` starts the UI on 3000, and on
-8000 the Python API server (`services/api-py`, which needs [uv](https://docs.astral.sh/uv/))
-in front of the agent server on 8100. The agent's routes are moving to Python one group at
-a time (issue #190), and api-py passes the rest to the agent server, so 8000 is the address
-to use. `pnpm dev:ts` runs the UI and the agent server alone on 8000, as before.
-`pnpm dev:ui`, `pnpm dev:agent` and `pnpm dev:api` run them separately.
-Check it with `curl http://localhost:8000/health`. Storage can still be
-migrating after this health endpoint answers.
+Copy `.env.example` to `.env`, run `uv sync --all-packages --locked`, and set
+`ANTHROPIC_API_KEY` for real chat. `pnpm dev` / `pnpm dev:python` starts the UI on 3000,
+the Python API (`services/api-py`) on 8000, and the Python chat agent
+(`services/agent-py`) on 9300. No `apps/agent` process is started.
+`TS_AGENT_URL` is unset by default, so Python never silently falls back to it.
+Storage, built-in skills and persistent chat history require PostgreSQL and S3;
+without them the UI still supports browser-local files and chat without skills.
+
+`pnpm dev:ui`, `pnpm dev:api` and `pnpm dev:agent-py` run the services separately;
+set `AGENT_URL=http://127.0.0.1:9300` when starting the UI separately.
+`GET http://localhost:8000/health` reports readiness of the Python API and its storage.
+`pnpm dev:ts` is an explicit legacy comparison, outside Node 26 frontend support.
 
 After an upgrade, `pnpm env:check` compares `.env` with `.env.example`: settings a
 release removed or renamed, new settings, and ones `.env.example` doesn't know. Only
@@ -23,6 +26,14 @@ comments out removed settings, applies renames, and appends new settings comment
 with their explanations. `--env` and `--example` point it at other files, e.g.
 `node scripts/env-upgrade.mjs --env /srv/knowledge/.env`. A release that removes or renames a
 setting adds a row to `MIGRATIONS` in `scripts/env-upgrade-plan.mjs`.
+
+## Next runtime target
+
+After the Node 26 migration, the next target is Python 3.14 as the default backend
+runtime. Handle that upgrade in a separate PR: `.python-version`, Python container
+images and the supported-version/type-checking policy need to be considered together.
+The Node 26 migration keeps Python 3.12 as the default and adds no Python 3.14 upgrade tests;
+the existing Python 3.12/3.14 CI matrix is unchanged.
 
 ## Optional server storage
 
@@ -220,10 +231,10 @@ where they are in `forwardedProps.knowledge_chatroom`. What the backend receives
 must do is in [Remote agent backend](remote-agent.md).
 
 This repo's own Python backend, `services/agent-py`, runs beside the others with
-`pnpm dev:python` (it needs [uv](https://docs.astral.sh/uv/)): the UI, api-py, the agent server and
+`pnpm dev:python` (it needs [uv](https://docs.astral.sh/uv/)): the UI, api-py and
 the Python agent on `http://127.0.0.1:9300`, with `AGENT_URL` pointing there. With login
-on, give it the agent server's public key as `KNOWLEDGE_PUBLIC_KEY` in `.env` (the agent
-server prints it at startup). See its [README](../services/agent-py/README.md).
+on, give it api-py's public key from `GET /identity/public-key` as
+`KNOWLEDGE_PUBLIC_KEY` in `.env`. See its [README](../services/agent-py/README.md).
 
 `AGENT_URL` used to be the address of this repo's agent server. If your `.env` still
 has `AGENT_URL=http://localhost:8000`, remove it, or rename it to `LOCAL_AGENT_URL`.
@@ -273,7 +284,7 @@ inputs but is not a substitute for upgrading the affected dependency.
 ## Troubleshooting
 
 - Agent connection errors: check port 8000, the health endpoint and the API key.
-- Dependency errors: select Node 22, stop dev/test servers, then run `pnpm install`.
+- Dependency errors: select Node 26, stop dev/test servers, then run `pnpm install`.
 - Test port in use: stop your existing server or override the E2E ports listed in
   [Testing](testing.md). The runner intentionally refuses to reuse an unknown server.
 - S3 writes failing after multiple test buckets: SeaweedFS reserves volumes per

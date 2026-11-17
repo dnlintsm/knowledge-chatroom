@@ -4,11 +4,11 @@
  * (https://docs.astral.sh/uv/).
  *
  *   node scripts/dev-py.mjs api-py      # `pnpm dev:api`: the API server on :8000,
- *                                       # in front of the agent server on :8100
+ *                                       # serving the API directly
  *   node scripts/dev-py.mjs agent-py    # `pnpm dev:agent-py`: the Python chat agent on :9300
  *
- * `pnpm dev` runs api-py beside the app and the agent server; `pnpm dev:python`
- * adds agent-py, with the app's AGENT_URL pointing at it (docs/remote-agent.md).
+ * `pnpm dev` / `pnpm dev:python` run the UI, api-py and agent-py. No TypeScript
+ * agent server is started; AGENT_URL points at agent-py (docs/remote-agent.md).
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

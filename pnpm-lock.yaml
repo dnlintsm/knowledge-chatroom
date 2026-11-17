@@ -188,8 +188,8 @@ importers:
         specifier: ^1.63.0
         version: 1.64.1
       '@types/node':
-        specifier: ^20
-        version: 20.19.43
+        specifier: ^26
+        version: 26.6.6
       concurrently:
         specifier: ^9.1.2
         version: 9.2.5
@@ -204,7 +204,7 @@ importers:
         version: 17.13.0
       next:
         specifier: 16.4.2
-        version: 16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@20.19.43)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
@@ -340,7 +340,7 @@ importers:
         version: 0.577.0(react@19.3.1)
       next:
         specifier: 16.4.2
-        version: 16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@20.19.43)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8
@@ -379,8 +379,8 @@ importers:
         specifier: ^4
         version: 4.3.3
       '@types/node':
-        specifier: ^20
-        version: 20.19.43
+        specifier: ^26
+        version: 26.6.6
       '@types/react':
         specifier: ^19
         version: 19.3.0
@@ -397,8 +397,8 @@ importers:
   packages/contracts:
     devDependencies:
       '@types/node':
-        specifier: ^22.9.0
-        version: 22.20.5
+        specifier: ^26
+        version: 26.6.6
       ajv:
         specifier: 8.20.0
         version: 8.20.0
@@ -2332,11 +2332,11 @@ packages:
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
 
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
-
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
+
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
@@ -5000,6 +5000,9 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici-types@8.9.0:
+    resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
+
   undici@6.29.1:
     resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
     engines: {node: '>=18.17'}
@@ -7084,14 +7087,14 @@ snapshots:
 
   '@slack/logger@4.0.1':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@slack/oauth@3.0.5(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)':
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
       '@types/jsonwebtoken': 9.0.10
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
       jsonwebtoken: 9.0.3
     transitivePeerDependencies:
       - debug
@@ -7101,7 +7104,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/web-api': 7.19.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
       '@types/ws': 8.18.2
       eventemitter3: 5.0.4
       ws: 8.22.0
@@ -7117,7 +7120,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.22.0
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
       '@types/retry': 0.12.0
       axios: 1.20.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
       eventemitter3: 5.0.4
@@ -7263,7 +7266,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/busboy@1.5.4':
     dependencies:
@@ -7271,11 +7274,11 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/cors@2.8.19':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/d3-array@3.2.2': {}
 
@@ -7408,7 +7411,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.3':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
       '@types/qs': 6.15.1
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -7436,7 +7439,7 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/katex@0.16.8': {}
 
@@ -7450,13 +7453,13 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@22.20.5':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/node@26.6.6':
+    dependencies:
+      undici-types: 8.9.0
 
   '@types/prop-types@15.7.15': {}
 
@@ -7478,12 +7481,12 @@ snapshots:
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@types/trusted-types@2.0.7': {}
 
@@ -7499,7 +7502,7 @@ snapshots:
 
   '@types/ws@8.18.2':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
 
   '@typescript-eslint/eslint-plugin@8.72.0(@typescript-eslint/parser@8.72.0(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3))(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)':
     dependencies:
@@ -9748,7 +9751,7 @@ snapshots:
     dependencies:
       content-type: 2.1.0
 
-  next@16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@20.19.43)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  next@16.4.2(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       '@next/env': 16.4.2
       '@swc/helpers': 0.5.23
@@ -9769,7 +9772,7 @@ snapshots:
       '@next/swc-win32-x64-msvc': 16.4.2
       '@opentelemetry/api': 1.9.1
       '@playwright/test': 1.64.1
-      sharp: 0.35.5(@types/node@20.19.43)
+      sharp: 0.35.5(@types/node@26.6.6)
     transitivePeerDependencies:
       - '@babel/core'
       - '@types/node'
@@ -10416,40 +10419,6 @@ snapshots:
 
   setprototypeof@1.2.0: {}
 
-  sharp@0.35.5(@types/node@20.19.43):
-    dependencies:
-      '@img/colour': 1.1.0
-      detect-libc: 2.1.2
-      semver: 7.8.5
-    optionalDependencies:
-      '@img/sharp-darwin-arm64': 0.35.5
-      '@img/sharp-darwin-x64': 0.35.5
-      '@img/sharp-freebsd-wasm32': 0.35.5
-      '@img/sharp-libvips-darwin-arm64': 1.3.4
-      '@img/sharp-libvips-darwin-x64': 1.3.4
-      '@img/sharp-libvips-linux-arm': 1.3.4
-      '@img/sharp-libvips-linux-arm64': 1.3.4
-      '@img/sharp-libvips-linux-ppc64': 1.3.4
-      '@img/sharp-libvips-linux-riscv64': 1.3.4
-      '@img/sharp-libvips-linux-s390x': 1.3.4
-      '@img/sharp-libvips-linux-x64': 1.3.4
-      '@img/sharp-libvips-linuxmusl-arm64': 1.3.4
-      '@img/sharp-libvips-linuxmusl-x64': 1.3.4
-      '@img/sharp-linux-arm': 0.35.5
-      '@img/sharp-linux-arm64': 0.35.5
-      '@img/sharp-linux-ppc64': 0.35.5
-      '@img/sharp-linux-riscv64': 0.35.5
-      '@img/sharp-linux-s390x': 0.35.5
-      '@img/sharp-linux-x64': 0.35.5
-      '@img/sharp-linuxmusl-arm64': 0.35.5
-      '@img/sharp-linuxmusl-x64': 0.35.5
-      '@img/sharp-webcontainers-wasm32': 0.35.5
-      '@img/sharp-win32-arm64': 0.35.5
-      '@img/sharp-win32-ia32': 0.35.5
-      '@img/sharp-win32-x64': 0.35.5
-      '@types/node': 20.19.43
-    optional: true
-
   sharp@0.35.5(@types/node@22.20.5):
     dependencies:
       '@img/colour': 1.1.0
@@ -10482,6 +10451,40 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 22.20.5
+
+  sharp@0.35.5(@types/node@26.6.6):
+    dependencies:
+      '@img/colour': 1.1.0
+      detect-libc: 2.1.2
+      semver: 7.8.5
+    optionalDependencies:
+      '@img/sharp-darwin-arm64': 0.35.5
+      '@img/sharp-darwin-x64': 0.35.5
+      '@img/sharp-freebsd-wasm32': 0.35.5
+      '@img/sharp-libvips-darwin-arm64': 1.3.4
+      '@img/sharp-libvips-darwin-x64': 1.3.4
+      '@img/sharp-libvips-linux-arm': 1.3.4
+      '@img/sharp-libvips-linux-arm64': 1.3.4
+      '@img/sharp-libvips-linux-ppc64': 1.3.4
+      '@img/sharp-libvips-linux-riscv64': 1.3.4
+      '@img/sharp-libvips-linux-s390x': 1.3.4
+      '@img/sharp-libvips-linux-x64': 1.3.4
+      '@img/sharp-libvips-linuxmusl-arm64': 1.3.4
+      '@img/sharp-libvips-linuxmusl-x64': 1.3.4
+      '@img/sharp-linux-arm': 0.35.5
+      '@img/sharp-linux-arm64': 0.35.5
+      '@img/sharp-linux-ppc64': 0.35.5
+      '@img/sharp-linux-riscv64': 0.35.5
+      '@img/sharp-linux-s390x': 0.35.5
+      '@img/sharp-linux-x64': 0.35.5
+      '@img/sharp-linuxmusl-arm64': 0.35.5
+      '@img/sharp-linuxmusl-x64': 0.35.5
+      '@img/sharp-webcontainers-wasm32': 0.35.5
+      '@img/sharp-win32-arm64': 0.35.5
+      '@img/sharp-win32-ia32': 0.35.5
+      '@img/sharp-win32-x64': 0.35.5
+      '@types/node': 26.6.6
+    optional: true
 
   shebang-command@2.0.0:
     dependencies:
@@ -10699,7 +10702,7 @@ snapshots:
   type-graphql@2.0.0-rc.1(class-validator@0.14.4)(graphql-scalars@2.0.1(graphql@16.14.2))(graphql@16.14.2):
     dependencies:
       '@graphql-yoga/subscription': 5.1.1
-      '@types/node': 20.19.43
+      '@types/node': 26.6.6
       '@types/semver': 7.8.0
       graphql: 16.14.2
       graphql-query-complexity: 0.12.0(graphql@16.14.2)
@@ -10729,6 +10732,8 @@ snapshots:
   typescript@5.9.3: {}
 
   undici-types@6.21.0: {}
+
+  undici-types@8.9.0: {}
 
   undici@6.29.1: {}
 

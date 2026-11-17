@@ -54,6 +54,8 @@ __pycache__/
 /test-results-login/
 /test-results-storage/
 /test-results-python/
+/test-results-python-storage/
+/test-results-browser/
 /playwright-report/
 /blob-report/
 /preview/

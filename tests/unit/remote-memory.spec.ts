@@ -103,7 +103,8 @@ test.describe("memory tokens for a remote chat agent", () => {
     process.env.AUTH_MODE = "local";
     delete process.env.AUTH_SECRET;
     expect(memoryHeaderOf(createSuggesterAgent())).toBeNull();
-    delete process.env.AGENT_URL;
+    // AGENT_URL=local: the legacy agent server's own chat needs no memory token.
+    process.env.AGENT_URL = "local";
     expect(memoryHeaderOf(createDefaultAgent())).toBeNull();
   });
 });

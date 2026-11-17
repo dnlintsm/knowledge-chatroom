@@ -166,7 +166,13 @@ async def memory_route(request: Request) -> Response:
     claims = memory_claims(request, secret) if agent else None
     # A remote backend's run is served here; outside MCP servers' tokens (and
     # bad ones, for the TypeScript server's 401) go through.
-    here = claims is not None and claims["via"] == REMOTE_VIA if agent else _served_here(request)
+    here = (
+        claims is not None and (claims["via"] == REMOTE_VIA or state.http is None)
+        if agent
+        else _served_here(request)
+    )
+    if agent and state.http is None and state.settings.memory and claims is None:
+        return send(401, {"error": "Sign in first"})
     if not state.settings.memory or not here or not await state.storage_ready():
         return await forward(request, state.http)
     storage = state.storage

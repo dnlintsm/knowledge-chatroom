@@ -72,7 +72,8 @@ const PORT = Number.parseInt(process.env.AGENT_PORT || "8000", 10);
 // AGENT_URL set: the app's chat goes to a remote backend (docs/remote-agent.md),
 // so this server keeps storage, skills, the hub and the follow-up chips
 // (/suggest), and its own chat is off.
-const REMOTE_CHAT = Boolean(process.env.AGENT_URL?.trim());
+// AGENT_URL=local (or unset, before #264) keeps the chat here.
+const REMOTE_CHAT = Boolean(process.env.AGENT_URL?.trim()) && process.env.AGENT_URL?.trim().toLowerCase() !== "local";
 const HOST = process.env.AGENT_HOST || "0.0.0.0";
 
 // Login settings are checked at startup whether or not storage is on.

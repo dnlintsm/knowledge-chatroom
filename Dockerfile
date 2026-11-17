@@ -7,12 +7,12 @@
 # apps/agent, packages/contracts). The agent runs from source with tsx, as
 # `pnpm -C apps/agent start` does.
 
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:26-bookworm-slim
+ARG LEGACY_NODE_IMAGE=node:22-bookworm-slim
 
 FROM ${NODE_IMAGE} AS base
-# pnpm at the version in package.json "packageManager".
-ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
+# Node 25+ no longer bundles Corepack. Pin pnpm to package.json's packageManager.
+RUN npm install --global --allow-scripts=pnpm pnpm@12.18.0
 
 # --- UI: Next.js standalone server ---
 FROM base AS app-build
@@ -47,7 +47,8 @@ CMD ["node", "apps/web/server.js"]
 # --- Agent: Claude Agent SDK over AG-UI, plus the storage API ---
 # `pnpm deploy` copies the agent with only its own dependencies (and
 # packages/contracts) into /out; a filtered install would also bring the UI's.
-FROM base AS agent-build
+FROM ${LEGACY_NODE_IMAGE} AS agent-build
+RUN npm install --global --allow-scripts=pnpm pnpm@12.18.0
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/
@@ -60,7 +61,7 @@ COPY apps/agent ./apps/agent
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm --filter ./apps/agent deploy /out
 
-FROM ${NODE_IMAGE} AS agent
+FROM ${LEGACY_NODE_IMAGE} AS agent
 # Same depth as in the repository: the agent treats ../../.. from its src/ as the
 # repository root (.env, and a folder skill scripts may not read).
 WORKDIR /app/apps/agent

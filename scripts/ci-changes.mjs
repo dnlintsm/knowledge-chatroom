@@ -27,7 +27,7 @@ export const RULES = [
   // api-py sits in front of the agent in the storage and login E2E runs (#190).
   ["services/api-py/**", ["python", "storage"]],
   // agent-py serves the chat in the Python agent E2E run (#176).
-  ["services/agent-py/**", ["python", "pyagent"]],
+  ["services/agent-py/**", ["python", "storage", "pyagent"]],
   // Shared by both Python services, or the whole uv workspace.
   ["packages/knowledge-py/**", ["python", "storage", "pyagent"]],
   ["pyproject.toml", ["python", "storage", "pyagent"]],

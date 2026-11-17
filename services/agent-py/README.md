@@ -4,9 +4,8 @@ The chatroom's chat agent in Python, on the
 [AG-UI adapter for the Claude Agent SDK](https://pypi.org/project/ag-ui-claude-sdk/)
 (`ag_ui_claude_sdk`) and FastAPI. The app reaches it through `AGENT_URL`, as any
 remote backend ([docs/remote-agent.md](../../docs/remote-agent.md)); this repo's
-TypeScript agent server (`apps/agent`) keeps serving storage, skills and memory on
-`LOCAL_AGENT_URL`, through the Python API server in front of it (`services/api-py`,
-issue #190).
+Python API server (`services/api-py`) serves storage, skills and memory on
+`LOCAL_AGENT_URL`; no TypeScript agent process is required.
 
 It is phase 2 of moving the backend to Python (issue #169), built in steps under
 issue #176. So far it chats with the app's own tools (task board, workbench panes,
@@ -24,7 +23,7 @@ Python 3.12+ and [uv](https://docs.astral.sh/uv/). With the app, from the reposi
 
 ```bash
 uv sync --all-packages
-pnpm dev:python                      # UI :3000, API :8000 (agent server :8100), this agent :9300
+pnpm dev:python                      # UI :3000, Python API :8000, this agent :9300
 ```
 
 `pnpm dev:python` reads the repository's `.env` for this agent too and sets the app's
@@ -42,7 +41,7 @@ With Docker, the `python-agent` profile builds `services/agent-py/Dockerfile` an
 beside the demo (the Claude Agent SDK brings its own Claude Code, so no Node.js):
 
 ```bash
-AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build
+docker compose --profile demo up --build
 ```
 
 Claude Code needs credentials as usual (`ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL`

@@ -1,7 +1,6 @@
 """Settings from the environment, read as the TypeScript agent server reads them.
 
-TS_AGENT_URL         the TypeScript agent server, which serves every route not
-                     ported yet (default http://127.0.0.1:8100)
+TS_AGENT_URL         optional legacy TypeScript server; unset disables forwarding
 API_PY_HOST / API_PY_PORT
                      where this server listens (default 127.0.0.1:8000, the
                      address the app and agent-py know as LOCAL_AGENT_URL)
@@ -56,7 +55,6 @@ from .semantic import EmbeddingSettings, embedding_settings
 if TYPE_CHECKING:
     from .tools import ToolsSettings
 
-DEFAULT_TS_AGENT_URL = "http://127.0.0.1:8100"
 # services/api-py/api_py/config.py -> the repository root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MIGRATIONS_DIR = REPO_ROOT / "apps" / "agent" / "src" / "storage" / "migrations"
@@ -97,7 +95,7 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
 
 @dataclass(frozen=True)
 class Settings:
-    ts_agent_url: str
+    ts_agent_url: str | None
     database_url: str | None
     auth_secret: str | None
     migrations_dir: Path
@@ -129,10 +127,13 @@ class Settings:
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
-    upstream = (env.get("TS_AGENT_URL") or DEFAULT_TS_AGENT_URL).strip().rstrip("/")
+    upstream = (env.get("TS_AGENT_URL") or "").strip().rstrip("/") or None
     port = env.get("API_PY_PORT") or "8000"
     if not port.isdigit() or not 0 < int(port) < 65536:
         raise ConfigError(f"API_PY_PORT must be a port number, not {port!r}")
+    tools = _tools(env)
+    if tools is None and upstream is None:
+        tools = _tools({**env, "MCP_SERVERS": "{}"})
     return Settings(
         ts_agent_url=upstream,
         database_url=(env.get("DATABASE_URL") or "").strip() or None,
@@ -150,7 +151,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         recovery_idle_days=_recovery_idle_days(env),
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
-        tools=_tools(env),
+        tools=tools,
         memory=bool(
             re.fullmatch(
                 r"(on|1|true|yes)", (env.get("MEMORY") or "").strip(f"{JS_SPACE}"), re.IGNORECASE

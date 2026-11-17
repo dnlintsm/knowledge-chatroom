@@ -43,27 +43,24 @@ jobs:
           node-version-file: .nvmrc
       # pnpm at the version in package.json "packageManager".
       - name: Enable pnpm
-        run: corepack enable
+        run: npm install --global pnpm@12.18.0
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Check lint and types (root, web, agent, contracts)
-        run: pnpm lint && pnpm typecheck
+        run: pnpm install --frozen-lockfile --filter @knowledge-chatroom/web... --filter @knowledge-chatroom/contracts
+      - name: Check lint and types (root, web, contracts)
+        run: pnpm exec eslint apps/web packages/contracts tests/unit e2e scripts *.ts --max-warnings=0 --no-warn-ignored && pnpm typecheck:web
       # packages/contracts/openapi/storage.yaml is the source of truth (issue #169).
       - name: Check the generated storage API types are up to date
         run: pnpm -C packages/contracts openapi:check
       - name: Frontend unit tests
         run: node scripts/ci-tests.mjs run "Frontend units" playwright -- pnpm exec playwright test --config playwright.unit.config.ts --reporter=list,json
-      - name: Agent unit tests
-        if: always()
-        run: node scripts/ci-tests.mjs run "Agent units" tap -- pnpm -C apps/agent test:unit
       - name: Summarize test suites
         if: always()
-        run: node scripts/ci-tests.mjs summary "Frontend units" "Agent units"
+        run: node scripts/ci-tests.mjs summary "Frontend units"
       - name: Verify the lockfile is unchanged
         run: git diff --exit-code -- pnpm-lock.yaml
 

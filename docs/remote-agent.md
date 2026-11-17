@@ -9,7 +9,7 @@ backend has to do.
 
 | Variable (Next.js server) | Meaning |
 | --- | --- |
-| `AGENT_URL` | The backend's base URL. Set, every chat run is posted to `${AGENT_URL}/agent/report`, and this repo's own Claude agent is off. Unset, the chat uses this repo's agent. |
+| `AGENT_URL` | The backend's base URL: every chat run is posted to `${AGENT_URL}/agent/report`. Unset, it is the Python chat agent (`services/agent-py`) at `http://127.0.0.1:9300` (issue #264). `AGENT_URL=local` sends the chat to the legacy TypeScript agent server at `LOCAL_AGENT_URL` instead. |
 | `LOCAL_AGENT_URL` | This repo's agent server (default `http://localhost:8000`). It always serves storage (`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`, `/access`), skills and the skill hub, so keep running it with storage. Before this change `AGENT_URL` held this address. |
 
 With `AGENT_URL` set:

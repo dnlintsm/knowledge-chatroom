@@ -2,84 +2,76 @@
 
 ## Demo stack
 
-`docker compose --profile demo up --build` builds the UI and agent images from the
-root `Dockerfile` (targets `app` and `agent`), and the Python API server from
-`services/api-py/Dockerfile` (the `api` service). It starts them with PostgreSQL and
-SeaweedFS. The app and the Python services reach the agent's routes through `api`, which
-serves the ones moved to Python so far and passes the rest to `agent` (issue #190). The UI (3000), the object store (8333, for signed binary downloads) and
-PostgreSQL (5432, for local development) are published on the host. The agent and the API
-server stay on the compose network. It runs without login, with the local storage credentials from
-`infra/seaweedfs/s3.json`, and reads `ANTHROPIC_API_KEY` and the optional model, memory,
-embedding and `MCP_SERVERS` settings from `.env` (the `agent` and `app` services in
-`docker-compose.yml` list them). The search model downloads into the `models` volume on
-first start. Treat it as a single-user demo: for anything shared, change the storage
-credentials, stop publishing 5432 and configure login as below.
+`docker compose --profile demo up --build` builds the Node 26 UI from the root
+`Dockerfile` (target `app`), the Python API from `services/api-py/Dockerfile`, and
+the Python chat agent from `services/agent-py/Dockerfile`. PostgreSQL and SeaweedFS
+provide storage. The demo starts no TypeScript agent; `api` has legacy forwarding
+disabled and `app` sends chat runs to `agent-py:9300` by default.
+
+The UI (3000), object store (8333, for signed binary downloads), and PostgreSQL
+(5432, for local development) are published on the host. Python services stay on the
+compose network. The demo runs without login and reads model, memory, embeddings
+and `MCP_SERVERS` settings from `.env`. Search models are cached in `api-models`.
+For a shared deployment, change the storage credentials, stop publishing 5432,
+and configure login as below.
 
 Optional profiles start sample MCP servers next to the demo: `papers`
 (`services/papers-mcp`, paper search) and `python-sample` (`services/lab-tools`, from `examples/python-agent`). Add
 the profile and the matching `MCP_SERVERS` line from `docker-compose.yml` to `.env`, using
 service names such as `http://papers:9200/mcp` rather than localhost.
 
-The `python-agent` profile serves the chat from the Python agent (`services/agent-py`)
-instead of the agent server's own: add it with `AGENT_URL=http://agent-py:9300`, as in
-`AGENT_URL=http://agent-py:9300 docker compose --profile demo --profile python-agent up --build`.
-It gets the same model settings and `MCP_SERVERS`, and reaches storage, skills and memory
-through the API server.
+The `python-agent` profile remains an alias for selecting the Python chat service.
+The retired TypeScript image is available only under `legacy-agent`, on Node 22;
+it is outside the Node 26 frontend migration.
 
 ## Production
 
-Use Node 22 for build and runtime. Install with `pnpm install --frozen-lockfile`, run `pnpm check`,
-then `pnpm build`. The build includes TypeScript checks. `pnpm start` serves the
-production build of `apps/web`; its standalone output (`apps/web/.next/standalone`, server
-`apps/web/server.js` inside it) can also be packaged by a deployment host with
-`apps/web/.next/static` and `apps/web/public`, as the Dockerfile does. Deploy the agent
-separately with its dependencies and `packages/contracts`
-(`pnpm --filter ./apps/agent deploy <dir>`, or `pnpm install --filter "./apps/agent..."`)
-and run `pnpm -C apps/agent start`. Both read `.env` from the repository root.
+Use Node 26 LTS for frontend build and runtime. Install pnpm 12.18.0 explicitly
+(`npm install --global pnpm@12.18.0`), then run:
 
-Run the Python API server (`services/api-py`, [README](../services/api-py/README.md)) in
-front of the agent, with `TS_AGENT_URL` pointing at the agent and the same `DATABASE_URL`,
-`AUTH_MODE` and `AUTH_SECRET`. Point `LOCAL_AGENT_URL` and the MCP servers'
-`KNOWLEDGE_STORAGE_URL` at the API server. The agent's routes are moving to it one group
-at a time (issue #190). It serves `/access`, `/nodes`, `/files`, `/experiments`, `/proposals`, `/search`, `/chats`, `/skills`, `/hub`, `/tools`, `/memory` (`/memory/agent` only for remote backends' runs; outside MCP servers' memory tokens still go to the agent), `/identity` and `/suggest` itself and passes the rest
-through. The agent keeps serving every route too until phase 4, so an install without
-the API server keeps working, but new work lands in Python. It serves `/files` too, so
-give it the same `S3_*` settings (including `S3_PUBLIC_URL`) and `MAX_UPLOAD_BYTES` as
-the agent; it reads and writes the same bucket. It also runs the search indexer, so start
-the agent with `SEARCH_INDEXER=off` and give the API server the same `EMBEDDING_*` and
-`SEARCH_MIN_SIMILARITY` settings as the agent, and a writable `EMBEDDING_CACHE_DIR` for
-the local model. Without `SEARCH_INDEXER=off` both index, which is harmless but wasteful.
-It serves the skills API and the skill hub too, so give it the same `HUB_ADMINS` and
-`SKILL_SCRIPTS` as the agent. It serves the chat's "+" menu (`/tools`) when it has
-`MCP_SERVERS` of its own, so give it the same `MCP_SERVERS` as the agent (and the same
-`TOOLS_CALL_TIMEOUT_MS` and `STORAGE_TOKEN_SECONDS`, if you set them). The menu's servers
-must then be reachable from the API server too. It serves memory (own and shared notes,
-memory packs) when `MEMORY=on` is set for it, so give it the same `MEMORY` as the agent;
-memory packs' verify and yank follow its `HUB_ADMINS`. Workspaces are its own: set
-`WORKSPACE_CREATORS` on it (emails or login subjects) to limit who may create one;
-without it, every signed-in user may. `PLATFORM_ADMINS` on it names the deployment's admins,
-who see the [workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also
-from the workspace switcher) and can add an Owner to a workspace whose Owners can no longer
-sign in; nobody is one by default. The chat's follow-up chips and importing plain-text memory ask
-the small model, so give it the agent's `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
-`ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL` too. It also
-learns from quiet chats in the background, so start the agent with `MEMORY_LEARN=off` and
-give the API server your `MEMORY_LEARN` and `MEMORY_IDLE_MINUTES`. Without
-`MEMORY_LEARN=off` on the agent both learn from each chat, which asks the model twice.
-It applies the database migrations too, so start the agent with `MIGRATIONS=off`: the agent
-then waits until they are in before it opens storage. Without it both try, and the shared
-lock lets only one apply each.
+```bash
+pnpm install --frozen-lockfile --filter @knowledge-chatroom/web... --filter @knowledge-chatroom/contracts
+pnpm check:web
+pnpm build
+```
 
-Configure `LOCAL_AGENT_URL` on Next.js to reach the agent (through the API server) over a private network,
-and `AGENT_URL` only when the chat uses a remote backend
-([Remote agent backend](remote-agent.md)); the agent then still serves storage and
-skills. Expose
-the Next.js UI through HTTPS. Keep the agent HTTP port private: Next.js signs
-forwarded identities, and users should not call the agent directly. Set `AUTH_MODE`
-on both: `oidc` with the OIDC values, `APP_URL` and shared `AUTH_SECRET` described in
-[Development](development.md) for a shared workspace, or `local` for a single-user
-setup without login. Production builds refuse to start when it is unset and no
-`AUTH_SECRET` is given, so a missing secret can't silently turn login off.
+The standalone output (`apps/web/.next/standalone`, with `apps/web/server.js`
+inside it) runs with `node apps/web/server.js`; include `.next/static` and `public`
+as the Dockerfile does.
+
+Deploy `api-py` and `agent-py` separately with the locked Python dependencies.
+Point the UI's `LOCAL_AGENT_URL` at api-py and `AGENT_URL` at agent-py. Point
+agent-py's `LOCAL_AGENT_URL` and MCP servers' `KNOWLEDGE_STORAGE_URL` at api-py.
+Leave `TS_AGENT_URL` unset: it is only an explicit legacy fallback. api-py applies
+migrations, serves the API directly, and checks its own storage readiness.
+PostgreSQL and S3 are required for skills, shared storage and persistent chat history.
+`AGENT_URL` unset means agent-py at `http://127.0.0.1:9300`; `AGENT_URL=local` sends the
+chat to the legacy TypeScript agent server at `LOCAL_AGENT_URL` instead.
+
+Give api-py the settings for everything it serves (its
+[README](../services/api-py/README.md) lists each one): `DATABASE_URL`, the `S3_*`
+settings and `MAX_UPLOAD_BYTES` for storage; `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY` and a
+writable `EMBEDDING_CACHE_DIR` for search; `HUB_ADMINS` and `SKILL_SCRIPTS` for skills;
+`MEMORY`, `MEMORY_LEARN` and `MEMORY_IDLE_MINUTES` for memory; and `ANTHROPIC_API_KEY` (or
+`ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and
+`CLAUDE_MODEL` for the follow-up chips and memory's small model. Give api-py and agent-py
+the same `MCP_SERVERS`: api-py serves the chat's "+" menu from it, agent-py connects to
+the servers. The menu's servers must be reachable from both. agent-py also needs the chat
+model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
+[README](../services/agent-py/README.md).
+
+Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
+`PLATFORM_ADMINS` names the deployment admins who can inspect the
+[workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also from the
+workspace switcher) and recover an Owner
+when a workspace's Owners can no longer sign in; nobody is one by default.
+
+Expose the UI through HTTPS and keep both Python service ports private. For login,
+set `AUTH_MODE=oidc`, OIDC settings, `APP_URL`, and the same `AUTH_SECRET` on the UI
+and api-py. Give agent-py and outside MCP servers only api-py's public key from
+`GET /identity/public-key` as `KNOWLEDGE_PUBLIC_KEY`, never the signing secret.
+For a single-user deployment use `AUTH_MODE=local`; production refuses an unset
+authentication mode without a secret.
 
 The first person to sign in owns the workspace. Owners see an **Admin** button next
 to Share: people who have signed in and when they were last active, workspace roles,
@@ -108,13 +100,13 @@ Then set `APP_URL=https://knowledge.example.com` on the UI (session cookies beco
 Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`). For binary files,
 pick one:
 
-- **Keep the store private (simpler)**: leave `S3_PUBLIC_URL` unset on the agent and drop
+- **Keep the store private (simpler)**: leave `S3_PUBLIC_URL` unset on api-py and drop
   the second block. Images, PDFs and other binary files then stream through the app after
-  the same access check. Each file passes through the agent in one piece (uploads are
+  the same access check. Each file passes through api-py in one piece (uploads are
   capped by `MAX_UPLOAD_BYTES`, 50 MB by default) and there are no range requests, so
   long videos can't seek.
 - **Signed links to the store**: keep the second block and set
-  `S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent. Left at
+  `S3_PUBLIC_URL=https://knowledge.example.com:8443` on api-py. Left at
   `http://localhost:8333`, previews break on an https page as mixed content.
 
 `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
@@ -127,15 +119,15 @@ Caddy); see [Dependency security](development.md#dependency-security) for why.
 ## Storage and upgrades
 
 Persist PostgreSQL and the S3 bucket together; files and their versions reference
-content hashes in the bucket. Set database/object-store credentials for the agent.
+content hashes in the bucket. Set database/object-store credentials for api-py.
 Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
 downloads; signed links expire after five minutes. Without it, binary files are served
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
 50 MB) caps one upload.
 
-Migrations apply when the Python API server starts (with `MIGRATIONS=off` on the agent,
-which then waits for them), or at agent startup without it. Back up database metadata and blob contents
+Migrations apply when the Python API server starts (a legacy TypeScript agent server
+behind it needs `MIGRATIONS=off`, and then waits for them). Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.
@@ -151,6 +143,9 @@ login E2E, and review the migration/runtime impact in a separate PR.
 or bucket access have finished. Verify authenticated storage operations after
 startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
+
+The next two settings are for the legacy TypeScript agent server's chat
+(`AGENT_URL=local`); the Python chat agent has neither yet (#264).
 
 With storage, the agent keeps a copy of each user's readable files in their run folder
 (`SKILLS_RUN_DIR`, default a temp folder) for Claude's Read/Glob/Grep: give that folder disk

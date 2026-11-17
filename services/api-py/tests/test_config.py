@@ -10,7 +10,9 @@ SECRET = "0123456789abcdef0123456789abcdef"
 def test_defaults_put_this_server_where_the_app_looks():
     settings = settings_from_env({})
     assert (settings.host, settings.port) == ("127.0.0.1", 8000)
-    assert settings.ts_agent_url == "http://127.0.0.1:8100"
+    assert settings.ts_agent_url is None
+    assert settings_from_env({"TS_AGENT_URL": "  "}).ts_agent_url is None
+    assert settings.tools is not None and settings.tools.servers == {}
     assert settings.database_url is None and settings.auth_secret is None
     assert (DEFAULT_MIGRATIONS_DIR / "001_init.sql").exists() or any(
         DEFAULT_MIGRATIONS_DIR.glob("001_*.sql")
