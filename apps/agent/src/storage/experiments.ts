@@ -18,7 +18,7 @@ export const STATUSES: ExperimentStatus[] = ["draft", "shared", "archived"];
 /** How far a run got; apart from status, which says who sees it. */
 export type ExperimentState = "ready" | "running" | "done" | "failed";
 export const STATES: ExperimentState[] = ["ready", "running", "done", "failed"];
-/** writer: its author, while it isn't archived. reader: may look. */
+/** writer: its maintainer or a collaborator, while it isn't archived. reader: may look. */
 export type ExperimentAccess = "writer" | "reader";
 
 export interface Experiment {
@@ -40,8 +40,23 @@ export interface Experiment {
   provenance: Record<string, unknown>;
   /** What the asking user may do with it. */
   access: ExperimentAccess;
-  /** Whether the asking user is its author (who may also restore or delete it). */
+  /**
+   * Whether the asking user is its maintainer (who may also change its
+   * status, delete it, or choose who works on it; 025_experiment_maintainers.sql).
+   */
   mine: boolean;
+  /** Who is responsible for it now: its author until they hand it over. */
+  maintainerId: string;
+  maintainerName: string | null;
+  /** Whether its maintainer is still a member of the workspace. */
+  maintainerIsMember: boolean;
+  /** Members the maintainer added to work on it. */
+  collaborators: Collaborator[];
+}
+
+export interface Collaborator {
+  id: string;
+  name: string | null;
 }
 
 export interface ExperimentInput {
@@ -64,6 +79,9 @@ export interface LinkedInput {
 
 /** The request can't be done as asked (no title, params not an object, …). */
 export class ExperimentError extends Error {}
+
+/** Refused: a collaborator or new maintainer who isn't (or just stopped being) a member. */
+export const NOT_A_MEMBER = "They aren't a member of this workspace; add them to it first";
 
 /** A new experiment was given an id that is already taken (even by a deleted one). */
 export class ExperimentExistsError extends Error {
@@ -128,6 +146,10 @@ interface ExperimentRow {
   provenance: Record<string, unknown>;
   access: ExperimentAccess;
   mine: boolean;
+  maintainer_id: string;
+  maintainer_name: string | null;
+  maintainer_is_member: boolean;
+  collaborators: Collaborator[];
 }
 
 const toExperiment = (r: ExperimentRow): Experiment => ({
@@ -147,6 +169,10 @@ const toExperiment = (r: ExperimentRow): Experiment => ({
   provenance: r.provenance,
   access: r.access,
   mine: r.mine,
+  maintainerId: r.maintainer_id,
+  maintainerName: r.maintainer_name,
+  maintainerIsMember: r.maintainer_is_member,
+  collaborators: r.collaborators,
 });
 
 /**
@@ -173,6 +199,26 @@ export class ExperimentService {
     return new ExperimentService(sql, this.events, this.workspaceId);
   }
 
+  /** The columns of an ExperimentRow, for `userId`; the query joins people(). */
+  private columns(userId: string) {
+    return this.sql`
+      e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
+      e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
+      (SELECT count(*) FROM files f WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
+      experiment_access(${userId}, e.id) AS access, e.maintainer_id = ${userId} AS mine,
+      e.maintainer_id, mu.name AS maintainer_name,
+      workspace_member(e.workspace_id, e.maintainer_id) AS maintainer_is_member,
+      (SELECT coalesce(jsonb_agg(jsonb_build_object('id', c.user_id, 'name', cu.name)
+                                 ORDER BY lower(coalesce(cu.name, cu.email, '')), c.created_at), '[]')
+       FROM experiment_collaborators c JOIN users cu ON cu.id = c.user_id
+       WHERE c.experiment_id = e.id) AS collaborators`;
+  }
+
+  /** The joins columns() needs: the author's and the maintainer's names. */
+  private people() {
+    return this.sql`LEFT JOIN users u ON u.id = e.author_id LEFT JOIN users mu ON mu.id = e.maintainer_id`;
+  }
+
   /**
    * Experiments `userId` can see, on one node (null: at the workspace root)
    * or, without `nodeId`, anywhere; newest first.
@@ -181,13 +227,9 @@ export class ExperimentService {
     if (nodeId && !isNodeId(nodeId)) return [];
     const rows = await this.sql<ExperimentRow[]>`
       SELECT * FROM (
-        SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-               e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
-               (SELECT count(*) FROM files f
-                WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
-               experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
+        SELECT ${this.columns(userId)}
         FROM experiments e LEFT JOIN nodes n ON n.id = e.node_id
-        LEFT JOIN users u ON u.id = e.author_id
+        ${this.people()}
         WHERE e.workspace_id = ${this.workspaceId} AND e.deleted_at IS NULL
           AND (e.node_id IS NULL OR n.deleted_at IS NULL)
           ${nodeId === undefined ? this.sql`` : this.sql`AND e.node_id IS NOT DISTINCT FROM ${nodeId}::uuid`}
@@ -200,12 +242,8 @@ export class ExperimentService {
   async get(userId: string, id: string): Promise<Experiment | null> {
     if (!isNodeId(id)) return null;
     const rows = await this.sql<ExperimentRow[]>`
-      SELECT e.id, e.node_id, e.author_id, u.name AS author_name, e.title, e.hypothesis,
-             e.params, e.results, e.status, e.state, e.forked_at, e.updated_at, e.provenance,
-             (SELECT count(*) FROM files f
-              WHERE f.experiment_id = e.id AND f.deleted_at IS NULL) AS file_count,
-             experiment_access(${userId}, e.id) AS access, e.author_id = ${userId} AS mine
-      FROM experiments e LEFT JOIN users u ON u.id = e.author_id
+      SELECT ${this.columns(userId)}
+      FROM experiments e ${this.people()}
       WHERE e.id = ${id} AND e.workspace_id = ${this.workspaceId} AND e.deleted_at IS NULL`;
     const row = rows[0];
     return row?.access ? toExperiment(row) : null;
@@ -417,6 +455,77 @@ export class ExperimentService {
     });
   }
 
+  /** Whether `userId` is a member who can view `nodeId` (null: the root), so may work on an experiment there. */
+  async canWork(userId: string, nodeId: string | null): Promise<boolean> {
+    if (!isNodeId(userId)) return false;
+    const [row] = await this.sql<{ ok: boolean }[]>`
+      SELECT workspace_member(${this.workspaceId}, ${userId}::uuid)
+         AND effective_role(${this.workspaceId}, ${userId}::uuid, ${nodeId}::uuid) IS NOT NULL AS ok`;
+    return Boolean(row?.ok);
+  }
+
+  /** Adds or removes a collaborator; whether anything changed. */
+  async setCollaborator(
+    experiment: Experiment,
+    userId: string,
+    add: boolean,
+    by: string,
+    inTx?: (tx: Tx) => Promise<unknown>,
+  ): Promise<boolean> {
+    return this.sql.begin(async (tx) => {
+      if (add && !(await lockMember(tx, this.workspaceId, userId))) throw new ExperimentError(NOT_A_MEMBER);
+      const changed = add
+        ? await tx`
+            INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
+            VALUES (${experiment.id}, ${userId}, ${by}) ON CONFLICT DO NOTHING`
+        : await tx`
+            DELETE FROM experiment_collaborators WHERE experiment_id = ${experiment.id} AND user_id = ${userId}`;
+      if (changed.count === 0) return false;
+      await inTx?.(tx);
+      await this.events.notify(tx, {
+        op: "experiment",
+        change: "update",
+        id: experiment.id,
+        node: experiment.nodeId,
+        ...(add ? {} : { left: [userId] }),
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Makes `userId` the maintainer. `keepPrevious`: the previous maintainer
+   * stays on as a collaborator. The new one stops being a collaborator.
+   */
+  async handOver(
+    experiment: Experiment,
+    userId: string,
+    keepPrevious: boolean,
+    by: string,
+    inTx?: (tx: Tx) => Promise<unknown>,
+  ): Promise<void> {
+    await this.sql.begin(async (tx) => {
+      if (!(await lockMember(tx, this.workspaceId, userId))) throw new ExperimentError(NOT_A_MEMBER);
+      // The previous maintainer stays on only while still a member.
+      const kept = keepPrevious && (await lockMember(tx, this.workspaceId, experiment.maintainerId));
+      if (kept) {
+        await tx`
+          INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
+          VALUES (${experiment.id}, ${experiment.maintainerId}, ${by}) ON CONFLICT DO NOTHING`;
+      }
+      await tx`DELETE FROM experiment_collaborators WHERE experiment_id = ${experiment.id} AND user_id = ${userId}`;
+      await tx`UPDATE experiments SET maintainer_id = ${userId}, updated_at = now() WHERE id = ${experiment.id}`;
+      await inTx?.(tx);
+      await this.events.notify(tx, {
+        op: "experiment",
+        change: "update",
+        id: experiment.id,
+        node: experiment.nodeId,
+        ...(kept ? {} : { left: [experiment.maintainerId] }),
+      });
+    });
+  }
+
   /** Soft-deletes the experiment and its files; history stays. */
   async remove(id: string, inTx?: (tx: Tx) => Promise<unknown>): Promise<boolean> {
     if (!isNodeId(id)) return false;
@@ -434,14 +543,14 @@ export class ExperimentService {
   }
 
   /**
-   * Whether `userId` should hear about a change to an experiment. Its author
-   * always; others who can view its node when it isn't a draft, or when it
+   * Whether `userId` should hear about a change to an experiment. Its
+   * maintainer and collaborators always; others who can view its node when it isn't a draft, or when it
    * just stopped or started being one (so their list updates). Answers for a
    * deleted experiment too.
    */
   async hears(userId: string, id: string, change: string): Promise<boolean> {
     const [row] = await this.sql<{ hears: boolean }[]>`
-      SELECT e.author_id = ${userId}
+      SELECT experiment_works(${userId}, e.id, e.maintainer_id)
           OR ((e.status <> 'draft' OR ${change} = 'status')
               AND effective_role(e.workspace_id, ${userId}, e.node_id) IS NOT NULL) AS hears
       FROM experiments e
@@ -456,4 +565,15 @@ export class ExperimentService {
       SELECT experiment_access(${userId}, ${id}::uuid) AS access`;
     return row.access;
   }
+}
+
+/**
+ * Whether `userId` is a member, holding their membership until `tx` ends, so a
+ * removal can't slip in before the write that gives them a place
+ * (025_experiment_maintainers.sql, lock_workspace_member).
+ */
+async function lockMember(tx: Tx, workspaceId: string, userId: string): Promise<boolean> {
+  if (!isNodeId(userId)) return false;
+  const [row] = await tx<{ ok: boolean }[]>`SELECT lock_workspace_member(${workspaceId}, ${userId}::uuid) AS ok`;
+  return Boolean(row?.ok);
 }

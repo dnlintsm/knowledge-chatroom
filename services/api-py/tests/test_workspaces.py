@@ -17,9 +17,11 @@ from psycopg import conninfo
 from support import SECRET, URL, Client, user
 
 from api_py import db
+from api_py import session as session_module
 from api_py import workspaces as workspaces_module
-from api_py.access import AccessError, AccessService
+from api_py.access import AccessError, AccessService, Principal
 from api_py.config import DEFAULT_MIGRATIONS_DIR
+from api_py.experiments import ExperimentError
 
 pytestmark = [
     pytest.mark.skipif(not URL, reason="needs TEST_DATABASE_URL"),
@@ -637,3 +639,116 @@ async def test_a_permission_write_after_a_removal_finds_no_member(database, kind
             await writing
         monkeypatch.setattr(workspaces_module, "_audit", audit)
         await _no_access_once_added_back(api, alice, bob, lab, bob_id)
+
+
+async def _lab_with_an_experiment(database, api, alice, bob):
+    """alice's workspace with bob a Member who can view its root, and alice's Experiment there."""
+    alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+    bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+    lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()["id"]
+    in_lab = {**alice, "X-Knowledge-Workspace": lab}
+    await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "viewer"},
+    )
+    # Creating one is still the TypeScript server's route.
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        cur = await conn.execute(
+            "INSERT INTO experiments (workspace_id, node_id, author_id, maintainer_id, title) "
+            "VALUES (%s, NULL, %s, %s, 'Try it') RETURNING id::text",
+            (lab, alice_id, alice_id),
+        )
+        row = await cur.fetchone()
+    assert row
+    return lab, in_lab, alice_id, bob_id, row[0]
+
+
+def _as_owner(app, lab: str, alice_id: str) -> session_module.Session:
+    """alice's storage session in her workspace (the experiment routes need file storage here)."""
+    here = app.state.storage.in_workspace(lab)
+    return session_module.Session(here, here.access, Principal(alice_id), "owner")
+
+
+async def _no_place_once_added_back(
+    app, api, alice, lab: str, alice_id: str, bob_id: str, exp: str
+) -> None:
+    added = await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "viewer"},
+    )
+    assert added.status_code == 201
+    experiment = await _as_owner(app, lab, alice_id).experiment(exp)
+    assert bob_id not in [c["id"] for c in experiment["collaborators"]]
+
+
+async def test_a_removal_waits_for_a_collaborator_write_and_takes_it_too(database, monkeypatch):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, in_lab, alice_id, bob_id, exp = await _lab_with_an_experiment(
+            database, api, alice, bob
+        )
+        paused, release = asyncio.Event(), asyncio.Event()
+        audit = session_module.Session._audit
+
+        def held_audit(self, action, target):
+            record = audit(self, action, target)
+
+            async def held(conn):
+                paused.set()
+                await release.wait()
+                await record(conn)
+
+            return held
+
+        # The add has locked bob's membership and written, but not committed.
+        monkeypatch.setattr(session_module.Session, "_audit", held_audit)
+        adding = asyncio.create_task(
+            _as_owner(app, lab, alice_id).set_collaborator(exp, bob_id, True)
+        )
+        await paused.wait()
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await asyncio.sleep(0.3)
+        assert not removing.done(), "the removal waits for the write"
+        release.set()
+        assert await adding
+        removed = await removing
+        assert removed["collaborations"] == 1
+        monkeypatch.setattr(session_module.Session, "_audit", audit)
+        await _no_place_once_added_back(app, api, alice, lab, alice_id, bob_id, exp)
+
+
+async def test_a_collaborator_write_after_a_removal_finds_no_member(database, monkeypatch):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, in_lab, alice_id, bob_id, exp = await _lab_with_an_experiment(
+            database, api, alice, bob
+        )
+        paused, release = asyncio.Event(), asyncio.Event()
+        audit = workspaces_module._audit
+
+        async def held_audit(*args, **kwargs):
+            paused.set()
+            await release.wait()
+            return await audit(*args, **kwargs)
+
+        # The removal has locked bob's membership and deleted what he holds, but not committed.
+        monkeypatch.setattr(workspaces_module, "_audit", held_audit)
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await paused.wait()
+        adding = asyncio.create_task(
+            _as_owner(app, lab, alice_id).set_collaborator(exp, bob_id, True)
+        )
+        await asyncio.sleep(0.3)
+        assert not adding.done(), "the write waits for the removal"
+        release.set()
+        await removing
+        with pytest.raises(ExperimentError, match="aren't a member"):
+            await adding
+        monkeypatch.setattr(workspaces_module, "_audit", audit)
+        await _no_place_once_added_back(app, api, alice, lab, alice_id, bob_id, exp)

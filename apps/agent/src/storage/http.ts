@@ -61,7 +61,7 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *   GET    /experiments?node=<id>   {experiments}: the ones you can see, on
  *                                   that node (node=root: at the workspace
  *                                   root) or (without node) anywhere, each
- *                                   with your access: writer (its author) or reader
+ *                                   with your access: writer (its maintainer or a collaborator) or reader
  *   POST   /experiments             {nodeId|null, title, hypothesis?, params?,
  *                                   results?, state?} → a new draft: on a node
  *                                   with a copy of the node's files, at the
@@ -83,13 +83,21 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  *                                   rerunOf: run that run again as a new one,
  *                                   reusing what isn't given.
  *   POST   /experiments/<id>/finish {results, state?: done|failed} → the run,
- *                                   finished, its front matter refreshed. Only
- *                                   its author; a finished run stays finished.
+ *                                   finished, its front matter refreshed. Its
+ *                                   maintainer and collaborators; a finished run stays finished.
  *   POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
  *                                   → the experiment, with each file linked in
  *                                   read only under inputs/ and recorded in its
- *                                   provenance (its author, not archived, not
+ *                                   provenance (maintainer or collaborator, not archived, not
  *                                   a finished run)
+ *   PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?: true}
+ *                                   → {experiment|null}: hands it over (its
+ *                                   maintainer, or an Owner or Admin once it
+ *                                   isn't a draft); null once you can't see it
+ *   PUT    /experiments/<id>/collaborators/<user> → {experiment}: adds one
+ *                                   (the maintainer; they must view its node)
+ *   DELETE /experiments/<id>/collaborators/<user> → {experiment|null}: the
+ *                                   maintainer removes anyone, you yourself
  *   POST   /experiments/upload      multipart/form-data → 201 {experiment,
  *                                   lineage, created, files}: a new experiment
  *                                   with its files, all or nothing. A "meta"
@@ -182,8 +190,8 @@ import type { RunInputSource, Session, UploadedFile } from "./session";
  * managing grants on it owner (of that node or one above it; whoever adds a
  * node owns it), and managing
  * groups owner of the workspace. Viewers may fork a node into an experiment;
- * a draft is seen by its author only, a shared or archived one by everyone
- * who can view the node, and only its author changes it. Who is asking comes from identity.ts: the
+ * a draft is seen by its maintainer and collaborators only, a shared or archived one by everyone
+ * who can view the node, and only they change it. Who is asking comes from identity.ts: the
  * local user without AUTH_SECRET, the signed-in user with it.
  *
  * An X-Knowledge-Storage token (packages/contracts/src/identity-token.ts) instead is Claude
@@ -225,6 +233,9 @@ export function agentRefusal(method: string, url: URL): string | null {
       if (method === "POST" && (sub === "" || sub === "runs")) return null;
       if (method === "PATCH" && sub !== "" && !sub.includes("/")) return null;
       if (method === "POST" && /^[^/]+\/(inputs|finish)$/.test(sub)) return null;
+      if (/^[^/]+\/(maintainer|collaborators\/[^/]+)$/.test(sub)) {
+        return "Claude doesn't hand experiments over or choose who works on them";
+      }
       return "Claude doesn't delete experiments or move folders into them";
     case "proposals":
       return method === "POST" && sub === "" ? null : "Claude doesn't accept, reject or withdraw proposals";
@@ -663,6 +674,26 @@ async function handleExperiments(
       return json(res, 400, { error: "Expected {results: object, state?: done|failed}" });
     }
     return json(res, 200, await session.finishRun(finishOf, results, state));
+  }
+
+  const maintainerOf = /^([^/]+)\/maintainer$/.exec(id)?.[1];
+  if (maintainerOf) {
+    if (req.method !== "PUT") return json(res, 405, { error: "Method not allowed" });
+    const body = await readJson(req);
+    const userId = body?.userId;
+    const keep = body ? (body.keepAsCollaborator ?? true) : null;
+    if (typeof userId !== "string" || typeof keep !== "boolean") {
+      return json(res, 400, { error: "Expected {userId: string, keepAsCollaborator?: boolean}" });
+    }
+    return json(res, 200, { experiment: await session.handOver(maintainerOf, userId, keep) });
+  }
+
+  const collaboratorOf = /^([^/]+)\/collaborators\/([^/]+)$/.exec(id);
+  if (collaboratorOf) {
+    if (req.method !== "PUT" && req.method !== "DELETE") return json(res, 405, { error: "Method not allowed" });
+    const [, experimentId, userId] = collaboratorOf;
+    await session.setCollaborator(experimentId, userId, req.method === "PUT");
+    return json(res, 200, { experiment: await session.experimentIfVisible(experimentId) });
   }
 
   const inputsOf = /^([^/]+)\/inputs$/.exec(id)?.[1];

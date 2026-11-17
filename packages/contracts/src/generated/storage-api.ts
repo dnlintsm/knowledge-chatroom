@@ -178,11 +178,14 @@ export interface paths {
         get: operations["getExperiment"];
         put?: never;
         post?: never;
-        /** Delete an experiment with its files (soft delete) */
+        /** Delete an experiment with its files (soft delete; its maintainer) */
         delete: operations["deleteExperiment"];
         options?: never;
         head?: never;
-        /** Change an experiment (its author) */
+        /**
+         * Change an experiment (its maintainer and collaborators)
+         * @description Only its maintainer changes the status (shares, archives or restores it).
+         */
         patch: operations["updateExperiment"];
         trace?: never;
     };
@@ -219,7 +222,7 @@ export interface paths {
         put?: never;
         /**
          * Record a run's results and how it ended
-         * @description Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Only its author, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
+         * @description Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
          */
         post: operations["finishRun"];
         delete?: never;
@@ -241,10 +244,65 @@ export interface paths {
         put?: never;
         /**
          * Link files into an experiment as inputs
-         * @description Each file is linked under inputs/ and recorded in the experiment's provenance. Only its author, while it isn't archived or a finished run.
+         * @description Each file is linked under inputs/ and recorded in the experiment's provenance. Its maintainer and collaborators, while it isn't archived or a finished run.
          */
         post: operations["addRunInputs"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/experiments/{id}/maintainer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Hand an experiment over to another member
+         * @description Its maintainer can, and an Owner or Admin of the workspace once it isn't a draft
+         *     (docs/workspaces.md, "Experiment handover"). The new maintainer must be a member
+         *     who can view its node (400 otherwise). The previous maintainer stays on as a
+         *     collaborator unless keepAsCollaborator is false, but only while they are still a
+         *     member. Its author never changes. Storage tokens can't (403).
+         */
+        put: operations["handOverExperiment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/experiments/{id}/collaborators/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add a collaborator (its maintainer)
+         * @description They must be a member who can view its node (400 otherwise). Collaborators edit it
+         *     while it isn't archived and see it while it is a draft; they don't change its
+         *     status, delete it or choose who works on it. Storage tokens can't (403).
+         */
+        put: operations["addExperimentCollaborator"];
+        post?: never;
+        /**
+         * Remove a collaborator (its maintainer), or stop collaborating (your own id)
+         * @description Storage tokens can't (403).
+         */
+        delete: operations["removeExperimentCollaborator"];
         options?: never;
         head?: never;
         patch?: never;
@@ -533,7 +591,8 @@ export interface paths {
          * @description Owners remove anyone, Admins remove Members only (403 otherwise), and anyone may
          *     leave. Nobody removes the last Owner, themselves included (409). In one
          *     transaction it deletes the membership, the person's direct grants in the
-         *     workspace and their memberships of its groups, and records the departure, so the
+         *     workspace, their memberships of its groups and their places as an Experiment
+         *     collaborator, and records the departure, so the
          *     default workspace doesn't add them back when they sign in. Their own drafts,
          *     chats and memory stay, private as before. From then on their requests, tokens and
          *     streams in the workspace get 404, and their runs there stop at the next tool call.
@@ -1688,8 +1747,10 @@ export interface components {
         MemberRemoval: {
             /** @description Their direct grants in the workspace. */
             grants: number;
+            /** @description How many Experiments they collaborate on. */
+            collaborations: number;
             groups: components["schemas"]["MemberRemovalGroup"][];
-            /** @description Shared or archived Experiments they started that you can see. */
+            /** @description Shared or archived Experiments they maintain that you can see. */
             experiments: components["schemas"]["MemberRemovalExperiment"][];
         };
         MemberRemovalGroup: {
@@ -1788,6 +1849,8 @@ export interface components {
             id: string;
             /** @description null for an experiment at the workspace root. */
             node: string | null;
+            /** @description Users who just stopped working on it (a collaborator removed or leaving, a previous maintainer not kept on). They hear this change even when they can't see the experiment any more, so an open draft closes for them. */
+            left?: string[];
         };
         ProposalEvent: {
             /** @constant */
@@ -1828,7 +1891,7 @@ export interface components {
             nodes: components["schemas"]["VisibleNode"][];
         };
         /**
-         * @description Who sees it. A draft only its author; shared or archived everyone who can view its node.
+         * @description Who sees it. A draft only its maintainer and collaborators; shared or archived everyone who can view its node.
          * @enum {string}
          */
         ExperimentStatus: "draft" | "shared" | "archived";
@@ -1853,6 +1916,7 @@ export interface components {
             id: string;
             /** @description null at the workspace root. */
             nodeId: string | null;
+            /** @description Who created it; never changes. */
             authorId: string;
             authorName: string | null;
             title: string;
@@ -1873,12 +1937,23 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * @description writer: its author, while it isn't archived. reader: may look.
+             * @description writer: its maintainer or a collaborator, while it isn't archived. reader: may look.
              * @enum {string}
              */
             access: "writer" | "reader";
-            /** @description Whether the asking user is its author. */
+            /** @description Whether the asking user is its maintainer (who changes its status, deletes it and chooses who works on it). */
             mine: boolean;
+            /** @description Who is responsible for it now; its author until handed over. */
+            maintainerId: string;
+            maintainerName: string | null;
+            /** @description Whether its maintainer is still a member of the workspace. */
+            maintainerIsMember: boolean;
+            /** @description Members its maintainer added to work on it. */
+            collaborators: components["schemas"]["Collaborator"][];
+        };
+        Collaborator: {
+            id: string;
+            name: string | null;
         };
         /** @description The `meta` part of an experiment upload, as JSON. */
         ExperimentUploadMeta: {
@@ -2452,6 +2527,17 @@ export interface components {
         };
     };
     responses: {
+        /** @description The experiment now, or null once you can't see it (a draft you handed over or left). */
+        ExperimentIfVisible: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    experiment: components["schemas"]["Experiment"] | null;
+                };
+            };
+        };
         /** @description No such note (or proposal, pack, install), or memory is off on this server (MEMORY=on) or has no storage. */
         MemoryNotFound: {
             headers: {
@@ -3343,6 +3429,75 @@ export interface operations {
             503: components["responses"]["Starting"];
         };
     };
+    handOverExperiment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId: string;
+                    /** @default true */
+                    keepAsCollaborator?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["ExperimentIfVisible"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    addExperimentCollaborator: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ExperimentIfVisible"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    removeExperimentCollaborator: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ExperimentIfVisible"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
     search: {
         parameters: {
             query?: {
@@ -3983,7 +4138,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Removed; how many direct grants and group memberships went with it. */
+            /** @description Removed; how many direct grants, group memberships and collaborator places went with it. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3993,6 +4148,7 @@ export interface operations {
                         removed: {
                             grants: number;
                             groups: number;
+                            collaborations: number;
                         };
                     };
                 };

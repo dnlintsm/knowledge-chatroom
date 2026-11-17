@@ -129,6 +129,10 @@ class ExperimentEvent(BaseModel):
     """
     null for an experiment at the workspace root.
     """
+    left: list[str] | None = None
+    """
+    Users who just stopped working on it (a collaborator removed or leaving, a previous maintainer not kept on). They hear this change even when they can't see the experiment any more, so an open draft closes for them.
+    """
 
 
 class ProposalEvent(BaseModel):
@@ -183,7 +187,7 @@ class Tree(BaseModel):
 
 ExperimentStatus = TypeAliasType("ExperimentStatus", Literal["draft", "shared", "archived"])
 """
-Who sees it. A draft only its author; shared or archived everyone who can view its node.
+Who sees it. A draft only its maintainer and collaborators; shared or archived everyone who can view its node.
 """
 
 
@@ -202,35 +206,9 @@ class ExperimentInput(BaseModel):
     state: ExperimentState | None = None
 
 
-class Experiment(BaseModel):
+class Collaborator(BaseModel):
     id: str
-    nodeId: str | None
-    """
-    null at the workspace root.
-    """
-    authorId: str
-    authorName: str | None
-    title: str
-    hypothesis: str
-    params: dict[str, Any]
-    results: dict[str, Any]
-    status: ExperimentStatus
-    state: ExperimentState
-    forkedAt: Timestamp
-    updatedAt: Timestamp
-    fileCount: Annotated[int, Field(ge=0)]
-    provenance: dict[str, Any]
-    """
-    Where a run came from; {} when nobody recorded it.
-    """
-    access: Literal["writer", "reader"]
-    """
-    writer: its author, while it isn't archived. reader: may look.
-    """
-    mine: bool
-    """
-    Whether the asking user is its author.
-    """
+    name: str | None
 
 
 class ExperimentUploadMeta(ExperimentInput):
@@ -247,19 +225,6 @@ class ExperimentUploadMeta(ExperimentInput):
     A node name for every level, top level first; empty (or null) for `None`.
     """
     title: Annotated[str, Field(max_length=200)]
-
-
-class ExperimentUpload(BaseModel):
-    experiment: Experiment
-    lineage: list[KnowledgeNode]
-    """
-    The node it sits on and that node's ancestors, top level first.
-    """
-    created: list[KnowledgeNode]
-    """
-    The nodes of the path that didn't exist and were added for it, top level first.
-    """
-    files: list[FileInfo]
 
 
 class RunInputSource(BaseModel):
@@ -1040,10 +1005,6 @@ class DeleteNodeResponse(BaseModel):
     """
 
 
-class ListExperimentsResponse(BaseModel):
-    experiments: list[Experiment]
-
-
 class CreateExperimentRequest(ExperimentInput):
     nodeId: str | None
     title: Annotated[str, Field(max_length=200)]
@@ -1119,6 +1080,11 @@ class FinishRunRequest(BaseModel):
 
 class AddRunInputsRequest(BaseModel):
     inputs: list[RunInputSource]
+
+
+class HandOverExperimentRequest(BaseModel):
+    userId: str
+    keepAsCollaborator: bool | None = True
 
 
 class SearchResponse(BaseModel):
@@ -1238,6 +1204,7 @@ class ChangeWorkspaceMemberRoleResponse(BaseModel):
 class Removed(BaseModel):
     grants: int
     groups: int
+    collaborations: int
 
 
 class RemoveWorkspaceMemberResponse(BaseModel):
@@ -1693,10 +1660,14 @@ class MemberRemoval(BaseModel):
     """
     Their direct grants in the workspace.
     """
+    collaborations: int
+    """
+    How many Experiments they collaborate on.
+    """
     groups: list[MemberRemovalGroup]
     experiments: list[MemberRemovalExperiment]
     """
-    Shared or archived Experiments they started that you can see.
+    Shared or archived Experiments they maintain that you can see.
     """
 
 
@@ -1710,6 +1681,66 @@ class WorkspaceMember(BaseModel):
     """
     createdAt: Timestamp | None = None
     lastSeenAt: Timestamp | None = None
+
+
+class Experiment(BaseModel):
+    id: str
+    nodeId: str | None
+    """
+    null at the workspace root.
+    """
+    authorId: str
+    """
+    Who created it; never changes.
+    """
+    authorName: str | None
+    title: str
+    hypothesis: str
+    params: dict[str, Any]
+    results: dict[str, Any]
+    status: ExperimentStatus
+    state: ExperimentState
+    forkedAt: Timestamp
+    updatedAt: Timestamp
+    fileCount: Annotated[int, Field(ge=0)]
+    provenance: dict[str, Any]
+    """
+    Where a run came from; {} when nobody recorded it.
+    """
+    access: Literal["writer", "reader"]
+    """
+    writer: its maintainer or a collaborator, while it isn't archived. reader: may look.
+    """
+    mine: bool
+    """
+    Whether the asking user is its maintainer (who changes its status, deletes it and chooses who works on it).
+    """
+    maintainerId: str
+    """
+    Who is responsible for it now; its author until handed over.
+    """
+    maintainerName: str | None
+    maintainerIsMember: bool
+    """
+    Whether its maintainer is still a member of the workspace.
+    """
+    collaborators: list[Collaborator]
+    """
+    Members its maintainer added to work on it.
+    """
+
+
+class ExperimentUpload(BaseModel):
+    experiment: Experiment
+    lineage: list[KnowledgeNode]
+    """
+    The node it sits on and that node's ancestors, top level first.
+    """
+    created: list[KnowledgeNode]
+    """
+    The nodes of the path that didn't exist and were added for it, top level first.
+    """
+    files: list[FileInfo]
 
 
 class RunSkill(BaseModel):
@@ -1728,6 +1759,22 @@ class RunSkill(BaseModel):
     It ships scripts, which run only with SKILL_SCRIPTS=on on this server.
     """
     files: list[RunSkillFile]
+
+
+class ListExperimentsResponse(BaseModel):
+    experiments: list[Experiment]
+
+
+class HandOverExperimentResponse(BaseModel):
+    experiment: Experiment | None
+
+
+class AddExperimentCollaboratorResponse(BaseModel):
+    experiment: Experiment | None
+
+
+class RemoveExperimentCollaboratorResponse(BaseModel):
+    experiment: Experiment | None
 
 
 class ListWorkspaceMembersResponse(BaseModel):

@@ -595,7 +595,7 @@ export function createFileTools(
       "Propose an experiment's work to its knowledge node: each file the experiment " +
         "changed or added (or only those in `paths`) becomes a proposed version on the " +
         "node, for someone who can edit the node to accept or reject. Only when the user " +
-        "asks to bring an experiment's results back to its node; only its author can.",
+        "asks to bring an experiment's results back to its node; only its maintainer and collaborators can.",
       {
         experiment: z.string().describe("Experiment id"),
         paths: z.array(z.string()).optional().describe("Only these files; omit for every changed file."),
@@ -616,8 +616,8 @@ export function createFileTools(
       "list_experiments",
       "List the experiments the user can see, on one knowledge node or (without node) " +
         "anywhere: id, title, node (null = at the workspace root), status (draft = only its " +
-        "author sees it, shared, archived), state (ready, running, done, failed), author, " +
-        "hypothesis, params and results. Use it to compare experiments on a node.",
+        "maintainer and collaborators see it, shared, archived), state (ready, running, done, failed), author, " +
+        "maintainer (who is responsible for it now), hypothesis, params and results. Use it to compare experiments on a node.",
       { node: nodeParam },
       ({ node }) =>
         run(async (session) => {
@@ -631,6 +631,7 @@ export function createFileTools(
                   status: e.status,
                   state: e.state,
                   author: e.authorName,
+                  maintainer: e.maintainerName,
                   canChange: e.access === "writer",
                   hypothesis: e.hypothesis,
                   params: e.params,
@@ -714,7 +715,7 @@ export function createFileTools(
       "Record an experiment's results and finish it: state done, or failed when it couldn't be " +
         "completed (say why in its report). Results replace the old ones whole, as numbers with " +
         "units in the key where you can, e.g. {\"yield_pct\": 92.5}. Also refreshes the record " +
-        "in its report.md front matter. Only for experiments the user authored.",
+        "in its report.md front matter. Only for experiments the user maintains or collaborates on.",
       {
         id: z.string().describe("Experiment id"),
         results: jsonObject.describe('e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}'),
@@ -728,9 +729,9 @@ export function createFileTools(
     ),
     tool(
       "update_experiment",
-      "Change an experiment the user authored: title, hypothesis or params (each replaces " +
+      "Change an experiment the user maintains or collaborates on: title, hypothesis or params (each replaces " +
         "the old value whole, so send the complete object), or its status. Record results and " +
-        "finish an experiment with set_experiment_results instead. Only change status (shared shows it to everyone who can see the node; archived makes " +
+        "finish an experiment with set_experiment_results instead. Only its maintainer changes the status; only change it (shared shows it to everyone who can see the node; archived makes " +
         "it read only) when the user asks.",
       {
         id: z.string().describe("Experiment id"),

@@ -358,6 +358,20 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/proposals", { headers: alice, json: { experimentId: exp.id, note: "promote" }, expect: 201 });
     await call("GET", `/proposals?experiment=${exp.id}`, { headers: alice, expect: 200 });
     await call("PATCH", `/experiments/${exp.id}`, { headers: alice, json: { status: "shared" }, expect: 200 });
+    // Who works on it (#255); the rules are in workspaces.test.ts.
+    await call("PUT", `/experiments/${exp.id}/collaborators/${bobId}`, { headers: alice, expect: 200 });
+    await call("PUT", `/experiments/${exp.id}/collaborators/00000000-0000-4000-8000-000000000000`, { headers: alice, expect: 400 });
+    await call("PUT", `/experiments/${exp.id}/collaborators/${aliceId}`, { headers: bob, expect: 403 });
+    await call("PUT", `/experiments/${exp.id}/collaborators/${bobId}`, { headers: storageToken("conformance|alice"), expect: 403 });
+    await call("DELETE", `/experiments/${exp.id}/collaborators/${bobId}`, { headers: bob, expect: 200 });
+    await call("DELETE", `/experiments/${exp.id}/collaborators/not-a-user`, { headers: alice, expect: 200 });
+    await call("DELETE", `/experiments/00000000-0000-4000-8000-000000000000/collaborators/${bobId}`, { headers: alice, expect: 404 });
+    const handed = (await call<Schema["Experiment"]>("POST", "/experiments", { headers: alice, json: { nodeId: mod.id, title: "Handed over" }, expect: 201 })).data;
+    await call("PUT", `/experiments/${handed.id}/maintainer`, { headers: alice, json: { userId: 3 }, expect: 400 });
+    await call("PUT", `/experiments/${handed.id}/maintainer`, { headers: storageToken("conformance|alice"), json: { userId: bobId }, expect: 403 });
+    await call("PUT", `/experiments/${handed.id}/maintainer`, { headers: bob, json: { userId: bobId }, expect: 404 });
+    await call("PUT", `/experiments/${handed.id}/maintainer`, { headers: alice, json: { userId: bobId }, expect: 200 });
+    await call("PUT", `/experiments/${handed.id}/maintainer`, { headers: alice, json: { userId: aliceId }, expect: 403 });
   });
 
   step("runs", async () => {

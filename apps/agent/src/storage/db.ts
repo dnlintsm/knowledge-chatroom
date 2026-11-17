@@ -111,6 +111,8 @@ export async function prepareRowSecurity(sql: Sql): Promise<boolean> {
     );
     // UPDATE also covers the row locks (FOR SHARE / FOR UPDATE) the services take.
     await tx.unsafe(`GRANT UPDATE ON nodes, files, experiments, proposals TO ${role}`);
+    // Who works on an experiment (025_experiment_maintainers.sql).
+    await tx.unsafe(`GRANT SELECT, INSERT, DELETE ON experiment_collaborators TO ${role}`);
     await tx.unsafe(`GRANT USAGE ON SEQUENCE audit_log_id_seq TO ${role}`);
     // Chat history (017_chats.sql): only its owner's, row security sees to that.
     await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON chats, chat_runs TO ${role}`);

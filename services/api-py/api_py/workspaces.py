@@ -24,14 +24,14 @@
     PATCH  /workspaces/<id>/members/<user>   {role} -> {member: {id, role}}: Owners set
                                              any role; Admins make a Member Admin, or
                                              step down themselves; 409 for the last Owner
-    DELETE /workspaces/<id>/members/<user>   -> {removed: {grants, groups}}: remove
+    DELETE /workspaces/<id>/members/<user>   -> {removed: {grants, groups, collaborations}}: remove
                                              someone (Owners anyone, Admins Members), or
                                              leave (your own id); 409 for the last Owner
     GET    /workspaces/<id>/members/<user>/removal
-                                             {grants, groups: [{id, name}], experiments:
-                                             [{id, title, nodeId}]}: what removing them
-                                             takes away, and the shared Experiments of
-                                             theirs you can see
+                                             {grants, groups: [{id, name}], collaborations,
+                                             experiments: [{id, title, nodeId}]}: what removing them
+                                             takes away, and the shared Experiments
+                                             they maintain that you can see
 
 A workspace you aren't a member of answers 404, the same as one that doesn't
 exist. Storage tokens can't use these routes: Claude doesn't manage workspaces.
@@ -322,6 +322,14 @@ class Workspaces:
                 (workspace_id, user_id),
             )
             groups = cur.rowcount
+            # Collaborator places are access someone gave them, like grants.
+            cur = await conn.execute(
+                """
+                DELETE FROM experiment_collaborators c USING experiments e
+                WHERE e.id = c.experiment_id AND e.workspace_id = %s AND c.user_id = %s""",
+                (workspace_id, user_id),
+            )
+            collaborations = cur.rowcount
             await conn.execute(
                 "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
                 (workspace_id, user_id),
@@ -339,15 +347,22 @@ class Workspaces:
                 workspace_id,
                 by,
                 "member.leave" if leaving else "member.remove",
-                {"user": user_id, "role": current, "grants": grants, "groups": groups},
+                {
+                    "user": user_id,
+                    "role": current,
+                    "grants": grants,
+                    "groups": groups,
+                    "collaborations": collaborations,
+                },
             )
-        return {"grants": grants, "groups": groups}
+        return {"grants": grants, "groups": groups, "collaborations": collaborations}
 
     async def removal(self, workspace_id: str, viewer: str, user_id: str) -> dict[str, Any]:
         """
         What removing a member takes away, for the confirmation: how many direct
         grants, which of the workspace's groups, and the shared or archived
-        Experiments they started that `viewer` can see. Never drafts.
+        Experiments they maintain that `viewer` can see, and how many
+        Experiments they collaborate on. Never drafts.
         """
         async with self.pool.connection() as conn:
             if await self._member_role(conn, workspace_id, user_id) is None:
@@ -359,6 +374,13 @@ class Workspaces:
                 (workspace_id, user_id),
             )
             (grants,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+            cur = await conn.execute(
+                """
+                SELECT count(*) FROM experiment_collaborators c JOIN experiments e ON e.id = c.experiment_id
+                WHERE e.workspace_id = %s AND c.user_id = %s AND e.deleted_at IS NULL""",
+                (workspace_id, user_id),
+            )
+            (collaborations,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
                 """
@@ -371,7 +393,7 @@ class Workspaces:
             await cur.execute(
                 """
                 SELECT e.id, e.title, e.node_id FROM experiments e
-                WHERE e.workspace_id = %(ws)s AND e.author_id = %(user)s
+                WHERE e.workspace_id = %(ws)s AND e.maintainer_id = %(user)s
                   AND e.status <> 'draft' AND e.deleted_at IS NULL
                   AND experiment_access(%(viewer)s, e.id) IS NOT NULL
                 ORDER BY e.created_at DESC""",
@@ -385,7 +407,12 @@ class Workspaces:
                 }
                 for r in await cur.fetchall()
             ]
-        return {"grants": grants, "groups": groups, "experiments": experiments}
+        return {
+            "grants": grants,
+            "groups": groups,
+            "collaborations": collaborations,
+            "experiments": experiments,
+        }
 
     async def create(
         self, user_id: str, name: str, levels: list[str], asked: str | None = None

@@ -434,7 +434,7 @@ describe("workspaces: administration (#255)", { skip: !enabled && "STORAGE_URL a
       // An Admin removes Members only.
       await ok(403, "DELETE", `/workspaces/${ws}/members/${ids.erin}`, { headers: carol });
       const removed = await ok<{ removed: { grants: number; groups: number } }>(200, "DELETE", `/workspaces/${ws}/members/${ids.dave}`, { headers: carol });
-      assert.deepEqual(removed.removed, { grants: 2, groups: 1 });
+      assert.deepEqual(removed.removed, { grants: 2, groups: 1, collaborations: 0 });
       await ok(404, "GET", "/nodes", { headers: as(dave) });
       await ok(404, "GET", `/files?node=${node}`, { headers: token });
       await ok(200, "PUT", `/files/notes/after-removal.md?node=${node}`, { headers: as(erin), body: "x" });
@@ -498,5 +498,178 @@ describe("workspaces: administration (#255)", { skip: !enabled && "STORAGE_URL a
     const log = await ok<{ entries: { action: string }[] }>(200, "GET", "/access/audit", { headers: as(erin) });
     const actions = new Set(log.entries.map((e) => e.action));
     for (const action of ["workspace.rename", "workspace.archive", "workspace.restore"]) assert.ok(actions.has(action), action);
+  });
+});
+
+interface Experiment {
+  id: string;
+  status: string;
+  authorId: string;
+  maintainerId: string;
+  maintainerIsMember: boolean;
+  collaborators: { id: string; name: string | null }[];
+  access: string;
+  mine: boolean;
+}
+const collaboratorIds = (e: Experiment | null) => (e?.collaborators ?? []).map((c) => c.id).sort();
+
+describe("workspaces: Experiment handover (#255)", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
+  // In the default workspace: carol and dave view the node, erin doesn't.
+  let node = "";
+  let daveGrant = "";
+  let draft = "";
+  const need = () => assert.ok(node && draft, "needs the first test to pass");
+  const create = async (who: Headers, title: string, shared = false, headers: Headers = {}) => {
+    const e = await ok<Experiment>(201, "POST", "/experiments", { headers: { ...who, ...headers }, json: { nodeId: node, title } });
+    if (shared) await ok(200, "PATCH", `/experiments/${e.id}`, { headers: { ...who, ...headers }, json: { status: "shared" } });
+    return e.id;
+  };
+  const collaborator = (who: Headers, exp: string, userId: string, method: "PUT" | "DELETE", status = 200) =>
+    ok<{ experiment: Experiment | null }>(status, method, `/experiments/${exp}/collaborators/${userId}`, { headers: who });
+  const handOver = (who: Headers, exp: string, userId: string, status = 200, keepAsCollaborator?: boolean) =>
+    ok<{ experiment: Experiment | null }>(status, "PUT", `/experiments/${exp}/maintainer`, {
+      headers: who,
+      json: { userId, ...(keepAsCollaborator !== undefined && { keepAsCollaborator }) },
+    });
+
+  test("a collaborator edits it, but doesn't change its status, delete it or choose who works on it", async () => {
+    node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: owner, json: { parentId: null, name: `Handover ${stamp}` } })).id;
+    await grant(node, ids.carol, "viewer");
+    daveGrant = (await grant(node, ids.dave, "viewer")).id;
+    draft = await create(carol, "Carol's draft");
+    await ok(404, "GET", `/experiments/${draft}`, { headers: dave });
+
+    const added = await collaborator(carol, draft, ids.dave, "PUT");
+    assert.deepEqual(collaboratorIds(added.experiment), [ids.dave]);
+    const seen = await ok<Experiment>(200, "GET", `/experiments/${draft}`, { headers: dave });
+    assert.equal(seen.access, "writer");
+    assert.equal(seen.mine, false);
+    assert.equal(seen.maintainerId, ids.carol);
+    await ok(200, "PATCH", `/experiments/${draft}`, { headers: dave, json: { title: "Edited by dave" } });
+    await ok(200, "PUT", `/files/notes/dave.md?experiment=${draft}`, { headers: dave, body: "dave's work" });
+    await ok(403, "PATCH", `/experiments/${draft}`, { headers: dave, json: { status: "shared" } });
+    await ok(403, "DELETE", `/experiments/${draft}`, { headers: dave });
+    await collaborator(dave, draft, ids.erin, "PUT", 403);
+    await handOver(dave, draft, ids.dave, 403);
+    // Only members who can view its node: erin can't.
+    await collaborator(carol, draft, ids.erin, "PUT", 400);
+    await handOver(carol, draft, ids.erin, 400);
+    // Claude doesn't choose who works on an experiment.
+    await ok(403, "PUT", `/experiments/${draft}/collaborators/${ids.dave}`, { headers: storageToken("workspaces|carol") });
+    await ok(403, "PUT", `/experiments/${draft}/maintainer`, { headers: storageToken("workspaces|carol"), json: { userId: ids.dave } });
+
+    // A collaborator may leave; the draft is then out of sight.
+    const left = await collaborator(dave, draft, ids.dave, "DELETE");
+    assert.equal(left.experiment, null);
+    await ok(404, "GET", `/experiments/${draft}`, { headers: dave });
+  });
+
+  test("losing access to the node ends a collaborator's access", async () => {
+    need();
+    await collaborator(carol, draft, ids.dave, "PUT");
+    await ok(200, "DELETE", `/access/grants/${daveGrant}`, { headers: owner });
+    await ok(404, "GET", `/experiments/${draft}`, { headers: dave });
+    const write = await req("PUT", `/files/notes/dave.md?experiment=${draft}`, { headers: dave, body: "still here?" });
+    assert.ok([403, 404].includes(write.status), `no writes without the node, got ${write.status}`);
+    daveGrant = (await grant(node, ids.dave, "viewer")).id;
+    await ok(200, "GET", `/experiments/${draft}`, { headers: dave });
+  });
+
+  test("the maintainer hands over and stays on, unless they choose not to; the author never changes", async () => {
+    need();
+    const handed = (await handOver(carol, draft, ids.dave)).experiment!;
+    assert.equal(handed.maintainerId, ids.dave);
+    assert.equal(handed.authorId, ids.carol);
+    assert.equal(handed.mine, false);
+    assert.deepEqual(collaboratorIds(handed), [ids.carol], "carol stays on; dave is no longer a collaborator");
+    await ok(403, "PATCH", `/experiments/${draft}`, { headers: carol, json: { status: "shared" } });
+    await ok(200, "PATCH", `/experiments/${draft}`, { headers: carol, json: { title: "Still carol's work too" } });
+    const mine = await ok<Experiment>(200, "GET", `/experiments/${draft}`, { headers: dave });
+    assert.equal(mine.mine, true);
+
+    // Handing a draft over without staying on: it is out of sight.
+    const other = await create(carol, "Carol hands this away");
+    const gone = await handOver(carol, other, ids.dave, 200, false);
+    assert.equal(gone.experiment, null);
+    await ok(404, "GET", `/experiments/${other}`, { headers: carol });
+    await ok(200, "GET", `/experiments/${other}`, { headers: dave });
+  });
+
+  test("whoever stops working on a draft hears it, so it closes for them; nobody else does", async () => {
+    need();
+    const exp = await create(carol, "Carol's draft for a while");
+    await collaborator(carol, exp, ids.dave, "PUT");
+    const daves = await watch("/files?watch", dave);
+    const carols = await watch("/files?watch", carol);
+    const erins = await watch("/files?watch", erin);
+    try {
+      // Removed as a collaborator: the draft is out of dave's sight, and he hears that.
+      await collaborator(carol, exp, ids.dave, "DELETE");
+      assert.ok(await daves.saw(onExperiment(exp)), "the removed collaborator must hear about it");
+      // Handed over without staying on: carol hears it too.
+      await handOver(carol, exp, ids.dave, 200, false);
+      assert.ok(await carols.saw((e) => onExperiment(exp)(e) && Array.isArray(e.left) && e.left.includes(ids.carol)));
+      await ok(200, "PUT", `/files/notes/marker-${stamp}.md?node=${node}`, { headers: owner, body: "marker" });
+      assert.ok(await carols.saw(onFile(node, `notes/marker-${stamp}.md`)));
+      assert.ok(!erins.events.some(onExperiment(exp)), "someone who can't see it hears nothing");
+    } finally {
+      daves.stop();
+      carols.stop();
+      erins.stop();
+    }
+  });
+
+  test("an Owner or Admin hands over a shared Experiment, never a draft", async () => {
+    need();
+    const shared = await create(carol, "Carol's shared one", true);
+    const privateOne = await create(carol, "Carol's other draft");
+    await handOver(owner, privateOne, ids.dave, 404);
+    await handOver(dave, shared, ids.dave, 403);
+    const handed = (await handOver(owner, shared, ids.dave, 200, false)).experiment!;
+    assert.equal(handed.maintainerId, ids.dave);
+    assert.deepEqual(collaboratorIds(handed), []);
+    const carols = await ok<Experiment>(200, "GET", `/experiments/${shared}`, { headers: carol });
+    assert.equal(carols.access, "reader");
+    const log = await ok<{ entries: { action: string }[] }>(200, "GET", "/access/audit", { headers: owner });
+    const actions = new Set(log.entries.map((e) => e.action));
+    for (const action of ["experiment.maintainer", "experiment.collaborator.add", "experiment.collaborator.remove"]) {
+      assert.ok(actions.has(action), action);
+    }
+  });
+
+  test("removal ends collaborator places for good; a re-added member gets back what they still maintain", async () => {
+    // erin's own workspace: erin Owner, carol and dave Members who view everything.
+    const ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: erin, json: { name: `Erin's handover lab ${stamp}` } })).id;
+    const as = (who: Headers) => ({ ...who, ...inWs(ws) });
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.carol, role: "member", access: "viewer" } });
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.dave, role: "member", access: "viewer" } });
+    node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(erin), json: { parentId: null, name: `Handover lab ${stamp}` } })).id;
+    const handedLater = await create(dave, "Dave's, handed over after he leaves", true, inWs(ws));
+    const keptByDave = await create(dave, "Dave's, still his", true, inWs(ws));
+    const erins = await create(erin, "Erin's, dave helps", true, inWs(ws));
+    await collaborator(as(erin), erins, ids.dave, "PUT");
+
+    const preview = await ok<{ collaborations: number; experiments: { id: string }[] }>(200, "GET", `/workspaces/${ws}/members/${ids.dave}/removal`, { headers: erin });
+    assert.equal(preview.collaborations, 1);
+    assert.deepEqual(preview.experiments.map((e) => e.id).sort(), [handedLater, keptByDave].sort());
+    const removed = await ok<{ removed: { collaborations: number } }>(200, "DELETE", `/workspaces/${ws}/members/${ids.dave}`, { headers: erin });
+    assert.equal(removed.removed.collaborations, 1);
+
+    // His Experiments wait for a new maintainer; handing one over doesn't keep him on.
+    const waiting = await ok<Experiment>(200, "GET", `/experiments/${handedLater}`, { headers: as(erin) });
+    assert.equal(waiting.maintainerIsMember, false);
+    const handed = (await handOver(as(erin), handedLater, ids.carol)).experiment!;
+    assert.equal(handed.maintainerId, ids.carol);
+    assert.deepEqual(collaboratorIds(handed), [], "a departed maintainer doesn't become a collaborator");
+
+    // Back again: what he still maintains is his; collaborator places and handed-over ones aren't.
+    await ok(201, "POST", `/workspaces/${ws}/members`, { headers: erin, json: { userId: ids.dave, role: "member", access: "viewer" } });
+    const kept = await ok<Experiment>(200, "GET", `/experiments/${keptByDave}`, { headers: as(dave) });
+    assert.equal(kept.mine, true);
+    assert.equal(kept.access, "writer");
+    for (const id of [handedLater, erins]) {
+      const e = await ok<Experiment>(200, "GET", `/experiments/${id}`, { headers: as(dave) });
+      assert.equal(e.access, "reader", `${id}: only reads it now`);
+    }
   });
 });
