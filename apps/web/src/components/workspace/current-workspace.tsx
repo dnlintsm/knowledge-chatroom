@@ -15,3 +15,13 @@ export const CurrentWorkspaceContext = createContext<WorkspaceInfo | null>(null)
 export function useCurrentWorkspace(): WorkspaceInfo | null {
   return useContext(CurrentWorkspaceContext);
 }
+
+/**
+ * Shows a new name for the current workspace once it is renamed (issue #255),
+ * without loading the page again. Set by src/app/home.tsx.
+ */
+export const RenameWorkspaceContext = createContext<(name: string) => void>(() => {});
+
+export function useRenameWorkspace(): (name: string) => void {
+  return useContext(RenameWorkspaceContext);
+}

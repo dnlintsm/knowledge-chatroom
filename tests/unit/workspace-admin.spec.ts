@@ -1,0 +1,66 @@
+import { test, expect } from "@playwright/test";
+
+import {
+  assignableRoles,
+  canRemove,
+  namesMatch,
+  settingsFor,
+  transferSteps,
+} from "../../apps/web/src/lib/workspace-admin";
+
+/** What the people and settings screens offer (issue #255, docs/workspaces.md, "Changing a role"). */
+
+test("Owners give any role; Admins promote Members and step down; Members change nothing", () => {
+  for (const target of ["owner", "admin", "member"] as const) {
+    expect(assignableRoles("owner", target, false)).toEqual(["owner", "admin", "member"]);
+    expect(assignableRoles("member", target, false)).toEqual([]);
+  }
+  expect(assignableRoles("owner", "owner", true)).toEqual(["owner", "admin", "member"]);
+  expect(assignableRoles("admin", "member", false)).toEqual(["admin", "member"]);
+  expect(assignableRoles("admin", "admin", false)).toEqual([]);
+  expect(assignableRoles("admin", "owner", false)).toEqual([]);
+  expect(assignableRoles("admin", "admin", true)).toEqual(["admin", "member"]);
+  expect(assignableRoles("member", "member", true)).toEqual([]);
+});
+
+test("Owners remove anyone else, Admins only Members, and nobody removes themselves here", () => {
+  expect(canRemove("owner", "owner", false)).toBe(true);
+  expect(canRemove("owner", "admin", false)).toBe(true);
+  expect(canRemove("owner", "owner", true)).toBe(false);
+  expect(canRemove("admin", "member", false)).toBe(true);
+  expect(canRemove("admin", "admin", false)).toBe(false);
+  expect(canRemove("admin", "owner", false)).toBe(false);
+  expect(canRemove("member", "member", false)).toBe(false);
+});
+
+test("Owners and Admins rename; only Owners archive, and never the default workspace", () => {
+  expect(settingsFor("owner", false)).toEqual({ rename: true, archive: true });
+  expect(settingsFor("owner", true)).toEqual({ rename: true, archive: false });
+  expect(settingsFor("admin", false)).toEqual({ rename: true, archive: false });
+  expect(settingsFor("member", false)).toEqual({ rename: false, archive: false });
+});
+
+test("archiving is confirmed by the workspace's name, as a person reads it", () => {
+  expect(namesMatch("Etch lab", "Etch lab")).toBe(true);
+  expect(namesMatch("  Etch   lab ", "Etch lab")).toBe(true);
+  expect(namesMatch("etch lab", "Etch lab")).toBe(false);
+  expect(namesMatch("Etch", "Etch lab")).toBe(false);
+  expect(namesMatch("   ", "   ")).toBe(false);
+});
+
+test("a transfer makes them Owner first, then gives Full access, then lowers your role", () => {
+  const steps = transferSteps("ws 1", "me", "them", { fullAccess: true, myRole: "admin" });
+  expect(steps).toEqual([
+    { path: "/api/workspaces/ws%201/members/them", method: "PATCH", body: { role: "owner" } },
+    {
+      path: "/api/access/grants",
+      method: "POST",
+      body: { node: null, principalType: "user", principalId: "them", role: "owner" },
+    },
+    { path: "/api/workspaces/ws%201/members/me", method: "PATCH", body: { role: "admin" } },
+  ]);
+  // Sharing ownership: you stay an Owner, and they keep the access they have.
+  expect(transferSteps("w", "me", "them", { fullAccess: false, myRole: "owner" })).toEqual([
+    { path: "/api/workspaces/w/members/them", method: "PATCH", body: { role: "owner" } },
+  ]);
+});

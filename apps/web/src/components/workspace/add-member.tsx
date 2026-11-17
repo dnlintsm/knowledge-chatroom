@@ -18,7 +18,7 @@ const STARTING_ACCESS = [
 type StartingAccess = (typeof STARTING_ACCESS)[number]["value"];
 
 /** A request to the workspaces API (services/api-py/api_py/workspaces.py), with its answer. */
-async function workspacesApi<T>(path: string, init?: RequestInit): Promise<{ status: number; body: T & { error?: string } }> {
+export async function workspacesApi<T>(path: string, init?: RequestInit): Promise<{ status: number; body: T & { error?: string } }> {
   const res = await apiFetch(`/api/workspaces${path}`, {
     ...init,
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,

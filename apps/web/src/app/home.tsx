@@ -1,11 +1,11 @@
 "use client";
 
-import { useLayoutEffect, useMemo } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 
 import { Workspace, WorkspaceProvider } from "@/components/workspace";
 import type { StepsMode } from "@/components/workspace/agent-steps";
 import { StepsDefaultContext } from "@/components/workspace/agent-steps-view";
-import { CurrentWorkspaceContext } from "@/components/workspace/current-workspace";
+import { CurrentWorkspaceContext, RenameWorkspaceContext } from "@/components/workspace/current-workspace";
 import { setSavedStateScope } from "@/components/workspace/local-persistence";
 import { useGenerativeUIExamples } from "@/hooks";
 import { recordVisit } from "@/lib/workspace-choice";
@@ -53,6 +53,18 @@ export function Home({
     }
   }, [id, userKey, isDefault]);
   const headers = useMemo(() => (id ? { [WORKSPACE_HEADER]: id } : undefined), [id]);
+  // Its name as shown: a rename (issue #255) changes it in place.
+  const [renamed, setRenamed] = useState<{ id: string; name: string } | null>(null);
+  const shown = useMemo(
+    () => (workspace && renamed?.id === workspace.id ? { ...workspace, name: renamed.name } : workspace),
+    [workspace, renamed],
+  );
+  const rename = useCallback(
+    (name: string) => {
+      if (id) setRenamed({ id, name });
+    },
+    [id],
+  );
 
   return (
     <CopilotKit
@@ -64,7 +76,8 @@ export function Home({
       openGenerativeUI={{}}
       useSingleEndpoint={false}
     >
-      <CurrentWorkspaceContext.Provider value={workspace}>
+      <CurrentWorkspaceContext.Provider value={shown}>
+        <RenameWorkspaceContext.Provider value={rename}>
         {/*
           One UNCONTROLLED CopilotChatConfigurationProvider (no `threadId` prop) owns
           the active thread. The chat pane's history list and its
@@ -79,6 +92,7 @@ export function Home({
             </WorkspaceProvider>
           </StepsDefaultContext.Provider>
         </CopilotChatConfigurationProvider>
+        </RenameWorkspaceContext.Provider>
       </CurrentWorkspaceContext.Provider>
     </CopilotKit>
   );

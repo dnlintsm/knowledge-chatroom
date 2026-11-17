@@ -101,6 +101,8 @@ export interface WorkspaceInfo {
   slug: string;
   name: string;
   role: "owner" | "admin" | "member";
+  /** "archived" only in the list of archived workspaces an Owner may restore (issue #255). */
+  status?: "active" | "archived";
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { ArchiveRestore, Check, ChevronDown, LogOut, Plus, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { CreateWorkspaceDialog, Dialog } from "./create-workspace";
 import { useCurrentWorkspace } from "./current-workspace";
 import { savedStateScope } from "./local-persistence";
 import { useWorkspace } from "./store";
+import { LeaveWorkspaceDialog, WorkspaceSettingsDialog } from "./workspace-settings";
 
 /**
  * The workspace switcher, at the root of the breadcrumb (issue #226,
@@ -19,11 +20,17 @@ import { useWorkspace } from "./store";
  * workspaces, recent ones first, with Create. Shown whenever the server has
  * workspaces, also with only one, so Create is always there for those the
  * server lets create one (WORKSPACE_CREATORS).
+ *
+ * With issue #255 it also opens the current workspace's settings (Owners and
+ * Admins), leaving it (with login), and lists the archived workspaces the
+ * user owns, to restore.
  */
 export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; current: boolean }) {
   const workspace = useCurrentWorkspace();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [dialog, setDialog] = useState<"settings" | "leave" | null>(null);
+  const { account } = useWorkspace();
   const { leave, prompt } = useLeave();
   if (!workspace) return null;
 
@@ -64,6 +71,22 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
             setOpen(false);
             setCreating(true);
           }}
+          onSettings={
+            workspace.role === "owner" || workspace.role === "admin"
+              ? () => {
+                  setOpen(false);
+                  setDialog("settings");
+                }
+              : undefined
+          }
+          onLeave={
+            account.login
+              ? () => {
+                  setOpen(false);
+                  setDialog("leave");
+                }
+              : undefined
+          }
         />
       )}
       {creating && (
@@ -75,6 +98,8 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
           }}
         />
       )}
+      {dialog === "settings" && <WorkspaceSettingsDialog workspace={workspace} onClose={() => setDialog(null)} />}
+      {dialog === "leave" && <LeaveWorkspaceDialog workspace={workspace} onClose={() => setDialog(null)} />}
       {prompt}
     </span>
   );
@@ -85,13 +110,22 @@ function SwitcherMenu({
   onPick,
   onCreate,
   onClose,
+  onSettings,
+  onLeave,
 }: {
   current: WorkspaceInfo;
   onPick: (workspace: WorkspaceInfo) => void;
   onCreate: () => void;
   onClose: () => void;
+  /** The current workspace's settings, for its Owners and Admins. */
+  onSettings?: () => void;
+  /** Leaving the current workspace, with login. */
+  onLeave?: () => void;
 }) {
   const [listed, setListed] = useState<WorkspaceInfo[] | null>(null);
+  // The archived workspaces this user owns, which they may restore.
+  const [archived, setArchived] = useState<WorkspaceInfo[]>([]);
+  const [restoring, setRestoring] = useState<string | null>(null);
   // Whether the server lets this user create one (WORKSPACE_CREATORS); unknown until listed.
   const [canCreate, setCanCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,11 +133,13 @@ function SwitcherMenu({
 
   useEffect(() => {
     const controller = new AbortController();
-    workspaceFetch("/api/workspaces", { signal: controller.signal })
+    workspaceFetch("/api/workspaces?archived=true", { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Couldn't list your workspaces (${res.status})`);
         const body = (await res.json()) as { workspaces?: WorkspaceInfo[]; canCreate?: boolean };
-        setListed(body.workspaces ?? []);
+        const all = body.workspaces ?? [];
+        setListed(all.filter((w) => w.status !== "archived"));
+        setArchived(all.filter((w) => w.status === "archived"));
         setCanCreate(body.canCreate !== false);
       })
       .catch((err) => {
@@ -134,6 +170,27 @@ function SwitcherMenu({
     // Site storage blocked: no recent ones.
   }
   const sections = switcherSections(listed ?? [current], recentIds, current.id);
+
+  const restore = async (w: WorkspaceInfo) => {
+    setRestoring(w.id);
+    setError(null);
+    try {
+      const res = await workspaceFetch(`/api/workspaces/${encodeURIComponent(w.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "active" }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Couldn't restore ${w.name} (${res.status})`);
+      }
+      onPick({ ...w, status: "active" });
+    } catch (err) {
+      if (!isAborted(err)) setError(err instanceof Error ? err.message : String(err));
+      setRestoring(null);
+    }
+  };
+  const action = "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer";
 
   const item = (w: WorkspaceInfo, key: string) => {
     const here = w.id === current.id;
@@ -180,18 +237,44 @@ function SwitcherMenu({
           {error}
         </p>
       )}
-      {canCreate && (
+      {archived.length > 0 && (
         <>
           <div className="my-1 border-t border-[var(--border)]" />
-          <button
-            type="button"
-            role="menuitem"
-            onClick={onCreate}
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer"
-          >
-            <Plus className="size-3.5" /> Create workspace
-          </button>
+          <p className="px-2 pb-1 pt-1.5 text-[11px] font-medium text-[var(--muted-foreground)]">Archived workspaces</p>
+          <ul aria-label="Archived workspaces" className="max-h-40 overflow-auto">
+            {archived.map((w) => (
+              <li key={w.id} className="flex items-center gap-2 px-2 py-1 text-[var(--muted-foreground)]">
+                <span className="min-w-0 flex-1 truncate">{w.name}</span>
+                <button
+                  type="button"
+                  role="menuitem"
+                  aria-label={`Restore ${w.name}`}
+                  disabled={restoring !== null}
+                  onClick={() => void restore(w)}
+                  className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[var(--foreground)] hover:bg-[var(--secondary)] cursor-pointer disabled:cursor-wait disabled:opacity-50"
+                >
+                  <ArchiveRestore className="size-3" /> {restoring === w.id ? "Restoring…" : "Restore"}
+                </button>
+              </li>
+            ))}
+          </ul>
         </>
+      )}
+      {(onSettings || onLeave || canCreate) && <div className="my-1 border-t border-[var(--border)]" />}
+      {onSettings && (
+        <button type="button" role="menuitem" onClick={onSettings} className={action}>
+          <Settings className="size-3.5" /> Workspace settings
+        </button>
+      )}
+      {onLeave && (
+        <button type="button" role="menuitem" onClick={onLeave} className={action}>
+          <LogOut className="size-3.5" /> Leave workspace
+        </button>
+      )}
+      {canCreate && (
+        <button type="button" role="menuitem" onClick={onCreate} className={action}>
+          <Plus className="size-3.5" /> Create workspace
+        </button>
       )}
     </div>
   );
