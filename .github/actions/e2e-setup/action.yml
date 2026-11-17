@@ -15,7 +15,7 @@ runs:
     # pnpm at the version in package.json "packageManager".
     - name: Enable pnpm
       shell: bash
-      run: corepack enable
+      run: npm install --global pnpm@12.18.0
     - uses: actions/setup-node@v4
       with:
         node-version-file: .nvmrc
@@ -24,7 +24,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pnpm install --frozen-lockfile
+      run: pnpm install --frozen-lockfile --filter @knowledge-chatroom/web... --filter @knowledge-chatroom/contracts
 
     - name: Install Playwright Chromium
       shell: bash

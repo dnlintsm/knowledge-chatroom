@@ -10,7 +10,7 @@ test("documentation-only changes skip every suite", () => {
 test("Python services run only the E2E suites that start them", () => {
   expect(affectedSuites(["services/papers-mcp/papers_mcp/server.py"])).toEqual({ ...none, python: true });
   expect(affectedSuites(["services/api-py/api_py/app.py"])).toEqual({ ...none, python: true, storage: true });
-  expect(affectedSuites(["services/agent-py/agent_py/app.py"])).toEqual({ ...none, python: true, pyagent: true });
+  expect(affectedSuites(["services/agent-py/agent_py/app.py"])).toEqual({ ...none, python: true, storage: true, pyagent: true });
   expect(affectedSuites(["uv.lock"])).toEqual({ ...none, python: true, storage: true, pyagent: true });
   expect(affectedSuites(["packages/knowledge-py/src/knowledge_chatroom/api.py"])).toEqual({ ...none, python: true, storage: true, pyagent: true });
 });

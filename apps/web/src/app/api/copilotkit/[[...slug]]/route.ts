@@ -20,6 +20,7 @@ import { handleChatRoute } from "@/lib/chat-routes";
 import { ChatRunner, runOwner } from "@/lib/chat-runner";
 import { AutoChatStore } from "@/lib/chat-store";
 import { workspaceFromHeaders } from "@/lib/workspace-request";
+import { requestWithHeaders } from "@/lib/request-forwarding";
 import type { NextRequest } from "next/server";
 
 // Claude Agent SDK: the agent runs as its own server and speaks AG-UI directly
@@ -138,7 +139,7 @@ async function withUser(req: NextRequest) {
       }
     }
   }
-  return handler(new Request(req, { headers }));
+  return handler(await requestWithHeaders(req, headers));
 }
 
 export const GET = withUser;

@@ -48,7 +48,7 @@ they can affect ([issue #192](https://github.com/dnlintsm/knowledge-chatroom/iss
 | `docs/**`, root `README.md`, `CHANGELOG.md`, `LICENSE` | | | | | |
 | `services/lab-tools/**`, `services/papers-mcp/**`, `examples/python-agent/**`, `pyrefly-baseline.json` | | ✓ | | | |
 | `services/api-py/**` | | ✓ | | ✓ | |
-| `services/agent-py/**` | | ✓ | | | ✓ |
+| `services/agent-py/**` | | ✓ | | ✓ | ✓ |
 | `packages/knowledge-py/**`, `pyproject.toml`, `uv.lock`, `.python-version` | | ✓ | | ✓ | ✓ |
 | Anything else | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -70,8 +70,8 @@ updating the ruleset.
 each has its own database, S3, ports and output folders ([issue #219](https://github.com/dnlintsm/knowledge-chatroom/issues/219)):
 
 - `e2e-browser`: the walkthrough and the other browser specs. No server storage.
-- `e2e-storage`: storage E2E, then login E2E, in sequence on one Postgres/S3 pair,
-  with api-py in front of the agent server.
+- `e2e-storage`: storage E2E, login E2E, then the complete Python backend E2E,
+  using api-py directly without starting the retired TypeScript API.
 - `e2e-python`: the chat on the Python agent. No server storage.
 
 Each job builds the app itself (`.github/actions/e2e-setup`) and uploads its own

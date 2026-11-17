@@ -92,8 +92,8 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  # Server storage and the knowledge tree, then login and sharing, with api-py in
-  # front of the agent server (issue #190). They share this job's database and S3
+  # Server storage, login/sharing, then the complete Python backend. No TypeScript
+  # agent is started. These share this job's database server and S3
   # in sequence, as before; login gets its own output folder.
   e2e-storage:
     needs: changes
@@ -157,11 +157,23 @@ jobs:
         if: always() && steps.storage.outcome != 'skipped'
         run: node scripts/ci-tests.mjs run "Login E2E" playwright -- pnpm test:e2e:login --output test-results-login --reporter=list,json
 
+      - name: Test the complete Python backend without the TypeScript API
+        if: always() && steps.storage.outcome != 'skipped'
+        env:
+          DATABASE_URL: postgres://knowledge:knowledge@localhost:5432/knowledge_python
+        run: |
+          uv run --locked --package api-py python - <<'PYTHON'
+          import psycopg
+          with psycopg.connect("postgres://knowledge:knowledge@localhost:5432/knowledge", autocommit=True) as conn:
+              conn.execute("CREATE DATABASE knowledge_python")
+          PYTHON
+          node scripts/ci-tests.mjs run "Python backend E2E" playwright -- pnpm test:e2e:python-storage --output test-results-python-storage --reporter=list,json
+
       - name: Summarize test suites
         if: always()
         # Diagnostics only: a failure here must not fail the suite's job, and so `preview`.
         continue-on-error: true
-        run: node scripts/ci-tests.mjs summary "Storage E2E" "Login E2E"
+        run: node scripts/ci-tests.mjs summary "Storage E2E" "Login E2E" "Python backend E2E"
 
       - name: Upload preview artifact
         id: artifact
@@ -174,6 +186,7 @@ jobs:
             preview/
             test-results-storage/
             test-results-login/
+            test-results-python-storage/
           retention-days: 14
           if-no-files-found: ignore
 

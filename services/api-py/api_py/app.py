@@ -151,7 +151,7 @@ async def _serve_storage_when_ready(
 def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.http = client(settings.ts_agent_url, transport)
+        app.state.http = client(settings.ts_agent_url, transport) if settings.ts_agent_url else None
         app.state.settings = settings
         # The small model's Messages API, for /memory/import (llm.py); tests swap it.
         app.state.create_message = llm.message_creator()
@@ -218,7 +218,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 job.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job
-            await app.state.http.aclose()
+            if app.state.http:
+                await app.state.http.aclose()
             if app.state.storage and app.state.storage.semantic:
                 await app.state.storage.semantic.stop()
             if app.state.storage and app.state.storage.events:
@@ -236,15 +237,21 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
 
     @app.get("/health")
     async def health(request: Request) -> Response:
-        """Up, with the TypeScript server behind it and a database this server knows; 503 with what isn't."""
-        try:
-            answer = await request.app.state.http.get("/health", timeout=5.0)
-            upstream = "ok" if answer.status_code == 200 else "down"
-        except httpx.HTTPError:
-            upstream = "down"
+        """Ready on its own, or with an explicitly configured legacy upstream."""
+        upstream = "off"
+        if request.app.state.http:
+            try:
+                answer = await request.app.state.http.get("/health", timeout=5.0)
+                upstream = "ok" if answer.status_code == 200 else "down"
+            except httpx.HTTPError:
+                upstream = "down"
         found: db.Schema | None = request.app.state.schema
         database = "off" if not settings.database_url else found.state.value if found else "down"
-        if upstream == "ok" and database in ("off", "ready", "behind"):
+        database_ready = database in ("off", "ready") or (upstream == "ok" and database == "behind")
+        storage_ready = (
+            not settings.database_url or request.app.state.storage is not None or upstream == "ok"
+        )
+        if upstream != "down" and database_ready and storage_ready:
             return JSONResponse(
                 {"status": "ok"}
             )  # the spec's answer (getHealth), as the TypeScript server gives it
@@ -272,7 +279,10 @@ def main(env: Mapping[str, str] = os.environ) -> None:
         settings = settings_from_env(env)
     except ConfigError as err:
         raise SystemExit(f"[api-py] {err}") from err
-    logger.info("passing routes not ported yet to %s", settings.ts_agent_url)
+    if settings.ts_agent_url:
+        logger.info("legacy forwarding enabled: %s", settings.ts_agent_url)
+    else:
+        logger.info("serving the Python API directly; legacy forwarding is disabled")
     if settings.tools is not None:
         logger.info(
             "serving /tools for MCP_SERVERS: %s",

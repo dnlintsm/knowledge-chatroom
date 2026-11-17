@@ -3,13 +3,18 @@
 The agent server's HTTP API in Python, on FastAPI. It is phase 3 of moving the
 backend to Python (issue #169), done one route group at a time under issue #190.
 
-api-py is the front door at `LOCAL_AGENT_URL`. It serves the route groups moved to
-Python so far (`api_py/routes.py`). Every other request goes to the TypeScript agent
-server (`apps/agent`) at `TS_AGENT_URL`, streamed both ways and unchanged: method,
-path (percent-encoding kept), query, headers, body, status, and server-sent events.
-So the app, the Python chat agent and the MCP servers keep one address while routes
-move. The URLs and `packages/contracts/openapi/storage.yaml` stay the contract, and
-the conformance suite runs through api-py.
+api-py is the API at `LOCAL_AGENT_URL`, and runs independently of `apps/agent`.
+`pnpm dev` and the demo use it with the Python chat agent (`services/agent-py`).
+Leave `TS_AGENT_URL` unset to disable legacy forwarding. With it unset,
+`GET /health` checks this API's storage readiness, unknown routes and legacy chat
+endpoints return 404, and storage that is still starting returns 503. Setting an
+explicit `TS_AGENT_URL` restores the old forwarding mode for migration comparisons.
+
+PostgreSQL and S3 are required for storage, skills and persisted history. api-py
+applies the shared SQL migrations itself. Without a database, the UI can still
+use browser-local files and chat, but skills and persisted history are unavailable.
+With no `MCP_SERVERS`, api-py serves an empty tools menu itself. Valid remote-agent
+and outside MCP memory tokens are served here when legacy forwarding is disabled.
 
 What it serves itself so far:
 
@@ -111,7 +116,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `TS_AGENT_URL` | `http://127.0.0.1:8100` | The TypeScript agent server, for every route not moved yet. |
+| `TS_AGENT_URL` | unset | Optional legacy TypeScript server. Unset disables all forwarding. |
 | `API_PY_HOST`, `API_PY_PORT` | `127.0.0.1`, `8000` | Where it listens. |
 | `DATABASE_URL` | unset | The same Postgres as the TypeScript server. Unset means no storage. |
 | `AUTH_MODE`, `AUTH_SECRET` | | Login, with the TypeScript server's rules and the same secret. |
@@ -121,16 +126,16 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run. |
 | `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
-| `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off leaves `/memory` to the TypeScript server. |
+| `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off disables `/memory` (or forwards it only in explicit legacy mode). |
 | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | As the TypeScript server reads them: the small model that makes the chat's follow-up chips, sorts imported plain-text memory into notes and learns from chats. Without a key, the chips' request ends with an error (no chips), and imported text waits in the inbox as one note, as there. |
 | `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES` | unset, `10` | As the TypeScript server reads them: `MEMORY_LEARN=off` stops learning from chats, which otherwise runs here once a chat has been quiet that many minutes. Set `MEMORY_LEARN=off` on the TypeScript server. |
-| `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset leaves `/tools` to the TypeScript server. |
+| `MCP_SERVERS` | unset | The outside MCP servers, as the TypeScript server reads them; give both the same value. Unset serves an empty `/tools` menu (unless explicit legacy forwarding is enabled). |
 | `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |
 
 `pnpm dev` reads the repository's `.env`. As with the agent server, keep its port private.
 
-With Docker, the demo's `api` service builds `services/api-py/Dockerfile` and runs it in
-front of the `agent` service.
+With Docker, the demo's `api` service builds `services/api-py/Dockerfile` and runs
+independently beside `agent-py`, with no TypeScript agent process.
 
 ## Tests
 

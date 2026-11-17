@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 
 from api_py.app import create_app
-from api_py.config import Settings
+from api_py.config import Settings, settings_from_env
 from api_py.proxy import client
 
 pytestmark = pytest.mark.anyio
@@ -188,6 +188,29 @@ async def test_health_reports_the_typescript_server():
         answer = await api.get("/health")
     assert answer.status_code == 503
     assert answer.json() == {"status": "degraded", "upstream": "down", "database": "off"}
+
+
+async def test_standalone_api_never_contacts_the_retired_server():
+    async def forbidden(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Standalone API contacted the TypeScript server: {request.url}")
+
+    app = create_app(settings_from_env({}), transport=httpx.MockTransport(forbidden))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        assert app.state.http is None
+        health = await api.get("/health")
+        assert health.status_code == 200 and health.json() == {"status": "ok"}
+        menu = await api.get("/tools")
+        assert menu.status_code == 200 and menu.json() == {"tools": []}
+        for method, path in [("POST", "/"), ("POST", "/agent/report"), ("GET", "/unknown")]:
+            assert (await api.request(method, path)).status_code == 404
+        # A database still starting is unavailable, rather than missing files.
+        app.state.settings = settings(ts_agent_url=None, database_url="configured")
+        answer = await api.get("/files")
+        assert answer.status_code == 503
+        assert answer.json() == {"error": "Storage is not ready"}
 
 
 async def test_long_watches_do_not_hold_back_other_requests():

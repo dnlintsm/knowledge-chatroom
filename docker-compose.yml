@@ -46,10 +46,10 @@ services:
       timeout: 5s
       retries: 20
 
-  # --- Demo profile: the agent and UI built from ./Dockerfile ---
+  # --- Retired TypeScript agent, only for explicit legacy comparisons ---
   # No login (one built-in user owns everything); chat needs ANTHROPIC_API_KEY.
   agent:
-    profiles: [demo]
+    profiles: [legacy-agent]
     build:
       context: .
       target: agent
@@ -107,9 +107,7 @@ services:
       retries: 20
     # The agent port stays private: the UI forwards to it and signs identities.
 
-  # The agent server's HTTP API in Python (services/api-py, issue #190), in
-  # front of the agent above: it serves the routes moved to Python so far and
-  # passes every other request to the agent, so everything else talks to it.
+  # The standalone Python HTTP API. Legacy TypeScript forwarding is disabled.
   api:
     profiles: [demo]
     build:
@@ -117,7 +115,7 @@ services:
       dockerfile: services/api-py/Dockerfile
     environment:
       AUTH_MODE: local
-      TS_AGENT_URL: http://agent:8000
+      TS_AGENT_URL: ""
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
       # The same store as the agent: api-py serves /files (issue #190, step 3).
       S3_ENDPOINT: http://s3:8333
@@ -149,7 +147,9 @@ services:
     volumes:
       - api-models:/var/lib/knowledge/models
     depends_on:
-      agent:
+      postgres:
+        condition: service_healthy
+      s3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -165,8 +165,8 @@ services:
       target: app
     environment:
       LOCAL_AGENT_URL: http://api:8000
-      # A remote backend for the chat (docs/remote-agent.md); empty = the agent above.
-      AGENT_URL: ${AGENT_URL:-}
+      # Chat uses the Python agent by default; AGENT_URL can select another backend.
+      AGENT_URL: ${AGENT_URL:-http://agent-py:9300}
       AUTH_MODE: local
       CHAT_SUGGESTIONS: ${CHAT_SUGGESTIONS:-}
       CHAT_STEPS: ${CHAT_STEPS:-}
@@ -175,6 +175,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      agent-py:
+        condition: service_healthy
 
   # --- The chat on the Python agent (services/agent-py, issue #176) ---
   # With the demo, and the app's chat pointed at it (docs/remote-agent.md):
@@ -182,7 +184,7 @@ services:
   # It reaches storage, skills and memory through the api service above, and gets
   # the same model settings and MCP_SERVERS.
   agent-py:
-    profiles: [python-agent]
+    profiles: [demo, python-agent]
     build:
       context: .
       dockerfile: services/agent-py/Dockerfile

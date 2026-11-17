@@ -46,6 +46,12 @@ function pathIn(text) {
 
 /** What the scripted model answers: text, or one tool call. */
 function answer(request) {
+  if (request.tool_choice?.name === "copilotkitSuggest") {
+    return { tool: { name: "copilotkitSuggest", input: { suggestions: [
+      { title: "Check the evidence", message: "Check the evidence behind that answer." },
+      { title: "Save it as a note", message: "Save that answer as a note." },
+    ] } } };
+  }
   const turn = [...(request.messages ?? [])].reverse().find((m) => m.role === "user");
   const blocks = Array.isArray(turn?.content) ? turn.content : [];
   const result = blocks.find((block) => block?.type === "tool_result");
@@ -59,7 +65,7 @@ function answer(request) {
   const text = textOf(turn?.content).replace(/<workspace>[\s\S]*?<\/workspace>/g, "");
   const write = (request.tools ?? []).find((tool) => /(^|__)writeWorkspaceFile$/.test(tool.name));
   if (write && text.includes("artifacts/")) return { tool: { name: write.name, input: ARTIFACT } };
-  if (text.includes(TLDR_MARKER)) return { text: TLDR };
+  if (text.includes(TLDR_MARKER) || text.includes("one bold **TL;DR:** line")) return { text: TLDR };
   return { text: REPLY };
 }
 
@@ -118,15 +124,17 @@ const server = http.createServer(async (req, res) => {
   if (pathname === "/v1/messages/count_tokens") return json(res, 200, { input_tokens: 100 });
   // Claude Code also makes side requests without tools (titles and the like).
   if (request.tools?.length) lastRequest = request;
-  if (request.stream === false) {
-    const { text } = answer(request);
+  if (request.stream !== true) {
+    const { text, tool } = answer(request);
     return json(res, 200, {
       id: `msg_${randomUUID().replace(/-/g, "")}`,
       type: "message",
       role: "assistant",
       model: request.model,
-      content: [{ type: "text", text: text ?? "" }],
-      stop_reason: "end_turn",
+      content: tool
+        ? [{ type: "tool_use", id: `toolu_${randomUUID()}`, name: tool.name, input: tool.input }]
+        : [{ type: "text", text: text ?? "" }],
+      stop_reason: tool ? "tool_use" : "end_turn",
       stop_sequence: null,
       usage: { input_tokens: 100, output_tokens: 20 },
     });

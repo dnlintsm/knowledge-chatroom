@@ -1,18 +1,20 @@
 # Testing
 
-Run from the repository root with Node 22. Root `pnpm install` installs the whole workspace.
+Run frontend checks from the repository root with Node 26 LTS and pnpm 12.18.0.
+Use `pnpm check:web` for frontend lint, types and units; it skips the retired agent suites.
 The default test command runs only fast units; integration and E2E are explicit.
 
 | Command | Services/credentials | Coverage |
 | --- | --- | --- |
-| `pnpm check` | None | ESLint, all TypeScript projects (root, web, agent, contracts), all unit tests |
+| `pnpm check:web` | None | Frontend ESLint, root/web/contracts TypeScript, frontend unit tests |
 | `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
 | `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
 | `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every agent server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
-| `pnpm test:e2e:storage` | Chromium + PostgreSQL + S3 | Real storage, knowledge tree, experiments, runs and chat history with mock chat |
-| `pnpm test:e2e:login` | Chromium + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
+| `pnpm test:e2e:storage` | Chromium + uv + PostgreSQL + S3 | Python API storage, knowledge tree, experiments, runs and chat history with mock chat |
+| `pnpm test:e2e:login` | Chromium + uv + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
 | `pnpm test:e2e:python` | Chromium + uv (`uv sync --package agent-py`) | The chat on the Python agent (`services/agent-py`, `AGENT_URL`) with a real Claude Code engine and a scripted model: replies, a browser tool, a skill, follow-up chips |
+| `pnpm test:e2e:python-storage` | Chromium + uv + PostgreSQL + S3 | Real Python API and chat agent: streamed replies, built-in skill, reload from persisted history; only the model is scripted |
 | `pnpm test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
@@ -145,10 +147,10 @@ All required modes ignore ambient Anthropic/Intelligence keys and launch mock
 chat explicitly. Missing storage prerequisites fails instead of skipping cases.
 
 The runner owns its servers and refuses existing ones. Defaults: UI 3000, mock
-agent 8000, storage 8001 (the Python API server, in front of the storage agent on 8002), test OIDC 9400, Python agent 9300, scripted model
-9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_TS_STORAGE_PORT`, `E2E_OIDC_PORT`,
+agent 8000, storage 8001 (the standalone Python API server), test OIDC 9400, Python agent 9300, scripted model
+9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT`,
 `E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs. The storage and login
-modes need uv for the API server. `E2E_API_PY=off` serves storage from the agent alone.
+modes need uv for the API server. `E2E_API_PY=off` is an explicit comparison against the retired TypeScript API.
 
 The Python mode runs `services/agent-py` with Claude Code pointed at
 `e2e/mock-anthropic.mjs`, a stand-in for the Messages API that streams scripted turns

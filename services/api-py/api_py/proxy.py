@@ -59,8 +59,22 @@ def end_to_end(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
     return [(n, v) for n, v in headers if n.lower() not in HOP_BY_HOP and n.lower() not in named]
 
 
-async def forward(request: Request, http: httpx.AsyncClient) -> Response:
+async def forward(request: Request, http: httpx.AsyncClient | None) -> Response:
     """Sends `request` to the TypeScript server and streams its answer back."""
+    if http is None:
+        # No implicit connection to the retired TypeScript API. A configured
+        # database that is still starting must not look like missing content.
+        from .routes import STORAGE_PREFIXES
+
+        path = request.url.path
+        storage_path = any(path == p or path.startswith(p + "/") for p in STORAGE_PREFIXES)
+        if (
+            storage_path
+            and request.app.state.settings.database_url
+            and request.app.state.storage is None
+        ):
+            return JSONResponse({"error": "Storage is not ready"}, status_code=503)
+        return JSONResponse({"error": "Not found"}, status_code=404)
     # The path as sent (percent-encoding kept, %2F included) and the query as is.
     target = (request.scope.get("raw_path") or request.scope["path"].encode()).decode("latin-1")
     if query := request.scope.get("query_string", b""):

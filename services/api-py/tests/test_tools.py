@@ -59,10 +59,14 @@ def servers(config: dict[str, Any], **env: str) -> dict[str, ExternalServer]:
 # --- MCP_SERVERS, as mcp.ts reads it
 
 
-def test_mcp_servers_unset_means_typescript_keeps_tools():
+def test_mcp_servers_unset_serves_an_empty_menu_unless_legacy_forwarding_is_explicit():
     assert servers_from_env({}) is None
     assert servers_from_env({"MCP_SERVERS": " \n"}) is None
-    assert settings_from_env({}).tools is None
+    settings = settings_from_env({})
+    assert settings.tools is not None and settings.tools.servers == {}
+    whitespace = settings_from_env({"MCP_SERVERS": " \n"})
+    assert whitespace.tools is not None and whitespace.tools.servers == {}
+    assert settings_from_env({"TS_AGENT_URL": "http://legacy:8100"}).tools is None
 
 
 def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCaptureFixture):

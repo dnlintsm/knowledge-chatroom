@@ -13,7 +13,7 @@
     "test:conformance": "tsx --test --test-concurrency=1 conformance/storage.test.ts conformance/workspaces.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
+    "@types/node": "^26",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "openapi-typescript": "7.13.0",
