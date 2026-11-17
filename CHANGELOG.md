@@ -277,6 +277,16 @@
   workspace whose Owners can no longer sign in, and with `fullAccess` gives them alone
   Full access on its root. Both are audited in that workspace, with the admin as the
   actor; admins can't name themselves, and being one gives no membership or content.
+- Screens for workspace administration (issue #255, step 5). In the Admin panel's People
+  tab, Owners and Admins change each member's role, with only the roles they may set, and
+  remove members after a confirmation that says what goes (direct access, groups,
+  collaborator places) and lists the shared Experiments they maintain. "Make Owner" on
+  someone else asks whether you stay an Owner or become an Admin or a Member, and can
+  give them Full access on the workspace root. The workspace switcher has Workspace
+  settings (rename, for Owners and Admins; archive, for Owners and never the default
+  workspace, after typing its name), Leave workspace, which tells the last Owner to make
+  someone else Owner first, and the archived workspaces you own, with Restore. The
+  Activity tab now lists membership and workspace changes as well.
 
 ### Changed
 

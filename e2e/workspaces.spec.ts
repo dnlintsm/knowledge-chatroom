@@ -155,3 +155,52 @@ test("the switcher moves to another workspace, asking first about unsaved edits"
     await request.delete(`/api/files/${path}`);
   }
 });
+
+test("an Owner renames, archives and restores a workspace from the switcher", async ({ page, request }) => {
+  await expect.poll(async () => (await request.get("/api/nodes")).status(), { timeout: 60_000 }).toBe(200);
+  const name = `Settings ${Date.now()}`;
+  const renamed = `${name} renamed`;
+  const other: { id: string; slug: string } = await (await request.post("/api/workspaces", { data: { name } })).json();
+  const location = page.getByRole("navigation", { name: "Location" });
+  const menu = page.getByRole("menu", { name: "Workspaces" });
+  const settings = page.getByRole("dialog", { name: "Workspace settings" });
+
+  await page.goto(`/w/${other.slug}`);
+  await loaded(page);
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  // Without login nobody else could take it over: no Leave.
+  await expect(menu.getByRole("menuitem", { name: "Leave workspace" })).toHaveCount(0);
+  await menu.getByRole("menuitem", { name: "Workspace settings" }).click();
+  await settings.getByLabel("Name", { exact: true }).fill(renamed);
+  await settings.getByRole("button", { name: "Rename" }).click();
+  await expect(settings.getByRole("status")).toContainText("Renamed");
+  await expect(location.getByRole("button", { name: renamed, exact: true })).toBeVisible();
+
+  // Archiving asks for its name, as it is now.
+  const archive = settings.getByRole("region", { name: "Archive the workspace" });
+  await expect(archive.getByRole("button", { name: "Archive" })).toBeDisabled();
+  await archive.getByLabel(/to confirm/).fill(name);
+  await expect(archive.getByRole("button", { name: "Archive" })).toBeDisabled();
+  await archive.getByLabel(/to confirm/).fill(renamed);
+  await archive.getByRole("button", { name: "Archive" }).click();
+  await expect(page).toHaveURL(/\/w\/default$/);
+  await loaded(page);
+  expect((await request.get("/api/files", { headers: { [HEADER]: other.id } })).status()).toBe(404);
+
+  // It is gone from the list, and waits under Archived workspaces.
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  await expect(menu.getByRole("list", { name: "Archived workspaces" })).toContainText(renamed);
+  await expect(menu.locator("a", { hasText: renamed })).toHaveCount(0);
+  await menu.getByRole("menuitem", { name: `Restore ${renamed}` }).click();
+  await expect(page).toHaveURL(new RegExp(`/w/${other.slug}$`));
+  await loaded(page);
+  await expect(location.getByRole("button", { name: renamed, exact: true })).toBeVisible();
+
+  // The default workspace can be renamed, never archived.
+  await page.goto("/w/default");
+  await loaded(page);
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  await menu.getByRole("menuitem", { name: "Workspace settings" }).click();
+  await expect(settings.getByLabel("Name", { exact: true })).toBeVisible();
+  await expect(settings.getByRole("region", { name: "Archive the workspace" })).toHaveCount(0);
+});

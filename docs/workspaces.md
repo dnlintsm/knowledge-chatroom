@@ -728,7 +728,13 @@ rules.
 4. Backend, workspace inventory and adding an Owner. Done: api-py serves `/platform`
    (`platform.py`), with `PLATFORM_ADMINS` and `RECOVERY_IDLE_DAYS`. Only api-py serves
    it, as it does `/workspaces`.
-5. Screens: people, transfer, leave, settings, archived workspaces.
+5. Screens: people, transfer, leave, settings, archived workspaces. Done: the Admin
+   panel's People tab has each member's role (`members.tsx`) and Remove, with the
+   preview; "Make Owner" asks whether you stay an Owner or become an Admin or a Member,
+   and offers Full access on the root. The switcher has Workspace settings (rename;
+   archive, typing the name), Leave workspace (with login) and Archived workspaces, with
+   Restore (`workspace-settings.tsx`). The Activity tab lists membership and workspace
+   changes too. `src/lib/workspace-admin.ts` says what each role may do, for the screens.
 6. Screens: the Experiment header and the read-only reasons.
 7. Screen: workspace inventory.
 

@@ -7,6 +7,7 @@ import type { Role } from "./server-files";
 import { access, personLabel, ROLES, type Group, type Person } from "./sharing";
 import { useWorkspace } from "./store";
 import { AddMember } from "./add-member";
+import { MemberRoleMenu, RemoveMember, type MemberTarget } from "./members";
 import { useCurrentWorkspace } from "./current-workspace";
 import { apiFetch } from "./server-files";
 import { MEMBER_ROLE_LABEL } from "@/lib/workspace-choice";
@@ -86,7 +87,9 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
     const [p, g, a, who] = await Promise.all([
       access<{ people: PersonRow[] }>("/people"),
       access<{ groups: Group[] }>("/groups"),
-      access<{ entries: AuditEntry[] }>("/audit?limit=200&kind=group&kind=grant"),
+      access<{ entries: AuditEntry[] }>(
+        `/audit?limit=200&kind=group&kind=grant${workspace ? "&kind=member&kind=workspace&kind=platform" : ""}`,
+      ),
       access<{ me: { id: string } | null }>(""),
     ]);
     setPeople(p.people);
@@ -179,7 +182,16 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
           {tab === "people" && (
             <>
               {workspace && <AddMember workspace={workspace} onAdded={() => load().catch(() => {})} />}
-              <PeopleTab people={people} groups={groups} me={me} run={run} memberRoles={workspace ? memberRoles : null} />
+              <PeopleTab
+                people={people}
+                groups={groups}
+                me={me}
+                run={run}
+                memberRoles={workspace ? memberRoles : null}
+                workspace={workspace}
+                reload={() => load().catch((err) => setError(err instanceof Error ? err.message : String(err)))}
+                onError={setError}
+              />
             </>
           )}
           {tab === "groups" && <GroupsTab people={people ?? []} groups={groups} run={run} />}
@@ -203,6 +215,9 @@ function PeopleTab({
   me,
   run,
   memberRoles,
+  workspace,
+  reload,
+  onError,
 }: {
   people: PersonRow[] | null;
   groups: Group[];
@@ -210,8 +225,17 @@ function PeopleTab({
   run: Run;
   /** With workspaces: each member's role in the workspace. */
   memberRoles: Map<string, WorkspaceInfo["role"]> | null;
+  workspace: WorkspaceInfo | null;
+  reload: () => Promise<void>;
+  onError: (message: string | null) => void;
 }) {
   if (!people) return <p className="text-[var(--muted-foreground)]">Loading…</p>;
+  // Your own role, as the server lists it now (the page's may be older).
+  const viewer = me ? memberRoles?.get(me) : undefined;
+  const target = (p: PersonRow): MemberTarget | null => {
+    const role = memberRoles?.get(p.id);
+    return role ? { id: p.id, label: personLabel(p), role, fullAccess: p.effectiveRole === "owner" } : null;
+  };
   const groupName = (id: string) => groups.find((g) => g.id === id)?.name ?? "Unknown group";
   const setRole = (p: PersonRow, role: Role | "") => {
     if (
@@ -245,16 +269,19 @@ function PeopleTab({
         <thead className="text-xs text-[var(--muted-foreground)]">
           <tr>
             <th className="py-1 font-normal">Person</th>
+            {memberRoles && <th className="py-1 font-normal">Role</th>}
             {/* With workspaces, the role is the badge by the name; this is their access. */}
             <th className="py-1 font-normal">{memberRoles ? "Access to the workspace" : "Workspace role"}</th>
             <th className="py-1 font-normal">Groups</th>
             <th className="py-1 font-normal">Last active</th>
             <th className="py-1 font-normal">Joined</th>
+            {memberRoles && <th className="py-1 font-normal"><span className="sr-only">Remove</span></th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-[var(--border)]">
           {people.map((p) => {
             const label = personLabel(p);
+            const member = target(p);
             const viaGroup =
               p.effectiveRole && (!p.role || RANK[p.effectiveRole] > RANK[p.role]) ? p.effectiveRole : null;
             return (
@@ -263,19 +290,30 @@ function PeopleTab({
                   <div className="truncate font-medium">
                     {label}
                     {p.id === me && <span className="ml-1 text-xs text-[var(--muted-foreground)]">(you)</span>}
-                    {memberRoles?.get(p.id) && memberRoles.get(p.id) !== "member" && (
-                      <span className="ml-1.5 rounded bg-[var(--secondary)] px-1.5 py-0.5 text-[10px] font-normal">
-                        {MEMBER_ROLE_LABEL[memberRoles.get(p.id)!]}
-                      </span>
-                    )}
                   </div>
                   {p.email && p.email !== label && (
                     <div className="truncate text-xs text-[var(--muted-foreground)]">{p.email}</div>
                   )}
                 </td>
+                {memberRoles && (
+                  <td className="py-2 pr-2">
+                    {workspace && viewer && me && member ? (
+                      <MemberRoleMenu
+                        workspace={workspace}
+                        viewer={viewer}
+                        me={me}
+                        target={member}
+                        onChanged={reload}
+                        onError={onError}
+                      />
+                    ) : (
+                      <span className="text-sm">{member ? MEMBER_ROLE_LABEL[member.role] : "—"}</span>
+                    )}
+                  </td>
+                )}
                 <td className="py-2 pr-2">
                   <select
-                    aria-label={`Workspace role for ${label}`}
+                    aria-label={`${memberRoles ? "Access to the workspace" : "Workspace role"} for ${label}`}
                     value={p.role ?? ""}
                     onChange={(e) => void setRole(p, e.target.value as Role | "")}
                     className="h-8 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 text-sm"
@@ -309,9 +347,16 @@ function PeopleTab({
                 <td className="py-2 pr-2 text-xs whitespace-nowrap" title={p.lastSeenAt ?? undefined}>
                   {ago(p.lastSeenAt)}
                 </td>
-                <td className="py-2 text-xs whitespace-nowrap" title={p.createdAt}>
+                <td className="py-2 pr-2 text-xs whitespace-nowrap" title={p.createdAt}>
                   {ago(p.createdAt)}
                 </td>
+                {memberRoles && (
+                  <td className="py-2 text-right">
+                    {workspace && viewer && me && member && (
+                      <RemoveMember workspace={workspace} viewer={viewer} me={me} target={member} onRemoved={reload} />
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -513,8 +558,10 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
 
   const person = (id: unknown) => {
     const p = people.find((x) => x.id === id);
-    return p ? personLabel(p) : "someone";
+    return p ? personLabel(p) : "a former member";
   };
+  const memberRole = (role: unknown) =>
+    typeof role === "string" && role in MEMBER_ROLE_LABEL ? MEMBER_ROLE_LABEL[role as WorkspaceInfo["role"]] : String(role);
   const group = (id: unknown) => groups.find((g) => g.id === id)?.name ?? "a group";
   const principal = (t: Record<string, unknown>) =>
     t.principalType === "group" ? `the group ${group(t.principalId)}` : person(t.principalId);
@@ -538,6 +585,24 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
         return `gave ${principal(t)} ${ACCESS[t.role as Role] ?? String(t.role)} access to ${place(t.node)}`;
       case "grant.revoke":
         return `removed ${principal(t)}'s access to ${place(t.node)}`;
+      case "member.add":
+        return `added ${person(t.user)} as ${memberRole(t.role)}`;
+      case "member.role":
+        return `made ${person(t.user)} ${memberRole(t.role)} (was ${memberRole(t.previous)})`;
+      case "member.remove":
+        return `removed ${person(t.user)} from the workspace`;
+      case "member.leave":
+        return "left the workspace";
+      case "workspace.create":
+        return `created the workspace ${String(t.name)}`;
+      case "workspace.rename":
+        return `renamed the workspace from ${String(t.previous)} to ${String(t.name)}`;
+      case "workspace.archive":
+        return "archived the workspace";
+      case "workspace.restore":
+        return "restored the workspace";
+      case "platform.owner":
+        return `made ${person(t.user)} Owner`;
       default:
         return e.action;
     }
@@ -551,7 +616,9 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
             {ago(e.at)}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="font-medium">{person(e.actorId)}</span>
+            <span className="font-medium">
+              {e.action === "platform.owner" || e.target.recovery === true ? "A deployment admin" : person(e.actorId)}
+            </span>
             {e.actorType === "agent" && <span className="text-[var(--muted-foreground)]"> (via Claude)</span>}{" "}
             {describe(e)}
           </span>

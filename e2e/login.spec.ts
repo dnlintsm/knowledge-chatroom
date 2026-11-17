@@ -168,7 +168,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   const peopleTable = admin.getByRole("table", { name: "People" });
   await expect(peopleTable).toContainText("Alice Admin");
   await expect(peopleTable).toContainText("(you)");
-  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("");
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("");
 
   await admin.getByRole("tab", { name: /^Groups/ }).click();
   await admin.getByLabel("New group name").fill("Fab");
@@ -184,8 +184,8 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await shot(alice, "19-admin-groups");
 
   await admin.getByRole("tab", { name: /^People/ }).click();
-  await admin.getByLabel("Workspace role for Bob Builder").selectOption("editor");
-  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("editor");
+  await admin.getByLabel("Access to the workspace for Bob Builder").selectOption("editor");
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("editor");
   await expect(peopleTable).toContainText("Litho team");
   await shot(alice, "20-admin-people");
 
@@ -208,12 +208,12 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   // Alice gives Bob Full access and steps down to Can edit. She stays the
   // workspace's Owner (issue #226), which is what the Admin panel needs.
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
-  await admin.getByLabel("Workspace role for Bob Builder").selectOption("owner");
-  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("owner");
+  await admin.getByLabel("Access to the workspace for Bob Builder").selectOption("owner");
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("owner");
   alice.once("dialog", (d) => void d.accept());
-  await admin.getByLabel("Workspace role for Alice Admin").selectOption("editor");
-  await expect(admin.getByLabel("Workspace role for Alice Admin")).toHaveValue("editor");
-  await expect(admin.getByLabel("Workspace role for Bob Builder").locator("option:checked")).toHaveText("Full access");
+  await admin.getByLabel("Access to the workspace for Alice Admin").selectOption("editor");
+  await expect(admin.getByLabel("Access to the workspace for Alice Admin")).toHaveValue("editor");
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder").locator("option:checked")).toHaveText("Full access");
   await expect(admin.getByRole("table", { name: "People" })).toContainText("Owner");
   await admin.getByRole("button", { name: "Close" }).click();
   await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
@@ -262,7 +262,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await add.getByLabel("Starting access").selectOption("editor");
   await add.getByRole("button", { name: "Add" }).click();
   await expect(add.getByRole("status")).toContainText("Added Bob Builder as Member");
-  await expect(admin.getByLabel("Workspace role for Bob Builder")).toHaveValue("editor");
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("editor");
   await add.getByLabel("Email").fill("bob@example.com");
   await add.getByLabel("Role").selectOption("admin");
   await add.getByRole("button", { name: "Add" }).click();
@@ -282,6 +282,69 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   const bobLocation = bob.getByRole("navigation", { name: "Location" });
   await expect(bobLocation.getByRole("button", { name: lab, exact: true })).toBeVisible();
   await expect(bobLocation).toContainText("Lab finding");
+
+  // Administration (issue #255): Alice makes Bob an Admin, then hands the lab
+  // over to him and becomes an Admin herself.
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  await admin.getByLabel("Role of Bob Builder").selectOption("admin");
+  await expect(admin.getByLabel("Role of Bob Builder")).toHaveValue("admin");
+  await admin.getByLabel("Role of Bob Builder").selectOption("owner");
+  const transfer = alice.getByRole("dialog", { name: "Make Bob Builder an Owner" });
+  await transfer.getByLabel("Become an Admin").check();
+  await expect(transfer.getByLabel(/Give them Full access/)).toBeChecked();
+  await shot(alice, "30-admin-transfer");
+  const reloaded = alice.waitForEvent("load");
+  await transfer.getByRole("button", { name: "Make Owner" }).click();
+  // Her own role changed, so the page loads again.
+  await reloaded;
+  await expect(alice.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await alice.getByRole("button", { name: "Admin", exact: true }).click();
+  await expect(admin.getByLabel("Role of Alice Admin")).toHaveValue("admin");
+  // An Admin doesn't change an Owner's role.
+  await expect(admin.getByLabel("Role of Bob Builder")).toHaveCount(0);
+  await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("owner");
+  await admin.getByRole("tab", { name: "Activity" }).click();
+  await expect(changes).toContainText("made Bob Builder Owner (was Admin)");
+  await expect(changes).toContainText("made Alice Admin Admin (was Owner)");
+  await admin.getByRole("button", { name: "Close" }).click();
+
+  // Bob, now its Owner, removes Alice after seeing what goes, then adds her back.
+  await bob.goto(labUrl);
+  await expect(bob.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await bob.getByRole("button", { name: "Admin", exact: true }).click();
+  const bobAdmin = bob.getByRole("dialog", { name: "Admin" });
+  await bobAdmin.getByRole("button", { name: "Remove Alice Admin" }).click();
+  const removal = bob.getByRole("dialog", { name: "Remove Alice Admin?" });
+  await expect(removal.getByLabel("What goes")).toContainText("1 direct access they were given");
+  await expect(removal.getByRole("list", { name: "Experiments they maintain" })).toContainText("Lab finding");
+  await shot(bob, "31-admin-remove-member");
+  await removal.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(removal).toHaveCount(0);
+  await expect(bobAdmin.getByRole("table", { name: "People" })).not.toContainText("Alice Admin");
+  expect((await alice.request.get("/api/files", { headers: inLab })).status()).toBe(404);
+  const bobAdd = bobAdmin.getByRole("form", { name: "Add a member" });
+  await bobAdd.getByLabel("Email").fill("alice@example.com");
+  await bobAdd.getByRole("button", { name: "Add" }).click();
+  await expect(bobAdd.getByRole("status")).toContainText("Added Alice Admin as Member");
+  await bobAdmin.getByRole("button", { name: "Close" }).click();
+
+  // Alice leaves it from the switcher; Bob, its last Owner, is told he can't yet.
+  await alice.goto(labUrl);
+  await expect(alice.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await alice.getByRole("button", { name: "Switch workspace" }).click();
+  await alice.getByRole("menuitem", { name: "Leave workspace" }).click();
+  const leaving = alice.getByRole("dialog", { name: `Leave ${lab}?` });
+  await expect(leaving).toContainText("come back if you are");
+  await leaving.getByRole("button", { name: "Leave", exact: true }).click();
+  await expect(alice).toHaveURL(/\/w\/default$/);
+  expect((await alice.request.get("/api/files", { headers: inLab })).status()).toBe(404);
+  await bob.getByRole("button", { name: "Switch workspace" }).click();
+  await bob.getByRole("menuitem", { name: "Leave workspace" }).click();
+  const bobLeaving = bob.getByRole("dialog", { name: `Leave ${lab}?` });
+  await expect(bobLeaving).toContainText("You're its only Owner");
+  await expect(bobLeaving.getByRole("button", { name: "Leave", exact: true })).toHaveCount(0);
+  await bob.keyboard.press("Escape");
+  await expect(bobLeaving).toHaveCount(0);
 
   // Signing out ends the session.
   await bob.getByRole("button", { name: "Account" }).click();
