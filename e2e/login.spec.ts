@@ -418,3 +418,58 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await alice.context().close();
   await bob.context().close();
 });
+
+test("the workspace inventory is for the deployment's admins, who add Owners but never themselves", async ({ browser }) => {
+  // PLATFORM_ADMINS names Alice here (playwright.config.ts).
+  const alice = await signIn(browser, "Alice Admin");
+  const bob = await signIn(browser, "Bob Builder");
+  const name = `Inventory lab ${Date.now()}`;
+  const created = await alice.request.post("/api/workspaces", { data: { name } });
+  expect(created.status()).toBe(201);
+
+  // Bob isn't an admin: no menu item, and the page refuses him.
+  await bob.goto("/platform");
+  await expect(bob.getByTestId("workspace-inventory").getByRole("alert")).toContainText("Only the deployment's admins");
+  await expect(bob.getByRole("table", { name: "Workspaces" })).toHaveCount(0);
+
+  // Alice opens it from the switcher: her new workspace, with her as its Owner, and no content.
+  await alice.getByRole("button", { name: "Switch workspace" }).click();
+  await alice.getByRole("menuitem", { name: "Workspace inventory" }).click();
+  await expect(alice).toHaveURL(/\/platform$/);
+  const inventory = alice.getByRole("table", { name: "Workspaces" });
+  await alice.getByRole("searchbox", { name: "Find a workspace" }).fill(name);
+  await expect(inventory.getByRole("row")).toHaveCount(2);
+  await expect(inventory.getByRole("list", { name: `Owners of ${name}` })).toContainText("Alice Admin");
+  await expect(inventory.getByRole("row", { name })).toContainText("by Alice Admin");
+
+  // She can't make herself an Owner, and someone who never signed in can't be found.
+  await inventory.getByRole("button", { name: `Add an Owner to ${name}` }).click();
+  const add = alice.getByRole("dialog", { name: `Add an Owner to ${name}` });
+  await add.getByLabel("Their email").fill("nobody-yet@example.com");
+  await add.getByRole("button", { name: "Find" }).click();
+  await expect(add.getByRole("alert")).toContainText("Nobody with that email has signed in yet");
+  await add.getByLabel("Their email").fill("alice@example.com");
+  await add.getByRole("button", { name: "Find" }).click();
+  await add.getByRole("button", { name: "Make Owner" }).click();
+  await expect(add.getByRole("alert")).toContainText("can't make themselves Owners");
+
+  // Bob, who isn't a member, becomes an Owner. Alice, active, holds Full access, so it isn't preselected.
+  await add.getByLabel("Their email").fill("BOB@example.com");
+  await add.getByRole("button", { name: "Find" }).click();
+  await expect(add).toContainText("bob@example.com");
+  await expect(add.getByLabel(/Also give them Full access/)).not.toBeChecked();
+  await shot(alice, "34-workspace-inventory-add-owner");
+  await add.getByRole("button", { name: "Make Owner" }).click();
+  await expect(add).toHaveCount(0);
+  await expect(alice.getByRole("status")).toContainText(`Bob Builder is now an Owner of ${name}.`);
+  await expect(inventory.getByRole("list", { name: `Owners of ${name}` })).toContainText("Bob Builder");
+  await alice.getByRole("searchbox", { name: "Find a workspace" }).fill("");
+  await shot(alice, "35-workspace-inventory");
+
+  // Bob now has it, as an Owner.
+  const mine = (await (await bob.request.get("/api/workspaces")).json()) as { workspaces: { name: string; role: string }[] };
+  expect(mine.workspaces.find((w) => w.name === name)?.role).toBe("owner");
+
+  await alice.context().close();
+  await bob.context().close();
+});

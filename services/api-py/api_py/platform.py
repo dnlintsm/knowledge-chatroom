@@ -6,6 +6,7 @@ local mode the local user is one. Nobody is one by default, and being one gives
 nothing else: no membership, no content, no audit log.
 
     GET  /platform/workspaces               -> {workspaces: [PlatformWorkspace]}
+    GET  /platform/users?email=             -> {user: {id, name, email}}: who to add
     POST /platform/workspaces/<id>/owners   {userId, fullAccess?} -> {workspace: PlatformWorkspace}
 
 The list has no content: no node names, files, Experiments, chats, or members
@@ -39,6 +40,7 @@ _ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 NOT_ADMIN = "Only the deployment's admins (PLATFORM_ADMINS) see the workspace inventory"
 NOT_FOUND = "Workspace not found"
 UNKNOWN_USER = "Unknown user: they need to sign in once first"
+NOBODY = "Nobody with that email has signed in yet"
 NOT_YOURSELF = (
     "Deployment admins can't make themselves Owners: ask another admin, or add someone else"
 )
@@ -148,6 +150,23 @@ class Platform:
             )
             rows = await cur.fetchall()
         return [_entry(row) for row in rows]
+
+    async def lookup(self, email: str) -> dict[str, Any] | None:
+        """Someone who has signed in with exactly this email (case ignored), to make an Owner."""
+        address = email.strip()
+        if not address or "@" not in address:
+            return None
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id, name, email FROM users
+                WHERE lower(email) = lower(%s) AND subject <> 'local'
+                ORDER BY last_seen_at DESC NULLS LAST, created_at DESC
+                LIMIT 1""",
+                (address,),
+            )
+            row = await cur.fetchone()
+        return {"id": str(row[0]), "name": row[1], "email": row[2]} if row else None
 
     async def add_owner(
         self, workspace_id: str, admin: str, user_id: str, full_access: bool
@@ -294,6 +313,14 @@ async def _route(request: Request, platform: Platform, principal: Principal) -> 
         if method != "GET":
             return _send(405, {"error": "Method not allowed"})
         return _send(200, {"workspaces": await platform.workspaces()})
+    if parts == ["users"]:
+        if method != "GET":
+            return _send(405, {"error": "Method not allowed"})
+        emails = request.query_params.getlist("email")
+        person = await platform.lookup(emails[0]) if emails else None
+        if person is None:
+            return _send(404, {"error": NOBODY})
+        return _send(200, {"user": person})
     if len(parts) == 3 and parts[0] == "workspaces" and parts[2] == "owners":
         if method != "POST":
             return _send(405, {"error": "Method not allowed"})
