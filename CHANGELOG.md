@@ -298,6 +298,18 @@
 
 ### Changed
 
+- The backend is Python by default (issue #264, phase 4 of #169): `pnpm dev` and the compose
+  demo run the Python API server (`services/api-py`) on its own and the Python chat agent
+  (`services/agent-py`), with no TypeScript agent server. api-py no longer forwards
+  anything unless `TS_AGENT_URL` is set (it used to default to `http://127.0.0.1:8100`):
+  unknown routes answer 404, and storage that is still starting answers 503. Unset,
+  `AGENT_URL` now means the Python chat agent at `http://127.0.0.1:9300`; `AGENT_URL=local`
+  keeps the chat on the TypeScript agent server at `LOCAL_AGENT_URL`, as `pnpm dev:ts` does.
+  The TypeScript agent server stays in `apps/agent` for legacy comparisons only, under the
+  compose profile `legacy-agent` on Node 22, until #264 removes it.
+- The UI builds and runs on Node 26 LTS (`.nvmrc`). Node 26 no longer bundles Corepack, so
+  install pnpm 12.18.0 yourself (`npm install --global pnpm@12.18.0`). The chat route
+  rebuilds its request instead of wrapping Next.js's, which Node 26's `Request` can refuse.
 - Workspace membership replaces the root owner grant for administration (issue #226):
   people, groups and the audit log are for the workspace's Owners and Admins, and
   `/access/users` and `/access/people` list the workspace's members, not everyone who has
@@ -334,6 +346,14 @@
   a new experiment of yours. Access refusals from the storage API say what you can do there
   ("You can only view here; this needs editor access") (#187).
 
+### Known limitations
+
+- The Python chat agent doesn't run skills' scripts (`SKILL_SCRIPTS=on`), has no working
+  folder with a copy of the workspace (`AGENT_WORKDIR`: Read, Glob and Grep over files and
+  `save_file`), and lacks the starter's A2UI demo tools (`generate_a2ui`, flight search).
+  They are the next steps of #264; until then the TypeScript agent server's chat
+  (`AGENT_URL=local`) still has them.
+
 ### Fixed
 
 - A rerun reads its inputs at the content the earlier run recorded again, as it did before
@@ -345,33 +365,38 @@
 
 ### Upgrading
 
-- Run the Python API server in front of the agent server (issue #190; the
-  [Deployment](docs/deployment.md) guide and the
-  [api-py README](services/api-py/README.md) have the details). The compose file does all of
-  this; for your own deployment:
-  1. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+, or build
-     `services/api-py/Dockerfile`.
-  2. Move the agent server to another private port, and start api-py where it was, with
-     `TS_AGENT_URL` pointing at the agent server. `LOCAL_AGENT_URL` (Next.js) and the MCP
-     servers' `KNOWLEDGE_STORAGE_URL` keep pointing at the old address, now api-py's.
-  3. Give api-py the agent server's settings for what it now serves:
+- Move the backend to Python (issues #190 and #264; the [Deployment](docs/deployment.md)
+  guide and the [api-py](services/api-py/README.md) and
+  [agent-py](services/agent-py/README.md) READMEs have the details). The compose demo does
+  all of this; for your own deployment:
+  1. Back up the database and the bucket first, as for any release with migrations: api-py
+     applies them now. On a newer database than it knows, api-py refuses to start.
+  2. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+, or build
+     `services/api-py/Dockerfile` and `services/agent-py/Dockerfile`. Build and run the UI
+     on Node 26 with pnpm 12.18.0.
+  3. Stop the agent server and start api-py at its address. `LOCAL_AGENT_URL` (Next.js) and
+     the MCP servers' `KNOWLEDGE_STORAGE_URL` keep pointing there. Leave `TS_AGENT_URL`
+     unset. Give api-py the agent server's settings:
      - storage: `DATABASE_URL`, `AUTH_MODE`, `AUTH_SECRET`, the `S3_*` settings and
        `MAX_UPLOAD_BYTES`;
      - search: `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY`, and a writable
        `EMBEDDING_CACHE_DIR`;
      - skills: `HUB_ADMINS` and `SKILL_SCRIPTS`;
+     - workspaces: `WORKSPACE_CREATORS` and `PLATFORM_ADMINS`;
      - the "+" menu: `MCP_SERVERS`, `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS`;
      - memory and the follow-up chips: `MEMORY`, `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES`,
        `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`,
        `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
-  4. Start the agent server with `SEARCH_INDEXER=off`, `MEMORY_LEARN=off` and
-     `MIGRATIONS=off`, so the indexer, the memory learner and the migrations run in api-py
-     alone.
-  5. Back up the database and the bucket first, as for any release with migrations: api-py
-     applies them now. On a newer database than it knows, api-py refuses to start.
+  4. Start agent-py on a private address with the model settings, `MCP_SERVERS`,
+     `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
+     api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
+     if agent-py runs at `http://127.0.0.1:9300` next to the app.
 
-  The agent server alone (`pnpm dev:ts`, or without api-py) keeps working and keeps
-  migrating, but new work lands in api-py.
+  To keep a feature from the known limitations above for now, keep the agent server behind
+  api-py instead: start it on another private port with `SEARCH_INDEXER=off`,
+  `MEMORY_LEARN=off` and `MIGRATIONS=off`, set api-py's `TS_AGENT_URL` to it, and set
+  `AGENT_URL=local` on the app. `pnpm env:check` can't spot this change, since it comes
+  from settings your `.env` doesn't have.
 - Migration `023_workspace_members.sql` adds workspace memberships and fills them from
   today's access: root owners (directly or through groups) become Owners, anyone else with
   a grant, or with their own chats, memory or skill settings in the workspace, becomes a

@@ -1,8 +1,8 @@
 // Runs the storage API conformance suite (packages/contracts/conformance) against
-// this agent: resets the test database, starts the agent on it with the Python
-// API server (services/api-py, issue #190) in front, as `pnpm dev` and compose
-// run them, waits for storage, runs the suite through api-py, and stops both.
-// CONFORMANCE_TARGET=ts runs it against the TypeScript server alone.
+// the Python API server (services/api-py) alone, as `pnpm dev` and compose run it
+// since issue #264: resets the test database, starts api-py on it with no
+// TypeScript server behind it, waits for storage, runs the suite and stops it.
+// CONFORMANCE_TARGET=ts runs it against the legacy TypeScript server alone.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -41,7 +41,7 @@ const freePort = () =>
       probe.close(() => resolve(port));
     });
   });
-const port = await freePort();
+const port = target === "ts" ? await freePort() : null;
 const apiPort = target === "api-py" ? await freePort() : null;
 const base = `http://127.0.0.1:${apiPort ?? port}`;
 const authSecret = randomBytes(32).toString("hex");
@@ -51,7 +51,7 @@ const mcpServers = JSON.stringify({
   conformance: { url: "http://127.0.0.1:9/mcp", forwardIdentity: true, ui: { label: "Conformance", tools: ["search"] } },
 });
 
-const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
+const agent = port && spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
   cwd: agentDir,
   env: {
     ...process.env,
@@ -69,14 +69,12 @@ const agent = spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
     AGENT_PORT: String(port),
     // Full-text search is enough here; search by meaning has its own tests.
     EMBEDDING_MODEL: "off",
-    // api-py in front runs the search indexer (issue #190, step 5) and applies the migrations (step 9).
-    ...(apiPort && { SEARCH_INDEXER: "off", MIGRATIONS: "off" }),
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "conformance-no-model-calls",
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
 let agentExited = false;
-agent.once("exit", () => { agentExited = true; });
+agent?.once("exit", () => { agentExited = true; });
 
 const servicesDir = fileURLToPath(new URL("../../../services/", import.meta.url));
 const api = apiPort
@@ -88,7 +86,8 @@ const api = apiPort
         S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
         AUTH_MODE: "oidc",
         AUTH_SECRET: authSecret,
-        TS_AGENT_URL: `http://127.0.0.1:${port}`,
+        // No legacy forwarding: everything the suite calls is served in Python.
+        TS_AGENT_URL: "",
         API_PY_PORT: String(apiPort),
         EMBEDDING_MODEL: "off",
         // The same hub admins as the agent: api-py serves the skill hub (step 7).
@@ -111,13 +110,10 @@ api?.once("error", (err) => {
 
 async function waitForStorage() {
   const end = Date.now() + 60_000;
-  // With api-py in front, the agent's own storage too: it opens once api-py has migrated.
-  const servers = apiPort ? [base, `http://127.0.0.1:${port}`] : [base];
   while (Date.now() < end && !agentExited) {
-    // 401 once storage is up; 503 while it starts (502 from api-py before the
-    // agent listens); no answer before the server listens.
-    const statuses = await Promise.all(servers.map((url) => fetch(`${url}/nodes`).then((r) => r.status, () => 0)));
-    if (statuses.every((status) => status === 401)) return true;
+    // 401 once storage is up; 503 while it starts; no answer before the server listens.
+    const status = await fetch(`${base}/nodes`).then((r) => r.status, () => 0);
+    if (status === 401) return true;
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;
@@ -140,5 +136,5 @@ if (await waitForStorage()) {
   console.error(agentExited ? "The agent or api-py exited before storage was ready." : "Storage didn't start within 60 s.");
 }
 api?.kill("SIGTERM");
-agent.kill("SIGTERM");
+agent?.kill("SIGTERM");
 process.exit(status);
