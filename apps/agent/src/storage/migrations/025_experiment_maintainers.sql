@@ -44,6 +44,23 @@ CREATE FUNCTION workspace_member(ws uuid, uid uuid) RETURNS boolean
   SELECT EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ws AND user_id = uid)
 $$;
 
+-- Holds a member until the transaction ends, and says whether they are one. A
+-- write that gives someone something in the workspace (a grant, a group
+-- membership, a collaborator place, an experiment to maintain) takes it first, so
+-- a removal either waits for that write and then deletes what it added, or goes
+-- first and this finds no member. The locks come in the removal's order: the
+-- workspace's row (FOR KEY SHARE, which the removal's FOR UPDATE waits for, while
+-- writes don't wait for each other), then the member's (FOR SHARE). The other
+-- order deadlocks with a removal, since the write's own rows take a key share on
+-- the workspace's row later.
+CREATE FUNCTION lock_workspace_member(ws uuid, uid uuid) RETURNS boolean
+  LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path FROM CURRENT AS $$
+BEGIN
+  PERFORM 1 FROM workspaces WHERE id = ws FOR KEY SHARE;
+  PERFORM 1 FROM workspace_members WHERE workspace_id = ws AND user_id = uid FOR SHARE;
+  RETURN FOUND;
+END $$;
+
 -- As in 015, with "maintainer or collaborator" where it said "author".
 CREATE OR REPLACE FUNCTION experiment_access(uid uuid, exp uuid) RETURNS text
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $$

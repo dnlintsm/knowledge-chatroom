@@ -499,16 +499,16 @@ class AccessService:
     async def _need_member(self, conn: AsyncConnection, user_id: str) -> None:
         """
         Grants and groups are for the workspace's members: add someone to the
-        workspace first. Holds their membership until the transaction ends, so
-        a removal (workspaces.py, remove_member, which locks it first) either
-        waits for this write and then deletes what it added, or goes first and
-        this finds no member.
+        workspace first. Holds their membership until the transaction ends
+        (lock_workspace_member, 025_experiment_maintainers.sql), so a removal
+        (workspaces.py, remove_member) either waits for this write and then
+        deletes what it added, or goes first and this finds no member.
         """
         cur = await conn.execute(
-            "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s FOR SHARE",
-            (self.workspace_id, user_id),
+            "SELECT lock_workspace_member(%s, %s)", (self.workspace_id, user_id)
         )
-        if not await cur.fetchone():
+        row = await cur.fetchone()
+        if not (row and row[0]):
             raise AccessError("They aren't a member of this workspace; add them to it first")
 
     async def _keep_an_owner(

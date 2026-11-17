@@ -80,6 +80,9 @@ export interface LinkedInput {
 /** The request can't be done as asked (no title, params not an object, …). */
 export class ExperimentError extends Error {}
 
+/** Refused: a collaborator or new maintainer who isn't (or just stopped being) a member. */
+export const NOT_A_MEMBER = "They aren't a member of this workspace; add them to it first";
+
 /** A new experiment was given an id that is already taken (even by a deleted one). */
 export class ExperimentExistsError extends Error {
   constructor(readonly id: string) {
@@ -470,6 +473,7 @@ export class ExperimentService {
     inTx?: (tx: Tx) => Promise<unknown>,
   ): Promise<boolean> {
     return this.sql.begin(async (tx) => {
+      if (add && !(await lockMember(tx, this.workspaceId, userId))) throw new ExperimentError(NOT_A_MEMBER);
       const changed = add
         ? await tx`
             INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
@@ -495,7 +499,9 @@ export class ExperimentService {
     inTx?: (tx: Tx) => Promise<unknown>,
   ): Promise<void> {
     await this.sql.begin(async (tx) => {
-      if (keepPrevious) {
+      if (!(await lockMember(tx, this.workspaceId, userId))) throw new ExperimentError(NOT_A_MEMBER);
+      // The previous maintainer stays on only while still a member.
+      if (keepPrevious && (await lockMember(tx, this.workspaceId, experiment.maintainerId))) {
         await tx`
           INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
           VALUES (${experiment.id}, ${experiment.maintainerId}, ${by}) ON CONFLICT DO NOTHING`;
@@ -546,4 +552,15 @@ export class ExperimentService {
       SELECT experiment_access(${userId}, ${id}::uuid) AS access`;
     return row.access;
   }
+}
+
+/**
+ * Whether `userId` is a member, holding their membership until `tx` ends, so a
+ * removal can't slip in before the write that gives them a place
+ * (025_experiment_maintainers.sql, lock_workspace_member).
+ */
+async function lockMember(tx: Tx, workspaceId: string, userId: string): Promise<boolean> {
+  if (!isNodeId(userId)) return false;
+  const [row] = await tx<{ ok: boolean }[]>`SELECT lock_workspace_member(${workspaceId}, ${userId}::uuid) AS ok`;
+  return Boolean(row?.ok);
 }

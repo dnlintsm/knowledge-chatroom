@@ -35,6 +35,7 @@ ARCHIVED = "This experiment is archived; restore it to change it"
 NOT_WORKER = "Only the experiment's maintainer and collaborators can change it"
 ONLY_MAINTAINER = "Only the experiment's maintainer can do this"
 CANT_WORK = "They can't view this experiment's node. Share it with them first."
+NOT_A_MEMBER = "They aren't a member of this workspace; add them to it first"
 # The node name an upload uses for a level its path leaves empty ("Etch/Module 3//").
 EMPTY_LEVEL_NAME = "None"
 # What an audit target says about content, hidden from a reader who can't see it.
@@ -686,6 +687,8 @@ class Session:
         action = "experiment.collaborator.add" if add else "experiment.collaborator.remove"
         async with self.scoped() as conn:
             if add:
+                if not await _lock_member(conn, self.ws, user_id):
+                    raise ExperimentError(NOT_A_MEMBER)
                 cur = await conn.execute(
                     """
                     INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
@@ -732,7 +735,10 @@ class Session:
             return current
         await self._need_can_work(current, user_id)
         async with self.scoped() as conn:
-            if keep and current["maintainerIsMember"]:
+            if not await _lock_member(conn, self.ws, user_id):
+                raise ExperimentError(NOT_A_MEMBER)
+            # The previous maintainer stays on only while still a member.
+            if keep and await _lock_member(conn, self.ws, previous):
                 await conn.execute(
                     """
                     INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
@@ -1256,3 +1262,16 @@ class FilesSession:
         self._need_editor()
         async with self.session.scoped() as conn:
             return await self.service.remove(conn, path, self._audit("file.delete", {"path": path}))
+
+
+async def _lock_member(conn: AsyncConnection, workspace_id: str, user_id: str) -> bool:
+    """
+    Whether `user_id` is a member, holding their membership until the transaction
+    ends, so a removal can't slip in before the write that gives them a place
+    (025_experiment_maintainers.sql, lock_workspace_member).
+    """
+    if not is_uuid(user_id):
+        return False
+    cur = await conn.execute("SELECT lock_workspace_member(%s, %s)", (workspace_id, user_id))
+    row = await cur.fetchone()
+    return bool(row and row[0])

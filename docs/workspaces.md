@@ -535,11 +535,13 @@ What stops (see [Revalidation](#revalidation)):
   reason ("no longer a member of this workspace"), and the run stops there. An Experiment
   run left in the `running` state stays so; its maintainer, after a handover, can finish
   it as failed.
-- A grant, group membership or collaborator change that was being written for them as
-  they were removed is taken away too: the write holds their membership row (`FOR
-  SHARE`), the removal waits for it (`FOR UPDATE`) and then removes what it wrote, and a
-  write that starts after the removal finds no member and is refused. Adding them back
-  restores none of it.
+- A grant, group membership, collaborator place or handover that was being written for
+  them as they were removed is taken away too. The write takes
+  `lock_workspace_member()` first: the workspace's row `FOR KEY SHARE`, then their
+  membership row `FOR SHARE`, the order the removal locks them in (`FOR UPDATE`). The
+  removal waits for the write and then removes what it wrote, and a write that starts
+  after the removal finds no member and is refused. Adding them back restores none of
+  it.
 - Signed download links expire as before (`DOWNLOAD_LINK_SECONDS`).
 
 ### Renaming and archiving a workspace

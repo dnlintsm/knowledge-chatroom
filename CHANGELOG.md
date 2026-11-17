@@ -261,6 +261,10 @@
   (`collaborations` in the answer and the preview, which lists what they maintain).
   Storage tokens can't use these routes. Migration `025_experiment_maintainers.sql` makes
   every existing Experiment's author its maintainer, with no change in who sees what.
+  Adding a collaborator or a new maintainer holds their membership, as grants and group
+  writes do, so a removal at the same moment takes it away too; grants and group writes
+  now take the workspace's row first, which also keeps them from deadlocking with a
+  removal.
 
 ### Changed
 
