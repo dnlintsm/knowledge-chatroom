@@ -301,6 +301,15 @@
   last used, and a filter. "Add an Owner" finds someone by the email they signed in with
   (the new `GET /platform/users?email=` on the API server) and can give them Full access
   on the workspace, preselected when nobody active holds it. Anyone else is refused.
+- The Python chat agent runs skills' scripts (issue #264, step 2). With `SKILL_SCRIPTS=on`
+  on agent-py, a run whose skills include one with scripts gets Bash in Claude Code's
+  sandbox, as on the TypeScript agent server: no network, writes only in the user's run
+  folder (not its skills), agent-py's own folder, its home, other users' folders, the usual
+  secret mounts and `SKILL_SCRIPTS_DENY_READ` unreadable, and an environment with no
+  secrets. The run talks to Anthropic with a stand-in key through a proxy inside agent-py
+  on 127.0.0.1 (`agent_py/keyproxy.py`), which sends on the real one. agent-py's host needs
+  bubblewrap and socat, plus the interpreters the skills use (Node.js for the built-in
+  `analysis` skill's script).
 
 ### Changed
 
@@ -354,10 +363,10 @@
 
 ### Known limitations
 
-- The Python chat agent doesn't run skills' scripts (`SKILL_SCRIPTS=on`), has no working
-  folder with a copy of the workspace (`AGENT_WORKDIR`: Read, Glob and Grep over files and
-  `save_file`), and lacks the starter's A2UI demo tools (`generate_a2ui`, flight search).
-  They are the next steps of #264; until then the TypeScript agent server's chat
+- The Python chat agent has no working folder with a copy of the workspace
+  (`AGENT_WORKDIR`: Read, Glob and Grep over files and `save_file`), and lacks the
+  starter's A2UI demo tools (`generate_a2ui`, flight search). They are the next steps of
+  #264; until then the TypeScript agent server's chat
   (`AGENT_URL=local`) still has them.
 
 ### Fixed
@@ -394,7 +403,8 @@
        `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`,
        `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
   4. Start agent-py on a private address with the model settings, `MCP_SERVERS`,
-     `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
+     `SKILL_SCRIPTS` and `SKILL_SCRIPTS_DENY_READ` if scripts are on (with bubblewrap and
+     socat on its host), `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
      api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
      if agent-py runs at `http://127.0.0.1:9300` next to the app.
 

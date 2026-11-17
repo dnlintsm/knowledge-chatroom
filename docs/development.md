@@ -112,8 +112,9 @@ storage it also holds a read-only copy of the user's files that Claude searches 
 Read/Glob/Grep (`AGENT_WORKDIR=off` turns it off; see
 [Working folder](architecture.md#working-folder)).
 Skills are instructions; embedded shell commands are not executed. With
-`SKILL_SCRIPTS=on` the agent runs skills' scripts in the SDK's sandbox, which needs
-bubblewrap (`apt-get install bubblewrap`; macOS has its own) on the agent host; see
+`SKILL_SCRIPTS=on` (for both api-py and agent-py, which `pnpm dev` gives the same `.env`) the
+chat agent runs skills' scripts in the SDK's sandbox, which needs bubblewrap and socat
+(`apt-get install bubblewrap socat`; macOS has its own) on the agent host; see
 [Skill scripts](architecture.md#skill-scripts). `HUB_ADMINS`
 (emails or login subjects, comma-separated) names who may verify hub skills and
 dismiss reports; without login the built-in user is an admin. See

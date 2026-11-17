@@ -70,7 +70,8 @@ folder), and only `/name` for one of those skills reaches the SDK as a command.
 #### Skill scripts
 
 A deployment can let skills run the scripts they ship (`scripts/`, `*.py`, `*.sh`, ...) with
-`SKILL_SCRIPTS=on` (`apps/agent/src/skills/run.ts`). A run whose skills include one with scripts then
+`SKILL_SCRIPTS=on` on the chat agent (`services/agent-py/agent_py/scripts.py`; the legacy
+TypeScript agent's is `apps/agent/src/skills/run.ts`). A run whose skills include one with scripts then
 gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, which the agent
 host must have; the run fails rather than run a command unsandboxed):
 
@@ -85,8 +86,10 @@ host must have; the run fails rather than run a command unsandboxed):
 - **No secrets**: the run's environment keeps only basics such as `PATH`, `HOME`, the locale and
   the model, so no `DATABASE_URL`, `AUTH_SECRET`, S3 or proxy settings. The SDK itself needs an
   API key, and its commands would inherit it, so the run gets a stand-in key that only a proxy
-  inside the agent accepts (`apps/agent/src/skills/keyproxy.ts`, on 127.0.0.1); the proxy sends
-  requests on to Anthropic with the real key.
+  inside the agent accepts (`agent_py/keyproxy.py`, or `apps/agent/src/skills/keyproxy.ts`, on
+  127.0.0.1); the proxy sends requests on to Anthropic with the real key. The Python SDK can only
+  add to the environment Claude Code inherits from agent-py, so agent-py passes every other
+  variable as an empty string, and drops its own virtualenv from `PATH`.
 
 Commands run without a permission prompt because they're sandboxed; `!` commands in a SKILL.md
 stay off. The Skills view marks a skill with scripts with a terminal icon when they run, and a

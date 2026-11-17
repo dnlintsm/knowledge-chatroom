@@ -55,6 +55,8 @@ for a gateway) in this server's environment.
 | `MCP_SERVERS` | Outside MCP servers and tool chips: give it the agent server's value, so the chat's "+" menu (from the agent server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
 | `AGENT_PY_WORKDIR` | Where each user's working folder goes, holding their skills (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
+| `SKILL_SCRIPTS` | `on`: skills' scripts run, in Claude Code's sandbox (needs bubblewrap and socat). Set it on api-py too. |
+| `SKILL_SCRIPTS_DENY_READ` | More absolute paths scripts can't read, comma-separated. |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |
 
 ## How it works
@@ -91,8 +93,21 @@ for a gateway) in this server's environment.
   `/name`. Only `/name` for one of them stays a command (`/clear` and the like go as
   text), and a run with `/name` gets its workspace note after the command. Each skill
   used goes to the chat as a `skill_used` event and to the usage history
-  (`POST /skills/used`). `!` commands in a SKILL.md never run and there is no shell,
-  so skills' scripts don't run here (on the agent server they need `SKILL_SCRIPTS=on`).
+  (`POST /skills/used`). `!` commands in a SKILL.md never run, and there is no shell
+  unless skills' scripts are on (below).
+- `agent_py/scripts.py` and `agent_py/keyproxy.py`: skills' scripts, as the TypeScript
+  agent runs them. With `SKILL_SCRIPTS=on`, a run whose skills include one with scripts
+  (`needsExecution`) gets Bash in Claude Code's sandbox: no network, writes only in the
+  user's run folder (not its skills or the files Claude Code reads as instructions),
+  this checkout or `/app`, its home, `AGENT_PY_WORKDIR`'s other folders, the usual secret
+  mounts and `SKILL_SCRIPTS_DENY_READ` (comma-separated absolute paths) unreadable. The
+  Python SDK only adds to the environment Claude Code inherits, so every variable but
+  the basics (`PATH` without the virtualenv, `HOME`, the locale, the model settings) is
+  passed empty, and the run gets a stand-in API key that only a proxy inside agent-py
+  accepts, on 127.0.0.1, which sends requests on to Anthropic with the real key. The host
+  needs bubblewrap and socat (and, in a container, permission to create user
+  namespaces) plus the interpreters the skills use; a run with scripts fails when the
+  sandbox can't start.
 - `agent_py/memory.py`: the user's memory in the chat, as the TypeScript agent gives it
   (`apps/agent/src/memory/run.ts`). With the run's `X-Knowledge-Memory` token (the app
   sends one per run; memory needs `MEMORY=on` on the agent server), each run asks
