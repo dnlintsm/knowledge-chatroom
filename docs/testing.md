@@ -86,10 +86,10 @@ are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testin
 integration does not fall back to `DATABASE_URL`.
 
 `pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values. It resets the
-database and starts the agent on it with a throwaway `AUTH_SECRET`. In front of the agent
-it starts the Python API server (`services/api-py`, which needs uv), as `pnpm dev` does.
-Then it runs `packages/contracts/conformance/storage.test.ts` through the API server
-(`CONFORMANCE_TARGET=ts` runs it against the agent alone, which doesn't serve `/workspaces`
+database and starts the Python API server (`services/api-py`, which needs uv) on it with
+a throwaway `AUTH_SECRET` and no TypeScript server behind it, as `pnpm dev` does (#264).
+Then it runs `packages/contracts/conformance/storage.test.ts` against it
+(`CONFORMANCE_TARGET=ts` runs it against the legacy TypeScript agent server alone, which doesn't serve `/workspaces`
 and refuses other workspaces' storage requests, so those tests fail there). That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an

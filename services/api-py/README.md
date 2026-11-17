@@ -148,5 +148,5 @@ The second form also runs the database tests. They need a Postgres where the tes
 create and drop databases. The file tests also need an S3-compatible store: add
 `S3_ENDPOINT` (and `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`); each test makes a bucket
 of its own. `pnpm test:conformance` and `pnpm test:e2e:storage` and
-`:login` run through api-py. Use `CONFORMANCE_TARGET=ts` or `E2E_API_PY=off` to test
-the TypeScript server alone.
+`:login` run against api-py alone, with no TypeScript server behind it. Use
+`CONFORMANCE_TARGET=ts` or `E2E_API_PY=off` to test the legacy TypeScript server alone.

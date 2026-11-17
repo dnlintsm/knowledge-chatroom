@@ -36,7 +36,7 @@ const baseURL = `http://localhost:${UI_PORT}`;
 process.env.LOCAL_AGENT_URL = `http://localhost:${mode === "python-storage" ? STORAGE_PORT : AGENT_PORT}`;
 // The chat goes to this repo's agent (or the mock), or in "python" mode to
 // services/agent-py; never a remote backend from the environment.
-process.env.AGENT_URL = withPython ? `http://localhost:${PY_AGENT_PORT}` : "";
+process.env.AGENT_URL = withPython ? `http://localhost:${PY_AGENT_PORT}` : "local";
 process.env.AGENT_PORT = String(AGENT_PORT);
 if (!useRealAgent) {
   process.env.ANTHROPIC_API_KEY = "";

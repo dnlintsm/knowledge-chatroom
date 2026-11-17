@@ -45,6 +45,20 @@ agent-py's `LOCAL_AGENT_URL` and MCP servers' `KNOWLEDGE_STORAGE_URL` at api-py.
 Leave `TS_AGENT_URL` unset: it is only an explicit legacy fallback. api-py applies
 migrations, serves the API directly, and checks its own storage readiness.
 PostgreSQL and S3 are required for skills, shared storage and persistent chat history.
+`AGENT_URL` unset means agent-py at `http://127.0.0.1:9300`; `AGENT_URL=local` sends the
+chat to the legacy TypeScript agent server at `LOCAL_AGENT_URL` instead.
+
+Give api-py the settings for everything it serves (its
+[README](../services/api-py/README.md) lists each one): `DATABASE_URL`, the `S3_*`
+settings and `MAX_UPLOAD_BYTES` for storage; `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY` and a
+writable `EMBEDDING_CACHE_DIR` for search; `HUB_ADMINS` and `SKILL_SCRIPTS` for skills;
+`MEMORY`, `MEMORY_LEARN` and `MEMORY_IDLE_MINUTES` for memory; and `ANTHROPIC_API_KEY` (or
+`ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and
+`CLAUDE_MODEL` for the follow-up chips and memory's small model. Give api-py and agent-py
+the same `MCP_SERVERS`: api-py serves the chat's "+" menu from it, agent-py connects to
+the servers. The menu's servers must be reachable from both. agent-py also needs the chat
+model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
+[README](../services/agent-py/README.md).
 
 Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
 `PLATFORM_ADMINS` names the deployment admins who can inspect the
@@ -85,13 +99,13 @@ Then set `APP_URL=https://knowledge.example.com` on the UI (session cookies beco
 Secure, and the OIDC redirect URI is `$APP_URL/api/auth/callback`). For binary files,
 pick one:
 
-- **Keep the store private (simpler)**: leave `S3_PUBLIC_URL` unset on the agent and drop
+- **Keep the store private (simpler)**: leave `S3_PUBLIC_URL` unset on api-py and drop
   the second block. Images, PDFs and other binary files then stream through the app after
-  the same access check. Each file passes through the agent in one piece (uploads are
+  the same access check. Each file passes through api-py in one piece (uploads are
   capped by `MAX_UPLOAD_BYTES`, 50 MB by default) and there are no range requests, so
   long videos can't seek.
 - **Signed links to the store**: keep the second block and set
-  `S3_PUBLIC_URL=https://knowledge.example.com:8443` on the agent. Left at
+  `S3_PUBLIC_URL=https://knowledge.example.com:8443` on api-py. Left at
   `http://localhost:8333`, previews break on an https page as mixed content.
 
 `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
@@ -104,15 +118,15 @@ Caddy); see [Dependency security](development.md#dependency-security) for why.
 ## Storage and upgrades
 
 Persist PostgreSQL and the S3 bucket together; files and their versions reference
-content hashes in the bucket. Set database/object-store credentials for the agent.
+content hashes in the bucket. Set database/object-store credentials for api-py.
 Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
 downloads; signed links expire after five minutes. Without it, binary files are served
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
 50 MB) caps one upload.
 
-Migrations apply when the Python API server starts (with `MIGRATIONS=off` on the agent,
-which then waits for them), or at agent startup without it. Back up database metadata and blob contents
+Migrations apply when the Python API server starts (a legacy TypeScript agent server
+behind it needs `MIGRATIONS=off`, and then waits for them). Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.
@@ -128,6 +142,9 @@ login E2E, and review the migration/runtime impact in a separate PR.
 or bucket access have finished. Verify authenticated storage operations after
 startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
+
+The next two settings are for the legacy TypeScript agent server's chat
+(`AGENT_URL=local`); the Python chat agent has neither yet (#264).
 
 With storage, the agent keeps a copy of each user's readable files in their run folder
 (`SKILLS_RUN_DIR`, default a temp folder) for Claude's Read/Glob/Grep: give that folder disk
