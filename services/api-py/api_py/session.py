@@ -710,6 +710,7 @@ class Session:
                         "change": "update",
                         "id": experiment_id,
                         "node": current["nodeId"],
+                        **({} if add else {"left": [user_id]}),
                     },
                 )
         return changed
@@ -738,7 +739,8 @@ class Session:
             if not await _lock_member(conn, self.ws, user_id):
                 raise ExperimentError(NOT_A_MEMBER)
             # The previous maintainer stays on only while still a member.
-            if keep and await _lock_member(conn, self.ws, previous):
+            kept = keep and await _lock_member(conn, self.ws, previous)
+            if kept:
                 await conn.execute(
                     """
                     INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
@@ -764,6 +766,7 @@ class Session:
                     "change": "update",
                     "id": experiment_id,
                     "node": current["nodeId"],
+                    **({} if kept else {"left": [previous]}),
                 },
             )
         return await self.experiment_if_visible(experiment_id)
@@ -1039,6 +1042,9 @@ class Session:
         if op == "node":
             return await self.access.sees_node(user_id, str(event.get("id")))
         if op == "experiment":
+            # Who just stopped working on it hears that too, to close it (issue #255).
+            if user_id in (event.get("left") or []):
+                return True
             return await self.access.hears_experiment(
                 user_id, str(event.get("id")), str(event.get("change"))
             )

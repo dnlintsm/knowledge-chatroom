@@ -34,6 +34,12 @@ export interface ExperimentEvent {
   id: string;
   /** null: an experiment at the workspace root. */
   node: string | null;
+  /**
+   * Users who just stopped working on it (a collaborator removed or leaving, a
+   * previous maintainer not kept on). They hear this change even when they can't
+   * see the experiment any more, so an open draft closes for them.
+   */
+  left?: string[];
 }
 
 export interface ProposalEvent {

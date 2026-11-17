@@ -875,7 +875,10 @@ export class Session {
     const userId = this.principal.userId;
     // Hidden nodes stay hidden: not even their ids go out.
     if (event.op === "node") return this.parts.access.seesNode(userId, event.id);
-    if (event.op === "experiment") return this.parts.experiments.hears(userId, event.id, event.change);
+    if (event.op === "experiment") {
+      // Who just stopped working on it hears that too, to close it (issue #255).
+      return Boolean(event.left?.includes(userId)) || this.parts.experiments.hears(userId, event.id, event.change);
+    }
     if (event.op === "proposal") return event.authorId === userId || (await this.role(event.node)) !== null;
     if (event.experiment) return (await this.parts.experiments.access(userId, event.experiment)) !== null;
     return (await this.role(event.node)) !== null;

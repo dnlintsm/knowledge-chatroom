@@ -595,6 +595,30 @@ describe("workspaces: Experiment handover (#255)", { skip: !enabled && "STORAGE_
     await ok(200, "GET", `/experiments/${other}`, { headers: dave });
   });
 
+  test("whoever stops working on a draft hears it, so it closes for them; nobody else does", async () => {
+    need();
+    const exp = await create(carol, "Carol's draft for a while");
+    await collaborator(carol, exp, ids.dave, "PUT");
+    const daves = await watch("/files?watch", dave);
+    const carols = await watch("/files?watch", carol);
+    const erins = await watch("/files?watch", erin);
+    try {
+      // Removed as a collaborator: the draft is out of dave's sight, and he hears that.
+      await collaborator(carol, exp, ids.dave, "DELETE");
+      assert.ok(await daves.saw(onExperiment(exp)), "the removed collaborator must hear about it");
+      // Handed over without staying on: carol hears it too.
+      await handOver(carol, exp, ids.dave, 200, false);
+      assert.ok(await carols.saw((e) => onExperiment(exp)(e) && Array.isArray(e.left) && e.left.includes(ids.carol)));
+      await ok(200, "PUT", `/files/notes/marker-${stamp}.md?node=${node}`, { headers: owner, body: "marker" });
+      assert.ok(await carols.saw(onFile(node, `notes/marker-${stamp}.md`)));
+      assert.ok(!erins.events.some(onExperiment(exp)), "someone who can't see it hears nothing");
+    } finally {
+      daves.stop();
+      carols.stop();
+      erins.stop();
+    }
+  });
+
   test("an Owner or Admin hands over a shared Experiment, never a draft", async () => {
     need();
     const shared = await create(carol, "Carol's shared one", true);

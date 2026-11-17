@@ -264,7 +264,8 @@
   Adding a collaborator or a new maintainer holds their membership, as grants and group
   writes do, so a removal at the same moment takes it away too; grants and group writes
   now take the workspace's row first, which also keeps them from deadlocking with a
-  removal.
+  removal. An `experiment` change event names in `left` whoever just stopped working on
+  it, and they hear it even once they can't see it, so an open draft closes for them.
 
 ### Changed
 

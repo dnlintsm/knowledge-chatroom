@@ -482,7 +482,13 @@ export class ExperimentService {
             DELETE FROM experiment_collaborators WHERE experiment_id = ${experiment.id} AND user_id = ${userId}`;
       if (changed.count === 0) return false;
       await inTx?.(tx);
-      await this.events.notify(tx, { op: "experiment", change: "update", id: experiment.id, node: experiment.nodeId });
+      await this.events.notify(tx, {
+        op: "experiment",
+        change: "update",
+        id: experiment.id,
+        node: experiment.nodeId,
+        ...(add ? {} : { left: [userId] }),
+      });
       return true;
     });
   }
@@ -501,7 +507,8 @@ export class ExperimentService {
     await this.sql.begin(async (tx) => {
       if (!(await lockMember(tx, this.workspaceId, userId))) throw new ExperimentError(NOT_A_MEMBER);
       // The previous maintainer stays on only while still a member.
-      if (keepPrevious && (await lockMember(tx, this.workspaceId, experiment.maintainerId))) {
+      const kept = keepPrevious && (await lockMember(tx, this.workspaceId, experiment.maintainerId));
+      if (kept) {
         await tx`
           INSERT INTO experiment_collaborators (experiment_id, user_id, added_by)
           VALUES (${experiment.id}, ${experiment.maintainerId}, ${by}) ON CONFLICT DO NOTHING`;
@@ -509,7 +516,13 @@ export class ExperimentService {
       await tx`DELETE FROM experiment_collaborators WHERE experiment_id = ${experiment.id} AND user_id = ${userId}`;
       await tx`UPDATE experiments SET maintainer_id = ${userId}, updated_at = now() WHERE id = ${experiment.id}`;
       await inTx?.(tx);
-      await this.events.notify(tx, { op: "experiment", change: "update", id: experiment.id, node: experiment.nodeId });
+      await this.events.notify(tx, {
+        op: "experiment",
+        change: "update",
+        id: experiment.id,
+        node: experiment.nodeId,
+        ...(kept ? {} : { left: [experiment.maintainerId] }),
+      });
     });
   }
 
