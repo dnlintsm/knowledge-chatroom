@@ -25,6 +25,7 @@ from psycopg_pool import AsyncConnectionPool
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
 from .memory_learn import MemoryLearner
+from .platform import Platform, parse_admins
 from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
@@ -177,11 +178,15 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         watcher = None
         # The workspaces and memberships (workspaces.py); None without a database.
         app.state.workspaces = None
+        app.state.platform = None
         if settings.database_url:
             pool = db.open_pool(settings.database_url)
             await pool.open(wait=False)
             app.state.pool = pool
             app.state.workspaces = Workspaces(pool)
+            app.state.platform = Platform(
+                pool, parse_admins(settings.platform_admins), settings.recovery_idle_days
+            )
             try:
                 found = await db.schema(pool, settings.migrations_dir)
             except Exception as err:  # /health reports the database is not ready.

@@ -266,6 +266,17 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/workspaces/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
     await call("GET", "/workspaces", { headers: storageToken("conformance|alice"), expect: 403 });
     await call("GET", "/workspaces", { expect: 401 });
+    // The workspace inventory (#255), for the deployment's admins (PLATFORM_ADMINS).
+    const platform = user("conformance|platform", "platform");
+    const inventory = await call<{ workspaces: Schema["PlatformWorkspace"][] }>("GET", "/platform/workspaces", { headers: platform, expect: 200 });
+    assert.deepEqual(inventory.data.workspaces.find((w) => w.id === lab.id)?.owners.map((o) => o.id), [aliceId]);
+    await call("GET", "/platform/workspaces", { headers: alice, expect: 403 });
+    await call("GET", "/platform/workspaces", { expect: 401 });
+    await call("POST", `/platform/workspaces/${lab.id}/owners`, { headers: platform, json: { userId: bobId, fullAccess: true }, expect: 200 });
+    await call("POST", `/platform/workspaces/${lab.id}/owners`, { headers: platform, json: { userId: 1 }, expect: 400 });
+    await call("POST", `/platform/workspaces/${lab.id}/owners`, { headers: alice, json: { userId: bobId }, expect: 403 });
+    await call("POST", "/platform/workspaces/00000000-0000-4000-8000-000000000000/owners", { headers: platform, json: { userId: bobId }, expect: 404 });
+    await call("GET", "/platform/workspaces", { headers: storageToken("conformance|platform"), expect: 403 });
   });
 
   step("knowledge nodes", async () => {

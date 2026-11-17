@@ -58,6 +58,7 @@ tags:
   - name: chats
   - name: access
   - name: workspaces
+  - name: platform
   - name: skills
   - name: hub
   - name: memory
@@ -1448,6 +1449,75 @@ paths:
                     properties:
                       id: { type: string }
                       name: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /platform/workspaces:
+    get:
+      tags: [platform]
+      operationId: listPlatformWorkspaces
+      summary: Every workspace in the deployment, for its admins (PLATFORM_ADMINS)
+      description: |
+        Active and archived, newest first, with no content: no node names, files,
+        Experiments, chats, or members beyond the Owners. 403 for anyone the server's
+        PLATFORM_ADMINS doesn't name (in local mode the local user is one), and for
+        storage tokens.
+      responses:
+        "200":
+          description: The workspaces.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspaces]
+                properties:
+                  workspaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/PlatformWorkspace" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /platform/workspaces/{id}/owners:
+    post:
+      tags: [platform]
+      operationId: addPlatformWorkspaceOwner
+      summary: Make someone an Owner of a workspace whose Owners can no longer sign in (PLATFORM_ADMINS)
+      description: |
+        `userId` must have signed in; they become an Owner, and a member if they weren't
+        one, under the workspace's lock. `fullAccess: true` also gives them, and only them,
+        Full access on the workspace root. Audited in that workspace's log
+        (`platform.owner`, and `grant.set` with `recovery: true`), with the deployment
+        admin as the actor. Admins can't name themselves (400); being one gives no
+        membership. 403 for anyone the server's PLATFORM_ADMINS doesn't name, and for
+        storage tokens.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string }
+                fullAccess: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The workspace's entry after.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspace]
+                properties:
+                  workspace: { $ref: "#/components/schemas/PlatformWorkspace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3580,6 +3650,54 @@ components:
         role: { $ref: "#/components/schemas/WorkspaceRole" }
         email: { type: [string, "null"], description: For Owners and Admins only. }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
+        lastSeenAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
+    PlatformWorkspace:
+      type: object
+      required: [id, slug, name, status, createdAt, createdBy, memberCount, owners, lastActiveAt, fullAccessHeld]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/WorkspaceStatus" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        createdBy:
+          oneOf:
+            - $ref: "#/components/schemas/PlatformWorkspaceCreator"
+            - type: "null"
+        memberCount: { type: integer }
+        owners:
+          type: array
+          items: { $ref: "#/components/schemas/PlatformWorkspaceOwner" }
+        lastActiveAt:
+          description: The latest audit entry, chat run, file or Experiment change; null if none.
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        fullAccessHeld:
+          type: boolean
+          description: |
+            Whether a member who signed in within the server's RECOVERY_IDLE_DAYS holds Full
+            access on the root, directly or through a group. The screen preselects
+            `fullAccess` when not.
+
+    PlatformWorkspaceCreator:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+
+    PlatformWorkspaceOwner:
+      type: object
+      required: [id, name, email, lastSeenAt]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+        email: { type: [string, "null"] }
         lastSeenAt:
           oneOf:
             - $ref: "#/components/schemas/Timestamp"

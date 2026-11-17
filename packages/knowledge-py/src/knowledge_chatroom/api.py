@@ -45,6 +45,11 @@ class AlreadyMember(BaseModel):
     role: WorkspaceRole
 
 
+class PlatformWorkspaceCreator(BaseModel):
+    id: str
+    name: str | None
+
+
 class Error(BaseModel):
     error: str
     exists: Literal[True] | None = None
@@ -1220,6 +1225,11 @@ class LookUpWorkspaceUserResponse(BaseModel):
     user: User1
 
 
+class AddPlatformWorkspaceOwnerRequest(BaseModel):
+    userId: str
+    fullAccess: bool | None = False
+
+
 class GetMyAccessResponse(BaseModel):
     me: User | None
     rootRole: RoleOrNull
@@ -1683,6 +1693,13 @@ class WorkspaceMember(BaseModel):
     lastSeenAt: Timestamp | None = None
 
 
+class PlatformWorkspaceOwner(BaseModel):
+    id: str
+    name: str | None
+    email: str | None
+    lastSeenAt: Timestamp | None
+
+
 class Experiment(BaseModel):
     id: str
     nodeId: str | None
@@ -1783,3 +1800,33 @@ class ListWorkspaceMembersResponse(BaseModel):
 
 class RunSkillsResponse(BaseModel):
     skills: list[RunSkill]
+
+
+class PlatformWorkspace(BaseModel):
+    id: str
+    slug: str
+    name: str
+    status: WorkspaceStatus
+    createdAt: Timestamp
+    createdBy: PlatformWorkspaceCreator | None
+    memberCount: int
+    owners: list[PlatformWorkspaceOwner]
+    lastActiveAt: Timestamp | None
+    """
+    The latest audit entry, chat run, file or Experiment change; null if none.
+    """
+    fullAccessHeld: bool
+    """
+    Whether a member who signed in within the server's RECOVERY_IDLE_DAYS holds Full
+    access on the root, directly or through a group. The screen preselects
+    `fullAccess` when not.
+
+    """
+
+
+class ListPlatformWorkspacesResponse(BaseModel):
+    workspaces: list[PlatformWorkspace]
+
+
+class AddPlatformWorkspaceOwnerResponse(BaseModel):
+    workspace: PlatformWorkspace
