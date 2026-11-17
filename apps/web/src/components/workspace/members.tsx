@@ -275,12 +275,15 @@ export function RemoveMember({
   me,
   target,
   onRemoved,
+  onOpened,
 }: {
   workspace: WorkspaceInfo;
   viewer: MemberRole;
   me: string;
   target: MemberTarget;
   onRemoved: () => Promise<void> | void;
+  /** After opening one of the Experiments they maintain: closes the Admin panel, so it shows. */
+  onOpened: () => void;
 }) {
   const [open, setOpen] = useState(false);
   if (!canRemove(viewer, target.role, target.id === me)) return null;
@@ -300,6 +303,10 @@ export function RemoveMember({
           workspace={workspace}
           target={target}
           onClose={() => setOpen(false)}
+          onOpened={() => {
+            setOpen(false);
+            onOpened();
+          }}
           onRemoved={async () => {
             setOpen(false);
             await onRemoved();
@@ -314,11 +321,13 @@ function RemoveDialog({
   workspace,
   target,
   onClose,
+  onOpened,
   onRemoved,
 }: {
   workspace: WorkspaceInfo;
   target: MemberTarget;
   onClose: () => void;
+  onOpened: () => void;
   onRemoved: () => Promise<void>;
 }) {
   const { enterExperiment } = useWorkspace();
@@ -394,7 +403,7 @@ function RemoveDialog({
                           type="button"
                           onClick={() => {
                             void enterExperiment(x.id);
-                            onClose();
+                            onOpened();
                           }}
                           className="text-left text-[var(--primary)] underline underline-offset-2 cursor-pointer"
                         >

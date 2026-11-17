@@ -318,6 +318,12 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(removal.getByLabel("What goes")).toContainText("1 direct access they were given");
   await expect(removal.getByRole("list", { name: "Experiments they maintain" })).toContainText("Lab finding");
   await shot(bob, "31-admin-remove-member");
+  // Opening one of them closes the panel, to show it.
+  await removal.getByRole("button", { name: "Lab finding" }).click();
+  await expect(bobAdmin).toHaveCount(0);
+  await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("Lab finding");
+  await bob.getByRole("button", { name: "Admin", exact: true }).click();
+  await bobAdmin.getByRole("button", { name: "Remove Alice Admin" }).click();
   await removal.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(removal).toHaveCount(0);
   await expect(bobAdmin.getByRole("table", { name: "People" })).not.toContainText("Alice Admin");

@@ -191,6 +191,7 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
                 workspace={workspace}
                 reload={() => load().catch((err) => setError(err instanceof Error ? err.message : String(err)))}
                 onError={setError}
+                onClose={onClose}
               />
             </>
           )}
@@ -218,6 +219,7 @@ function PeopleTab({
   workspace,
   reload,
   onError,
+  onClose,
 }: {
   people: PersonRow[] | null;
   groups: Group[];
@@ -228,6 +230,8 @@ function PeopleTab({
   workspace: WorkspaceInfo | null;
   reload: () => Promise<void>;
   onError: (message: string | null) => void;
+  /** Closes the Admin panel. */
+  onClose: () => void;
 }) {
   if (!people) return <p className="text-[var(--muted-foreground)]">Loading…</p>;
   // Your own role, as the server lists it now (the page's may be older).
@@ -353,7 +357,14 @@ function PeopleTab({
                 {memberRoles && (
                   <td className="py-2 text-right">
                     {workspace && viewer && me && member && (
-                      <RemoveMember workspace={workspace} viewer={viewer} me={me} target={member} onRemoved={reload} />
+                      <RemoveMember
+                        workspace={workspace}
+                        viewer={viewer}
+                        me={me}
+                        target={member}
+                        onRemoved={reload}
+                        onOpened={onClose}
+                      />
                     )}
                   </td>
                 )}
