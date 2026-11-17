@@ -1225,6 +1225,16 @@ class LookUpWorkspaceUserResponse(BaseModel):
     user: User1
 
 
+class User2(BaseModel):
+    id: str
+    name: str | None
+    email: str | None
+
+
+class FindPlatformUserResponse(BaseModel):
+    user: User2
+
+
 class AddPlatformWorkspaceOwnerRequest(BaseModel):
     userId: str
     fullAccess: bool | None = False

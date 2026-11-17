@@ -62,7 +62,8 @@ model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
 
 Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
 `PLATFORM_ADMINS` names the deployment admins who can inspect the
-[workspace inventory](workspaces.md#workspace-inventory) and recover an Owner
+[workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also from the
+workspace switcher) and recover an Owner
 when a workspace's Owners can no longer sign in; nobody is one by default.
 
 Expose the UI through HTTPS and keep both Python service ports private. For login,

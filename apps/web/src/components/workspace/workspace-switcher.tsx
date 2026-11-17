@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore, Check, ChevronDown, LogOut, Plus, Settings } from "lucide-react";
+import { ArchiveRestore, Check, ChevronDown, LayoutList, LogOut, Plus, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,8 @@ import { LeaveWorkspaceDialog, WorkspaceSettingsDialog } from "./workspace-setti
  *
  * With issue #255 it also opens the current workspace's settings (Owners and
  * Admins), leaving it (with login), and lists the archived workspaces the
- * user owns, to restore.
+ * user owns, to restore. The deployment's admins (PLATFORM_ADMINS) also get
+ * the workspace inventory.
  */
 export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; current: boolean }) {
   const workspace = useCurrentWorkspace();
@@ -71,6 +72,10 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
             setOpen(false);
             setCreating(true);
           }}
+          onInventory={() => {
+            setOpen(false);
+            leave("/platform");
+          }}
           onSettings={
             workspace.role === "owner" || workspace.role === "admin"
               ? () => {
@@ -112,11 +117,14 @@ function SwitcherMenu({
   onClose,
   onSettings,
   onLeave,
+  onInventory,
 }: {
   current: WorkspaceInfo;
   onPick: (workspace: WorkspaceInfo) => void;
   onCreate: () => void;
   onClose: () => void;
+  /** The workspace inventory, offered only to the deployment's admins. */
+  onInventory: () => void;
   /** The current workspace's settings, for its Owners and Admins. */
   onSettings?: () => void;
   /** Leaving the current workspace, with login. */
@@ -129,6 +137,7 @@ function SwitcherMenu({
   // Whether the server lets this user create one (WORKSPACE_CREATORS); unknown until listed.
   const [canCreate, setCanCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const deploymentAdmin = useDeploymentAdmin();
   const menu = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -260,7 +269,7 @@ function SwitcherMenu({
           </ul>
         </>
       )}
-      {(onSettings || onLeave || canCreate) && <div className="my-1 border-t border-[var(--border)]" />}
+      {(onSettings || onLeave || canCreate || deploymentAdmin) && <div className="my-1 border-t border-[var(--border)]" />}
       {onSettings && (
         <button type="button" role="menuitem" onClick={onSettings} className={action}>
           <Settings className="size-3.5" /> Workspace settings
@@ -276,8 +285,38 @@ function SwitcherMenu({
           <Plus className="size-3.5" /> Create workspace
         </button>
       )}
+      {deploymentAdmin && (
+        <button type="button" role="menuitem" onClick={onInventory} className={action}>
+          <LayoutList className="size-3.5" /> Workspace inventory
+        </button>
+      )}
     </div>
   );
+}
+
+let adminOnce: Promise<boolean> | null = null;
+
+/**
+ * Whether the server names this user a deployment admin (PLATFORM_ADMINS),
+ * asked once per page by trying the inventory: anyone else gets a 403.
+ */
+function useDeploymentAdmin(): boolean {
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    let live = true;
+    adminOnce ??= fetch("/api/platform/workspaces", { cache: "no-store" }).then(
+      (res) => res.ok,
+      () => {
+        adminOnce = null;
+        return false;
+      },
+    );
+    void adminOnce.then((yes) => live && setAdmin(yes));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return admin;
 }
 
 /**

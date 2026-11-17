@@ -72,7 +72,8 @@ const pythonAgent = [
 const storageServers = withStorage
   ? withApiPy
     ? [{
-        command: `cd services/api-py && ${mode === "python-storage" ? `ANTHROPIC_API_KEY=mock-key ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}` : ""} TS_AGENT_URL= API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off uv run --locked python -m api_py.app`,
+        // With login, Alice runs the deployment (the workspace inventory, #255).
+        command: `cd services/api-py && ${mode === "python-storage" ? `ANTHROPIC_API_KEY=mock-key ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}` : ""} TS_AGENT_URL= API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
         url: `http://localhost:${STORAGE_PORT}/health`,
       }]
     : [{
