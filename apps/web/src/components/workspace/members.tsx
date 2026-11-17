@@ -286,6 +286,7 @@ export function RemoveMember({
   onOpened: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const ws = useWorkspace();
   if (!canRemove(viewer, target.role, target.id === me)) return null;
   return (
     <>
@@ -309,7 +310,8 @@ export function RemoveMember({
           }}
           onRemoved={async () => {
             setOpen(false);
-            await onRemoved();
+            // The Experiments they maintained now say they're no longer a member.
+            await Promise.all([onRemoved(), ws.refresh().catch(() => undefined)]);
           }}
         />
       )}

@@ -656,7 +656,7 @@ Experiment's title shows only to readers who can see that Experiment.
 | Leave workspace | In the switcher's menu for the current workspace. Says what happens (your access goes; your drafts, chats and memory stay private and come back if you're added again). The last Owner is told to make someone else Owner first. |
 | Workspace settings | Rename (Owners and Admins). Archive (Owners, not the default workspace), confirmed by typing the workspace's name. |
 | Archived workspaces | A section of the switcher, for Owners, with Restore. |
-| Experiment header | "Maintained by Alice · started by Bob" when they differ, and the collaborators. The maintainer adds and removes collaborators from members who can view the node, and hands over. "No longer a member" by a departed maintainer, with Hand over for Owners and Admins. |
+| Experiment header | "Maintained by Alice · started by Bob" when they differ, and the collaborators. The maintainer adds and removes collaborators from the workspace's members (the server refuses one who can't view the node, and says so), and hands over. "No longer a member" by a departed maintainer, with Hand over for Owners and Admins. |
 | Read-only reasons (`read-only.ts`) | "Only Alice and the collaborators can edit this experiment", and the archived reason names the maintainer. |
 | Workspace inventory | A page for deployment admins only, with the list and "Add an Owner". |
 
@@ -735,7 +735,12 @@ rules.
    archive, typing the name), Leave workspace (with login) and Archived workspaces, with
    Restore (`workspace-settings.tsx`). The Activity tab lists membership and workspace
    changes too. `src/lib/workspace-admin.ts` says what each role may do, for the screens.
-6. Screens: the Experiment header and the read-only reasons.
+6. Screens: the Experiment header and the read-only reasons. Done: `experiment-people.tsx`
+   shows the maintainer, who started it and the collaborators under the Experiment's
+   title, with Add collaborator, Hand over and Stop collaborating where
+   `experimentPeople` (`src/lib/workspace-admin.ts`) allows them. The pickers list the
+   workspace's members; someone who can't view the node is refused with the server's
+   reason. `read-only.ts` names the maintainer and the collaborators.
 7. Screen: workspace inventory.
 
 Each backend step brings its tests. The legacy fallback's cut-off release gets its own

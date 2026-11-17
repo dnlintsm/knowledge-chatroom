@@ -3,6 +3,7 @@ import { test, expect } from "@playwright/test";
 import {
   assignableRoles,
   canRemove,
+  experimentPeople,
   namesMatch,
   settingsFor,
   transferSteps,
@@ -63,4 +64,33 @@ test("a transfer makes them Owner first, then gives Full access, then lowers you
   expect(transferSteps("w", "me", "them", { fullAccess: false, myRole: "owner" })).toEqual([
     { path: "/api/workspaces/w/members/them", method: "PATCH", body: { role: "owner" } },
   ]);
+});
+
+test("the maintainer manages an Experiment's people; Owners and Admins hand over a departed maintainer's shared one", () => {
+  const exp = (fields: Partial<Parameters<typeof experimentPeople>[0]>) => ({
+    mine: false,
+    status: "shared" as const,
+    maintainerIsMember: true,
+    collaborators: [{ id: "carol" }],
+    ...fields,
+  });
+  const none = { collaborators: false, handOver: false, leave: false };
+  expect(experimentPeople(exp({ mine: true }), { id: "me", role: "member" })).toEqual({
+    collaborators: true,
+    handOver: true,
+    leave: false,
+  });
+  // A maintainer who is still a member: nobody else hands it over, Owners included.
+  expect(experimentPeople(exp({}), { id: "me", role: "owner" })).toEqual(none);
+  expect(experimentPeople(exp({ maintainerIsMember: false }), { id: "me", role: "admin" })).toEqual({
+    ...none,
+    handOver: true,
+  });
+  expect(experimentPeople(exp({ maintainerIsMember: false, status: "archived" }), { id: "me", role: "owner" }).handOver).toBe(true);
+  // Never a draft (they can't see one), and never by a Member.
+  expect(experimentPeople(exp({ maintainerIsMember: false, status: "draft" }), { id: "me", role: "owner" })).toEqual(none);
+  expect(experimentPeople(exp({ maintainerIsMember: false }), { id: "me", role: "member" })).toEqual(none);
+  // A collaborator may stop collaborating.
+  expect(experimentPeople(exp({}), { id: "carol", role: "member" })).toEqual({ ...none, leave: true });
+  expect(experimentPeople(exp({}), { id: null, role: null })).toEqual(none);
 });

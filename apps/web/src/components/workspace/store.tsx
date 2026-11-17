@@ -37,6 +37,7 @@ import {
   deleteServerExperiment,
   deleteServerFile,
   deleteServerNode,
+  changeServerExperimentPeople,
   eventPlace,
   experimentOf,
   experimentPlace,
@@ -54,6 +55,7 @@ import {
   type Account,
   type Experiment,
   type ExperimentChange,
+  type ExperimentPeopleChange,
   type KnowledgeNode,
   type NodeId,
   type NodeType,
@@ -202,6 +204,11 @@ interface WorkspaceValue {
   /** Runs experiment `id` again as a new one of yours and moves into it; throws with a message. */
   rerunExperiment: (id: string) => Promise<Experiment>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
+  /**
+   * Hands experiment `id` over, or adds or removes a collaborator; moves to
+   * its node when you can no longer see it. Throws with the server's reason.
+   */
+  changeExperimentPeople: (id: string, change: ExperimentPeopleChange) => Promise<Experiment | null>;
   deleteExperiment: (id: string) => Promise<void>;
   /**
    * Adds files of experiment `id` (by path) as its run inputs:
@@ -795,6 +802,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [settleSaves, setExperiments],
   );
+  const changeExperimentPeople = useCallback(
+    async (id: string, change: ExperimentPeopleChange) => {
+      const here = experimentPlace(id);
+      // Handing it over or leaving can end your access, so edits on their way go first.
+      if (placeRef.current === here) await settleSaves(here);
+      const nodeId = experiments.find((e) => e.id === id)?.nodeId ?? null;
+      const updated = await changeServerExperimentPeople(id, change);
+      if (updated) {
+        setExperiments((list) => list.map((e) => (e.id === id ? updated : e)));
+      } else {
+        if (placeRef.current === here && !(await enterNode(nodeId))) await enterNode(null);
+        await refreshExperiments();
+      }
+      return updated;
+    },
+    [experiments, settleSaves, setExperiments, enterNode, refreshExperiments],
+  );
   const addRunInputs = useCallback(
     async (id: string, paths: string[]) => {
       // Inputs link what the server has, so new uploads go first.
@@ -886,6 +910,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createExperiment,
       rerunExperiment,
       updateExperiment,
+      changeExperimentPeople,
       deleteExperiment,
       addRunInputs,
       proposals,
@@ -896,7 +921,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
-    updateExperiment, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
+    updateExperiment, changeExperimentPeople, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

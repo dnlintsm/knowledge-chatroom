@@ -985,7 +985,7 @@ function RunList() {
             <RunRow
               key={e.id}
               title={e.title}
-              detail={[scope.node === e.nodeId ? null : placeName(ws.nodes, e.nodeId), e.mine ? null : e.authorName]
+              detail={[scope.node === e.nodeId ? null : placeName(ws.nodes, e.nodeId), e.mine ? null : e.maintainerName]
                 .filter(Boolean)
                 .join(" · ")}
               badges={
