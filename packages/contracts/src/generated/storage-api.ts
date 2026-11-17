@@ -653,6 +653,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every workspace in the deployment, for its admins (PLATFORM_ADMINS)
+         * @description Active and archived, newest first, with no content: no node names, files,
+         *     Experiments, chats, or members beyond the Owners. 403 for anyone the server's
+         *     PLATFORM_ADMINS doesn't name (in local mode the local user is one), and for
+         *     storage tokens.
+         */
+        get: operations["listPlatformWorkspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform/workspaces/{id}/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make someone an Owner of a workspace whose Owners can no longer sign in (PLATFORM_ADMINS)
+         * @description `userId` must have signed in; they become an Owner, and a member if they weren't
+         *     one, under the workspace's lock. `fullAccess: true` also gives them, and only them,
+         *     Full access on the workspace root. Audited in that workspace's log
+         *     (`platform.owner`, and `grant.set` with `recovery: true`), with the deployment
+         *     admin as the actor. Admins can't name themselves (400); being one gives no
+         *     membership. 403 for anyone the server's PLATFORM_ADMINS doesn't name, and for
+         *     storage tokens.
+         */
+        post: operations["addPlatformWorkspaceOwner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/access": {
         parameters: {
             query?: never;
@@ -1774,6 +1823,34 @@ export interface components {
             email?: string | null;
             createdAt?: components["schemas"]["Timestamp"];
             lastSeenAt?: components["schemas"]["Timestamp"] | null;
+        };
+        PlatformWorkspace: {
+            id: string;
+            slug: string;
+            name: string;
+            status: components["schemas"]["WorkspaceStatus"];
+            createdAt: components["schemas"]["Timestamp"];
+            createdBy: components["schemas"]["PlatformWorkspaceCreator"] | null;
+            memberCount: number;
+            owners: components["schemas"]["PlatformWorkspaceOwner"][];
+            /** @description The latest audit entry, chat run, file or Experiment change; null if none. */
+            lastActiveAt: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description Whether a member who signed in within the server's RECOVERY_IDLE_DAYS holds Full
+             *     access on the root, directly or through a group. The screen preselects
+             *     `fullAccess` when not.
+             */
+            fullAccessHeld: boolean;
+        };
+        PlatformWorkspaceCreator: {
+            id: string;
+            name: string | null;
+        };
+        PlatformWorkspaceOwner: {
+            id: string;
+            name: string | null;
+            email: string | null;
+            lastSeenAt: components["schemas"]["Timestamp"] | null;
         };
         Error: {
             error: string;
@@ -4273,6 +4350,70 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listPlatformWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspaces. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        workspaces: components["schemas"]["PlatformWorkspace"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    addPlatformWorkspaceOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId: string;
+                    /** @default false */
+                    fullAccess?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The workspace's entry after. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        workspace: components["schemas"]["PlatformWorkspace"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

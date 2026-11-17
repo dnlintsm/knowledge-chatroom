@@ -93,6 +93,8 @@ const api = apiPort
         EMBEDDING_MODEL: "off",
         // The same hub admins as the agent: api-py serves the skill hub (step 7).
         HUB_ADMINS: "conformance|alice",
+        // The workspace inventory's admins (#255): api-py serves /platform alone.
+        PLATFORM_ADMINS: "conformance|platform workspaces|platform",
         MCP_SERVERS: mcpServers,
         // api-py serves each user's own notes (step 8); nothing learns in the background.
         MEMORY: "on",

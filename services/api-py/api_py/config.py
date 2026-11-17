@@ -22,6 +22,11 @@ EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
 HUB_ADMINS           who moderates the skill hub: emails or login subjects
 WORKSPACE_CREATORS   who may create workspaces: emails or login subjects
                      (unset: every signed-in user; the local user always may)
+PLATFORM_ADMINS      who sees the workspace inventory and may add an Owner to a
+                     workspace (platform.py): emails or login subjects (unset:
+                     nobody; the local user always may)
+RECOVERY_IDLE_DAYS   how recently a member must have signed in to count as
+                     holding Full access in the inventory (default 90)
 SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
                      runs chats; /skills here says so)
 BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
@@ -109,6 +114,9 @@ class Settings:
     hub_admins: str | None = None
     # Who may create workspaces (WORKSPACE_CREATORS, as given); None: every signed-in user.
     workspace_creators: str | None = None
+    # The deployment's admins (PLATFORM_ADMINS, as given), and RECOVERY_IDLE_DAYS (platform.py).
+    platform_admins: str | None = None
+    recovery_idle_days: int = 90
     skill_scripts: bool = False
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
     # Personalized memory (MEMORY=on); off leaves /memory to the TypeScript server, which answers 404.
@@ -138,6 +146,8 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         embedding=embedding_settings(env),
         hub_admins=env.get("HUB_ADMINS"),
         workspace_creators=env.get("WORKSPACE_CREATORS"),
+        platform_admins=env.get("PLATFORM_ADMINS"),
+        recovery_idle_days=_recovery_idle_days(env),
         skill_scripts=env.get("SKILL_SCRIPTS") == "on",
         builtin_skills_dir=Path(env.get("BUILTIN_SKILLS_DIR") or DEFAULT_BUILTIN_SKILLS_DIR),
         tools=_tools(env),
@@ -183,3 +193,12 @@ def max_upload_bytes(env: Mapping[str, str]) -> int:
     if not match or int(match.group(1)) <= 0:
         raise ConfigError(f"MAX_UPLOAD_BYTES must be a number of bytes, not {raw!r}")
     return int(match.group(1))
+
+
+def _recovery_idle_days(env: Mapping[str, str]) -> int:
+    value = (env.get("RECOVERY_IDLE_DAYS") or "").strip()
+    if not value:
+        return 90
+    if not value.isdigit() or int(value) < 1:
+        raise ConfigError(f"RECOVERY_IDLE_DAYS must be a whole number of days, not {value!r}")
+    return int(value)

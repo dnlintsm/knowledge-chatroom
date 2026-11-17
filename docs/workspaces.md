@@ -623,8 +623,10 @@ and `HUB_ADMINS` do). In local mode the local user is one. Nobody is one by defa
   member lists beyond the Owners.
 - `POST /platform/workspaces/{id}/owners` `{userId, fullAccess?}` makes someone who has
   signed in an Owner of that workspace, adding them as a member if they aren't one. It is
-  for a workspace whose Owners can no longer sign in. It takes the workspace lock, as
-  role changes do.
+  for a workspace whose Owners can no longer sign in, archived or not. It takes the
+  workspace lock, as role changes do. A deployment admin can't name themselves (400): ask
+  another admin, or add someone else. Adding someone who is already an Owner changes
+  nothing and logs nothing.
 - **Restoring content administration.** Being Owner alone isn't always enough to recover:
   Share needs Full access, and in a new workspace the creator's direct root Full access
   grant is often the only one. If that creator can no longer sign in, groups can't help
@@ -723,7 +725,9 @@ rules.
    status, deletion and handover for the maintainer, handover also for Owners and Admins
    on shared ones) for users' own queries under row-level security. Both servers serve
    the handover and collaborator routes, and removal deletes collaborator places.
-4. Backend, workspace inventory and adding an Owner.
+4. Backend, workspace inventory and adding an Owner. Done: api-py serves `/platform`
+   (`platform.py`), with `PLATFORM_ADMINS` and `RECOVERY_IDLE_DAYS`. Only api-py serves
+   it, as it does `/workspaces`.
 5. Screens: people, transfer, leave, settings, archived workspaces.
 6. Screens: the Experiment header and the read-only reasons.
 7. Screen: workspace inventory.

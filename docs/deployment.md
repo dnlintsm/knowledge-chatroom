@@ -57,7 +57,9 @@ must then be reachable from the API server too. It serves memory (own and shared
 memory packs) when `MEMORY=on` is set for it, so give it the same `MEMORY` as the agent;
 memory packs' verify and yank follow its `HUB_ADMINS`. Workspaces are its own: set
 `WORKSPACE_CREATORS` on it (emails or login subjects) to limit who may create one;
-without it, every signed-in user may. The chat's follow-up chips and importing plain-text memory ask
+without it, every signed-in user may. `PLATFORM_ADMINS` on it names the deployment's admins,
+who see the [workspace inventory](workspaces.md#workspace-inventory) and can add an Owner
+to a workspace whose Owners can no longer sign in; nobody is one by default. The chat's follow-up chips and importing plain-text memory ask
 the small model, so give it the agent's `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
 `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL` too. It also
 learns from quiet chats in the background, so start the agent with `MEMORY_LEARN=off` and

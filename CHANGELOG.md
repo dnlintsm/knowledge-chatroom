@@ -266,6 +266,17 @@
   now take the workspace's row first, which also keeps them from deadlocking with a
   removal. An `experiment` change event names in `left` whoever just stopped working on
   it, and they hear it even once they can't see it, so an open draft closes for them.
+- The workspace inventory and Owner recovery on the API server (issue #255, step 4 of
+  [Administration and handover](docs/workspaces.md#workspace-inventory)), with no screen
+  yet. `PLATFORM_ADMINS` names the deployment's admins (emails or login subjects; in local
+  mode the local user is one; nobody by default). `GET /platform/workspaces` lists every
+  workspace, active and archived, with its creator, member count, Owners, when it was
+  last used and whether someone who signed in lately holds Full access on its root
+  (`RECOVERY_IDLE_DAYS`, 90 by default), and no content. `POST
+  /platform/workspaces/{id}/owners` makes someone who has signed in an Owner of a
+  workspace whose Owners can no longer sign in, and with `fullAccess` gives them alone
+  Full access on its root. Both are audited in that workspace, with the admin as the
+  actor; admins can't name themselves, and being one gives no membership or content.
 
 ### Changed
 

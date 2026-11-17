@@ -673,3 +673,101 @@ describe("workspaces: Experiment handover (#255)", { skip: !enabled && "STORAGE_
     }
   });
 });
+
+describe("workspaces: inventory and Owner recovery (#255)", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
+  // A deployment admin (PLATFORM_ADMINS names workspaces|platform), and gina, who creates a
+  // workspace and can then no longer sign in: her direct root Full access grant is its only one.
+  const admin = user("workspaces|platform", "platform");
+  const gina = user("workspaces|gina", "gina");
+  let ws = "";
+  let ginaId = "";
+  let adminId = "";
+  const as = (who: Headers) => ({ ...who, ...inWs(ws) });
+  const need = () => assert.ok(ws && ginaId && adminId, "needs the first test to pass");
+  type Entry = { id: string; status: string; memberCount: number; createdBy: { id: string } | null; owners: { id: string }[]; fullAccessHeld: boolean };
+  const entry = async () => {
+    const answer = await req<{ workspaces: Entry[] }>("GET", "/platform/workspaces", { headers: admin });
+    assert.equal(answer.status, 200, answer.text.slice(0, 200));
+    return { found: answer.data.workspaces.find((w) => w.id === ws)!, text: answer.text };
+  };
+  const addOwner = (json: Json, status: number, headers = admin) =>
+    ok<{ workspace: Entry }>(status, "POST", `/platform/workspaces/${ws}/owners`, { headers, json });
+  const rootOwners = async (headers: Headers) => {
+    const { grants } = await ok<{ grants: { nodeId: string | null; principalId: string; role: string }[] }>(200, "GET", "/access/grants", { headers });
+    return grants.filter((g) => g.nodeId === null && g.role === "owner").map((g) => g.principalId).sort();
+  };
+
+  test("setup: gina's workspace, with carol and dave as Members without access, and some content", async () => {
+    for (const who of [admin, gina]) await ok(200, "GET", "/access", { headers: who });
+    const { users } = await ok<{ users: { id: string; subject: string }[] }>(200, "GET", "/access/users", { headers: owner });
+    ginaId = users.find((u) => u.subject === "workspaces|gina")!.id;
+    adminId = users.find((u) => u.subject === "workspaces|platform")!.id;
+    ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: gina, json: { name: `Gina's lab ${stamp}` } })).id;
+    for (const id of [ids.carol, ids.dave]) await ok(201, "POST", `/workspaces/${ws}/members`, { headers: gina, json: { userId: id, role: "member", access: "none" } });
+    const node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(gina), json: { parentId: null, name: `Gina's secret node ${stamp}` } })).id;
+    await ok(200, "PUT", `/files/notes/gina-secret-${stamp}.md?node=${node}`, { headers: as(gina), body: "private" });
+  });
+
+  test("the inventory is refused to anyone not in PLATFORM_ADMINS, and has no content", async () => {
+    need();
+    await ok(401, "GET", "/platform/workspaces");
+    await ok(403, "GET", "/platform/workspaces", { headers: gina });
+    await ok(403, "GET", "/platform/workspaces", { headers: storageToken("workspaces|platform") });
+    await ok(403, "POST", `/platform/workspaces/${ws}/owners`, { headers: gina, json: { userId: ids.carol } });
+    const { found, text } = await entry();
+    const own = JSON.stringify(found);
+    assert.equal(found.status, "active");
+    assert.equal(found.memberCount, 3);
+    assert.equal(found.createdBy?.id, ginaId);
+    assert.deepEqual(found.owners.map((o) => o.id), [ginaId]);
+    for (const content of [`Gina's secret node ${stamp}`, `gina-secret-${stamp}`]) assert.ok(!text.includes(content), `the inventory shows ${content}`);
+    // Its Members aren't listed, only its Owners.
+    for (const member of [ids.carol, ids.dave, "carol@example.com"]) assert.ok(!own.includes(member), `the entry shows ${member}`);
+    // Being a deployment admin gives no membership.
+    await ok(404, "GET", "/nodes", { headers: as(admin) });
+  });
+
+  test("recovery: an Owner added without fullAccess can't Share; one added with it can, and the grant is theirs alone", async () => {
+    need();
+    const carol1 = await addOwner({ userId: ids.carol }, 200);
+    assert.deepEqual(carol1.workspace.owners.map((o) => o.id).sort(), [ginaId, ids.carol].sort());
+    await ok(403, "POST", "/access/grants", { headers: as(carol), json: { node: null, principalType: "user", principalId: ids.dave, role: "viewer" } });
+
+    await addOwner({ userId: ids.dave, fullAccess: true }, 200);
+    await ok(200, "POST", "/access/grants", { headers: as(dave), json: { node: null, principalType: "user", principalId: ids.carol, role: "viewer" } });
+    assert.deepEqual(await rootOwners(as(dave)), [ginaId, ids.dave].sort(), "only gina's and dave's Full access on the root");
+    // Again: nothing changes, and nothing more is logged.
+    const before = (await ok<{ entries: unknown[] }>(200, "GET", "/access/audit", { headers: as(dave) })).entries.length;
+    await addOwner({ userId: ids.dave, fullAccess: true }, 200);
+    assert.equal((await ok<{ entries: unknown[] }>(200, "GET", "/access/audit", { headers: as(dave) })).entries.length, before);
+
+    // Audited in the workspace, with the deployment admin as the actor; still no access for them.
+    const log = await ok<{ entries: { action: string; actorId: string | null; target: Json }[] }>(200, "GET", "/access/audit", { headers: as(dave) });
+    const owners = log.entries.filter((e) => e.action === "platform.owner");
+    assert.deepEqual(owners.map((e) => e.target.user).sort(), [ids.carol, ids.dave].sort());
+    assert.ok(owners.every((e) => e.actorId === adminId && e.target.previous === "member"));
+    const recovery = log.entries.filter((e) => e.action === "grant.set" && e.target.recovery === true);
+    assert.deepEqual(recovery.map((e) => [e.actorId, e.target.principalId, e.target.role]), [[adminId, ids.dave, "owner"]]);
+    await ok(404, "GET", "/nodes", { headers: as(admin) });
+    await ok(404, "GET", `/workspaces/${ws}`, { headers: admin });
+  });
+
+  test("admins can't make themselves Owners, and unknown people or workspaces are refused", async () => {
+    need();
+    await addOwner({ userId: adminId, fullAccess: true }, 400);
+    await addOwner({ userId: NO_SUCH_WORKSPACE }, 400);
+    await addOwner({ userId: ids.carol, fullAccess: "yes" }, 400);
+    await ok(404, "POST", `/platform/workspaces/${NO_SUCH_WORKSPACE}/owners`, { headers: admin, json: { userId: ids.carol } });
+    await ok(405, "DELETE", "/platform/workspaces", { headers: admin });
+  });
+
+  test("an archived workspace stays in the inventory, and can be given an Owner", async () => {
+    need();
+    await ok(200, "PATCH", `/workspaces/${ws}`, { headers: dave, json: { status: "archived" } });
+    assert.equal((await entry()).found.status, "archived");
+    await addOwner({ userId: ids.erin }, 200);
+    const { workspaces } = await ok<{ workspaces: { id: string; status: string }[] }>(200, "GET", "/workspaces?archived=true", { headers: erin });
+    assert.equal(workspaces.find((w) => w.id === ws)?.status, "archived", "erin may restore it");
+    await ok(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "active" } });
+  });
+});
