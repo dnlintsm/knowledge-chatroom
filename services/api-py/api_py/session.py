@@ -67,10 +67,15 @@ class Session:
         return await self.access.role(self.principal.user_id, node_id)
 
     async def still_member(self) -> bool:
-        """Whether the principal is still a member of the workspace (an open stream rechecks it)."""
+        """
+        Whether the principal is still a member of the workspace, and it is
+        still active (an open stream rechecks it).
+        """
         async with self.storage.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                """
+                SELECT 1 FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+                WHERE m.workspace_id = %s AND m.user_id = %s AND w.status = 'active'""",
                 (self.ws, self.principal.user_id),
             )
             return await cur.fetchone() is not None
@@ -886,6 +891,9 @@ class Session:
         """Whether this principal may hear about a change."""
         user_id = self.principal.user_id
         op = event.get("op")
+        # Only wakes open streams to recheck membership (workspaces.py, update).
+        if op == "workspace":
+            return False
         # Hidden nodes stay hidden: not even their ids go out.
         if op == "node":
             return await self.access.sees_node(user_id, str(event.get("id")))

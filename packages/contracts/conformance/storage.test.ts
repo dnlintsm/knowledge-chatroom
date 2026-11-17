@@ -203,6 +203,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
   const bob = user("conformance|bob", "bob");
   const stamp = Date.now();
   let bobId = "";
+  let aliceId = "";
   let tech: Schema["KnowledgeNode"];
   let mod: Schema["KnowledgeNode"];
   let grant: Schema["Grant"];
@@ -218,6 +219,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/access/people", { headers: bob, expect: 403 });
     const users = await call<{ users: Schema["User"][] }>("GET", "/access/users", { headers: alice, expect: 200 });
     bobId = users.data.users.find((u) => u.subject === "conformance|bob")!.id;
+    aliceId = users.data.users.find((u) => u.subject === "conformance|alice")!.id;
   });
 
   step("workspaces", async () => {
@@ -241,6 +243,26 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/workspaces/${lab.id}/members`, { headers: alice, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/members`, { headers: bob, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/lookup?email=alice@example.com`, { headers: bob, expect: 403 });
+    // Administration (#255): rename, roles, removal, archive.
+    await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: { name: `Lab renamed ${stamp}` }, expect: 200 });
+    await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: {}, expect: 400 });
+    await call("PATCH", `/workspaces/${lab.id}`, { headers: bob, json: { name: "Mine now" }, expect: 403 });
+    await call("PATCH", `/workspaces/${lab.id}/members/${bobId}`, { headers: alice, json: { role: "admin" }, expect: 200 });
+    await call("PATCH", `/workspaces/${lab.id}/members/${bobId}`, { headers: alice, json: { role: "boss" }, expect: 400 });
+    await call("PATCH", `/workspaces/${lab.id}/members/${aliceId}`, { headers: bob, json: { role: "member" }, expect: 403 });
+    await call("PATCH", `/workspaces/${lab.id}/members/${aliceId}`, { headers: alice, json: { role: "member" }, expect: 409 });
+    await call("PATCH", `/workspaces/${lab.id}/members/00000000-0000-4000-8000-000000000000`, { headers: alice, json: { role: "member" }, expect: 404 });
+    await call("GET", `/workspaces/${lab.id}/members/${bobId}/removal`, { headers: alice, expect: 200 });
+    await call("GET", `/workspaces/${lab.id}/members/00000000-0000-4000-8000-000000000000/removal`, { headers: alice, expect: 404 });
+    await call("DELETE", `/workspaces/${lab.id}/members/${aliceId}`, { headers: bob, expect: 403 });
+    await call("DELETE", `/workspaces/${lab.id}/members/${aliceId}`, { headers: alice, expect: 409 });
+    await call("DELETE", `/workspaces/${lab.id}/members/${bobId}`, { headers: alice, expect: 200 });
+    await call("DELETE", `/workspaces/${lab.id}/members/${bobId}`, { headers: alice, expect: 404 });
+    await call("PATCH", `/workspaces/${defaultWs.id}`, { headers: alice, json: { status: "archived" }, expect: 400 });
+    await call("PATCH", `/workspaces/${named.id}`, { headers: alice, json: { status: "archived" }, expect: 200 });
+    const archived = await call<{ workspaces: Schema["Workspace"][] }>("GET", "/workspaces?archived=true", { headers: alice, expect: 200 });
+    assert.equal(archived.data.workspaces.find((w) => w.id === named.id)?.status, "archived");
+    await call("PATCH", `/workspaces/${named.id}`, { headers: alice, json: { status: "active" }, expect: 200 });
     await call("GET", "/workspaces/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
     await call("GET", "/workspaces", { headers: storageToken("conformance|alice"), expect: 403 });
     await call("GET", "/workspaces", { expect: 401 });

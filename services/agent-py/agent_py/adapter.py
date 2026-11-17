@@ -26,6 +26,8 @@ the thread's first run. Three things change that for this app:
   `memory` event.
 - Outside MCP servers (mcp.py): the servers in MCP_SERVERS, each run with the
   user's tokens for them, and the chat's tool chips in the prompt.
+- Revocation (revocation.py): a run whose user is removed from its workspace,
+  or sees it archived, stops at the next tool boundary.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from ag_ui.core import (
@@ -53,6 +55,7 @@ from ag_ui_claude_sdk import ClaudeAgentAdapter
 from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
 from .place import workspace_note
+from .revocation import membership_hooks
 from .skills import (
     RunSkill,
     Trigger,
@@ -144,6 +147,14 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 )
             options.mcp_servers = {**(options.mcp_servers or {}), "copilotkit": server(tools)}
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
+            # Removed from the workspace, or it was archived, mid-run: no further
+            # tool call of any kind, and no further turn, also after a call that
+            # was already running (issue #255). Ahead of every other hook.
+            revoked = membership_hooks(lambda: self._storage(thread_id or ""))
+            ordered: dict[str, list[Any]] = dict(cast(Any, options.hooks) or {})
+            for event, matcher in revoked.items():
+                ordered[event] = [matcher, *ordered.get(event, [])]
+            options.hooks = cast(Any, ordered)
         if memory:
             hooks = dict(options.hooks or {})
             hooks["PreToolUse"] = [

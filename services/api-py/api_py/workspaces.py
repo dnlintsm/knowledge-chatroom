@@ -1,13 +1,18 @@
-"""Workspaces and their members (issue #226, docs/workspaces.md).
+"""Workspaces and their members (issues #226 and #255, docs/workspaces.md).
 
-    GET    /workspaces                       {workspaces: [{id, slug, name, role}],
+    GET    /workspaces[?archived=true]       {workspaces: [{id, slug, name, role, status}],
                                              canCreate}: yours, and whether you may
-                                             create one
+                                             create one; with archived=true also the
+                                             archived ones you own
     POST   /workspaces                       {name, slug?, levels?} -> the new workspace
                                              (201), with you as its Owner; 409 when
                                              the slug asked for is taken, 403 when
                                              WORKSPACE_CREATORS doesn't name you
-    GET    /workspaces/<id>                  {id, slug, name, role}: one of yours
+    GET    /workspaces/<id>                  {id, slug, name, role, status}: one of
+                                             yours (an archived one only for its Owners)
+    PATCH  /workspaces/<id>                  {name?, status?: active | archived}: rename
+                                             (Owners and Admins), archive or restore
+                                             (Owners; never the default workspace)
     GET    /workspaces/<id>/members          {members: [{id, name, role, email?,
                                              createdAt?, lastSeenAt?}]}: names for
                                              everyone, the rest for Owners and Admins
@@ -16,6 +21,17 @@
     POST   /workspaces/<id>/members          {userId, role: member | admin,
                                              access?: none | viewer | editor} -> 201,
                                              or 409 with their role when already a member
+    PATCH  /workspaces/<id>/members/<user>   {role} -> {member: {id, role}}: Owners set
+                                             any role; Admins make a Member Admin, or
+                                             step down themselves; 409 for the last Owner
+    DELETE /workspaces/<id>/members/<user>   -> {removed: {grants, groups}}: remove
+                                             someone (Owners anyone, Admins Members), or
+                                             leave (your own id); 409 for the last Owner
+    GET    /workspaces/<id>/members/<user>/removal
+                                             {grants, groups: [{id, name}], experiments:
+                                             [{id, title, nodeId}]}: what removing them
+                                             takes away, and the shared Experiments of
+                                             theirs you can see
 
 A workspace you aren't a member of answers 404, the same as one that doesn't
 exist. Storage tokens can't use these routes: Claude doesn't manage workspaces.
@@ -29,6 +45,7 @@ period. Membership is checked on every request.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import unicodedata
@@ -43,6 +60,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .access import LEGACY_TOKEN, Principal, is_uuid, iso
 from .identity import identify
+from .storage import EVENTS_CHANNEL
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -59,6 +77,8 @@ SLUG_TAKEN = "Another workspace already has this address"
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 SLUG_MAX = 48
 NO_SUCH_EMAIL = "No one with that email has signed in yet. They need to sign in once first."
+LAST_OWNER = "A workspace needs at least one owner. Make someone else an Owner first."
+NOT_A_MEMBER = "Not a member of this workspace"
 _ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
@@ -116,31 +136,256 @@ class Workspaces:
             row = await cur.fetchone()
         return row[0] if row else None
 
-    async def get(self, workspace_id: str, user_id: str) -> dict[str, Any] | None:
-        """One workspace the user belongs to, with their role, or None."""
+    async def get(
+        self, workspace_id: str, user_id: str, archived: bool = False
+    ) -> dict[str, Any] | None:
+        """
+        One workspace the user belongs to, with their role, or None. With
+        `archived`, also an archived one, but only for its Owners.
+        """
         if not is_uuid(workspace_id):
             return None
-        found = await self._mine(user_id, workspace_id)
+        found = await self._mine(user_id, workspace_id, archived)
         return found[0] if found else None
 
-    async def mine(self, user_id: str) -> list[dict[str, Any]]:
-        """The workspaces the user belongs to, the default first, then by name."""
-        return await self._mine(user_id, None)
+    async def mine(self, user_id: str, archived: bool = False) -> list[dict[str, Any]]:
+        """
+        The workspaces the user belongs to, the default first, then by name;
+        with `archived`, also the archived ones they own.
+        """
+        return await self._mine(user_id, None, archived)
 
-    async def _mine(self, user_id: str, only: str | None) -> list[dict[str, Any]]:
+    async def _mine(self, user_id: str, only: str | None, archived: bool) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
                 """
-                SELECT w.id, w.slug, w.name, m.role
+                SELECT w.id, w.slug, w.name, m.role, w.status
                 FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
-                WHERE m.user_id = %(user)s AND w.status = 'active'
+                WHERE m.user_id = %(user)s
+                  AND (w.status = 'active' OR (%(archived)s AND m.role = 'owner'))
                   AND (%(only)s::uuid IS NULL OR w.id = %(only)s::uuid)
-                ORDER BY w.slug <> 'default', lower(w.name), w.created_at""",
-                {"user": user_id, "only": only},
+                ORDER BY w.status <> 'active', w.slug <> 'default', lower(w.name), w.created_at""",
+                {"user": user_id, "only": only, "archived": archived},
             )
             rows = await cur.fetchall()
         return [{**r, "id": str(r["id"])} for r in rows]
+
+    async def update(
+        self, workspace: dict[str, Any], by: str, name: str | None, status: str | None
+    ) -> dict[str, Any]:
+        """
+        Renames, archives or restores a workspace the caller may change (the
+        route checks who may), with an audit entry for each change.
+        """
+        ws = workspace["id"]
+        async with self.pool.connection() as conn, conn.transaction():
+            if name is not None and name != workspace["name"]:
+                await conn.execute("UPDATE workspaces SET name = %s WHERE id = %s", (name, ws))
+                await _audit(
+                    conn, ws, by, "workspace.rename", {"name": name, "previous": workspace["name"]}
+                )
+            if status is not None and status != workspace["status"]:
+                await conn.execute("UPDATE workspaces SET status = %s WHERE id = %s", (status, ws))
+                action = "workspace.archive" if status == "archived" else "workspace.restore"
+                await _audit(conn, ws, by, action, {"slug": workspace["slug"]})
+                # Wakes the workspace's open streams, which then close (Session.still_member).
+                await conn.execute(
+                    "SELECT pg_notify(%s, %s)",
+                    (
+                        EVENTS_CHANNEL,
+                        json.dumps({"op": "workspace", "change": status, "workspaceId": ws}),
+                    ),
+                )
+        return {
+            **workspace,
+            **({"name": name} if name is not None else {}),
+            **({"status": status} if status is not None else {}),
+        }
+
+    @staticmethod
+    async def _lock(conn: AsyncConnection, workspace_id: str) -> None:
+        """
+        Serializes membership changes in one workspace, so two Owners demoting
+        or removing each other at once can't leave it with none: the
+        keep-owner trigger only sees committed rows.
+        """
+        await conn.execute("SELECT 1 FROM workspaces WHERE id = %s FOR UPDATE", (workspace_id,))
+
+    @staticmethod
+    async def _member_role(
+        conn: AsyncConnection, workspace_id: str, user_id: str, lock: bool = False
+    ) -> str | None:
+        """
+        Their role, or None. With `lock`, holds the membership row first, so
+        grant and group writes for them (access.py, _need_member) finish
+        before a removal deletes what they hold, or find them gone.
+        """
+        if not is_uuid(user_id):
+            return None
+        query = (
+            "SELECT role FROM workspace_members WHERE workspace_id = %s AND user_id = %s FOR UPDATE"
+            if lock
+            else "SELECT role FROM workspace_members WHERE workspace_id = %s AND user_id = %s"
+        )
+        cur = await conn.execute(query, (workspace_id, user_id))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    async def _another_owner(conn: AsyncConnection, workspace_id: str, user_id: str) -> bool:
+        """
+        Whether the workspace keeps an Owner without `user_id`, as the
+        keep-owner trigger asks (024_workspace_departures.sql): the built-in
+        local user counts only for itself, since nobody signs in as it.
+        """
+        cur = await conn.execute(
+            "SELECT workspace_keeps_owner(%s, %s)",
+            (workspace_id, user_id),
+        )
+        (keeps,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+        return keeps
+
+    async def change_role(
+        self, workspace_id: str, by: str, by_role: str, user_id: str, role: str
+    ) -> str:
+        """
+        Gives a member another role (docs/workspaces.md, "Changing a role"):
+        Owners any role to anyone, Admins a Member to Admin and themselves to
+        Member. Never the last Owner's. Changes no grant. Returns the new role.
+        """
+        async with self.pool.connection() as conn, conn.transaction():
+            await self._lock(conn, workspace_id)
+            current = await self._member_role(conn, workspace_id, user_id)
+            if current is None:
+                raise WorkspaceError(404, NOT_A_MEMBER)
+            if current == role:
+                return role
+            if by_role != "owner" and not (
+                (current == "member" and role == "admin")
+                or (user_id == by and current == "admin" and role == "member")
+            ):
+                raise WorkspaceError(
+                    403,
+                    "Admins can make a Member an Admin, or step down themselves; Owners change other roles",
+                )
+            if current == "owner" and not await self._another_owner(conn, workspace_id, user_id):
+                raise WorkspaceError(409, LAST_OWNER)
+            await conn.execute(
+                "UPDATE workspace_members SET role = %s WHERE workspace_id = %s AND user_id = %s",
+                (role, workspace_id, user_id),
+            )
+            await _audit(
+                conn,
+                workspace_id,
+                by,
+                "member.role",
+                {"user": user_id, "role": role, "previous": current},
+            )
+        return role
+
+    async def remove_member(
+        self, workspace_id: str, by: str, by_role: str, user_id: str
+    ) -> dict[str, int]:
+        """
+        Removes a member, or lets one leave (`user_id` == `by`), in one
+        transaction (docs/workspaces.md, "Removing a member, or leaving"): the
+        membership, their direct grants and their memberships of the
+        workspace's groups go, and a departure keeps the default workspace from
+        adding them back at sign-in. Their own data stays. Never the last Owner.
+        """
+        leaving = user_id == by
+        async with self.pool.connection() as conn, conn.transaction():
+            await self._lock(conn, workspace_id)
+            current = await self._member_role(conn, workspace_id, user_id, lock=True)
+            if current is None:
+                raise WorkspaceError(404, NOT_A_MEMBER)
+            if (
+                not leaving
+                and by_role != "owner"
+                and not (by_role == "admin" and current == "member")
+            ):
+                raise WorkspaceError(403, "Admins can remove Members only")
+            if current == "owner" and not await self._another_owner(conn, workspace_id, user_id):
+                raise WorkspaceError(409, LAST_OWNER)
+            cur = await conn.execute(
+                """
+                DELETE FROM grants
+                WHERE workspace_id = %s AND principal_type = 'user' AND principal_id = %s""",
+                (workspace_id, user_id),
+            )
+            grants = cur.rowcount
+            cur = await conn.execute(
+                """
+                DELETE FROM group_members gm USING groups g
+                WHERE g.id = gm.group_id AND g.workspace_id = %s AND gm.user_id = %s""",
+                (workspace_id, user_id),
+            )
+            groups = cur.rowcount
+            await conn.execute(
+                "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (workspace_id, user_id),
+            )
+            await conn.execute(
+                """
+                INSERT INTO workspace_departures (workspace_id, user_id, removed_by)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (workspace_id, user_id)
+                DO UPDATE SET departed_at = now(), removed_by = EXCLUDED.removed_by""",
+                (workspace_id, user_id, by),
+            )
+            await _audit(
+                conn,
+                workspace_id,
+                by,
+                "member.leave" if leaving else "member.remove",
+                {"user": user_id, "role": current, "grants": grants, "groups": groups},
+            )
+        return {"grants": grants, "groups": groups}
+
+    async def removal(self, workspace_id: str, viewer: str, user_id: str) -> dict[str, Any]:
+        """
+        What removing a member takes away, for the confirmation: how many direct
+        grants, which of the workspace's groups, and the shared or archived
+        Experiments they started that `viewer` can see. Never drafts.
+        """
+        async with self.pool.connection() as conn:
+            if await self._member_role(conn, workspace_id, user_id) is None:
+                raise WorkspaceError(404, NOT_A_MEMBER)
+            cur = await conn.execute(
+                """
+                SELECT count(*) FROM grants
+                WHERE workspace_id = %s AND principal_type = 'user' AND principal_id = %s""",
+                (workspace_id, user_id),
+            )
+            (grants,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+            cur = conn.cursor(row_factory=dict_row)
+            await cur.execute(
+                """
+                SELECT g.id, g.name FROM groups g JOIN group_members gm ON gm.group_id = g.id
+                WHERE g.workspace_id = %s AND gm.user_id = %s
+                ORDER BY lower(g.name)""",
+                (workspace_id, user_id),
+            )
+            groups = [{"id": str(r["id"]), "name": r["name"]} for r in await cur.fetchall()]
+            await cur.execute(
+                """
+                SELECT e.id, e.title, e.node_id FROM experiments e
+                WHERE e.workspace_id = %(ws)s AND e.author_id = %(user)s
+                  AND e.status <> 'draft' AND e.deleted_at IS NULL
+                  AND experiment_access(%(viewer)s, e.id) IS NOT NULL
+                ORDER BY e.created_at DESC""",
+                {"ws": workspace_id, "user": user_id, "viewer": viewer},
+            )
+            experiments = [
+                {
+                    "id": str(r["id"]),
+                    "title": r["title"],
+                    "nodeId": str(r["node_id"]) if r["node_id"] else None,
+                }
+                for r in await cur.fetchall()
+            ]
+        return {"grants": grants, "groups": groups, "experiments": experiments}
 
     async def create(
         self, user_id: str, name: str, levels: list[str], asked: str | None = None
@@ -180,7 +425,7 @@ class Workspaces:
                     await _audit(
                         conn, ws, user_id, "workspace.create", {"name": name, "slug": slug}
                     )
-                return {"id": ws, "slug": slug, "name": name, "role": "owner"}
+                return {"id": ws, "slug": slug, "name": name, "role": "owner", "status": "active"}
             except errors.UniqueViolation as err:
                 if "slug" not in str(err):
                     raise
@@ -283,6 +528,12 @@ class Workspaces:
                 )
                 (current,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
                 return False, current
+            # Added again after leaving or being removed: signing in may add them
+            # to the default workspace again (024_workspace_departures.sql).
+            await conn.execute(
+                "DELETE FROM workspace_departures WHERE workspace_id = %s AND user_id = %s",
+                (workspace_id, user_id),
+            )
             await _audit(
                 conn, workspace_id, by.user_id, "member.add", {"user": user_id, "role": role}
             )
@@ -401,10 +652,11 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
     if not parts:
         creators = _creators(request.app.state.settings.workspace_creators)
         if method == "GET":
+            archived = request.query_params.get("archived") == "true"
             return _send(
                 200,
                 {
-                    "workspaces": await workspaces.mine(user),
+                    "workspaces": await workspaces.mine(user, archived),
                     "canCreate": await workspaces.may_create(user, creators),
                 },
             )
@@ -412,11 +664,7 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
             if not await workspaces.may_create(user, creators):
                 return _send(403, {"error": CANNOT_CREATE})
             body = await _read_json(request)
-            name = (
-                re.sub(r"\s+", " ", body["name"]).strip()
-                if body and isinstance(body.get("name"), str)
-                else ""
-            )
+            name = _name(body.get("name")) if body else ""
             levels = body.get("levels", list(DEFAULT_LEVELS)) if body else None
             slug = body.get("slug") if body else None
             if (
@@ -439,16 +687,25 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
         return _send(405, {"error": "Method not allowed"})
 
     ws, *rest = parts
+    if not rest:
+        # An archived workspace is still there for its Owners, to restore it.
+        found = await workspaces.get(ws, user, archived=True)
+        if found is None:
+            raise WorkspaceError(404, NOT_FOUND)
+        if method == "GET":
+            return _send(200, found)
+        if method == "PATCH":
+            return await _update(request, workspaces, found, user)
+        return _send(405, {"error": "Method not allowed"})
     found = await workspaces.get(ws, user)
     if found is None:
         raise WorkspaceError(404, NOT_FOUND)
     manages = found["role"] in ("owner", "admin")
-    section = rest[0] if rest else ""
+    section = rest[0]
+    if section == "members" and len(rest) > 1:
+        return await _member(request, workspaces, found, user, rest[1:])
     if len(rest) > 1:
         return _send(404, {"error": "Not found"})
-
-    if not section and method == "GET":
-        return _send(200, found)
     if section == "members" and method == "GET":
         local = await request.app.state.storage.access.local_user_id()
         return _send(
@@ -486,3 +743,79 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
             return _send(409, {"error": "Already a member of this workspace", "role": role})
         return _send(201, {"member": {"id": body["userId"], "role": role}})
     return _send(404, {"error": "Not found"})
+
+
+def _name(value: object) -> str:
+    """A workspace name as given, with runs of white space made one space; "" when not a string."""
+    return re.sub(r"\s+", " ", value).strip() if isinstance(value, str) else ""
+
+
+async def _update(
+    request: Request, workspaces: Workspaces, found: dict[str, Any], user: str
+) -> Response:
+    """PATCH /workspaces/<id>: rename (Owners and Admins), archive or restore (Owners)."""
+    body = await _read_json(request)
+    name = _name(body.get("name")) if body and "name" in body else None
+    status = body.get("status") if body else None
+    if (
+        not body
+        or (name is None and status is None)
+        or (name is not None and not 0 < len(name) <= 200)
+        or (status is not None and status not in ("active", "archived"))
+    ):
+        return _send(
+            400,
+            {
+                "error": 'Expected {name?: string (at most 200 characters), status?: "active" | "archived"}'
+            },
+        )
+    role = found["role"]
+    if name is not None and role not in ("owner", "admin"):
+        return _send(403, {"error": "Only the workspace's Owners and Admins can rename it"})
+    if status is not None and status != found["status"]:
+        if role != "owner":
+            return _send(403, {"error": "Only the workspace's Owners can archive or restore it"})
+        if status == "archived" and found["id"] == await workspaces.default_id():
+            return _send(
+                400,
+                {
+                    "error": "The default workspace can't be archived: requests that name no workspace go there"
+                },
+            )
+    return _send(200, await workspaces.update(found, user, name, status))
+
+
+async def _member(
+    request: Request, workspaces: Workspaces, found: dict[str, Any], user: str, rest: list[str]
+) -> Response:
+    """
+    /workspaces/<id>/members/<user>[/removal]: change a role, remove someone or
+    leave, and preview a removal (docs/workspaces.md, "Administration and handover").
+    """
+    target, *more = rest
+    target = target.lower()
+    method = request.method
+    role = found["role"]
+    manages = role in ("owner", "admin")
+    yourself = target == user
+    if more == ["removal"] and method == "GET":
+        if not (manages or yourself):
+            return _send(403, {"error": "Only the workspace's Owners and Admins can remove people"})
+        return _send(200, await workspaces.removal(found["id"], user, target))
+    if more:
+        return _send(404, {"error": "Not found"})
+    if method == "PATCH":
+        if not manages:
+            return _send(403, {"error": "Only the workspace's Owners and Admins can change roles"})
+        body = await _read_json(request)
+        new_role = body.get("role") if body else None
+        if new_role not in MEMBER_ROLES:
+            return _send(400, {"error": 'Expected {role: "owner" | "admin" | "member"}'})
+        changed = await workspaces.change_role(found["id"], user, role, target, new_role)
+        return _send(200, {"member": {"id": target, "role": changed}})
+    if method == "DELETE":
+        if not (manages or yourself):
+            return _send(403, {"error": "Only the workspace's Owners and Admins can remove people"})
+        removed = await workspaces.remove_member(found["id"], user, role, target)
+        return _send(200, {"removed": removed})
+    return _send(405, {"error": "Method not allowed"})

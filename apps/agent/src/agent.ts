@@ -25,6 +25,7 @@ import { searchFlights } from "./a2ui_fixed_schema";
 import { generateA2ui } from "./a2ui_dynamic_schema";
 import { currentStorage, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
+import { membershipHooks } from "./storage/revocation";
 import { createFileTools } from "./storage/tools";
 import { CONFINED_TOOLS, confineTools, workdirPrompt } from "./storage/workdir";
 import { guardSlashCommand, scriptOptions, skillOptions, type RunSkills, type SkillUse } from "./skills/run";
@@ -255,12 +256,24 @@ class WorkspaceAgentAdapter extends ClaudeAgentAdapter {
       }),
       ...(memory ? [...memoryTools(memory), ...chatTools(memory)] : []),
     ];
+    // Removed from the workspace, or it was archived, mid-run: no further tool
+    // call of any kind, and no further turn, also after a call that was
+    // already running (issue #255).
+    const revoked = userId ? membershipHooks(ctx.storage ?? currentStorage, userId) : null;
     return {
       ...withIdentity,
       ...(memory && {
         systemPrompt: `${withIdentity.systemPrompt ?? ""}\n${memoryPrompt(memory, memory.chats !== null)}`,
-        hooks: { ...withIdentity.hooks, PreToolUse: [...(withIdentity.hooks?.PreToolUse ?? []), taintHook(memory)] },
       }),
+      hooks: {
+        ...withIdentity.hooks,
+        PreToolUse: [
+          ...(revoked ? [revoked.PreToolUse] : []),
+          ...(withIdentity.hooks?.PreToolUse ?? []),
+          ...(memory ? [taintHook(memory)] : []),
+        ],
+        ...(revoked && { PostToolBatch: [revoked.PostToolBatch, ...(withIdentity.hooks?.PostToolBatch ?? [])] }),
+      },
       mcpServers: { ...withIdentity.mcpServers, [SERVER_NAME]: toolServer(tools) },
       // save_file is only in runs with a working folder, the memory and past-chat tools in runs with memory.
       allowedTools: [

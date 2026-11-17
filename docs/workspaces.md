@@ -460,7 +460,9 @@ The operation matrix above has its rows. This section says what each operation d
 | Admin | Make a Member an Admin (as they could add them as one), and step down to Member themselves. Nothing else: not another Admin, not an Owner. |
 | Member | Nothing. |
 
-- The last Owner can't be demoted (409, "A workspace needs at least one owner").
+- The last Owner can't be demoted (409, "A workspace needs at least one owner"). The
+  built-in local user of a deployment that once ran without login doesn't count, since
+  nobody signs in as it: the last signed-in Owner can't leave the workspace to it alone.
 - **Ownership changes are serialized per workspace.** The existing trigger
   (`workspace_members_keep_owner`) looks for another Owner without a lock, so two Owners
   demoting or removing each other at once could each still see the other and both commit,
@@ -496,7 +498,8 @@ In one transaction, it:
    and collaborators have to be members). Collaborator places are deleted from step 3
    on, when that table exists;
 3. records a **departure**, so the default workspace doesn't add them back at their next
-   sign-in during the compatibility period (decision 5). Adding them again clears it;
+   sign-in during the compatibility period (decision 5), also when that sign-in happens
+   while the removal is still committing. Adding them again clears it;
 4. writes one audit entry, `member.remove` or `member.leave`, with how many grants and
    group memberships went.
 
@@ -524,11 +527,20 @@ What stops (see [Revalidation](#revalidation)):
 
 - Every request, tool call and memory call in the workspace, including tokens already
   minted: 404, as for any non-member. Their open `?watch` streams close.
-- **Their running chat runs in that workspace end at their next step.** A tool call that
-  was already accepted runs to its end and keeps its result and audit entry. The run
-  doesn't start another model turn: it stops, and the chat records why ("You're no longer a
-  member of this workspace"). An Experiment run left in the `running` state stays so; its
-  maintainer, after a handover, can finish it as failed.
+- **Their running chat runs in that workspace end at their next step**, with the
+  TypeScript and the Python chat agent alike. Each checks membership (and that the
+  workspace is active) again before every tool call and after every batch of tool calls,
+  before the next model request. A tool call that was already accepted runs to its end,
+  whether it succeeds or fails, and keeps its result and audit entry; then the run stops,
+  so the model gets no turn after it. A tool call after the removal is refused, with the
+  reason ("no longer a member of this workspace"), and the run stops there. An Experiment
+  run left in the `running` state stays so; its maintainer, after a handover, can finish
+  it as failed.
+- A grant, group membership or collaborator change that was being written for them as
+  they were removed is taken away too: the write holds their membership row (`FOR
+  SHARE`), the removal waits for it (`FOR UPDATE`) and then removes what it wrote, and a
+  write that starts after the removal finds no member and is refused. Adding them back
+  restores none of it.
 - Signed download links expire as before (`DOWNLOAD_LINK_SECONDS`).
 
 ### Renaming and archiving a workspace
@@ -679,18 +691,31 @@ In the conformance suite, against the same backend as before:
   in the workspace.
 
 In `services/api-py/tests` (they need the database): the migration sets every maintainer to
-the author and changes nobody's access to any Experiment, and a member removed from the
-default workspace isn't added back at sign-in.
+the author and changes nobody's access to any Experiment, a member removed from the
+default workspace isn't added back at sign-in, and a group membership or grant written
+while its user is being removed, in either order, doesn't come back when they're added
+again.
 
-In `apps/agent`: a run whose user is removed mid-run finishes the accepted tool call, gets
-the next one refused, and ends without another model turn; the in-process tools follow the
-maintainer and collaborator rules.
+In `apps/agent` and `services/agent-py` (through the real Claude Code engine, with a
+scripted Messages API that counts model turns): a run whose user is removed, or whose
+workspace is archived, during an accepted tool call keeps that call's result, whether it
+succeeded or failed, and ends without another model turn; a tool call after that is
+refused and never runs. The in-process tools follow the maintainer and collaborator
+rules.
 
 ### Rollout (#255)
 
 1. This section.
 2. Backend, people: role changes, removal and leaving, departures, rename, archive and
-   restore, runs ending on removal. The routes go into `openapi/storage.yaml`.
+   restore, runs ending on removal. The routes go into `openapi/storage.yaml`. Done:
+   `services/api-py/api_py/workspaces.py` serves them, `024_workspace_departures.sql`
+   adds the departures, keeps `sign_in_memberships` from re-adding someone who left, and
+   makes `workspace_members_keep_owner` lock the workspace's row before it looks. The
+   routes take that lock first too, so two Owners demoting or removing each other at once
+   leave one. The removal preview lists Experiments by author until
+   step 3 adds maintainers. On the agent server, `membershipHook`
+   (`apps/agent/src/storage/revocation.ts`) checks membership before every tool call of a
+   run and stops the run once it is gone.
 3. Backend, Experiments: the migration, maintainer and collaborators in api-py and in the
    TypeScript server's session and tools.
 4. Backend, workspace inventory and adding an Owner.

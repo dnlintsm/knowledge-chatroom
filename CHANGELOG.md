@@ -231,6 +231,22 @@
   then (issue #226).
 - Share and the Admin panel call the top content access **Full access** instead of
   Owner, so it doesn't read like the Owner workspace role next to it (issue #226).
+- Workspace administration on the API server (issue #255, step 2 of
+  [Administration and handover](docs/workspaces.md#administration-and-handover)), with no
+  screens yet. `PATCH /workspaces/{id}/members/{userId}` changes a role: Owners set any
+  role, Admins make a Member an Admin or step down themselves, and the last Owner can't be
+  demoted (409); transferring ownership is making someone Owner, then stepping down.
+  `DELETE /workspaces/{id}/members/{userId}` removes a member (Owners anyone, Admins
+  Members) or, with your own id, leaves; with the membership go the person's direct grants
+  and memberships of the workspace's groups, and the default workspace no longer adds them
+  back when they sign in. `GET .../removal` previews that. `PATCH /workspaces/{id}` renames
+  a workspace (Owners and Admins) or archives and restores it (Owners; not the default
+  workspace), and `GET /workspaces?archived=true` lists the archived ones you own. Every
+  workspace in the answers has a `status`. A chat run, with the TypeScript or the Python
+  agent, whose user is removed, leaves, or whose workspace is archived stops at its next
+  tool boundary: a tool call already running ends and keeps its result, then the run
+  ends without another model turn; a later tool call, of any kind, is refused. A grant or
+  group membership written while its user is being removed goes with them.
 
 ### Changed
 

@@ -17,7 +17,8 @@ from psycopg import conninfo
 from support import SECRET, URL, Client, user
 
 from api_py import db
-from api_py.access import AccessService
+from api_py import workspaces as workspaces_module
+from api_py.access import AccessError, AccessService
 from api_py.config import DEFAULT_MIGRATIONS_DIR
 
 pytestmark = [
@@ -344,3 +345,295 @@ async def test_grants_and_groups_are_for_members(database):
         assert next(e for e in own if e["action"] == "node.create")["target"]["name"] == "Secret"
         renamed = next(e for e in entries if e["action"] == "group.create")
         assert renamed["target"]["name"] == "Team"
+
+
+async def test_someone_removed_from_the_default_workspace_isnt_added_back_at_sign_in(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+        assert default["slug"] == "default" and default["status"] == "active"
+        removed = await api.delete(f"/workspaces/{default['id']}/members/{bob_id}", headers=alice)
+        assert removed.status_code == 200
+    # A new server, so bob's sign-in runs again (it is cached per process).
+    async with Client(database, SECRET) as (api, _app):
+        assert (await api.get("/workspaces", headers=bob)).json()["workspaces"] == []
+        assert (await api.get("/nodes", headers=bob)).status_code == 404
+        # Added again, the departure is gone: signing in keeps him a member.
+        added = await api.post(
+            f"/workspaces/{default['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        assert added.status_code == 201
+    async with Client(database, SECRET) as (api, _app):
+        mine = (await api.get("/workspaces", headers=bob)).json()["workspaces"]
+        assert [w["slug"] for w in mine] == ["default"]
+        # Leaving works the same way.
+        assert (
+            await api.delete(f"/workspaces/{default['id']}/members/{bob_id}", headers=bob)
+        ).status_code == 200
+    async with Client(database, SECRET) as (api, _app):
+        assert (await api.get("/workspaces", headers=bob)).json()["workspaces"] == []
+
+
+async def test_the_local_user_doesnt_count_as_an_owner_for_someone_who_signs_in(database):
+    # An authenticated deployment that once ran without login: the built-in
+    # local user owns the default workspace too (023), but nobody signs in as it.
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        local = str(await _one(conn, "SELECT id FROM users WHERE subject = 'local'"))
+        await conn.execute(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) "
+            "SELECT id, %s, 'owner' FROM workspaces WHERE slug = 'default' "
+            "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'owner'",
+            (local,),
+        )
+    async with Client(database, SECRET) as (api, _app):
+        alice = user("test|alice", "Alice")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+        assert default["role"] == "owner"
+        members = f"/workspaces/{default['id']}/members"
+        left = await api.delete(f"{members}/{alice_id}", headers=alice)
+        assert left.status_code == 409
+        demoted = await api.patch(f"{members}/{alice_id}", headers=alice, json={"role": "admin"})
+        assert demoted.status_code == 409
+    # The trigger agrees, when the routes are bypassed; the local user itself may go.
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        with pytest.raises(psycopg.errors.RaiseException, match="at least one owner"):
+            await conn.execute(
+                "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (default["id"], alice_id),
+            )
+        await conn.execute(
+            "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], local),
+        )
+
+
+async def test_signing_in_while_being_removed_doesnt_add_them_back(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        default = (await api.get("/workspaces", headers=alice)).json()["workspaces"][0]
+    async with (
+        await psycopg.AsyncConnection.connect(database) as removing,
+        await psycopg.AsyncConnection.connect(database) as signing_in,
+    ):
+        # What remove_member does, held open at the point of committing.
+        await removing.execute(
+            "SELECT 1 FROM workspaces WHERE id = %s FOR UPDATE", (default["id"],)
+        )
+        await removing.execute(
+            "DELETE FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], bob_id),
+        )
+        await removing.execute(
+            "INSERT INTO workspace_departures (workspace_id, user_id) VALUES (%s, %s)",
+            (default["id"], bob_id),
+        )
+        # Bob's sign-in on a server with a cold cache, while the removal is uncommitted.
+        waiting = asyncio.create_task(
+            signing_in.execute("SELECT sign_in_memberships(%s)", (bob_id,))
+        )
+        await asyncio.sleep(0.3)
+        await removing.commit()
+        await waiting
+        await signing_in.commit()
+        cur = await signing_in.execute(
+            "SELECT count(*) FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+            (default["id"], bob_id),
+        )
+        assert (await cur.fetchone())[0] == 0  # pyrefly: ignore[unsupported-operation]
+
+
+async def test_two_owners_removing_each_other_at_once_keep_one(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        await api.get("/access", headers=alice)
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+        answers = await asyncio.gather(
+            api.delete(f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice),
+            api.delete(f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 409]
+        stays = alice if answers[0].status_code == 200 else bob
+        members = (await api.get(f"/workspaces/{lab['id']}/members", headers=stays)).json()
+        assert [m["role"] for m in members["members"]] == ["owner"]
+
+
+async def test_the_trigger_keeps_an_owner_when_the_routes_are_bypassed(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+    demote = "UPDATE workspace_members SET role = 'member' WHERE workspace_id = %s AND user_id = %s"
+    async with (
+        await psycopg.AsyncConnection.connect(database) as first,
+        await psycopg.AsyncConnection.connect(database) as second,
+    ):
+        await first.execute(demote, (lab["id"], alice_id))
+        # The second waits on the workspace lock the first holds, then sees its change.
+        waiting = asyncio.create_task(second.execute(demote, (lab["id"], bob_id)))
+        await asyncio.sleep(0.3)
+        assert not waiting.done()
+        await first.commit()
+        with pytest.raises(psycopg.errors.RaiseException, match="at least one owner"):
+            await waiting
+        await second.rollback()
+        cur = await first.execute(
+            "SELECT count(*) FROM workspace_members WHERE workspace_id = %s AND role = 'owner'",
+            (lab["id"],),
+        )
+        assert (await cur.fetchone())[0] == 1  # pyrefly: ignore[unsupported-operation]
+
+
+async def test_two_owners_demoting_each_other_at_once_keep_one(database):
+    async with Client(database, SECRET) as (api, _app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+        bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+        lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()
+        await api.post(
+            f"/workspaces/{lab['id']}/members",
+            headers=alice,
+            json={"userId": bob_id, "role": "member", "access": "none"},
+        )
+        await api.patch(
+            f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "owner"}
+        )
+        answers = await asyncio.gather(
+            api.patch(
+                f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice, json={"role": "admin"}
+            ),
+            api.patch(
+                f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob, json={"role": "admin"}
+            ),
+        )
+        assert sorted(a.status_code for a in answers) == [200, 409]
+        members = (await api.get(f"/workspaces/{lab['id']}/members", headers=alice)).json()
+        assert sorted(m["role"] for m in members["members"]) == ["admin", "owner"]
+
+
+async def _lab_with_a_privileged_group(api, alice, bob):
+    """alice's workspace with bob a Member without access, and a group with Full access on its root."""
+    alice_id = (await api.get("/access", headers=alice)).json()["me"]["id"]
+    bob_id = (await api.get("/access", headers=bob)).json()["me"]["id"]
+    lab = (await api.post("/workspaces", headers=alice, json={"name": "Lab"})).json()["id"]
+    in_lab = {**alice, "X-Knowledge-Workspace": lab}
+    await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "none"},
+    )
+    group = (
+        await api.post("/access/groups", headers=in_lab, json={"parentId": None, "name": "Admins"})
+    ).json()["id"]
+    granted = await api.post(
+        "/access/grants",
+        headers=in_lab,
+        json={"node": None, "principalType": "group", "principalId": group, "role": "owner"},
+    )
+    assert granted.status_code == 200
+    return lab, alice_id, bob_id, group
+
+
+def _write(access: AccessService, kind: str, group: str, bob_id: str, alice_id: str, in_tx):
+    """What a member-only permission write does: add bob to the group, or grant him a role."""
+    if kind == "group":
+        return access.set_member(group, bob_id, True, in_tx)
+    return access.set_grant(None, "user", bob_id, "owner", alice_id, in_tx)
+
+
+async def _no_access_once_added_back(api, alice, bob, lab: str, bob_id: str) -> None:
+    added = await api.post(
+        f"/workspaces/{lab}/members",
+        headers=alice,
+        json={"userId": bob_id, "role": "member", "access": "none"},
+    )
+    assert added.status_code == 201
+    me = (await api.get("/access", headers={**bob, "X-Knowledge-Workspace": lab})).json()
+    assert me["rootRole"] is None, "nothing written during the removal comes back"
+
+
+@pytest.mark.parametrize("kind", ["group", "grant"])
+async def test_a_removal_waits_for_a_permission_write_and_takes_it_too(database, kind):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, alice_id, bob_id, group = await _lab_with_a_privileged_group(api, alice, bob)
+        access = app.state.storage.access.in_workspace(lab)
+        paused, release = asyncio.Event(), asyncio.Event()
+
+        async def hold(_conn) -> None:
+            paused.set()
+            await release.wait()
+
+        # The write has checked bob is a member and written, but not committed.
+        writing = asyncio.create_task(_write(access, kind, group, bob_id, alice_id, hold))
+        await paused.wait()
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await asyncio.sleep(0.3)
+        assert not removing.done(), "the removal waits for the write"
+        release.set()
+        await writing
+        removed = await removing
+        assert removed["groups" if kind == "group" else "grants"] == 1
+        await _no_access_once_added_back(api, alice, bob, lab, bob_id)
+
+
+@pytest.mark.parametrize("kind", ["group", "grant"])
+async def test_a_permission_write_after_a_removal_finds_no_member(database, kind, monkeypatch):
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, alice_id, bob_id, group = await _lab_with_a_privileged_group(api, alice, bob)
+        access = app.state.storage.access.in_workspace(lab)
+        paused, release = asyncio.Event(), asyncio.Event()
+        audit = workspaces_module._audit
+
+        async def held_audit(*args, **kwargs):
+            paused.set()
+            await release.wait()
+            return await audit(*args, **kwargs)
+
+        # The removal has locked bob's membership and deleted what he holds, but not committed.
+        monkeypatch.setattr(workspaces_module, "_audit", held_audit)
+        removing = asyncio.create_task(
+            app.state.workspaces.remove_member(lab, alice_id, "owner", bob_id)
+        )
+        await paused.wait()
+
+        async def nothing(_conn) -> None:
+            return None
+
+        writing = asyncio.create_task(_write(access, kind, group, bob_id, alice_id, nothing))
+        await asyncio.sleep(0.3)
+        assert not writing.done(), "the write waits for the removal"
+        release.set()
+        await removing
+        with pytest.raises(AccessError, match="aren't a member"):
+            await writing
+        monkeypatch.setattr(workspaces_module, "_audit", audit)
+        await _no_access_once_added_back(api, alice, bob, lab, bob_id)

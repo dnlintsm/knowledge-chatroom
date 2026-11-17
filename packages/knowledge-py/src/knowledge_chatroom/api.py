@@ -12,6 +12,9 @@ from typing_extensions import TypeAliasType
 WorkspaceRole = TypeAliasType("WorkspaceRole", Literal["owner", "admin", "member"])
 
 
+WorkspaceStatus = TypeAliasType("WorkspaceStatus", Literal["active", "archived"])
+
+
 class Workspace(BaseModel):
     id: str
     """
@@ -23,6 +26,18 @@ class Workspace(BaseModel):
     """
     name: str
     role: WorkspaceRole
+    status: WorkspaceStatus
+
+
+class MemberRemovalGroup(BaseModel):
+    id: str
+    name: str
+
+
+class MemberRemovalExperiment(BaseModel):
+    id: str
+    title: str
+    nodeId: str | None
 
 
 class AlreadyMember(BaseModel):
@@ -1192,6 +1207,11 @@ class CreateWorkspaceRequest(BaseModel):
     levels: Annotated[list[Level] | None, Field(max_length=10)] = None
 
 
+class UpdateWorkspaceRequest(BaseModel):
+    name: Annotated[str | None, Field(max_length=200, min_length=1)] = None
+    status: WorkspaceStatus | None = None
+
+
 class AddWorkspaceMemberRequest(BaseModel):
     userId: str
     role: Literal["member", "admin"]
@@ -1205,6 +1225,23 @@ class Member(BaseModel):
 
 class AddWorkspaceMemberResponse(BaseModel):
     member: Member
+
+
+class ChangeWorkspaceMemberRoleRequest(BaseModel):
+    role: WorkspaceRole
+
+
+class ChangeWorkspaceMemberRoleResponse(BaseModel):
+    member: Member
+
+
+class Removed(BaseModel):
+    grants: int
+    groups: int
+
+
+class RemoveWorkspaceMemberResponse(BaseModel):
+    removed: Removed
 
 
 class User1(BaseModel):
@@ -1648,6 +1685,18 @@ class CallMemoryToolResponse(BaseModel):
     tainted: bool
     """
     Whether the run's later changes wait in the inbox (reading a shared note or a past chat sets it).
+    """
+
+
+class MemberRemoval(BaseModel):
+    grants: int
+    """
+    Their direct grants in the workspace.
+    """
+    groups: list[MemberRemovalGroup]
+    experiments: list[MemberRemovalExperiment]
+    """
+    Shared or archived Experiments they started that you can see.
     """
 
 
