@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, FileDiff, FlaskConical, Lock, Plus, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExperimentPeople } from "./experiment-people";
 import { useListScope } from "./list-scope";
 import { readOnlyReason } from "./read-only";
 import { hasRole } from "./roles";
@@ -128,8 +129,7 @@ export function ExperimentPanel() {
         <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
           <FlaskConical className="size-3.5" />
           <span>
-            {exp.nodeId === null ? "Experiment in" : "Experiment on"} {nodeName}
-            {exp.authorName && !exp.mine ? ` by ${exp.authorName}` : ""}, started{" "}
+            {exp.nodeId === null ? "Experiment in" : "Experiment on"} {nodeName}, started{" "}
             {new Date(exp.forkedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
           </span>
           <StatusBadge status={exp.status} />
@@ -148,6 +148,7 @@ export function ExperimentPanel() {
           onSave={(title) => save({ title })}
           className="text-xl font-semibold"
         />
+        <ExperimentPeople experiment={exp} nodeName={nodeName} />
         {reason && (
           <p data-testid="read-only-reason" className="text-xs text-[var(--muted-foreground)]">
             {reason.detail}
@@ -213,9 +214,13 @@ export function ExperimentPanel() {
           </div>
         )}
         <p className="text-xs text-[var(--muted-foreground)]">
-          {exp.status === "draft"
-            ? "Only you can see this draft. "
-            : `Everyone who can view ${nodeName} can see this. `}
+          {exp.status !== "draft"
+            ? `Everyone who can view ${nodeName} can see this. `
+            : exp.collaborators.length === 0 && exp.mine
+              ? "Only you can see this draft. "
+              : exp.mine
+                ? "Only you and the collaborators can see this draft. "
+                : "Only its maintainer and the collaborators can see this draft. "}
           {exp.nodeId === null
             ? "It started empty; changes here don't touch the workspace's files."
             : <>Its files started as a copy of {nodeName}&apos;s; changes here don&apos;t touch {nodeName}.</>}
@@ -873,7 +878,7 @@ function RunsTable({
                 </span>
               </td>
               {showPlace && <td className={cell}>{placeName(ws.nodes, e.nodeId)}</td>}
-              {showPlace && <td className={cell}>{e.mine ? "You" : (e.authorName ?? "Someone")}</td>}
+              {showPlace && <td className={cell}>{e.mine ? "You" : (e.maintainerName ?? "Someone")}</td>}
               {paramKeys.map((k) => (
                 <td key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
                   {k in e.params ? show(e.params[k]) : ""}

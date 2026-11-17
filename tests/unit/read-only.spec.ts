@@ -5,7 +5,15 @@ import type { Experiment } from "../../apps/web/src/components/workspace/server-
 /** Why a place is read only (apps/web/src/components/workspace/read-only.ts), #187. */
 
 const exp = (fields: Partial<Experiment>) =>
-  ({ access: "reader", status: "shared", mine: false, authorName: "Alice", ...fields }) as Experiment;
+  ({
+    access: "reader",
+    status: "shared",
+    mine: false,
+    authorName: "Bob",
+    maintainerName: "Alice",
+    collaborators: [],
+    ...fields,
+  }) as Experiment;
 const at = (experiment: Experiment | null, placeRole: "viewer" | "editor" | "owner" | null = "viewer") =>
   readOnlyReason({ experiment, placeRole, placeName: "Main etch" });
 
@@ -15,7 +23,7 @@ test("an experiment you can change, or a node you can edit, has no reason", () =
   expect(at(null, "owner")).toBeNull();
 });
 
-test("an archived experiment says so; only its author is told to restore it", () => {
+test("an archived experiment says so; only its maintainer is told to restore it", () => {
   const own = at(exp({ status: "archived", mine: true }))!;
   expect(own.kind).toBe("archived");
   expect(own.label).toBe("Read only · archived");
@@ -24,12 +32,15 @@ test("an archived experiment says so; only its author is told to restore it", ()
   expect(theirs.detail).toBe("Archived, so it's read only. Only Alice can restore it. Rerun it to work on your own copy.");
 });
 
-test("someone else's experiment names its author and offers a rerun", () => {
+test("someone else's experiment names its maintainer (not who started it) and offers a rerun", () => {
   const reason = at(exp({}))!;
-  expect(reason.kind).toBe("not-author");
+  expect(reason.kind).toBe("not-maintainer");
   expect(reason.label).toBe("Read only · only Alice can edit");
   expect(reason.detail).toBe("Only Alice can edit this experiment. Rerun it to work on your own copy.");
-  expect(at(exp({ authorName: null }))!.label).toBe("Read only · only its author can edit");
+  expect(at(exp({ maintainerName: null }))!.label).toBe("Read only · only its maintainer can edit");
+  // Its collaborators edit it too (#255).
+  const shared = at(exp({ collaborators: [{ id: "c", name: "Carol" }] }))!;
+  expect(shared.detail).toBe("Only Alice and the collaborators can edit this experiment. Rerun it to work on your own copy.");
   // Rerun is offered only where the user may start one.
   const noRerun = readOnlyReason({ experiment: exp({}), placeRole: "viewer", placeName: "Main etch", canRerun: false })!;
   expect(noRerun.detail).toBe("Only Alice can edit this experiment.");

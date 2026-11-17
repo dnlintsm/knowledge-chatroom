@@ -328,11 +328,68 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(removal).toHaveCount(0);
   await expect(bobAdmin.getByRole("table", { name: "People" })).not.toContainText("Alice Admin");
   expect((await alice.request.get("/api/files", { headers: inLab })).status()).toBe(404);
+  await bobAdmin.getByRole("button", { name: "Close" }).click();
+
+  // Her shared experiment says she has gone, and Bob, an Owner, hands it over
+  // to himself (docs/workspaces.md, "Experiment handover").
+  await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Lab finding" }).click();
+  const findingPanel = bob.getByTestId("experiment-panel");
+  const people = findingPanel.getByTestId("experiment-people");
+  await expect(people).toContainText("Maintained by Alice Admin");
+  await expect(people).toContainText("No longer a member");
+  await expect(findingPanel.getByTestId("read-only-reason")).toHaveText(
+    "Only Alice Admin can edit this experiment. Rerun it to work on your own copy.",
+  );
+  await shot(bob, "32-experiment-maintainer-left");
+  await people.getByRole("button", { name: "Hand over" }).click();
+  const handOver = bob.getByRole("dialog", { name: "Hand over the experiment" });
+  // A departed maintainer isn't kept on, so there's nothing to choose about it.
+  await expect(handOver.getByLabel("Stay on as a collaborator")).toHaveCount(0);
+  await handOver.getByLabel("New maintainer").selectOption({ label: "Bob Builder" });
+  await handOver.getByRole("button", { name: "Hand over" }).click();
+  await expect(handOver).toHaveCount(0);
+  await expect(people).toContainText("Maintained by you");
+  await expect(people).toContainText("started by Alice Admin");
+  await expect(people).not.toContainText("No longer a member");
+  await expect(findingPanel.getByTestId("read-only-reason")).toHaveCount(0);
+  await expect(findingPanel.getByRole("button", { name: "Make private" })).toBeVisible();
+
+  await bob.getByRole("button", { name: "Admin", exact: true }).click();
   const bobAdd = bobAdmin.getByRole("form", { name: "Add a member" });
   await bobAdd.getByLabel("Email").fill("alice@example.com");
   await bobAdd.getByRole("button", { name: "Add" }).click();
   await expect(bobAdd.getByRole("status")).toContainText("Added Alice Admin as Member");
   await bobAdmin.getByRole("button", { name: "Close" }).click();
+
+  // Bob, its maintainer now, adds her back to it as a collaborator: she edits
+  // it again, until she stops collaborating.
+  await people.getByRole("button", { name: "Add collaborator" }).click();
+  const addCollaborator = bob.getByRole("dialog", { name: "Add a collaborator" });
+  await addCollaborator.getByLabel("Collaborator").selectOption({ label: "Alice Admin" });
+  await addCollaborator.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(addCollaborator).toHaveCount(0);
+  await expect(people.getByRole("list", { name: "Collaborators" })).toHaveText("Alice Admin");
+  await expect(people.getByRole("button", { name: "Remove Alice Admin as a collaborator" })).toBeVisible();
+  await shot(bob, "33-experiment-collaborators");
+
+  await alice.goto(findingUrl);
+  await expect(alice.getByRole("navigation", { name: "Location" })).toContainText("Lab finding");
+  await alice.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Lab finding" }).click();
+  const aliceFinding = alice.getByTestId("experiment-panel");
+  await expect(aliceFinding.getByTestId("experiment-people")).toContainText("Maintained by Bob Builder");
+  await expect(aliceFinding.getByRole("list", { name: "Collaborators" })).toHaveText("you");
+  await expect(aliceFinding.getByTestId("read-only-reason")).toHaveCount(0);
+  // Collaborators edit; only the maintainer shares, archives or chooses who works on it.
+  await expect(aliceFinding.getByLabel("Experiment state")).toBeVisible();
+  await expect(aliceFinding.getByRole("button", { name: "Archive" })).toHaveCount(0);
+  await expect(aliceFinding.getByRole("button", { name: "Add collaborator" })).toHaveCount(0);
+  await aliceFinding.getByRole("button", { name: "Stop collaborating" }).click();
+  await alice.getByRole("dialog", { name: "Stop collaborating?" }).getByRole("button", { name: "Stop collaborating" }).click();
+  // It's shared, so she still sees it, read only.
+  await expect(aliceFinding.getByTestId("read-only-reason")).toHaveText(
+    "Only Bob Builder can edit this experiment. Rerun it to work on your own copy.",
+  );
+  await expect(aliceFinding.getByRole("list", { name: "Collaborators" })).toHaveCount(0);
 
   // Alice leaves it from the switcher; Bob, its last Owner, is told he can't yet.
   await alice.goto(labUrl);

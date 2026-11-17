@@ -269,8 +269,16 @@ export type ExperimentState = "ready" | "running" | "done" | "failed";
 export interface Experiment {
   id: string;
   nodeId: string | null;
+  /** Who created it; never changes (provenance). */
   authorId: string;
   authorName: string | null;
+  /** Who is responsible for it now: its author until they hand it over (#255). */
+  maintainerId: string;
+  maintainerName: string | null;
+  /** Whether its maintainer is still a member of the workspace. */
+  maintainerIsMember: boolean;
+  /** Members its maintainer added to work on it with them. */
+  collaborators: { id: string; name: string | null }[];
   title: string;
   hypothesis: string;
   params: Record<string, unknown>;
@@ -282,9 +290,9 @@ export interface Experiment {
   fileCount: number;
   /** Where a run came from, when Claude started it (apps/agent/src/storage/run-report.ts); else {}. */
   provenance?: RunProvenance;
-  /** writer: you are its author and it isn't archived. */
+  /** writer: you maintain it or collaborate on it, and it isn't archived. */
   access: "writer" | "reader";
-  /** You are its author: you may share, archive, restore or delete it. */
+  /** You maintain it: you may share, archive, restore or delete it, and choose who works on it. */
   mine: boolean;
 }
 
@@ -350,6 +358,39 @@ export const rerunServerExperiment = (id: string) =>
   experimentRequest("POST", "/runs", { rerunOf: id, provenance: {} });
 export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
+
+/**
+ * A change to who works on an experiment (docs/workspaces.md, "Experiment
+ * handover"): hand it over to another member, keeping you on as a
+ * collaborator or not, or add or remove a collaborator (your own id: stop
+ * collaborating).
+ */
+export type ExperimentPeopleChange =
+  | { handOver: string; keepAsCollaborator: boolean }
+  | { add: string }
+  | { remove: string };
+
+/** Makes the change; the experiment as you now see it, or null when you no longer can. */
+export async function changeServerExperimentPeople(
+  id: string,
+  change: ExperimentPeopleChange,
+): Promise<Experiment | null> {
+  const base = `/api/experiments/${encodeURIComponent(id)}`;
+  const [path, method, body] =
+    "handOver" in change
+      ? [`${base}/maintainer`, "PUT", { userId: change.handOver, keepAsCollaborator: change.keepAsCollaborator }]
+      : "add" in change
+        ? [`${base}/collaborators/${encodeURIComponent(change.add)}`, "PUT", undefined]
+        : [`${base}/collaborators/${encodeURIComponent(change.remove)}`, "DELETE", undefined];
+  const res = await apiFetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = (await res.json().catch(() => ({}))) as { experiment?: Experiment | null; error?: string };
+  if (!res.ok) throw new Error(data.error ?? `${method} experiment: ${res.status}`);
+  return data.experiment ?? null;
+}
 
 export type ProposalStatus = "open" | "accepted" | "rejected" | "withdrawn";
 

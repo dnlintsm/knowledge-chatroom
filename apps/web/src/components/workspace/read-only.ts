@@ -8,7 +8,7 @@ import type { Experiment, Role } from "./server-files";
  * reasons; null when the user can change it.
  */
 export interface ReadOnlyReason {
-  kind: "archived" | "not-author" | "view-only";
+  kind: "archived" | "not-maintainer" | "view-only";
   label: string;
   detail: string;
 }
@@ -27,7 +27,8 @@ interface Place {
 export function readOnlyReason({ experiment, placeRole, placeName, canRerun = true }: Place): ReadOnlyReason | null {
   if (experiment) {
     if (experiment.access === "writer") return null;
-    const author = experiment.authorName ?? "its author";
+    // Its maintainer (its author until handed over, #255) and collaborators edit it.
+    const maintainer = experiment.maintainerName ?? "its maintainer";
     const rerun = canRerun ? " Rerun it to work on your own copy." : "";
     if (experiment.status === "archived") {
       return {
@@ -35,13 +36,14 @@ export function readOnlyReason({ experiment, placeRole, placeName, canRerun = tr
         label: "Read only · archived",
         detail: experiment.mine
           ? "Archived, so it's read only. Restore it to change it."
-          : `Archived, so it's read only. Only ${author} can restore it.${rerun}`,
+          : `Archived, so it's read only. Only ${maintainer} can restore it.${rerun}`,
       };
     }
+    const who = experiment.collaborators.length > 0 ? `${maintainer} and the collaborators` : maintainer;
     return {
-      kind: "not-author",
-      label: `Read only · only ${author} can edit`,
-      detail: `Only ${author} can edit this experiment.${rerun}`,
+      kind: "not-maintainer",
+      label: `Read only · only ${who} can edit`,
+      detail: `Only ${who} can edit this experiment.${rerun}`,
     };
   }
   if (hasRole(placeRole, "editor")) return null;

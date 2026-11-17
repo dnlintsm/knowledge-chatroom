@@ -71,3 +71,27 @@ export function transferSteps(
       : []),
   ];
 }
+
+/**
+ * What `viewer` may change about who works on an Experiment, for its header
+ * (docs/workspaces.md, "Experiment handover"): its maintainer adds and removes
+ * collaborators and hands it over; an Owner or Admin hands over a shared or
+ * archived one whose maintainer is no longer a member; a collaborator leaves.
+ */
+export function experimentPeople(
+  experiment: {
+    mine: boolean;
+    status: "draft" | "shared" | "archived";
+    maintainerIsMember: boolean;
+    collaborators: { id: string }[];
+  },
+  viewer: { id: string | null; role: MemberRole | null },
+): { collaborators: boolean; handOver: boolean; leave: boolean } {
+  const manages = viewer.role === "owner" || viewer.role === "admin";
+  return {
+    collaborators: experiment.mine,
+    handOver:
+      experiment.mine || (manages && experiment.status !== "draft" && !experiment.maintainerIsMember),
+    leave: !experiment.mine && viewer.id !== null && experiment.collaborators.some((c) => c.id === viewer.id),
+  };
+}

@@ -287,6 +287,14 @@
   workspace, after typing its name), Leave workspace, which tells the last Owner to make
   someone else Owner first, and the archived workspaces you own, with Restore. The
   Activity tab now lists membership and workspace changes as well.
+- Who works on an Experiment, in its header (issue #255, step 6): "Maintained by Alice",
+  "started by Bob" when someone else started it, and its collaborators. Its maintainer
+  adds and removes collaborators from the workspace's members and hands it over,
+  staying on as a collaborator or not; a collaborator can stop collaborating. A
+  maintainer who has left the workspace shows as "No longer a member", and Owners and
+  Admins can then hand a shared or archived Experiment over. The read-only reasons name
+  the maintainer ("Only Alice and the collaborators can edit this experiment"), and the
+  experiment lists show who maintains each one.
 
 ### Changed
 

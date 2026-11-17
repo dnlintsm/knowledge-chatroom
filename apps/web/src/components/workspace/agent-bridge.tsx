@@ -76,7 +76,9 @@ export function useWorkspaceAgent() {
             title: ws.experiment.title,
             status: ws.experiment.status,
             state: ws.experiment.state,
-            author: ws.experiment.mine ? "the user" : ws.experiment.authorName,
+            author: ws.experiment.authorName,
+            maintainer: ws.experiment.mine ? "the user" : ws.experiment.maintainerName,
+            collaborators: ws.experiment.collaborators.map((c) => c.name),
             canChange: ws.experiment.access === "writer",
             hypothesis: ws.experiment.hypothesis,
             // Plain JSON from the server.

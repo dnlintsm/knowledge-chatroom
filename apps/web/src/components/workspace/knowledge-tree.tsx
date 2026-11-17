@@ -106,7 +106,7 @@ export function KnowledgeTree() {
               aria-selected={current}
               tabIndex={0}
               data-testid="experiment-node"
-              title={e.mine ? undefined : `By ${e.authorName ?? "someone else"}`}
+              title={e.mine ? undefined : `Maintained by ${e.maintainerName ?? "someone else"}`}
               onClick={go}
               onKeyDown={(ev) => ev.key === "Enter" && go()}
               style={{ paddingLeft: 4 + depth * 12 }}
