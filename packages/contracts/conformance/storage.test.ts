@@ -277,6 +277,8 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", `/platform/workspaces/${lab.id}/owners`, { headers: alice, json: { userId: bobId }, expect: 403 });
     await call("POST", "/platform/workspaces/00000000-0000-4000-8000-000000000000/owners", { headers: platform, json: { userId: bobId }, expect: 404 });
     await call("GET", "/platform/workspaces", { headers: storageToken("conformance|platform"), expect: 403 });
+    await call("GET", "/platform/users?email=nobody-at-all@example.com", { headers: platform, expect: 404 });
+    await call("GET", "/platform/users?email=bob@example.com", { headers: alice, expect: 403 });
   });
 
   step("knowledge nodes", async () => {

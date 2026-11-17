@@ -95,3 +95,25 @@ export function experimentPeople(
     leave: !experiment.mine && viewer.id !== null && experiment.collaborators.some((c) => c.id === viewer.id),
   };
 }
+
+/** A workspace in the deployment's inventory (GET /platform/workspaces): no content. */
+export interface PlatformWorkspace {
+  id: string;
+  slug: string;
+  name: string;
+  status: "active" | "archived";
+  createdAt: string;
+  createdBy: { id: string; name: string | null } | null;
+  memberCount: number;
+  owners: { id: string; name: string | null; email: string | null; lastSeenAt: string | null }[];
+  lastActiveAt: string | null;
+  /** Whether a member who signed in lately holds Full access on its root; "Add an Owner" offers it when not. */
+  fullAccessHeld: boolean;
+}
+
+/** Whether the inventory's filter finds `w`: by name, address, or an Owner's name or email, case ignored. */
+export function inventoryMatches(w: PlatformWorkspace, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [w.name, w.slug, ...w.owners.flatMap((o) => [o.name, o.email])].some((s) => s?.toLowerCase().includes(q));
+}

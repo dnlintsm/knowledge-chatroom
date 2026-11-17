@@ -621,6 +621,8 @@ and `HUB_ADMINS` do). In local mode the local user is one. Nobody is one by defa
   status, who created it and when, how many members, its Owners (names and emails), and
   when someone last used it. No content: no node names, files, Experiments, chats or
   member lists beyond the Owners.
+- `GET /platform/users?email=` finds someone who has signed in with exactly that email
+  (case ignored), so the screen can name who to add; 404 when nobody has.
 - `POST /platform/workspaces/{id}/owners` `{userId, fullAccess?}` makes someone who has
   signed in an Owner of that workspace, adding them as a member if they aren't one. It is
   for a workspace whose Owners can no longer sign in, archived or not. It takes the
@@ -658,7 +660,7 @@ Experiment's title shows only to readers who can see that Experiment.
 | Archived workspaces | A section of the switcher, for Owners, with Restore. |
 | Experiment header | "Maintained by Alice · started by Bob" when they differ, and the collaborators. The maintainer adds and removes collaborators from the workspace's members (the server refuses one who can't view the node, and says so), and hands over. "No longer a member" by a departed maintainer, with Hand over for Owners and Admins. |
 | Read-only reasons (`read-only.ts`) | "Only Alice and the collaborators can edit this experiment", and the archived reason names the maintainer. |
-| Workspace inventory | A page for deployment admins only, with the list and "Add an Owner". |
+| Workspace inventory | A page for deployment admins only (`/platform`, linked from the switcher), with the list and "Add an Owner". |
 
 ### Tests this batch asks for
 
@@ -741,7 +743,11 @@ rules.
    `experimentPeople` (`src/lib/workspace-admin.ts`) allows them. The pickers list the
    workspace's members; someone who can't view the node is refused with the server's
    reason. `read-only.ts` names the maintainer and the collaborators.
-7. Screen: workspace inventory.
+7. Screen: workspace inventory. Done: `/platform` (`inventory.tsx`) lists every
+   workspace, with a filter, and "Add an Owner" finds them by email
+   (`GET /platform/users`, added in this step) and offers Full access, preselected when
+   nobody active holds it. The workspace switcher links to it for the deployment's
+   admins. The app forwards `/api/platform` to the API server.
 
 Each backend step brings its tests. The legacy fallback's cut-off release gets its own
 issue.
