@@ -752,6 +752,19 @@ describe("workspaces: inventory and Owner recovery (#255)", { skip: !enabled && 
     await ok(404, "GET", `/workspaces/${ws}`, { headers: admin });
   });
 
+  test("admins find who to add by the email they signed in with", async () => {
+    need();
+    const found = await ok<{ user: { id: string; name: string | null; email: string | null } }>(
+      200, "GET", "/platform/users?email=CAROL@example.com", { headers: admin },
+    );
+    assert.equal(found.user.id, ids.carol);
+    await ok(404, "GET", "/platform/users?email=nobody-yet@example.com", { headers: admin });
+    await ok(404, "GET", "/platform/users?email=", { headers: admin });
+    await ok(404, "GET", "/platform/users", { headers: admin });
+    await ok(403, "GET", "/platform/users?email=carol@example.com", { headers: gina });
+    await ok(405, "POST", "/platform/users", { headers: admin });
+  });
+
   test("admins can't make themselves Owners, and unknown people or workspaces are refused", async () => {
     need();
     await addOwner({ userId: adminId, fullAccess: true }, 400);

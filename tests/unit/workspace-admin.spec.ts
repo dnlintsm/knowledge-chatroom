@@ -4,6 +4,7 @@ import {
   assignableRoles,
   canRemove,
   experimentPeople,
+  inventoryMatches,
   namesMatch,
   settingsFor,
   transferSteps,
@@ -93,4 +94,21 @@ test("the maintainer manages an Experiment's people; Owners and Admins hand over
   // A collaborator may stop collaborating.
   expect(experimentPeople(exp({}), { id: "carol", role: "member" })).toEqual({ ...none, leave: true });
   expect(experimentPeople(exp({}), { id: null, role: null })).toEqual(none);
+});
+
+test("the inventory's filter finds a workspace by name, address or an Owner, case ignored", () => {
+  const w = {
+    id: "w",
+    slug: "etch-lab",
+    name: "Etch lab",
+    status: "active" as const,
+    createdAt: "2026-11-17T00:00:00.000Z",
+    createdBy: null,
+    memberCount: 3,
+    owners: [{ id: "o", name: "Gina", email: "gina@example.com", lastSeenAt: null }],
+    lastActiveAt: null,
+    fullAccessHeld: false,
+  };
+  for (const q of ["", "  ", "etch", "ETCH-LAB", "gina", "Gina@Example", " lab "]) expect(inventoryMatches(w, q), q).toBe(true);
+  for (const q of ["litho", "carol"]) expect(inventoryMatches(w, q), q).toBe(false);
 });

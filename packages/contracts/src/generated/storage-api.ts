@@ -676,6 +676,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Someone who has signed in, by email, to make an Owner (PLATFORM_ADMINS)
+         * @description Exactly that email, case ignored. Whoever is not in any workspace is found too:
+         *     Owner recovery may name anyone who has signed in. 403 for anyone the server's
+         *     PLATFORM_ADMINS doesn't name, and for storage tokens.
+         */
+        get: operations["findPlatformUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/platform/workspaces/{id}/owners": {
         parameters: {
             query?: never;
@@ -4379,6 +4401,39 @@ export interface operations {
             };
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    findPlatformUser: {
+        parameters: {
+            query: {
+                email: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Who has signed in with it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user: {
+                            id: string;
+                            name: string | null;
+                            email: string | null;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

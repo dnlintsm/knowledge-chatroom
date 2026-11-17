@@ -295,6 +295,12 @@
   Admins can then hand a shared or archived Experiment over. The read-only reasons name
   the maintainer ("Only Alice and the collaborators can edit this experiment"), and the
   experiment lists show who maintains each one.
+- The workspace inventory screen, at `/platform` (issue #255, step 7). For the deployment's
+  admins (`PLATFORM_ADMINS`), and linked from their workspace switcher: every workspace,
+  active and archived, with who created it, its member count, its Owners and when it was
+  last used, and a filter. "Add an Owner" finds someone by the email they signed in with
+  (the new `GET /platform/users?email=` on the API server) and can give them Full access
+  on the workspace, preselected when nobody active holds it. Anyone else is refused.
 
 ### Changed
 

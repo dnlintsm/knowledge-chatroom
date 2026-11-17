@@ -1482,6 +1482,42 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /platform/users:
+    get:
+      tags: [platform]
+      operationId: findPlatformUser
+      summary: Someone who has signed in, by email, to make an Owner (PLATFORM_ADMINS)
+      description: |
+        Exactly that email, case ignored. Whoever is not in any workspace is found too:
+        Owner recovery may name anyone who has signed in. 403 for anyone the server's
+        PLATFORM_ADMINS doesn't name, and for storage tokens.
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Who has signed in with it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    type: object
+                    required: [id, name, email]
+                    properties:
+                      id: { type: string }
+                      name: { type: [string, "null"] }
+                      email: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /platform/workspaces/{id}/owners:
     post:
       tags: [platform]
