@@ -261,6 +261,19 @@ def test_save_file_stores_a_file_from_the_folder(api, tmp_path: Path):
     assert "save_file" not in [t.name for t in file_tools(lambda: storage(api), {})]
 
 
+def test_save_file_with_a_relative_working_folder(api, tmp_path: Path, monkeypatch):
+    # AGENT_PY_WORKDIR=runs gives a relative folder: its files still count as inside.
+    monkeypatch.chdir(tmp_path)
+    folder = Path("runs") / "h"
+    (folder / "out").mkdir(parents=True)
+    (folder / "out" / "plot.png").write_bytes(b"png bytes")
+    (folder / ".claude").mkdir()
+    save = tool(file_tools(lambda: storage(api), {}, folder), "save_file")
+    done = asyncio.run(save.handler({"from": "out/plot.png", "path": "artifacts/plot.png"}))
+    assert not done.get("is_error"), done
+    assert api.puts[0].content == b"png bytes"
+
+
 def test_a_run_claude_starts_gets_its_inputs_in_the_folder(api, tmp_path: Path):
     tools = file_tools(lambda: storage(api), {}, tmp_path)
     answer = asyncio.run(

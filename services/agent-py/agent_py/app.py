@@ -55,7 +55,9 @@ def make_adapter(
     timeout = float(env.get("AGENT_RUN_TIMEOUT_SECONDS") or 1800)
     # Not this server's folder: Claude Code describes its working folder (git
     # status and all) to the model. Each user works in a folder in here.
-    root = env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-")
+    # Absolute: run folders, the sandbox's paths and the working folder's
+    # checks all build on it.
+    root = str(Path(env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-")).resolve())
     return ChatroomAdapter(
         name="report",
         description="The chatroom's chat agent",

@@ -249,6 +249,8 @@ def file_tools(
     from .workdir import is_inside, write_run_inputs
 
     meta = meta or {}
+    # Absolute, so a file's path isn't read against the folder twice.
+    workdir = workdir.resolve() if workdir is not None else None
     versions = tool_versions()
 
     def guarded(fn: Callable[[Storage, dict[str, Any]], Awaitable[ToolResult]]):
