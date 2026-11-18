@@ -47,8 +47,9 @@ RUN_ENV = re.compile(
 SECRET_MOUNTS = ("/run/secrets", "/var/run/secrets", "/etc/secrets")
 # Files in the run folder that Claude Code reads as project instructions or settings.
 PROJECT_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".mcp.json")
-# The workspace copy in the run folder (#264 step 3), as the TypeScript agent names it.
-WORKSPACE_FILES = ("workspace", ".workspace-manifest.json")
+# The workspace copy in the run folder (#264 step 3), as the TypeScript agent names
+# it, and the inputs of runs Claude starts, which this server writes outside the sandbox.
+WORKSPACE_FILES = ("workspace", ".workspace-manifest.json", "run-inputs")
 
 
 @dataclass(frozen=True)

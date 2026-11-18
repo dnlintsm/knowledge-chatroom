@@ -99,7 +99,8 @@ agent host.
 #### Working folder
 
 With file storage, each user's run folder also holds `workspace/`, a read-only copy of every
-file that user can read (`apps/agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
+file that user can read in the workspace (`services/agent-py/agent_py/workdir.py`; the legacy
+TypeScript agent's is `apps/agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
 the workspace like on a local project:
 
 - **Layout**: `workspace/root/` is the workspace root, `workspace/nodes/<tech>/<module>/...`
@@ -107,7 +108,8 @@ the workspace like on a local project:
   each experiment the user can see. `workspace/.places.json` maps each folder to its node or
   experiment id and the user's role, and lists files left out.
 - **Sync**: at the start of each run, through the user's own session (the same permission checks
-  and row security as the file tools). Only files whose content changed are downloaded; deleted
+  and row security as the file tools; agent-py goes through the storage API with the run's
+  token). Only files whose content changed are downloaded; deleted
   ones are removed. It is a snapshot: changes made during a run show up in the next one.
   A run Claude starts in the turn gets its linked inputs copied to `run-inputs/<run id>/`
   (the exact versions the run read, which the snapshot may predate); the next sync drops

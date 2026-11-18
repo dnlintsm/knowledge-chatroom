@@ -235,14 +235,22 @@ def tool_versions() -> dict[str, str]:
 
 
 def file_tools(
-    storage: Callable[[], Storage], meta: Mapping[str, Any] | None = None
+    storage: Callable[[], Storage],
+    meta: Mapping[str, Any] | None = None,
+    workdir: Path | None = None,
 ) -> list[SdkMcpTool[Any]]:
     """The workspace tools; `storage` gives the current run's storage API.
 
     `meta` is about the chat, for the provenance of runs Claude starts: its
-    `chat` (the AG-UI thread) and `model`.
+    `chat` (the AG-UI thread) and `model`. `workdir` is the run's folder when it
+    holds a copy of the workspace (workdir.py): it adds save_file, and runs
+    Claude starts get their inputs copied there.
     """
+    from .workdir import is_inside, write_run_inputs
+
     meta = meta or {}
+    # Absolute, so a file's path isn't read against the folder twice.
+    workdir = workdir.resolve() if workdir is not None else None
     versions = tool_versions()
 
     def guarded(fn: Callable[[Storage, dict[str, Any]], Awaitable[ToolResult]]):
@@ -798,6 +806,9 @@ def file_tools(
         elif not args.get("rerunOf"):
             body["nodeId"] = None
         run = await s.json("POST", "/experiments/runs", json_body=body)
+        linked = [i["path"] for i in run["provenance"].get("inputs", [])]
+        # The working folder's copy may be older than what the run linked: scripts read these.
+        local = await write_run_inputs(s, workdir, run["id"], linked) if workdir else {}
         return text(
             {
                 "ok": True,
@@ -805,7 +816,8 @@ def file_tools(
                 "title": run["title"],
                 "state": run["state"],
                 "files": run["fileCount"],
-                "inputs": [i["path"] for i in run["provenance"].get("inputs", [])],
+                "inputs": linked,
+                **({"inputsInWorkingFolder": local} if local else {}),
                 "report": "report.md",
             }
         )
@@ -850,6 +862,43 @@ def file_tools(
             }
         )
 
+    @tool(
+        "save_file",
+        "Save a file from the working folder (one a script made, e.g. out/plot.png or a CSV) "
+        "into the workspace, with the same rules as write_file: where the user is working "
+        "unless they say otherwise, PROPOSED in a knowledge node or for skills, kept as a "
+        "version. Use write_file for text you write yourself.",
+        schema(
+            {
+                "from": {
+                    "type": "string",
+                    "description": "Path in the working folder, e.g. out/plot.png",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Workspace path to save it as, e.g. artifacts/plot.png",
+                },
+                "node": NODE,
+                "experiment": EXPERIMENT,
+                "summary": SUMMARY,
+            },
+            "from",
+            "path",
+        ),
+    )
+    @guarded
+    async def save_file(s: Storage, args: dict[str, Any]) -> ToolResult:
+        assert workdir is not None  # only offered with a working folder
+        given = str(args["from"])
+        source = workdir / given
+        if not is_inside(workdir, source):
+            return error(f"{given} is not in the working folder.")
+        if is_inside(workdir / ".claude", source):
+            return error("Skills can't be saved from here.")
+        if not source.is_file():
+            return error(f"No file at {given} in the working folder.")
+        return await store(s, args["path"], source.read_bytes(), args)
+
     return [
         list_nodes,
         create_node,
@@ -858,6 +907,7 @@ def file_tools(
         search_files,
         write_file,
         edit_file,
+        *([save_file] if workdir else []),
         list_experiments,
         create_experiment,
         set_experiment_results,

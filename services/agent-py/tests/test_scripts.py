@@ -83,6 +83,7 @@ def test_script_runs_are_sandboxed_and_hold_no_secrets(tmp_path: Path):
         str(cwd / ".mcp.json"),
         str(cwd / "workspace"),
         str(cwd / ".workspace-manifest.json"),
+        str(cwd / "run-inputs"),
     ]
     assert fs["denyRead"] == [
         str(app.resolve()),
