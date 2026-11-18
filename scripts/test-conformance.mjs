@@ -88,9 +88,10 @@ let status = 1;
 if (await waitForStorage()) {
   // One file after the other, in this order: storage.test.ts's first user must
   // become the owner, and workspaces.test.ts (issue #226) relies on that owner.
-  // One run, so CI reads one set of counts.
+  // One run, so CI reads one set of counts, in TAP (scripts/ci-tests.mjs reads
+  // its "# tests" lines; Node 26 prints the spec reporter even when piped).
   const files = ["conformance/storage.test.ts", "conformance/workspaces.test.ts"];
-  const result = spawnSync(process.execPath, [tsx(contractsDir), "--test", "--test-concurrency=1", ...files], {
+  const result = spawnSync(process.execPath, [tsx(contractsDir), "--test", "--test-reporter=tap", "--test-concurrency=1", ...files], {
     cwd: contractsDir,
     env: { ...process.env, STORAGE_URL: base, AUTH_SECRET: authSecret },
     stdio: "inherit",
