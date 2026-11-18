@@ -310,6 +310,17 @@
   on 127.0.0.1 (`agent_py/keyproxy.py`), which sends on the real one. agent-py's host needs
   bubblewrap and socat, plus the interpreters the skills use (Node.js for the built-in
   `analysis` skill's script).
+- The Python chat agent has the working folder (issue #264, step 3), as the TypeScript
+  agent server has: at the start of each run, the user's folder under `AGENT_PY_WORKDIR`
+  gets `workspace/`, a read-only copy of every file they can read in the run's workspace,
+  fetched through api-py with the run's token, and Claude searches it with Read, Glob and
+  Grep, confined to that folder. `save_file` stores a file from the folder (a script's
+  plot or CSV) in the workspace, and an experiment Claude starts gets its inputs copied to
+  `run-inputs/<id>/`. `AGENT_WORKDIR=off`, `AGENT_WORKDIR_MAX_MB` and
+  `AGENT_WORKDIR_MAX_FILE_MB` work as on the TypeScript server. Each workspace now has its
+  own folder per user, as on the TypeScript server. Binary files that api-py serves as
+  store links (`S3_PUBLIC_URL`) are fetched from that link, so it must be reachable from
+  agent-py, or those files are left out of the copy.
 
 ### Changed
 
@@ -363,10 +374,8 @@
 
 ### Known limitations
 
-- The Python chat agent has no working folder with a copy of the workspace
-  (`AGENT_WORKDIR`: Read, Glob and Grep over files and `save_file`), and lacks the
-  starter's A2UI demo tools (`generate_a2ui`, flight search). They are the next steps of
-  #264; until then the TypeScript agent server's chat
+- The Python chat agent lacks the starter's A2UI demo tools (`generate_a2ui`, flight
+  search). They are the next step of #264; until then the TypeScript agent server's chat
   (`AGENT_URL=local`) still has them.
 
 ### Fixed
@@ -404,7 +413,8 @@
        `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
   4. Start agent-py on a private address with the model settings, `MCP_SERVERS`,
      `SKILL_SCRIPTS` and `SKILL_SCRIPTS_DENY_READ` if scripts are on (with bubblewrap and
-     socat on its host), `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
+     socat on its host), the `AGENT_WORKDIR*` settings and an `AGENT_PY_WORKDIR` with disk
+     for the working folders, `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
      api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
      if agent-py runs at `http://127.0.0.1:9300` next to the app.
 

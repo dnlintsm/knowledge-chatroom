@@ -247,4 +247,6 @@ def test_the_runs_workspace_goes_with_its_storage_calls(claude):
         )
         storage = c.app.state.adapter._storage("t1")
     assert storage.workspace == ws and storage.token is None
-    assert [r.headers.get("x-knowledge-workspace") for r in seen] == [ws]
+    # Skills, then the working folder's copy (workdir.py): all in the page's workspace.
+    assert {"/skills/run", "/nodes", "/experiments"} <= {r.url.path for r in seen}
+    assert {r.headers.get("x-knowledge-workspace") for r in seen} == {ws}

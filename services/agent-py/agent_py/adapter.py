@@ -22,6 +22,10 @@ the thread's first run. Three things change that for this app:
   `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
   With SKILL_SCRIPTS=on, a run with a skill that ships scripts also gets Bash,
   sandboxed, with a stand-in API key (scripts.py, keyproxy.py).
+- Working folder (workdir.py): the user's folder holds a read-only copy of the
+  workspace files they can read, synced at the start of each run, which Claude
+  searches with Read, Glob and Grep (confined to the folder); save_file stores
+  a file from the folder in the workspace. AGENT_WORKDIR=off turns it off.
 - Memory (memory.py): with the run's memory token, the system prompt gets the
   memory section and Claude the memory_* and chats_* tools, run by the agent
   server's /memory/agent. Each note they read or change goes to the chat as a
@@ -68,6 +72,15 @@ from .skills import (
     skill_options,
     slash_command,
 )
+from .workdir import (
+    CONFINED_TOOLS,
+    Limits,
+    Summary,
+    clear_workdir,
+    confine_hook,
+    sync_workdir,
+    workdir_prompt,
+)
 from .workspace import Storage, WorkspaceError, file_tools, server, tool_names
 
 logger = logging.getLogger("agent_py")
@@ -83,6 +96,8 @@ class Run:
     servers: RunServers | None = None
     # How a run with scripts reaches Anthropic (keyproxy.py); None: no scripts.
     keys: KeyRoute | None = None
+    # The workspace copy in `cwd` (workdir.py); None: the run has none.
+    workdir: Summary | None = None
     # (name, value) of CUSTOM events for the chat: skill_used, memory.
     pending: list[tuple[str, Any]] = field(default_factory=list)
 
@@ -97,6 +112,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         transport: httpx.AsyncBaseTransport | None = None,
         mcp_servers: Mapping[str, McpServer] | None = None,
         scripts: Scripts | None = None,
+        workdir: Limits | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -111,6 +127,8 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._scripts = scripts
         self._key_proxy: KeyProxy | None = None
         self._key_lock = asyncio.Lock()
+        # The working folder's size limits; None: AGENT_WORKDIR=off (workdir.py).
+        self._workdir = workdir
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
         # Usage records on their way to the agent server.
@@ -133,9 +151,21 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         run = self._runs.get(thread_id or "")
         memory = run.memory if run else None
         servers = run.servers if run else None
+        scripts = (
+            script_options(self._scripts, run.cwd, run.skills, run.keys, self._skills_root)
+            if run and self._skills_root is not None
+            else None
+        )
+        workdir = run.cwd if run and run.cwd and run.workdir else None
+        folder = workdir_prompt(run.workdir, bool(scripts)) if run and run.workdir else None
         options.system_prompt = "\n".join(
             part
-            for part in (self._system_prompt, memory and memory.prompt, servers and servers.prompt)
+            for part in (
+                self._system_prompt,
+                folder,
+                memory and memory.prompt,
+                servers and servers.prompt,
+            )
             if part
         )
         if servers and servers.configs:
@@ -148,6 +178,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             tools = file_tools(
                 lambda: self._storage(thread_id or ""),
                 {"chat": thread_id, "model": options.model},
+                workdir,
             )
             if memory:
                 tools += memory_tools(
@@ -186,11 +217,13 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             hooks = dict(options.hooks or {})
             hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), hook]
             options.hooks = hooks
-        scripts = (
-            script_options(self._scripts, run.cwd, run.skills, run.keys, self._skills_root)
-            if run and self._skills_root is not None
-            else None
-        )
+        if workdir:
+            # Read, Glob and Grep run outside the sandbox: confined to the run folder.
+            options.tools = [*(options.tools or []), *CONFINED_TOOLS]
+            options.allowed_tools = [*(options.allowed_tools or []), *CONFINED_TOOLS]
+            hooks = dict(options.hooks or {})
+            hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), confine_hook(workdir)]
+            options.hooks = hooks
         if scripts:
             options.tools = [*(options.tools or []), "Bash"]
             options.allowed_tools = [*(options.allowed_tools or []), "Bash"]
@@ -216,15 +249,29 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         remember(self._workspaces, thread_id, workspace, self._max_workers)
         run = Run()
         if self._skills_root is not None:
+            # A folder per user and workspace (issue #226): skills and the copy differ by workspace.
+            folder = f"{user}@{workspace}" if workspace else user
             run.skills = await self._skills_for(thread_id)
             try:
-                run.cwd = materialize(self._skills_root, user, run.skills)
+                run.cwd = materialize(self._skills_root, folder, run.skills)
             except OSError as err:
                 logger.warning("couldn't write the run's skills; running without them: %s", err)
                 run.skills = ()
-                run.cwd = materialize(self._skills_root, user, ())
+                run.cwd = materialize(self._skills_root, folder, ())
             if self._scripts and needs_scripts(run.skills):
                 run.keys = await self._keys()
+            if self._workdir and self._storage_url:
+                try:
+                    run.workdir = await sync_workdir(
+                        self._storage(thread_id), run.cwd, self._workdir
+                    )
+                except (WorkspaceError, OSError, KeyError, ValueError) as err:
+                    logger.warning(
+                        "[workdir] couldn't copy the workspace; running without it: %s", err
+                    )
+            # Without a fresh copy, no old one either: scripts can read the run folder.
+            if not run.workdir:
+                await clear_workdir(run.cwd)
         if memory_token and self._storage_url:
             try:
                 run.memory = await fetch_memory(

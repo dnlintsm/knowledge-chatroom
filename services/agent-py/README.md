@@ -54,7 +54,9 @@ for a gateway) in this server's environment.
 | `LOCAL_AGENT_URL` | The agent server with the storage API, as for the app (default `http://localhost:8000`). |
 | `MCP_SERVERS` | Outside MCP servers and tool chips: give it the agent server's value, so the chat's "+" menu (from the agent server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
-| `AGENT_PY_WORKDIR` | Where each user's working folder goes, holding their skills (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
+| `AGENT_PY_WORKDIR` | Where each user's working folder goes (one per user and workspace), holding their skills and the workspace copy (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
+| `AGENT_WORKDIR` | `off`: no workspace copy in the working folder, and no Read/Glob/Grep or `save_file`. |
+| `AGENT_WORKDIR_MAX_MB`, `AGENT_WORKDIR_MAX_FILE_MB` | The copy's size caps (default 500 and 25): smallest files first, larger ones left out. |
 | `SKILL_SCRIPTS` | `on`: skills' scripts run, in Claude Code's sandbox (needs bubblewrap and socat). Set it on api-py too. |
 | `SKILL_SCRIPTS_DENY_READ` | More absolute paths scripts can't read, comma-separated. |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |
@@ -95,6 +97,16 @@ for a gateway) in this server's environment.
   used goes to the chat as a `skill_used` event and to the usage history
   (`POST /skills/used`). `!` commands in a SKILL.md never run, and there is no shell
   unless skills' scripts are on (below).
+- `agent_py/workdir.py`: the working folder, as the TypeScript agent keeps it
+  (`apps/agent/src/storage/workdir.ts`). At the start of each run the user's folder gets
+  `workspace/`, a read-only copy of every file they can read in the run's workspace
+  (`root/`, `nodes/<tech>/<module>/...`, `experiments/<title> (<id>)/`, and `.places.json`
+  mapping folders to ids and roles), fetched through the storage API with the run's
+  token; only changed files are downloaded. Claude gets Read, Glob and Grep, which a
+  hook confines to the folder, a prompt section about it, and `save_file` for files a
+  script made there. An experiment Claude starts gets its inputs copied to
+  `run-inputs/<id>/`. When the copy can't be made (or `AGENT_WORKDIR=off`), any old one
+  is removed and the run has none of this.
 - `agent_py/scripts.py` and `agent_py/keyproxy.py`: skills' scripts, as the TypeScript
   agent runs them. With `SKILL_SCRIPTS=on`, a run whose skills include one with scripts
   (`needsExecution`) gets Bash in Claude Code's sandbox: no network, writes only in the

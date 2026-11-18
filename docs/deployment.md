@@ -144,12 +144,12 @@ or bucket access have finished. Verify authenticated storage operations after
 startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
 
-The working folder is only in the legacy TypeScript agent server's chat
-(`AGENT_URL=local`); the Python chat agent doesn't have it yet (#264).
-
-With storage, the agent keeps a copy of each user's readable files in their run folder
-(`SKILLS_RUN_DIR`, default a temp folder) for Claude's Read/Glob/Grep: give that folder disk
-for up to `AGENT_WORKDIR_MAX_MB` (default 500) per active user, or set `AGENT_WORKDIR=off`. See
+The chat agent keeps a copy of each user's readable files in their run folder
+(agent-py's `AGENT_PY_WORKDIR`, or the legacy TypeScript server's `SKILLS_RUN_DIR`; default a
+temp folder) for Claude's Read/Glob/Grep: give that folder disk for up to `AGENT_WORKDIR_MAX_MB`
+(default 500) per active user and workspace, or set `AGENT_WORKDIR=off` on it. agent-py fetches
+the copy through api-py; binary files api-py serves as store links (`S3_PUBLIC_URL`) come from
+that link, so make it reachable from agent-py too, or they are left out. See
 [Working folder](architecture.md#working-folder).
 
 Skill scripts are off unless the chat agent has `SKILL_SCRIPTS=on`: agent-py runs them

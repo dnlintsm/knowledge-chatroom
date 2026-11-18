@@ -107,7 +107,7 @@ Built-in skills live in `apps/agent/skills/`; with server storage, the agent als
 workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
-skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory; with server
+skills. `AGENT_PY_WORKDIR` (`SKILLS_RUN_DIR` on the legacy TypeScript agent) sets the chat agent's per-user working directory; with server
 storage it also holds a read-only copy of the user's files that Claude searches with
 Read/Glob/Grep (`AGENT_WORKDIR=off` turns it off; see
 [Working folder](architecture.md#working-folder)).
