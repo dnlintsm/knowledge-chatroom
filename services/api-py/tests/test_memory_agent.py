@@ -9,6 +9,7 @@ TypeScript server.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import math
 import re
@@ -22,7 +23,15 @@ import support
 from support import ALICE, SECRET, URL, Client, user
 
 from api_py import tokens
-from api_py.memory_agent import TOOL_SPECS, MemoryRecall, parse_args
+from api_py.memory import MEMORY_TYPES
+from api_py.memory_agent import (
+    CHAT_TOOLS,
+    MEMORY_TOOLS,
+    TOOL_SPECS,
+    MemoryRecall,
+    MemoryTools,
+    parse_args,
+)
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -93,6 +102,32 @@ class FakeSemantic:
 
     async def stop(self) -> None:
         pass
+
+
+def test_the_tool_schemas_match_the_tools():
+    # memory-tools.json is what remote backends get (and the Python chat agent
+    # passes on to Claude); these are the handlers that answer the calls. Moved
+    # from apps/agent/src/memory/run.test.ts, which checked it against run.ts (#264).
+    assert [t["name"] for t in TOOL_SPECS] == [*MEMORY_TOOLS, *CHAT_TOOLS]
+    for spec in TOOL_SPECS:
+        name, schema = spec["name"], spec["inputSchema"]
+        assert spec["description"].strip(), name
+        assert schema["type"] == "object" and schema["additionalProperties"] is False, name
+        props, required = schema["properties"], set(schema.get("required", ()))
+        assert required <= set(props), name
+        for key, prop in props.items():
+            # What parse_args can read; anything else would refuse every call.
+            assert "enum" in prop or prop.get("type") in ("string", "integer"), (name, key)
+            assert prop.get("description", "").strip(), (name, key)
+        params = inspect.signature(getattr(MemoryTools, f"_{name}")).parameters
+        args = {k: p for k, p in params.items() if k != "self"}
+        assert set(args) == set(props), name
+        assert {k for k, p in args.items() if p.default is inspect.Parameter.empty} == required, (
+            name
+        )
+    save = next(t for t in TOOL_SPECS if t["name"] == "memory_save")["inputSchema"]["properties"]
+    assert tuple(save["type"]["enum"]) == MEMORY_TYPES
+    assert save["scope"]["enum"] == ["personal", "workspace", "node"]
 
 
 def test_arguments_are_read_as_zod_reads_them():

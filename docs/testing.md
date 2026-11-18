@@ -15,7 +15,7 @@ The default test command runs only fast units; integration and E2E are explicit.
 | `pnpm test:e2e:login` | Chromium + uv + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
 | `pnpm test:e2e:python` | Chromium + uv (`uv sync --package agent-py`) | The chat on the Python agent (`services/agent-py`, `AGENT_URL`) with a real Claude Code engine and a scripted model: replies, a browser tool, a skill, follow-up chips |
 | `pnpm test:e2e:python-storage` | Chromium + uv + PostgreSQL + S3 | Real Python API and chat agent: streamed replies, built-in skill, reload from persisted history; only the model is scripted |
-| `pnpm test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
+| `pnpm test:live` | Chromium + uv + Anthropic key | Opt-in live smoke coverage: the browser suite with the chat on the Python agent and the real model |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
 browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
@@ -88,9 +88,7 @@ integration does not fall back to `DATABASE_URL`.
 `pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values. It resets the
 database and starts the Python API server (`services/api-py`, which needs uv) on it with
 a throwaway `AUTH_SECRET` and no TypeScript server behind it, as `pnpm dev` does (#264).
-Then it runs `packages/contracts/conformance/storage.test.ts` against it
-(`CONFORMANCE_TARGET=ts` runs it against the legacy TypeScript agent server alone, which doesn't serve `/workspaces`
-and refuses other workspaces' storage requests, so those tests fail there). That suite calls every operation in
+Then it runs `packages/contracts/conformance/storage.test.ts` against it. That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
 operation was never called. It only speaks HTTP, so it can check any backend that
@@ -150,7 +148,7 @@ The runner owns its servers and refuses existing ones. Defaults: UI 3000, mock
 agent 8000, storage 8001 (the standalone Python API server), test OIDC 9400, Python agent 9300, scripted model
 9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT`,
 `E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs. The storage and login
-modes need uv for the API server. `E2E_API_PY=off` is an explicit comparison against the retired TypeScript API.
+modes need uv for the API server.
 
 The Python mode runs `services/agent-py` with Claude Code pointed at
 `e2e/mock-anthropic.mjs`, a stand-in for the Messages API that streams scripted turns
@@ -165,6 +163,9 @@ mode. Forward Playwright arguments after `--`, for example
 generated artifacts and are ignored by git. Preview screenshots go in `preview/`.
 
 For an intentional live run, export `ANTHROPIC_API_KEY` and use `pnpm test:live`.
+It runs the browser suite with the chat on `services/agent-py` and the real model
+(`ANTHROPIC_BASE_URL` points it at a gateway); the mock agent server serves the
+rest, or api-py when `DATABASE_URL` and the S3 values are set. It needs uv.
 Live coverage may cost money and depends on the provider/network. Mock-specific
 answer checks are excluded from live mode; it is not a replacement for required
 mock coverage. It is not run by required CI.

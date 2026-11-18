@@ -17,9 +17,8 @@
   on :8100, so `pnpm dev` now needs [uv](https://docs.astral.sh/uv/). `pnpm dev:ts` runs the UI
   and the agent server alone, as before. The demo compose file has a new `api` service, and the
   app, `agent-py`, `lab-tools` and `papers` reach the agent through `http://api:8000`. The
-  conformance suite and the storage and login e2e run through it (`CONFORMANCE_TARGET=ts` and
-  `E2E_API_PY=off` test the agent alone). A deployment without it keeps working while it only
-  passes requests through ([Deployment](docs/deployment.md)).
+  conformance suite and the storage and login e2e run through it. A deployment without it
+  keeps working while it only passes requests through ([Deployment](docs/deployment.md)).
 - api-py now serves `/access` and `/nodes` itself (issue #190, step 2): people, groups,
   grants, the admin panel's lists, the audit log and the knowledge tree, with the same
   answers, refusals, audit entries, row-level security and change events as the agent
@@ -333,6 +332,16 @@
   keeps the chat on the TypeScript agent server at `LOCAL_AGENT_URL`, as `pnpm dev:ts` does.
   The TypeScript agent server stays in `apps/agent` for legacy comparisons only, under the
   compose profile `legacy-agent` on Node 22, until #264 removes it.
+- The tests no longer need the TypeScript agent server (#264, step 5). `pnpm test:live`
+  runs the browser suite with the chat on the Python chat agent and the real model, and
+  the mock agent server (or api-py, with `DATABASE_URL` and the S3 settings) for the rest,
+  so it needs uv. `CONFORMANCE_TARGET=ts` and `E2E_API_PY=off` are gone: the conformance
+  suite and the storage and login e2e only run against api-py. The memory tools' schema
+  check (`memory-tools.json`) and the built-in skills' checks moved to api-py's tests.
+- The built-in `analysis` skill profiles CSV files with `scripts/profile.py` (plain
+  Python 3) instead of `profile.mjs`, since the Python chat agent's image has no Node. The
+  output is the same. With `SKILL_SCRIPTS=on` on the TypeScript agent server, its host
+  now needs `python3` for this script.
 - The UI builds and runs on Node 26 LTS (`.nvmrc`). Node 26 no longer bundles Corepack, so
   install pnpm 12.18.0 yourself (`npm install --global pnpm@12.18.0`). The chat route
   rebuilds its request instead of wrapping Next.js's, which Node 26's `Request` can refuse.
