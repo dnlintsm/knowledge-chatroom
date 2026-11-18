@@ -686,8 +686,7 @@ In the conformance suite, against the same backend as before:
   maintainer's Experiment with `keepAsCollaborator` doesn't make them a collaborator, also
   after they are added again; the new maintainer or collaborator must be able to
   view the node; agent tokens can't manage collaborators. These run in the default
-  workspace, so they also run with `CONFORMANCE_TARGET=ts`, which checks the TypeScript
-  server's own rules.
+  workspace.
 - Workspace inventory: refused to anyone not in `PLATFORM_ADMINS`, no content in the
   answer, adding an Owner is audited in the workspace.
 - Recovery where the unavailable creator held the only direct root Full access grant and

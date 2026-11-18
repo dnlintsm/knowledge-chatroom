@@ -2,7 +2,6 @@
 // the Python API server (services/api-py) alone, as `pnpm dev` and compose run it
 // since issue #264: resets the test database, starts api-py on it with no
 // TypeScript server behind it, waits for storage, runs the suite and stops it.
-// CONFORMANCE_TARGET=ts runs it against the legacy TypeScript server alone.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -18,7 +17,6 @@ if (missing.length) {
   process.exit(1);
 }
 
-const agentDir = fileURLToPath(new URL("../", import.meta.url));
 const contractsDir = fileURLToPath(new URL("../../../packages/contracts/", import.meta.url));
 const tsx = (dir) => join(dir, "node_modules/tsx/dist/cli.mjs");
 
@@ -28,12 +26,6 @@ await reset`DROP SCHEMA public CASCADE`;
 await reset`CREATE SCHEMA public`;
 await reset.end();
 
-const target = process.env.CONFORMANCE_TARGET || "api-py";
-if (!["api-py", "ts"].includes(target)) {
-  console.error(`CONFORMANCE_TARGET must be "api-py" or "ts", not "${target}".`);
-  process.exit(1);
-}
-
 const freePort = () =>
   new Promise((resolve) => {
     const probe = createServer().listen(0, () => {
@@ -41,76 +33,49 @@ const freePort = () =>
       probe.close(() => resolve(port));
     });
   });
-const port = target === "ts" ? await freePort() : null;
-const apiPort = target === "api-py" ? await freePort() : null;
-const base = `http://127.0.0.1:${apiPort ?? port}`;
+const apiPort = await freePort();
+const base = `http://127.0.0.1:${apiPort}`;
 const authSecret = randomBytes(32).toString("hex");
-// One "+" menu server, for the /tools routes (both servers read it; api-py serves them, issue #190 step 7).
+// One "+" menu server, for the /tools routes (api-py serves them, issue #190 step 7).
 // Nothing listens on port 9, so a call answers 502.
 const mcpServers = JSON.stringify({
   conformance: { url: "http://127.0.0.1:9/mcp", forwardIdentity: true, ui: { label: "Conformance", tools: ["search"] } },
 });
 
-const agent = port && spawn(process.execPath, [tsx(agentDir), "src/server.ts"], {
-  cwd: agentDir,
+const servicesDir = fileURLToPath(new URL("../../../services/", import.meta.url));
+const api = spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
+  cwd: join(servicesDir, "api-py"),
   env: {
     ...process.env,
     DATABASE_URL: process.env.TEST_DATABASE_URL,
     S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
-    // Signed-in users, whatever AUTH_MODE the shell or the repository .env sets.
     AUTH_MODE: "oidc",
     AUTH_SECRET: authSecret,
+    // No legacy forwarding: everything the suite calls is served in Python.
+    TS_AGENT_URL: "",
+    API_PY_PORT: String(apiPort),
+    EMBEDDING_MODEL: "off",
     // The suite's owner moderates the skill hub (verify, dismiss reports).
     HUB_ADMINS: "conformance|alice",
+    // The workspace inventory's admins (#255): api-py serves /platform alone.
+    PLATFORM_ADMINS: "conformance|platform workspaces|platform",
     MCP_SERVERS: mcpServers,
-    // Memory routes answer 404 unless memory is on; nothing learns in the background.
+    // api-py serves each user's own notes (step 8); nothing learns in the background.
     MEMORY: "on",
     MEMORY_LEARN: "off",
-    AGENT_PORT: String(port),
-    // Full-text search is enough here; search by meaning has its own tests.
-    EMBEDDING_MODEL: "off",
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "conformance-no-model-calls",
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
-let agentExited = false;
-agent?.once("exit", () => { agentExited = true; });
-
-const servicesDir = fileURLToPath(new URL("../../../services/", import.meta.url));
-const api = apiPort
-  ? spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
-      cwd: join(servicesDir, "api-py"),
-      env: {
-        ...process.env,
-        DATABASE_URL: process.env.TEST_DATABASE_URL,
-        S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
-        AUTH_MODE: "oidc",
-        AUTH_SECRET: authSecret,
-        // No legacy forwarding: everything the suite calls is served in Python.
-        TS_AGENT_URL: "",
-        API_PY_PORT: String(apiPort),
-        EMBEDDING_MODEL: "off",
-        // The same hub admins as the agent: api-py serves the skill hub (step 7).
-        HUB_ADMINS: "conformance|alice",
-        // The workspace inventory's admins (#255): api-py serves /platform alone.
-        PLATFORM_ADMINS: "conformance|platform workspaces|platform",
-        MCP_SERVERS: mcpServers,
-        // api-py serves each user's own notes (step 8); nothing learns in the background.
-        MEMORY: "on",
-        MEMORY_LEARN: "off",
-      },
-      stdio: ["ignore", "inherit", "inherit"],
-    })
-  : null;
-api?.once("exit", () => { agentExited = true; });
-api?.once("error", (err) => {
+let apiExited = false;
+api.once("exit", () => { apiExited = true; });
+api.once("error", (err) => {
   console.error(`Couldn't start api-py (${err.message}): it needs uv (https://docs.astral.sh/uv/).`);
-  agentExited = true;
+  apiExited = true;
 });
 
 async function waitForStorage() {
   const end = Date.now() + 60_000;
-  while (Date.now() < end && !agentExited) {
+  while (Date.now() < end && !apiExited) {
     // 401 once storage is up; 503 while it starts; no answer before the server listens.
     const status = await fetch(`${base}/nodes`).then((r) => r.status, () => 0);
     if (status === 401) return true;
@@ -133,8 +98,7 @@ if (await waitForStorage()) {
   if (result.error) console.error(result.error.message);
   status = result.status ?? 1;
 } else {
-  console.error(agentExited ? "The agent or api-py exited before storage was ready." : "Storage didn't start within 60 s.");
+  console.error(apiExited ? "api-py exited before storage was ready." : "Storage didn't start within 60 s.");
 }
-api?.kill("SIGTERM");
-agent?.kill("SIGTERM");
+api.kill("SIGTERM");
 process.exit(status);

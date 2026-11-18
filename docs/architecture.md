@@ -213,7 +213,7 @@ is no separate run folder or mode (issue #82):
   Claude starts a run with the user's files as inputs, reads them from the run, writes the
   report from `reference/report-template.md` and records the results. With
   `SKILL_SCRIPTS=on` it can also profile the run's copy of CSV inputs with its
-  `scripts/profile.mjs` (plain Node: per-column counts, missing values, numeric statistics,
+  `scripts/profile.py` (plain Python 3: per-column counts, missing values, numeric statistics,
   top values) and save what
   scripts make into the run. Long analyses still run within one chat turn; background jobs
   with progress are a later step.

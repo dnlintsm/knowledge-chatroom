@@ -31,7 +31,7 @@ straight into notes or artifacts outside a run.
    profile CSV files with the bundled script instead of reading every row:
 
    ```bash
-   mkdir -p out && node .claude/skills/analysis/scripts/profile.mjs run-inputs/<run id>/data.csv > out/profile.json
+   mkdir -p out && python3 .claude/skills/analysis/scripts/profile.py run-inputs/<run id>/data.csv > out/profile.json
    ```
 
    Always profile the run's own copy: `create_experiment` returns where each
