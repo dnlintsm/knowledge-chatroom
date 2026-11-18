@@ -1,5 +1,5 @@
 """The system prompt: apps/agent/src/agent.ts's, without the starter demo's
-backend tools (flights, dashboards, chart data), which this agent doesn't have,
+chart-data tool (query_data), which this agent doesn't have,
 and with its lines for files on the server (workspace.py's tools) and skills (skills.py).
 
 The workspace and where the user is don't go here: they change between runs of
