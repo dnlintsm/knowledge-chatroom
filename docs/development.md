@@ -9,15 +9,13 @@ The repository root `.env` is shared by the frontend and Python services.
 Copy `.env.example` to `.env`, run `uv sync --all-packages --locked`, and set
 `ANTHROPIC_API_KEY` for real chat. `pnpm dev` / `pnpm dev:python` starts the UI on 3000,
 the Python API (`services/api-py`) on 8000, and the Python chat agent
-(`services/agent-py`) on 9300. No `apps/agent` process is started.
-`TS_AGENT_URL` is unset by default, so Python never silently falls back to it.
+(`services/agent-py`) on 9300.
 Storage, built-in skills and persistent chat history require PostgreSQL and S3;
 without them the UI still supports browser-local files and chat without skills.
 
 `pnpm dev:ui`, `pnpm dev:api` and `pnpm dev:agent-py` run the services separately;
 set `AGENT_URL=http://127.0.0.1:9300` when starting the UI separately.
 `GET http://localhost:8000/health` reports readiness of the Python API and its storage.
-`pnpm dev:ts` is an explicit legacy comparison, outside Node 26 frontend support.
 
 After an upgrade, `pnpm env:check` compares `.env` with `.env.example`: settings a
 release removed or renamed, new settings, and ones `.env.example` doesn't know. Only
@@ -103,11 +101,11 @@ arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. S
 
 ## Skills
 
-Built-in skills live in `apps/agent/skills/`; with server storage, the agent also loads
+Built-in skills live in `services/api-py/skills/`; with server storage, the API also serves
 workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
-skills. `AGENT_PY_WORKDIR` (`SKILLS_RUN_DIR` on the legacy TypeScript agent) sets the chat agent's per-user working directory; with server
+skills. `AGENT_PY_WORKDIR` sets the chat agent's per-user working directory; with server
 storage it also holds a read-only copy of the user's files that Claude searches with
 Read/Glob/Grep (`AGENT_WORKDIR=off` turns it off; see
 [Working folder](architecture.md#working-folder)).
@@ -176,7 +174,7 @@ without the chip. `icon` is a lucide name (`book-open`, `globe`, `search`,
 `database`; otherwise a wrench). `tools` lists the tools the app itself may call for the
 signed-in user, as the paper cards' Save button does:
 
-| Route (agent server, `/api/tools` in the app) | Answer |
+| Route (API server, `/api/tools` in the app) | Answer |
 | --- | --- |
 | `GET /tools` | `{tools: [{server, label, chip, description, icon, mode, callable}]}` |
 | `POST /tools/<server>/<tool>` with `{arguments: {...}}` | `{result, text}`: the tool's structured content (or the JSON in its text). `422 {error}` is the tool's own error, `403` a tool not in `tools`, `502` a server that is down. |
@@ -225,7 +223,7 @@ mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 
 The chat can use an agent from a separate backend instead of this repo's own:
 set `AGENT_URL` to its base URL, and every chat run goes to
-`${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage,
+`${AGENT_URL}/agent/report`. This repo's API server keeps serving storage,
 skills and the follow-up chips at `LOCAL_AGENT_URL` (default `http://localhost:8000`,
 which `pnpm dev` starts), and turns its own chat off. Each run tells the backend who the user is and
 where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
@@ -251,7 +249,7 @@ The issuer and `APP_URL` must use https unless they are on localhost; set
 sign in owns the workspace. Without login (`AUTH_MODE=local`, or no `AUTH_SECRET`
 in development), one built-in user owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
 
-Chat history needs nothing extra: each user's chats are kept by the agent server, in
+Chat history needs nothing extra: each user's chats are kept by the API server, in
 Postgres with `DATABASE_URL` and in memory without it ([Architecture](architecture.md#chat-history)).
 `CPK_INTELLIGENCE_API_KEY` is optional and keeps threads in CopilotKit Intelligence
 instead. Its browser gate is resolved at build time, so rebuild after changing it for a
@@ -262,13 +260,12 @@ production run.
 `pnpm audit` checks the whole workspace. Patched transitive versions are pinned in
 `pnpm-workspace.yaml` (`overrides`, which apply to every package), and the UI's
 `@ag-ui/core` is a direct dependency pinned to 1.0.2, so CopilotKit's peers resolve to the
-same version as the UI's `@ag-ui/client` while the agent keeps 1.0.4:
+same version as the UI's `@ag-ui/client`:
 
 | Where | What |
 | --- | --- |
-| `pnpm-workspace.yaml` `overrides` | `adm-zip`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
+| `pnpm-workspace.yaml` `overrides` | `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
 | Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
-| `apps/agent/package.json` | its own `@ag-ui/core`, `@ag-ui/encoder` and `@ag-ui/client` on 1.0.4, which use Zod 4 |
 
 When updating these dependencies, recheck the overrides and run the build and tests
 before removing any. The `undici` and `graphql-scalars` overrides cross an upstream

@@ -329,9 +329,7 @@
   anything unless `TS_AGENT_URL` is set (it used to default to `http://127.0.0.1:8100`):
   unknown routes answer 404, and storage that is still starting answers 503. Unset,
   `AGENT_URL` now means the Python chat agent at `http://127.0.0.1:9300`; `AGENT_URL=local`
-  keeps the chat on the TypeScript agent server at `LOCAL_AGENT_URL`, as `pnpm dev:ts` does.
-  The TypeScript agent server stays in `apps/agent` for legacy comparisons only, under the
-  compose profile `legacy-agent` on Node 22, until #264 removes it.
+  sends the chat to `LOCAL_AGENT_URL` itself, which only the e2e mock agent serves now.
 - The tests no longer need the TypeScript agent server (#264, step 5). `pnpm test:live`
   runs the browser suite with the chat on the Python chat agent and the real model, and
   the mock agent server (or api-py, with `DATABASE_URL` and the S3 settings) for the rest,
@@ -340,8 +338,7 @@
   check (`memory-tools.json`) and the built-in skills' checks moved to api-py's tests.
 - The built-in `analysis` skill profiles CSV files with `scripts/profile.py` (plain
   Python 3) instead of `profile.mjs`, since the Python chat agent's image has no Node. The
-  output is the same. With `SKILL_SCRIPTS=on` on the TypeScript agent server, its host
-  now needs `python3` for this script.
+  output is the same.
 - The UI builds and runs on Node 26 LTS (`.nvmrc`). Node 26 no longer bundles Corepack, so
   install pnpm 12.18.0 yourself (`npm install --global pnpm@12.18.0`). The chat route
   rebuilds its request instead of wrapping Next.js's, which Node 26's `Request` can refuse.
@@ -354,9 +351,8 @@
   signed-in user is a Member of the default workspace, which gives no content access, as
   before.
 - Follow-up chips work with a remote backend (`AGENT_URL`): the app keeps asking this
-  repo's agent server's `POST /suggest`, which needs only the messages, instead of
-  keeping the first-round chips. The agent server no longer answers 404 there when it
-  sees `AGENT_URL` (issue #176).
+  repo's API server's `POST /suggest`, which needs only the messages, instead of
+  keeping the first-round chips (issue #176).
 - Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
   file (a node's or the root's editors, an experiment's author while it isn't archived), the
   same as for everything else. A run's generated `models/general_rules.md` is now an ordinary
@@ -383,6 +379,13 @@
 
 ### Removed
 
+- The TypeScript agent server, `apps/agent` (#264, step 6), with `pnpm dev:ts`,
+  `pnpm dev:agent`, `pnpm test:integration`, the compose profile `legacy-agent` and its
+  `agent` image, and the TypeScript storage tests on Node 22. The Python API server and
+  chat agent do everything it did. Its SQL migrations and built-in skills moved to
+  `services/api-py/migrations` and `services/api-py/skills`, where `MIGRATIONS_DIR` and
+  `BUILTIN_SKILLS_DIR` now default; the api-py image has them where it did. Settings only
+  it read, such as `SKILLS_RUN_DIR` and `SEARCH_INDEXER`, do nothing now.
 - The starter's A2UI demo tools: `generate_a2ui` and the flight search, the web app's demo
   catalog and its `@copilotkit/a2ui-renderer` dependency (#264, step 4; #74). No app feature
   used them, and the Python chat agent now has everything else the TypeScript one had.
@@ -428,10 +431,9 @@
      api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
      if agent-py runs at `http://127.0.0.1:9300` next to the app.
 
-  To keep the agent server's own chat for now, keep it behind api-py instead: start it on
-  another private port with `SEARCH_INDEXER=off`, `MEMORY_LEARN=off` and `MIGRATIONS=off`,
-  set api-py's `TS_AGENT_URL` to it, and set `AGENT_URL=local` on the app. `pnpm env:check` can't spot this change, since it comes
-  from settings your `.env` doesn't have.
+  This release no longer has the TypeScript agent server, so there is no falling back to
+  its chat: stay on 0.2.3 until the Python chat agent works for you. `pnpm env:check`
+  can't spot this change, since it comes from settings your `.env` doesn't have.
 - Migration `023_workspace_members.sql` adds workspace memberships and fills them from
   today's access: root owners (directly or through groups) become Owners, anyone else with
   a grant, or with their own chats, memory or skill settings in the workspace, becomes a

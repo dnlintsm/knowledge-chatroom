@@ -22,9 +22,9 @@ COPY pyproject.toml uv.lock ./
 COPY packages/knowledge-py ./packages/knowledge-py
 COPY services/api-py/pyproject.toml ./services/api-py/
 RUN uv sync --frozen --no-dev --package api-py
-COPY apps/agent/src/storage/migrations ./migrations
-# The built-in skills /skills lists, as the agent server ships them.
-COPY apps/agent/skills ./skills
+COPY services/api-py/migrations ./migrations
+# The built-in skills /skills lists.
+COPY services/api-py/skills ./skills
 COPY services/api-py/api_py ./services/api-py/api_py
 
 RUN useradd --create-home --uid 10001 api \

@@ -62,6 +62,6 @@ jobs:
           IMAGE: ${{ matrix.image }}
         run: |
           case "$IMAGE" in
-            app | agent) docker build --target "$IMAGE" -t "knowledge-chatroom-$IMAGE" . ;;
+            app) docker build --target "$IMAGE" -t "knowledge-chatroom-$IMAGE" . ;;
             *) docker build -f "services/$IMAGE/Dockerfile" -t "knowledge-chatroom-$IMAGE" . ;;
           esac

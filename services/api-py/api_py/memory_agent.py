@@ -53,9 +53,9 @@ from .text_index import from_units, to_units
 logger = logging.getLogger("api_py")
 
 REMOTE_VIA = "remote"
-# The tools' names, descriptions and JSON schemas, as run.ts declares them
-# (z.toJSONSchema). test_memory_agent.py checks them against MemoryTools below,
-# and apps/agent/src/memory/run.test.ts against run.ts while it is there.
+# The tools' names, descriptions and JSON schemas, as the TypeScript server's
+# run.ts declared them (z.toJSONSchema). test_memory_agent.py checks them
+# against MemoryTools below.
 TOOL_SPECS: list[dict[str, Any]] = json.loads(
     (Path(__file__).parent / "data" / "memory-tools.json").read_text("utf-8")
 )

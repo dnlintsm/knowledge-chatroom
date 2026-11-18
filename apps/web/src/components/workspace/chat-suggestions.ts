@@ -67,7 +67,7 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
 }
 
 /**
- * What the suggester (apps/agent/src/suggest.ts) is asked for after each reply;
+ * What the suggester (services/api-py/api_py/suggest.py) is asked for after each reply;
  * it also sees the conversation and the workspace context.
  */
 export const FOLLOW_UP_INSTRUCTIONS =

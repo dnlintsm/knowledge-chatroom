@@ -1,7 +1,7 @@
 """Skills Claude can use (issue #7), as apps/agent/src/skills/catalog.ts and scan.ts read them.
 
 SKILL.md folders in the Claude Code / Agent Skills layout, from three sources:
-built-in ones shipped with the agent (apps/agent/skills/), skills installed
+built-in ones shipped with the agent (services/api-py/skills/), skills installed
 from the hub (skills.py), and the workspace's own skills/<name>/ files. Each
 has a mode: auto (Claude may use it on its own, and /name runs it), manual
 (only /name runs it) or off.
@@ -186,7 +186,7 @@ def _read_tree(directory: Path, prefix: str = "") -> list[SkillFile]:
 
 
 def builtin_skills(directory: Path) -> list[Skill]:
-    """The skills shipped in apps/agent/skills/."""
+    """The skills shipped in services/api-py/skills/."""
     try:
         with os.scandir(directory) as entries:
             folders = sorted((e.name for e in entries if e.is_dir()), key=code_unit_key)

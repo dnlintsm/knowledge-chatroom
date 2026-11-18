@@ -15,7 +15,7 @@ export const SUITES = ["node", "python", "browser", "storage", "pyagent"];
 
 // [path pattern, suites]. Patterns: `dir/**` (anything below), or an exact path.
 export const RULES = [
-  // Documentation outside the code. Markdown under apps/ is runtime content (skills).
+  // Documentation outside the code. Markdown in services/api-py/skills is runtime content.
   ["docs/**", []],
   ["README.md", []],
   ["CHANGELOG.md", []],
@@ -24,6 +24,10 @@ export const RULES = [
   ["services/lab-tools/**", ["python"]],
   ["services/papers-mcp/**", ["python"]],
   ["examples/python-agent/**", ["python"]],
+  // The migrations and built-in skills api-py serves reach every suite, as they
+  // did from apps/agent (#264): the mock agent and the browser specs mirror them.
+  ["services/api-py/migrations/**", SUITES],
+  ["services/api-py/skills/**", SUITES],
   // api-py sits in front of the agent in the storage and login E2E runs (#190).
   ["services/api-py/**", ["python", "storage"]],
   // agent-py serves the chat in the Python agent E2E run (#176).

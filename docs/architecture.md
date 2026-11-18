@@ -1,15 +1,14 @@
 # Architecture
 
-The browser renders a Next.js workspace. CopilotKit's runtime route connects to
-an AG-UI agent on port 8000; `apps/agent/src/server.ts` streams the Claude SDK adapter.
-With `AGENT_URL` set, the chat goes to a remote backend's `/agent/report` instead
-([Remote agent backend](remote-agent.md)), and each run carries the user and their
-place in `forwardedProps.knowledge_chatroom`.
-The agent also hosts storage HTTP routes and per-user file/node/experiment tools.
-Those routes are moving to Python one group at a time (issue #190): the Python API
-server (`services/api-py`) sits in front of the agent at `LOCAL_AGENT_URL`, serves the
-groups moved so far, and passes every other request to the agent unchanged. Both use
-the same database, migrations, row-level security and object store.
+The browser renders a Next.js workspace. CopilotKit's runtime route connects to an AG-UI
+chat agent: by default the Python chat agent (`services/agent-py`, port 9300), which runs
+the Claude Agent SDK. With `AGENT_URL` set, the chat goes to a remote backend's
+`/agent/report` instead ([Remote agent backend](remote-agent.md)), and each run carries the
+user and their place in `forwardedProps.knowledge_chatroom`.
+The Python API server (`services/api-py`, at `LOCAL_AGENT_URL`) serves storage, skills,
+memory, chat history and every route but the chat itself, and applies the database
+migrations. The chat agent reaches the same database and object store through api-py's
+modules, with per-user file, node and experiment tools.
 `apps/web/src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
 when login is enabled. Browser state and authenticated storage access meet in
 `apps/web/src/components/workspace/store.tsx`; pane commands live in `workbench.tsx`.
@@ -18,21 +17,21 @@ when login is enabled. Browser state and authenticated storage access meet in
 flowchart LR
   Browser --> Next[Next.js UI and API proxy]
   Next --> Api[Python API server]
-  Api -->|routes not moved yet| Agent[AG-UI agent and storage HTTP]
-  Api --> PG
+  Next --> Agent[Python chat agent]
   Next -.->|AGENT_URL| Remote[Remote chat backend]
-  Agent --> Claude[Claude SDK]
+  Agent --> Claude[Claude Agent SDK]
   Agent --> MCP[Outside MCP servers]
-  Agent --> PG[(PostgreSQL metadata and versions)]
-  Agent --> S3[(S3 content bytes)]
+  Api --> PG[(PostgreSQL metadata and versions)]
+  Api --> S3[(S3 content bytes)]
+  Agent --> PG
+  Agent --> S3
   PG --> Events[LISTEN / NOTIFY]
   Events --> Browser
 ```
 
-The UI (`apps/web`), the agent (`apps/agent`) and `packages/contracts` form one pnpm
-workspace with one lockfile; `pnpm install` at the root installs all three. Each keeps
-its own dependency versions: the UI is on Zod 3 and `@ag-ui/*` 1.0.2 for CopilotKit,
-the agent on Zod 4 and `@ag-ui/*` 1.0.4. The starter's charts and meeting picker remain
+The UI (`apps/web`) and `packages/contracts` form one pnpm workspace with one lockfile;
+`pnpm install` at the root installs both. The Python services and `packages/knowledge-py`
+form one uv workspace (`uv.lock`). The starter's charts and meeting picker remain
 under `apps/web/src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
@@ -45,7 +44,7 @@ then [file storage](#file-storage) and its access rules, and finally the
 ### Skills
 
 Skills are `SKILL.md` folders in the [Claude Code / Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview)
-layout. Claude gets the built-in ones (`apps/agent/skills/`), skills installed from the
+layout. Claude gets the built-in ones (`services/api-py/skills/`), skills installed from the
 [skill hub](#skill-hub), and the workspace's own `skills/<name>/` at the root (with
 [file storage](#file-storage)); a workspace skill hides a hub or built-in one of the same name.
 In the **Skills** view each one is set to:
@@ -63,15 +62,14 @@ proposed change that someone with edit access accepts, and Claude never turns sk
 
 Typing `/` in the chat lists the skills you can run; the line under the
 input says which skills are on and which ones the current turn used. By default skills are
-instructions only: no shell, and `!` commands in a SKILL.md are not run. The agent server copies
-each user's skills into its own working folder for runs (`SKILLS_RUN_DIR`, default a temp
+instructions only: no shell, and `!` commands in a SKILL.md are not run. The chat agent copies
+each user's skills into their run folder (under `AGENT_PY_WORKDIR`, default a temp
 folder), and only `/name` for one of those skills reaches the SDK as a command.
 
 #### Skill scripts
 
 A deployment can let skills run the scripts they ship (`scripts/`, `*.py`, `*.sh`, ...) with
-`SKILL_SCRIPTS=on` on the chat agent (`services/agent-py/agent_py/scripts.py`; the legacy
-TypeScript agent's is `apps/agent/src/skills/run.ts`). A run whose skills include one with scripts then
+`SKILL_SCRIPTS=on` on the chat agent (`services/agent-py/agent_py/scripts.py`). A run whose skills include one with scripts then
 gets the SDK's Bash tool, always inside the SDK's sandbox (bubblewrap on Linux, which the agent
 host must have; the run fails rather than run a command unsandboxed):
 
@@ -86,9 +84,8 @@ host must have; the run fails rather than run a command unsandboxed):
 - **No secrets**: the run's environment keeps only basics such as `PATH`, `HOME`, the locale and
   the model, so no `DATABASE_URL`, `AUTH_SECRET`, S3 or proxy settings. The SDK itself needs an
   API key, and its commands would inherit it, so the run gets a stand-in key that only a proxy
-  inside the agent accepts (`agent_py/keyproxy.py`, or `apps/agent/src/skills/keyproxy.ts`, on
-  127.0.0.1); the proxy sends requests on to Anthropic with the real key. The Python SDK can only
-  add to the environment Claude Code inherits from agent-py, so agent-py passes every other
+  inside the agent accepts (`agent_py/keyproxy.py`, on 127.0.0.1); the proxy sends requests on
+  to Anthropic with the real key. The Python SDK can only add to the environment Claude Code inherits from agent-py, so agent-py passes every other
   variable as an empty string, and drops its own virtualenv from `PATH`.
 
 Commands run without a permission prompt because they're sandboxed; `!` commands in a SKILL.md
@@ -99,8 +96,7 @@ agent host.
 #### Working folder
 
 With file storage, each user's run folder also holds `workspace/`, a read-only copy of every
-file that user can read in the workspace (`services/agent-py/agent_py/workdir.py`; the legacy
-TypeScript agent's is `apps/agent/src/storage/workdir.ts`), so the SDK's built-in tools work on
+file that user can read in the workspace (`services/agent-py/agent_py/workdir.py`), so the SDK's built-in tools work on
 the workspace like on a local project:
 
 - **Layout**: `workspace/root/` is the workspace root, `workspace/nodes/<tech>/<module>/...`
@@ -144,7 +140,7 @@ With file storage, a deployment has one skill hub (`011_skill_hub.sql`), opened 
 
 Trust (`012_hub_trust.sql`) helps people decide what to install:
 
-- **Publish check**: each version is scanned as it's published (`apps/agent/src/skills/scan.ts`) for
+- **Publish check**: each version is scanned as it's published (`services/api-py/api_py/skills.py`) for
   scripts, links and network commands, large or binary files, hidden text (invisible characters,
   HTML comments, long encoded runs) and instructions such as "ignore previous instructions" or
   "don't tell the user". Flags show on the hub and before an update; they warn, they don't block,
@@ -187,7 +183,7 @@ is no separate run folder or mode (issue #82):
   back/forward move between runs. A link to one that isn't there, or isn't shared with you,
   drops out of the URL with a notice. Old `?run=` links are dropped the same way.
 
-- **Runs Claude starts** (`create_experiment`, `apps/agent/src/storage/session.ts` `startRun`)
+- **Runs Claude starts** (`create_experiment`, `services/api-py/api_py/session.py` `start_run`)
   begin in state running. The files the run works from are its **inputs**: each is linked
   in under `inputs/`, at the version it had then and sharing its stored bytes, so
   later changes to the original don't change what the run read, and promoting the run never
@@ -199,7 +195,7 @@ is no separate run folder or mode (issue #82):
   agent and Claude Agent SDK versions, and each input's original place, version and
   SHA-256 (`experiments.provenance`, migration `016_run_provenance.sql`; set by the agent
   only, never by the API). The run's `report.md` carries the same record in its front
-  matter, refreshed when the results are set (`apps/agent/src/storage/run-report.ts`), and the
+  matter, refreshed when the results are set (`services/api-py/api_py/run_report.py`), and the
   run panel shows it under **Provenance**, with the inputs to open.
 - **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
   place with the old run's parameters and hypothesis, and its inputs read from its `inputs/`
@@ -209,7 +205,7 @@ is no separate run folder or mode (issue #82):
   finished again with other results. The new run's provenance and front matter name the old
   one (`rerun_of`) by id only, since the old run may be a draft its viewers can't see; the
   panel links back to it for those who can see it.
-- **Analysis** is the built-in `analysis` skill (`apps/agent/skills/analysis/`, Auto by default):
+- **Analysis** is the built-in `analysis` skill (`services/api-py/skills/analysis/`, Auto by default):
   Claude starts a run with the user's files as inputs, reads them from the run, writes the
   report from `reference/report-template.md` and records the results. With
   `SKILL_SCRIPTS=on` it can also profile the run's copy of CSV inputs with its
@@ -299,14 +295,12 @@ open (`apps/web/src/components/workspace/chat-suggestions.ts`): summarize the op
 analyze the open run's report, and, with server storage, search for similar experiments.
 After each reply CopilotKit asks a separate `suggester` agent for follow-ups. The chat agent
 can't serve that request, because CopilotKit forces a single tool call and the Claude Agent SDK
-would run a whole turn with file tools, so the agent's `POST /suggest` (`apps/agent/src/suggest.ts`)
+would run a whole turn with file tools, so the API server's `POST /suggest` (`services/api-py/api_py/suggest.py`)
 makes one Messages API call on a small model with the conversation and the workspace context,
-and streams back only that tool call. Nothing is stored and no tools run. With the Python API
-server in front, it answers `/suggest` the same way (`services/api-py/api_py/suggest.py`, issue
-#190, step 9). The browser freezes
+and streams back only that tool call. Nothing is stored and no tools run. The browser freezes
 the first-round chips once the chat starts, since any change would reload the follow-ups.
 `CHAT_SUGGESTIONS=static` on the UI leaves the suggester out. With a remote backend
-(`AGENT_URL`) the suggester stays on this repo's agent server, since it needs only the messages.
+(`AGENT_URL`) the suggester stays on this repo's API server, since it needs only the messages.
 
 ### Agent steps in the chat
 
@@ -330,9 +324,9 @@ from the history still says how long its steps took.
 ### Tool chips and paper search
 
 Outside MCP servers whose `MCP_SERVERS` entry has a `ui` block show up in the chat's
-"+" menu (issue #151). The agent lists them at `GET /tools` and
+"+" menu (issue #151). The API server lists them at `GET /tools` and
 runs single calls for the app's buttons at `POST /tools/<server>/<tool>`
-(`apps/agent/src/tools-api.ts`, proxied as `/api/tools`), only for tools the block lists.
+(`services/api-py/api_py/tools.py`, proxied as `/api/tools`), only for tools the block lists.
 Picking one puts a chip above the message box; the chips each chat has on are kept in the
 browser (`apps/web/src/components/workspace/tool-chips.ts`, `tool-menu.tsx`) and sent with every run
 as `forwardedProps.knowledge_chatroom.tools`, and the agent then tells Claude to answer with
@@ -354,8 +348,8 @@ question; each can be opened again, renamed, archived or deleted.
 - `apps/web/src/lib/chat-runner.ts` is the CopilotKit runtime's runner. A live run streams from memory
   (so reconnecting mid-run works); when it finishes, its compacted AG-UI events and the
   messages after it are saved. Opening a chat replays its saved runs.
-- `apps/web/src/lib/chat-store.ts` saves them through the agent server's `/chats` API
-  (`apps/agent/src/storage/chats.ts`, tables `chats` and `chat_runs` from `017_chats.sql`) when
+- `apps/web/src/lib/chat-store.ts` saves them through the API server's `/chats` API
+  (`services/api-py/api_py/chats.py`, tables `chats` and `chat_runs` from `017_chats.sql`) when
   it has storage, else in this process's memory (lost on restart, still one history per
   user).
 - `apps/web/src/lib/chat-routes.ts` answers the runtime's thread routes (`/api/copilotkit/threads…`)
@@ -373,17 +367,17 @@ With `MEMORY=on` and server storage, Claude keeps short notes about each user ac
 type (`profile`, `preference`, `project`, `feedback`, `reference`), the same shape as Claude
 Code's memory files and `SKILL.md`.
 
-- `apps/agent/src/storage/memory.ts` keeps them (tables from `018_memory.sql`). Each note belongs
+- `services/api-py/api_py/memory.py` keeps them (tables from `018_memory.sql`). Each note belongs
   to one user; nobody else reads it, workspace owners included, and with row-level security
   Postgres enforces this too. Every change is a version. Claude's changes and reads are also
   `memory_events`, which is what Undo works from. When Claude deletes a note, it is only
   archived; when the user deletes one, it is gone for good, with its versions.
-- `apps/agent/src/memory/run.ts` gives a chat run the user's memory, unless memory is off for them
+- `services/agent-py/agent_py/memory.py` gives a chat run the user's memory, unless memory is off for them
   or the chat is incognito. The system prompt gets an index of the notes (one line each,
   the most recently used first, within 6,000 characters). Claude gets `memory_view`,
   `memory_search`, `memory_save`, `memory_edit` and `memory_delete`. Each read or change
   goes to the browser as an AG-UI custom event `memory`.
-- `apps/agent/src/memory/http.ts` serves `/memory`, the user's own notes, settings, undo and
+- `services/api-py/api_py/memory_routes.py` serves `/memory`, the user's own notes, settings, undo and
   `.zip` export. The app forwards `/api/memory` to it. Without `MEMORY=on` or storage it
   answers 404, and the app hides memory.
 - `apps/web/src/components/workspace/memory.tsx` has the Memory view (list, on/off, export), the note
@@ -396,16 +390,15 @@ Code's memory files and `SKILL.md`.
   Claude's saves, edits and deletes become proposals in `memory_inbox` instead. The user
   accepts or rejects them in the Memory view; accepting applies the change against the
   version it was made on, or reports a conflict.
-- `apps/agent/src/memory/learn.ts` is the background learner. Every minute it picks chats idle
+- `services/api-py/api_py/memory_learn.py` is the background learner. Every minute it picks chats idle
   for `MEMORY_IDLE_MINUTES` (default 10) and at most 3 days old, not incognito, whose
   owner has memory on or ask, and asks a small model (`MEMORY_MODEL`, else the follow-up
   chips' model) for at most 5 changes to the notes, covering new facts, duplicates,
   contradictions and stale notes. Changes apply directly in `on` mode (with Undo, listed
   under "Recent changes by Claude") or go to the inbox in `ask` mode.
   `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
-  it off. With the Python API server in front, its `memory_learn.py` learns instead and the
-  agent runs with `MEMORY_LEARN=off` (issue #190, step 8d).
-- Shared memory (`020_shared_memory.sql`, `apps/agent/src/storage/shared-memory.ts`): notes for
+  it off.
+- Shared memory (`020_shared_memory.sql`, `services/api-py/api_py/shared_memory.py`): notes for
   the workspace, a knowledge node (and everything below it) or a group (and its
   sub-groups). `shared_memory_rank` decides who reads and edits each place from the
   grants: anyone with a grant in the workspace reads its notes and editors of the
@@ -420,10 +413,10 @@ Code's memory files and `SKILL.md`.
   someone who edits the place accepts or rejects it in the Memory view, and accepting
   credits the author. A person shares one of their own notes by copying it (a
   snapshot, checked before it goes): directly where they edit, else as a proposal.
-- Memory packs (`021_memory_packs.sql`, `apps/agent/src/storage/memory-packs.ts`): a place's
+- Memory packs (`021_memory_packs.sql`, `services/api-py/api_py/memory_packs.py`): a place's
   own shared notes published to the hub (one per deployment, like skills) as immutable,
   numbered versions. Whoever publishes a name first owns it; unchanged notes add no
-  version, and each version is scanned like a skill (`skills/scan.ts`). A place's editors
+  version, and each version is scanned like a skill. A place's editors
   install a pack pinned to a version: its notes become the place's shared notes with
   `pack_install_id` set, Manual for everyone, and read-only (the API and Claude's
   proposals refuse to change them). Moving the install to another version updates the
@@ -431,25 +424,25 @@ Code's memory files and `SKILL.md`.
   `pack_install_id` so they become the place's own. Hub admins (`HUB_ADMINS`) verify
   versions; the publisher or an admin yanks one, which keeps existing installs but blocks
   new ones. The Memory view lists installs, and the hub opens in the middle pane.
-- Import (`apps/agent/src/memory/import.ts`, `POST /memory/import`): notes with front matter
+- Import (`services/api-py/api_py/memory_import.py`, `POST /memory/import`): notes with front matter
   (this app's `.zip` export, Claude Code memory files) are read as they are; other text,
   such as ChatGPT's or Claude's memory pasted in, goes to `MEMORY_MODEL`, which sorts it
   into notes and merges it with the user's own (at most 30). Every note goes to the
   inbox (`source = 'import'`), never straight into memory. Without a model the text
   becomes one note.
-- Outside MCP servers (`memoryAccess`, `/memory/agent` in `apps/agent/src/memory/http.ts`):
+- Outside MCP servers (`memoryAccess`, `/memory/agent` in `services/api-py/api_py/memory_agent.py`):
   a run with memory sends such servers an `X-Knowledge-Memory` token naming the user,
   the chat and its node. With it, a server gets the chat's memory prompt and runs the
   same `memory_*` tools as Claude, with the run marked as having read outside
   content, so every change waits in the inbox. Events reach the browser through the
   live run of that chat (`trackLiveRun`).
-- Search by meaning (`apps/agent/src/memory/recall.ts`): when the agent runs an embedding
+- Search by meaning (`services/api-py/api_py/memory_agent.py`): when the API server runs an embedding
   model for file search (`storage.semantic` is ready), `memory_search` also lists notes
   close in meaning that the words missed, under "Close in meaning". Note vectors are
-  kept in the agent's memory only (an LRU of 5,000, keyed by the model and the note's
+  kept in the server's memory only (an LRU of 5,000, keyed by the model and the note's
   text), so nothing derived from private notes is stored and a changed note is simply
   embedded again.
-- Past chats (`ChatService.search` and `lines` in `apps/agent/src/storage/chats.ts`): runs with
+- Past chats (`search_chats` and the chat lines in `services/api-py/api_py/chats.py`): runs with
   memory and chat history get `chats_search` (the user's own chats with the query's
   words in their name or in what the user and Claude said, tool output left out) and
   `chats_read` (a chat in parts of 12,000 characters). Incognito chats and the chat
@@ -476,8 +469,8 @@ highlights the paragraphs, list items, table rows or code blocks the lines belon
 editor selects the lines themselves. Links to files that aren't in the workspace show greyed
 out, and web links work as before.
 
-Claude learns the format from the system prompt (`apps/agent/src/agent.ts`), and file content
-reaches it with numbered lines (the open file in context, and `readWorkspaceFile`), so it can
+Claude learns the format from the system prompt (`services/agent-py/agent_py/prompt.py`), and file content
+reaches it with numbered lines (the open file in context, and `read_file`), so it can
 cite them. The contract lives in `apps/web/src/components/workspace/file-refs.ts`, whose parser also
 accepts `#L12-18` and `notes/welcome.md:12`.
 
@@ -490,14 +483,13 @@ the browser (see issue #4). It is optional; without
 For local setup, see [Development](development.md).
 
 - **Postgres** (15 or newer) holds the file tree, every version of every file, and who
-  wrote it (`apps/agent/src/storage/migrations`). Migrations run when the Python API
-  server starts (`services/api-py`, which applies them under the same lock as the agent),
-  or when the agent starts without it; the agent behind the API server runs with
-  `MIGRATIONS=off` and waits for them.
+  wrote it (`services/api-py/migrations`). Migrations run when the Python API
+  server starts, under an advisory lock; with `MIGRATIONS=off` it waits for another
+  process to apply them instead.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
-- **API**: the agent server serves `/files` and Next.js forwards `/api/files/*` to it.
+- **API**: the API server serves `/files` and Next.js forwards `/api/files/*` to it.
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
   (request body = bytes) and deletes one, `PATCH /api/files/<path>` with `{"path": ...}`
   renames it within the same place (history kept; 412 when the name is taken),
@@ -505,7 +497,7 @@ For local setup, see [Development](development.md).
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
   (412 if the file exists). `PUT`, `PATCH` and `DELETE` need write access to the place (403
-  otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the agent port private in either mode.
+  otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the API server's and chat agent's ports private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
   Postgres `ltree`, and the database checks that each node sits exactly one level below its
@@ -543,11 +535,11 @@ For local setup, see [Development](development.md).
   words (with their forms, so etch finds etching) or exact text (part numbers, CJK) or path
   match, with the passage that matched. `&scope=<node id>` keeps to one node and everything
   below it, and `&near=<node id>` or `&experiment=<id>` ranks files near there first. Files
-  stored before search existed are indexed in the background when the agent starts. The
+  stored before search existed are indexed in the background when the API server starts. The
   Search view in the left rail searches as you type and opens a result where it lives.
 - **Search by meaning**: with pgvector in Postgres (the `docker compose` image has it), a
   small multilingual embedding model (`Xenova/multilingual-e5-small`, MIT) runs inside the
-  agent, so nothing leaves your server. It downloads once (about 120 MB, to
+  API server, so nothing leaves your server. It downloads once (about 120 MB, to
   `~/.cache/knowledge-chatroom/models` or `EMBEDDING_CACHE_DIR`), then embeds every passage
   in the background, and search also finds passages close in meaning ("chamber wall
   buildup" finds "polymer deposition on the liner"), marked "Similar meaning". Word
@@ -566,7 +558,7 @@ For local setup, see [Development](development.md).
   grants. Whoever adds a node becomes its owner, so they can delete or share what they
   made. A grant to a group covers members of its sub-groups too.
   The API (`/api/access`: users, groups and members, grants, audit log) and Claude's tools
-  check access in one place (`apps/agent/src/storage/session.ts`), and every change is written to
+  check access in one place (`services/api-py/api_py/session.py`), and every change is written to
   `audit_log` with who made it and whether Claude made it for them. Without login there is
   one built-in user who owns everything, so nothing changes for a single-user setup.
 - **Login** (optional): set `AUTH_MODE=oidc`, `AUTH_SECRET` (the same value for the app and the agent, at least
@@ -587,7 +579,7 @@ For local setup, see [Development](development.md).
   Claude's tools in a chat act as the person chatting.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
-  (`apps/agent/src/storage/migrations/004_row_security.sql`, `005_experiments.sql` for
+  (`services/api-py/migrations/004_row_security.sql`, `005_experiments.sql` for
   experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
@@ -604,8 +596,8 @@ For local setup, see [Development](development.md).
   show, like HEIC) it says so and offers Open and Download instead of a broken image.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
   `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
-  `update_experiment` and `propose_experiment` tools on the agent server
-  (`apps/agent/src/storage/tools.ts`), so it works with files even when no browser tab is open.
+  `update_experiment` and `propose_experiment` tools on the chat agent
+  (`services/agent-py/agent_py/workspace.py`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in
   lines (and `column` for lines longer than one read) and returns at most 50,000 characters
@@ -623,8 +615,8 @@ For local setup, see [Development](development.md).
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.
-- **Tests**: `pnpm test:integration` requires `TEST_DATABASE_URL` and `S3_ENDPOINT`;
-  it resets a disposable test database. See [Testing](testing.md).
+- **Tests**: `pnpm test:conformance` and the api-py tests require `TEST_DATABASE_URL` and
+  `S3_ENDPOINT`; they reset a disposable test database. See [Testing](testing.md).
 
 
 ## Boundaries when changing code
@@ -648,23 +640,21 @@ Transport timestamps are date strings, with hashes and sizes.
 Local files hold numeric timestamps and text or binary data/HTTP URLs instead.
 
 The storage API's HTTP contract (`/files`, `/nodes`, `/experiments`, `/search`,
-`/proposals`, `/chats`, `/access`), and that of the agent server's other routes
+`/proposals`, `/chats`, `/access`), and that of the API server's other routes
 (`/memory`, `/skills`, `/hub`, `/tools`, `/suggest`, `/identity/public-key`, `/health`), is written
 down in
 `packages/contracts/openapi/storage.yaml`, the source of truth that a Python storage
 service has to match (issue #169). `pnpm -C packages/contracts openapi` generates
 `src/generated/storage-api.ts` from it, and the Quality workflow fails when that file
 is out of date. The chat run itself (`POST /`) is AG-UI's contract, not this one.
-`apps/agent/src/storage/api-contract.ts` ties the agent's own types to
-the spec's schemas, so `pnpm typecheck` fails when a route's answer and the spec drift
-apart in either direction. `pnpm test:conformance` then checks the running agent's real
+`pnpm test:conformance` checks the running API server's real
 answers against the spec, operation by operation ([Testing](testing.md)). Python gets
 pydantic models from the same spec: `knowledge_chatroom.api` in `packages/knowledge-py`,
 written by `uv run datamodel-codegen` there, one model per schema and one per operation's
 inline request or answer (`ListChatsResponse`, `SetSkillModeRequest`). The Quality workflow
 fails when they are out of date, and the Storage tests workflow parses every request and
 answer of the conformance run into them. When a route changes, change the spec, regenerate
-both sides and change the conformance suite in the same PR.
+the TypeScript and Python models and change the conformance suite in the same PR.
 
 Path normalization, kinds and MIME inference are shared. SVG is intentionally
 readable as text by agent tools, while browser previews/uploads retain image URLs.

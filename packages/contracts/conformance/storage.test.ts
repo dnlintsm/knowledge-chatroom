@@ -9,8 +9,8 @@
  * Needs STORAGE_URL (the backend's base URL) and AUTH_SECRET (the backend's
  * secret, to sign the test users' identity tokens). The backend must use a fresh
  * database: the first user to sign in becomes the workspace owner, and the suite
- * relies on that being its own user. `pnpm -C apps/agent test:conformance` starts
- * the agent on the test database and runs this file.
+ * relies on that being its own user. `pnpm test:conformance` starts
+ * api-py on the test database and runs this file.
  *
  * With CONFORMANCE_SAMPLES set to a file path, every JSON answer that matched the
  * spec, and every JSON request that succeeded, is written there as one JSON line

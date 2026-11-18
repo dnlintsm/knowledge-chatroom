@@ -45,7 +45,6 @@ next-env.d.ts
 
 
 # python
-apps/agent/venv/
 __pycache__/
 .venv/
 

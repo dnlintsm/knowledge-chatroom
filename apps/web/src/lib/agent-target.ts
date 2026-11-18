@@ -6,10 +6,10 @@
  *   the messages.
  * - AGENT_URL unset: the Python chat agent (services/agent-py) at its default
  *   address, http://127.0.0.1:9300 (issue #264).
- * - AGENT_URL=local: the retired TypeScript agent server's own chat at
- *   LOCAL_AGENT_URL, for legacy comparisons only (`pnpm dev:ts`).
+ * - AGENT_URL=local: the chat at LOCAL_AGENT_URL itself. Only the e2e mock agent
+ *   serves one now; the TypeScript agent server that did is gone (issue #264).
  *
- * Storage, skills and the skill hub are always this repo's agent server, at
+ * Storage, skills and the skill hub are always this repo's API server, at
  * LOCAL_AGENT_URL (default http://localhost:8000), in both cases.
  */
 

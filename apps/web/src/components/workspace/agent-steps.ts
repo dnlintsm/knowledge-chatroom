@@ -130,7 +130,7 @@ const host = (value: unknown) => {
 type Verb = [running: string, done: string];
 /** [while running, once done], with what the arguments add. */
 const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
-  // The agent's storage and memory tools (apps/agent/src/storage/tools.ts, apps/agent/src/memory).
+  // The agent's storage and memory tools (services/agent-py/agent_py/workspace.py, services/api-py/api_py/memory_agent.py).
   read_file: (a) => [`Reading ${short(a.path) || "a file"}`, `Read ${short(a.path) || "a file"}`],
   write_file: (a) => [`Writing ${short(a.path) || "a file"}`, `Wrote ${short(a.path) || "a file"}`],
   save_file: (a) => [`Saving ${short(a.path) || "a file"}`, `Saved ${short(a.path) || "a file"}`],

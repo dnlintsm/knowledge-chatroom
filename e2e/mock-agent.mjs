@@ -57,7 +57,7 @@ const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
 /** The input of the last chat run, for GET /last-run. */
 let lastRun = null;
 
-/** The "+" menu, as the agent's GET /tools lists a papers server (apps/agent/src/tools-api.ts). */
+/** The "+" menu, as the agent's GET /tools lists a papers server (services/api-py/api_py/tools.py). */
 const TOOL_MENU = [
   {
     server: "papers", label: "Search papers", chip: "Papers", description: "Academic papers from OpenAlex and arXiv",
@@ -145,7 +145,7 @@ const TOOL_REPLIES = {
   openRun: "Switched to the other run.",
 };
 
-// The agent's built-in skills (apps/agent/skills/), as GET /skills lists them.
+// The agent's built-in skills (services/api-py/skills/), as GET /skills lists them.
 const SKILLS = [
   {
     name: "analysis",

@@ -17,7 +17,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const contractsDir = fileURLToPath(new URL("../../../packages/contracts/", import.meta.url));
+const contractsDir = fileURLToPath(new URL("../packages/contracts/", import.meta.url));
 const tsx = (dir) => join(dir, "node_modules/tsx/dist/cli.mjs");
 
 // The suite's first user must become the workspace owner, so start from nothing.
@@ -42,7 +42,7 @@ const mcpServers = JSON.stringify({
   conformance: { url: "http://127.0.0.1:9/mcp", forwardIdentity: true, ui: { label: "Conformance", tools: ["search"] } },
 });
 
-const servicesDir = fileURLToPath(new URL("../../../services/", import.meta.url));
+const servicesDir = fileURLToPath(new URL("../services/", import.meta.url));
 const api = spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
   cwd: join(servicesDir, "api-py"),
   env: {
