@@ -1,8 +1,7 @@
 /**
  * The Claude Agent SDK agent — backend tools + the official AG-UI adapter.
  *
- * Three backend tools live in their own modules (src/query.ts,
- * src/a2ui_fixed_schema.ts, src/a2ui_dynamic_schema.ts). The official
+ * The starter's chart-data tool lives in src/query.ts. The official
  * ClaudeAgentAdapter does everything else: it drives Claude via the Claude Agent
  * SDK, bridges CopilotKit frontend tools + human-in-the-loop, and manages the
  * shared `todos` state via its built-in ag_ui_update_state tool.
@@ -21,8 +20,6 @@ import { allowServer, chipsFrom, externalServersFromEnv, serverConfigs, withTool
 import { resolveModel } from "./model";
 import { keepFailureReason } from "./run-errors";
 import { queryData } from "./query";
-import { searchFlights } from "./a2ui_fixed_schema";
-import { generateA2ui } from "./a2ui_dynamic_schema";
 import { currentStorage, type Storage } from "./storage";
 import { storageConfigFromEnv } from "./storage/config";
 import { membershipHooks } from "./storage/revocation";
@@ -45,8 +42,6 @@ const serverStorage = Boolean(storageConfigFromEnv());
 const SYSTEM_PROMPT = [
   "You are a polished, professional demo assistant. Keep responses to 1-2 sentences.",
   "",
-  "- Flights: call search_flights to show flight cards.",
-  "- Dashboards: call generate_a2ui to build a rich dashboard UI; it renders itself.",
   "- Charts: call query_data first, then render with the chart component.",
   "- Todos: the todo board is shared state under `todos`; call openTaskBoard, then",
   "  ag_ui_update_state with the COMPLETE list to add or change todos.",
@@ -113,7 +108,7 @@ const SYSTEM_PROMPT = [
 // the file tools run here; the browser then hides its own copies of them.
 const SERVER_NAME = "copilotkit";
 type Tools = NonNullable<Parameters<typeof createSdkMcpServer>[0]["tools"]>;
-const baseTools: Tools = [queryData, searchFlights, generateA2ui];
+const baseTools: Tools = [queryData];
 const toolServer = (tools: Tools) =>
   createSdkMcpServer({ name: SERVER_NAME, version: "1.0.0", tools });
 // The file tools act for a user (see ./storage/tools.ts). Without login that

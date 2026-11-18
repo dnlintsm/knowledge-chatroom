@@ -45,7 +45,7 @@ import {
  * opens into the steps. The block always renders its messages, inside a
  * StepsContext; the step renderers (ReasoningStep, StepAssistantMessage, the
  * generic tool row in tool-rendering.tsx) read it and hide while the block is
- * closed. Everything else, i.e. paper cards, charts, A2UI, a tool waiting
+ * closed. Everything else, i.e. paper cards, charts, a tool waiting
  * for the user, keeps showing, so outcomes never fold away.
  */
 

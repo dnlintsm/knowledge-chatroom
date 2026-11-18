@@ -163,7 +163,7 @@ changed and how you validated it.
 | `apps/agent` | Retired TypeScript backend, kept for legacy comparisons and shared SQL/skill assets |
 | `apps/web/src/app` | Next.js routes, providers, authentication, and storage proxies |
 | `apps/web/src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
-| `apps/web/src/app/declarative-generative-ui`, `apps/web/src/hooks` | Starter examples and A2UI renderers |
+| `apps/web/src/hooks` | Starter examples (charts, meeting picker) |
 | `apps/agent/src` | Legacy Claude SDK adapter, server, storage and tools |
 | `apps/agent/src/storage/migrations` | Database schema and access policies |
 | `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |

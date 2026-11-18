@@ -25,7 +25,7 @@ const isStep = (m: Message) => m.role === "reasoning" || toolCallsOf(m).length >
  * still running, text with tool calls is narration rather than the answer,
  * so it folds in as soon as Claude starts a tool. A turn without thinking or
  * tool calls has no block. Outcomes inside a block (paper cards, charts,
- * A2UI, anything waiting for the user) still show when it is collapsed;
+ * anything waiting for the user) still show when it is collapsed;
  * that is up to their renderers, see agent-steps-view.tsx.
  */
 export function groupSteps(messages: Message[], running: boolean): StepRow[] {
