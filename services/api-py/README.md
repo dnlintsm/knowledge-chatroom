@@ -124,7 +124,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `MIGRATIONS` | unset | `off`: don't apply the migrations, wait for the TypeScript server to. Otherwise api-py applies them; start the TypeScript server with `MIGRATIONS=off`. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | as the TypeScript server | The blob store; give both servers the same values. |
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
-| `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | As the TypeScript server reads them: who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run. |
+| `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | Who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run (set it on agent-py too, which runs them). |
 | `BUILTIN_SKILLS_DIR` | `apps/agent/skills` | The built-in skills (`/app/skills` in the image). |
 | `MEMORY` | unset | `on`: each user's memory, as the TypeScript server reads it; give both the same value. Off disables `/memory` (or forwards it only in explicit legacy mode). |
 | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | As the TypeScript server reads them: the small model that makes the chat's follow-up chips, sorts imported plain-text memory into notes and learns from chats. Without a key, the chips' request ends with an error (no chips), and imported text waits in the inbox as one note, as there. |

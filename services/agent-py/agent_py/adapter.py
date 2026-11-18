@@ -20,6 +20,8 @@ the thread's first run. Three things change that for this app:
   this chat, starts in the user's own folder holding them, and only /name for
   one of them stays a command. Each skill used goes to the chat as a
   `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
+  With SKILL_SCRIPTS=on, a run with a skill that ships scripts also gets Bash,
+  sandboxed, with a stand-in API key (scripts.py, keyproxy.py).
 - Memory (memory.py): with the run's memory token, the system prompt gets the
   memory section and Claude the memory_* and chats_* tools, run by the agent
   server's /memory/agent. Each note they read or change goes to the chat as a
@@ -52,10 +54,12 @@ from ag_ui.core import (
 )
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
+from .keyproxy import KeyProxy, KeyRoute
 from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
 from .place import workspace_note
 from .revocation import membership_hooks
+from .scripts import Scripts, needs_scripts, script_options
 from .skills import (
     RunSkill,
     Trigger,
@@ -77,6 +81,8 @@ class Run:
     skills: Sequence[RunSkill] = ()
     memory: RunMemory | None = None
     servers: RunServers | None = None
+    # How a run with scripts reaches Anthropic (keyproxy.py); None: no scripts.
+    keys: KeyRoute | None = None
     # (name, value) of CUSTOM events for the chat: skill_used, memory.
     pending: list[tuple[str, Any]] = field(default_factory=list)
 
@@ -90,6 +96,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         skills_root: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         mcp_servers: Mapping[str, McpServer] | None = None,
+        scripts: Scripts | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -100,6 +107,10 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._transport = transport  # for tests
         # Each user's run folder (with their skills) is a folder in here.
         self._skills_root = skills_root
+        # SKILL_SCRIPTS=on (scripts.py), and the key proxy its runs share, once started.
+        self._scripts = scripts
+        self._key_proxy: KeyProxy | None = None
+        self._key_lock = asyncio.Lock()
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
         # Usage records on their way to the agent server.
@@ -175,6 +186,16 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             hooks = dict(options.hooks or {})
             hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), hook]
             options.hooks = hooks
+        scripts = (
+            script_options(self._scripts, run.cwd, run.skills, run.keys, self._skills_root)
+            if run and self._skills_root is not None
+            else None
+        )
+        if scripts:
+            options.tools = [*(options.tools or []), "Bash"]
+            options.allowed_tools = [*(options.allowed_tools or []), "Bash"]
+            options.env = {**(options.env or {}), **scripts["env"]}
+            options.sandbox = scripts["sandbox"]
         return options
 
     async def run(
@@ -202,6 +223,8 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 logger.warning("couldn't write the run's skills; running without them: %s", err)
                 run.skills = ()
                 run.cwd = materialize(self._skills_root, user, ())
+            if self._scripts and needs_scripts(run.skills):
+                run.keys = await self._keys()
         if memory_token and self._storage_url:
             try:
                 run.memory = await fetch_memory(
@@ -238,6 +261,26 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             while started and run.pending:
                 name, value = run.pending.pop(0)
                 yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+
+    async def _keys(self) -> KeyRoute | None:
+        """The key proxy for runs with scripts, started on first use; None if it can't start."""
+        async with self._key_lock:
+            if self._key_proxy is None:
+                proxy = KeyProxy()
+                try:
+                    await proxy.start()
+                except OSError as err:
+                    logger.error("key proxy didn't start; scripts are off for this run: %s", err)
+                    await proxy.close()
+                    return None
+                self._key_proxy = proxy
+            return self._key_proxy.route
+
+    async def shutdown(self) -> None:
+        await super().shutdown()
+        if self._key_proxy:
+            await self._key_proxy.close()
+            self._key_proxy = None
 
     def _storage(self, thread_id: str) -> Storage:
         """The storage API with the thread's latest token and workspace: tools read them when called, not when the chat began."""

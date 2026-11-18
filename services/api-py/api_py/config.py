@@ -26,7 +26,7 @@ PLATFORM_ADMINS      who sees the workspace inventory and may add an Owner to a
                      nobody; the local user always may)
 RECOVERY_IDLE_DAYS   how recently a member must have signed in to count as
                      holding Full access in the inventory (default 90)
-SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
+SKILL_SCRIPTS        on: skills' scripts run (on the chat agent, agent-py, which
                      runs chats; /skills here says so)
 BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
 MEMORY               on: each user's memory (as on the TypeScript server); this

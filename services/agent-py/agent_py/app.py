@@ -11,6 +11,8 @@ Environment:
     MCP_SERVERS                     outside MCP servers and tool chips, as for the agent server (mcp.py)
     AGENT_PY_WORKDIR                where each user's working folder (with their skills) goes
                                     (default: a new empty temp folder)
+    SKILL_SCRIPTS                   on: skills' scripts run, in Claude Code's sandbox (scripts.py)
+    SKILL_SCRIPTS_DENY_READ         more absolute paths scripts can't read (comma-separated)
     AGENT_PY_HOST / AGENT_PY_PORT   where to listen (default 127.0.0.1:9300)
 """
 
@@ -37,6 +39,7 @@ from .memory import MEMORY_HEADER
 from .model import resolve_model
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
+from .scripts import scripts_from_env
 from .workspace import STORAGE_HEADER, WORKSPACE_HEADER, storage_url
 
 logger = logging.getLogger("agent_py")
@@ -55,7 +58,8 @@ def make_adapter(
         options={
             "model": resolve_model(dict(env)),
             # No built-in Claude Code tools: the browser's tools and this
-            # agent's own MCP tools are the only ones (adapter.py).
+            # agent's own MCP tools are the only ones (adapter.py), plus Skill,
+            # and Bash for skills' scripts when they are on (scripts.py).
             "tools": [],
             "cwd": root,
         },
@@ -64,6 +68,7 @@ def make_adapter(
         skills_root=Path(root),
         transport=transport,
         mcp_servers=servers_from_env(env),
+        scripts=scripts_from_env(env),
         query_timeout_seconds=timeout or None,
     )
 
