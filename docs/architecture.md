@@ -32,8 +32,8 @@ flowchart LR
 The UI (`apps/web`), the agent (`apps/agent`) and `packages/contracts` form one pnpm
 workspace with one lockfile; `pnpm install` at the root installs all three. Each keeps
 its own dependency versions: the UI is on Zod 3 and `@ag-ui/*` 1.0.2 for CopilotKit,
-the agent on Zod 4 and `@ag-ui/*` 1.0.4. The starter's charts, meeting picker and A2UI examples remain
-under `apps/web/src/app/declarative-generative-ui` and `apps/web/src/hooks`; they are separate from
+the agent on Zod 4 and `@ag-ui/*` 1.0.4. The starter's charts and meeting picker remain
+under `apps/web/src/hooks`; they are separate from
 the knowledge workspace's persistence responsibilities.
 
 This page first describes the workspace features (skills, runs, actions, the chat),
@@ -318,7 +318,7 @@ renders: a turn's answer is its last assistant message with text, and the steps 
 into the block (while the turn runs, text that came with tool calls is narration). The block
 (`agent-steps-view.tsx`) always renders its messages, inside a context the step renderers read:
 the thinking row, narration and the generic tool row (`apps/web/src/components/tool-rendering.tsx`) hide
-while the block is closed, so paper cards, charts, A2UI and a tool waiting for the user still
+while the block is closed, so paper cards, charts and a tool waiting for the user still
 show. Follow-up chips sit under the message list and are not affected.
 
 The chat header's steps button switches between Compact (closed blocks) and Detailed (open

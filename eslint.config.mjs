@@ -23,10 +23,4 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "error",
     },
   },
-  {
-    // The starter's dynamic A2UI renderer accepts an SDK-defined property bag.
-    // Keep this exception local; workspace and backend code must use typed values.
-    files: ["apps/web/src/app/declarative-generative-ui/renderers.tsx"],
-    rules: { "@typescript-eslint/no-explicit-any": "off" },
-  },
 );

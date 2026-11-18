@@ -28,8 +28,8 @@ import type { NextRequest } from "next/server";
 // LangGraphAgent/LangGraphHttpAgent — those target LangGraph-shaped
 // endpoints). With AGENT_URL set that server is a remote backend's
 // `/agent/report`, else this repo's agent (src/lib/agent-target.ts). Everything
-// else — runtime config, v2 endpoint wiring, MCP apps, openGenerativeUI,
-// a2ui — mirrors the canonical demo.
+// else — runtime config, v2 endpoint wiring, MCP apps, openGenerativeUI —
+// mirrors the canonical demo. (The starter's A2UI demo is gone, #264.)
 const defaultAgent = createDefaultAgent();
 
 // Each user's chats, kept by the agent server in Postgres when it has
@@ -73,9 +73,6 @@ const runtime = new CopilotRuntime({
     : { runner: chatRunner }),
   // --- /copilotkit:intelligence ---
   openGenerativeUI: true,
-  a2ui: {
-    injectA2UITool: false,
-  },
   mcpApps: {
     servers: [
       {

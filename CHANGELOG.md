@@ -372,11 +372,12 @@
   a new experiment of yours. Access refusals from the storage API say what you can do there
   ("You can only view here; this needs editor access") (#187).
 
-### Known limitations
+### Removed
 
-- The Python chat agent lacks the starter's A2UI demo tools (`generate_a2ui`, flight
-  search). They are the next step of #264; until then the TypeScript agent server's chat
-  (`AGENT_URL=local`) still has them.
+- The starter's A2UI demo tools: `generate_a2ui` and the flight search, the web app's demo
+  catalog and its `@copilotkit/a2ui-renderer` dependency (#264, step 4; #74). No app feature
+  used them, and the Python chat agent now has everything else the TypeScript one had.
+  Charts, questions for the user and the other chat widgets are unchanged.
 
 ### Fixed
 
@@ -418,10 +419,9 @@
      api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
      if agent-py runs at `http://127.0.0.1:9300` next to the app.
 
-  To keep a feature from the known limitations above for now, keep the agent server behind
-  api-py instead: start it on another private port with `SEARCH_INDEXER=off`,
-  `MEMORY_LEARN=off` and `MIGRATIONS=off`, set api-py's `TS_AGENT_URL` to it, and set
-  `AGENT_URL=local` on the app. `pnpm env:check` can't spot this change, since it comes
+  To keep the agent server's own chat for now, keep it behind api-py instead: start it on
+  another private port with `SEARCH_INDEXER=off`, `MEMORY_LEARN=off` and `MIGRATIONS=off`,
+  set api-py's `TS_AGENT_URL` to it, and set `AGENT_URL=local` on the app. `pnpm env:check` can't spot this change, since it comes
   from settings your `.env` doesn't have.
 - Migration `023_workspace_members.sql` adds workspace memberships and fills them from
   today's access: root owners (directly or through groups) become Owners, anyone else with

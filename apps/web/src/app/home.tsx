@@ -12,8 +12,6 @@ import { recordVisit } from "@/lib/workspace-choice";
 import { DEFAULT_SLUG, WORKSPACE_HEADER, setRequestWorkspace, type WorkspaceInfo } from "@/lib/workspace-request";
 
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
-// A2UI catalog: definitions + renderers in ./declarative-generative-ui/
-import { demonstrationCatalog } from "./declarative-generative-ui/renderers";
 
 function Demos() {
   useGenerativeUIExamples();
@@ -72,7 +70,6 @@ export function Home({
       runtimeUrl="/api/copilotkit"
       // The chat's runs and history go to this workspace (route.ts, src/lib/chat-runner.ts).
       headers={headers}
-      a2ui={{ catalog: demonstrationCatalog }}
       openGenerativeUI={{}}
       useSingleEndpoint={false}
     >

@@ -296,9 +296,6 @@ importers:
       '@ag-ui/core':
         specifier: 1.0.2
         version: 1.0.2(zod@3.25.76)
-      '@copilotkit/a2ui-renderer':
-        specifier: 1.79.1
-        version: 1.79.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@copilotkit/react-core':
         specifier: 1.79.1
         version: 1.79.1(@cfworker/json-schema@4.1.1)(@types/mdast@4.0.4)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(graphql@16.14.2)(micromark-util-types@2.0.3)(micromark@4.0.3(supports-color@8.1.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(supports-color@8.1.1)(zod@3.25.76)
