@@ -183,7 +183,8 @@ async def sync_workdir(storage: Storage, cwd: Path, limits: Limits | None = None
 async def _sync(storage: Storage, cwd: Path, limits: Limits) -> Summary:
     root = cwd / WORKSPACE_DIR
     # Last turn's run inputs: this snapshot has them, under the runs' folders.
-    shutil.rmtree(cwd / RUN_INPUTS_DIR, ignore_errors=True)
+    # A fresh, real folder, which scripts can't write to (scripts.py).
+    _fresh_run_inputs(cwd)
     summary = Summary(root)
 
     tree, experiments = await asyncio.gather(
@@ -364,6 +365,14 @@ async def clear_workdir(cwd: Path) -> None:
         (cwd / MANIFEST).unlink(missing_ok=True)
 
 
+def _fresh_run_inputs(cwd: Path) -> None:
+    folder = cwd / RUN_INPUTS_DIR
+    if folder.is_symlink():
+        folder.unlink()
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True, exist_ok=True)
+
+
 async def write_run_inputs(
     storage: Storage,
     cwd: Path,
@@ -386,7 +395,9 @@ async def write_run_inputs(
             continue
         rel = f"{RUN_INPUTS_DIR}/{run_id}/{path.removeprefix('inputs/')}"
         target = cwd.joinpath(*rel.split("/"))
-        if not is_inside(folder, target):
+        # Checked against the run folder too: a script may have pointed a
+        # folder in here somewhere else, and this server writes outside the sandbox.
+        if folder.is_symlink() or not (is_inside(folder, target) and is_inside(cwd, target)):
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.unlink(missing_ok=True)

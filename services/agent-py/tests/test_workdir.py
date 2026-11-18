@@ -292,6 +292,28 @@ def test_a_run_claude_starts_gets_its_inputs_in_the_folder(api, tmp_path: Path):
     assert "inputsInWorkingFolder" not in result
 
 
+def test_run_inputs_never_land_outside_the_folder(api, tmp_path: Path):
+    # A script pointed run-inputs (or a folder in it) elsewhere: nothing is written there.
+    cwd, outside = tmp_path / "run", tmp_path / "outside"
+    cwd.mkdir()
+    outside.mkdir()
+    create = tool(file_tools(lambda: storage(api), {}, cwd), "create_experiment")
+    for link in (cwd / "run-inputs", cwd / "run-inputs" / "e1ffffffff"):
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to(outside, target_is_directory=True)
+        answer = asyncio.run(
+            create.handler({"title": "A", "inputs": [{"path": "uploads/data.csv"}]})
+        )
+        assert "inputsInWorkingFolder" not in json.loads(answer["content"][0]["text"])
+        assert list(outside.iterdir()) == []
+        link.unlink()
+    # Each turn's copy starts it again as a real folder.
+    (cwd / "run-inputs").rmdir()
+    (cwd / "run-inputs").symlink_to(outside, target_is_directory=True)
+    asyncio.run(sync_workdir(storage(api), cwd))
+    assert (cwd / "run-inputs").is_dir() and not (cwd / "run-inputs").is_symlink()
+
+
 def test_the_prompt_describes_the_folder():
     from agent_py.workdir import Summary
 
