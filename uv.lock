@@ -59,7 +59,7 @@ wheels = [
 
 [[package]]
 name = "agent-py"
-version = "0.2.3"
+version = "0.3.0"
 source = { virtual = "services/agent-py" }
 dependencies = [
     { name = "ag-ui-claude-sdk" },
@@ -140,7 +140,7 @@ wheels = [
 
 [[package]]
 name = "api-py"
-version = "0.2.3"
+version = "0.3.0"
 source = { virtual = "services/api-py" }
 dependencies = [
     { name = "boto3" },
@@ -1239,7 +1239,7 @@ wheels = [
 
 [[package]]
 name = "knowledge-chatroom"
-version = "0.2.3"
+version = "0.3.0"
 source = { editable = "packages/knowledge-py" }
 dependencies = [
     { name = "cryptography" },
@@ -1275,7 +1275,7 @@ dev = [
 
 [[package]]
 name = "lab-tools"
-version = "0.2.3"
+version = "0.3.0"
 source = { virtual = "services/lab-tools" }
 dependencies = [
     { name = "knowledge-chatroom" },
@@ -1712,7 +1712,7 @@ wheels = [
 
 [[package]]
 name = "papers-mcp"
-version = "0.2.3"
+version = "0.3.0"
 source = { virtual = "services/papers-mcp" }
 dependencies = [
     { name = "knowledge-chatroom" },

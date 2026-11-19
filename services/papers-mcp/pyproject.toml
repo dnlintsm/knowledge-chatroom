@@ -1,6 +1,6 @@
 [project]
 name = "papers-mcp"
-version = "0.2.3"
+version = "0.3.0"
 description = "Paper search (OpenAlex + arXiv) as an MCP server for the chatroom"
 requires-python = ">=3.12"
 dependencies = [

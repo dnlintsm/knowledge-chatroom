@@ -1,6 +1,6 @@
 {
   "name": "@knowledge-chatroom/web",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "The Next.js UI: three-pane workspace and chat over AG-UI (CopilotKit)",
   "scripts": {

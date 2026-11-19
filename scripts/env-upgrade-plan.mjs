@@ -9,6 +9,10 @@ export const MIGRATIONS = [
     note: "AGENT_URL now names a remote chat backend; this repo's agent server is LOCAL_AGENT_URL" },
   { key: "RUN_DIR_MARKERS", since: "0.1.2", note: "runs are experiments now; run folder markers are gone" },
   { key: "IDENTITY_FORMAT", since: "0.2.1", note: "identity tokens are only v2; the agent refuses to start while it is set" },
+  { key: "AGENT_HOST", since: "0.3.0", note: "the TypeScript agent server is gone; api-py listens on API_PY_HOST" },
+  { key: "AGENT_PORT", since: "0.3.0", note: "the TypeScript agent server is gone; api-py listens on API_PY_PORT" },
+  { key: "SKILLS_RUN_DIR", since: "0.3.0", note: "the TypeScript agent server is gone; agent-py keeps run folders under AGENT_PY_WORKDIR" },
+  { key: "SEARCH_INDEXER", since: "0.3.0", note: "the TypeScript agent server is gone; api-py always runs the search indexer" },
 ];
 
 const ACTIVE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
