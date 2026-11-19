@@ -19,9 +19,9 @@ import {
  * Login, for deployments that set AUTH_SECRET (the agent server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
- * signed cookie. Every request it forwards to the agent server carries a
+ * signed cookie. Every request it forwards to the API server carries a
  * short-lived signed X-Knowledge-User header (packages/contracts/src/identity-token.ts makes
- * it, apps/agent/src/storage/identity.ts checks it), so the agent knows whose
+ * it, services/api-py/api_py/identity.py checks it), so the server knows whose
  * access rules apply.
  *
  * AUTH_MODE=local turns login off and everyone is the local user; see

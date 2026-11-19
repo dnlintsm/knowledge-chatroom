@@ -1,8 +1,7 @@
-"""Postgres, shared with the TypeScript server (apps/agent/src/storage/db.ts).
+"""Postgres, shared with agent-py.
 
-This server applies the SQL migrations (MIGRATIONS_DIR), as migrate() in db.ts
-does and under the same lock, unless MIGRATIONS=off; the TypeScript server
-behind it then runs with MIGRATIONS=off and waits for them (issue #190, step 9).
+This server applies the SQL migrations (MIGRATIONS_DIR) under an advisory lock,
+unless MIGRATIONS=off, when it waits for another process to apply them.
 Either way it checks that the database has exactly the ones it was built for,
 and refuses a database with migrations it doesn't know.
 Each signed-in user's queries run in one transaction as APP_ROLE with

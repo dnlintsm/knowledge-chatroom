@@ -966,7 +966,7 @@ export interface paths {
         /**
          * Follow-up chips for the chat
          * @description One Messages API call on a small model that answers CopilotKit's forced
-         *     `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+         *     `copilotkitSuggest` tool call (services/api-py/api_py/suggest.py). The body is an AG-UI
          *     RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
          *     stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
          *     TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
@@ -989,7 +989,7 @@ export interface paths {
         };
         /**
          * The chat's "+" menu of outside tools
-         * @description The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+         * @description The MCP servers in MCP_SERVERS that have a `ui` block (services/api-py/api_py/tools.py).
          */
         get: operations["listTools"];
         put?: never;

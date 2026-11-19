@@ -54,7 +54,7 @@ export function createDefaultAgent(): HttpAgent {
 
 /**
  * The chat's follow-up chips after a reply: this repo's agent server's
- * `/suggest` answers with one small-model call (apps/agent/src/suggest.ts),
+ * `/suggest` answers with one small-model call (services/api-py/api_py/suggest.py),
  * also when a remote backend (AGENT_URL) serves the chat.
  */
 export function createSuggesterAgent(): HttpAgent {

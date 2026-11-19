@@ -1,7 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { normalizePath, InvalidPathError } from "@knowledge-chatroom/contracts/files";
 import { parseFileInfo, parseFileList, parseLocalFile, parseWorkspaceEvent, StorageContractError, type FileInfo } from "@knowledge-chatroom/contracts/storage-contract";
-import * as backend from "../../apps/agent/src/storage/paths";
 import * as browser from "../../apps/web/src/components/workspace/types";
 import { deleteServerFile, listServerFiles, loadServerFile, putServerFile, serverFileExists } from "../../apps/web/src/components/workspace/server-files";
 import { INVALID_STORAGE_KEY, STORAGE_KEY, persistWorkspace, readPlaceUi, restoreWorkspace } from "../../apps/web/src/components/workspace/local-persistence";
@@ -12,17 +11,17 @@ const state = { files: [{ path: info.path, kind: info.kind, mime: info.mime, con
 
 test("relative paths reject traversal/control bytes and normalize Windows separators", () => {
   expect(normalizePath(" /notes//folder\\a.md ")).toBe("notes/folder/a.md");
-  for (const path of ["", "notes/", "../secret", "notes/./a", "notes/../a", "notes/\u0000a", "a".repeat(1025)]) expect(() => backend.normalizePath(path)).toThrow(InvalidPathError);
+  for (const path of ["", "notes/", "../secret", "notes/./a", "notes/../a", "notes/\u0000a", "a".repeat(1025)]) expect(() => normalizePath(path)).toThrow(InvalidPathError);
 });
 
 test("MIME/kind compatibility is shared with an explicit SVG representation policy", () => {
-  for (const [path, mime] of [["notes/a.MD", "text/markdown"], ["notes/a.html", "text/html"], ["uploads/a.svg", "image/svg+xml"], ["uploads/a.png", "image/png"], ["artifacts/a.json", "application/json"], ["uploads/a.unknown", "application/octet-stream"]]) {
+  // services/api-py/tests/test_paths.py checks the storage API against the same table.
+  for (const [path, mime, kind] of [["notes/a.MD", "text/markdown", "note"], ["notes/a.html", "text/html", "note"], ["uploads/a.svg", "image/svg+xml", "upload"], ["uploads/a.png", "image/png", "upload"], ["artifacts/a.json", "application/json", "artifact"], ["uploads/a.unknown", "application/octet-stream", "upload"]]) {
     expect(browser.mimeForPath(path)).toBe(mime);
-    expect(backend.mimeForPath(path)).toBe(mime);
-    expect(browser.kindForPath(path)).toBe(backend.kindForPath(path));
+    expect(browser.kindForPath(path)).toBe(kind);
   }
+  // The browser shows SVG as an image; storage keeps it as text.
   expect(browser.isTextFile({ path: "uploads/a.svg", mime: "image/svg+xml" })).toBe(false);
-  expect(backend.isTextFile("uploads/a.svg", "image/svg+xml")).toBe(true);
 });
 
 test("the editor pane picks a preview from the type, or the extension for untyped files", () => {

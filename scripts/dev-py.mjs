@@ -1,6 +1,6 @@
 /**
  * Runs a Python service of services/ for `pnpm dev`, with the repository's
- * .env as `pnpm dev:agent` reads it (variables already set win). Needs uv
+ * .env (variables already set win). Needs uv
  * (https://docs.astral.sh/uv/).
  *
  *   node scripts/dev-py.mjs api-py      # `pnpm dev:api`: the API server on :8000,

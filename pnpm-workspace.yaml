@@ -4,18 +4,13 @@ packages:
   - apps/*
   - packages/*
 
-# Install scripts run only for the packages listed true. onnxruntime-node's script
-# only downloads the CUDA providers; its CPU runtime, which search by meaning uses,
-# ships in the package.
+# Install scripts run only for the packages listed true.
 allowBuilds:
   '@scarf/scarf': false
   esbuild: true
-  onnxruntime-node: false
-  protobufjs: true
 
 # Patched transitive versions (docs/development.md, "Dependency security").
 overrides:
-  adm-zip: 0.6.1
   body-parser: 2.4.0
   follow-redirects: 1.16.2
   graphql-scalars: 2.0.1

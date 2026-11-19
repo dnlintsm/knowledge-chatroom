@@ -11,7 +11,7 @@ those with a `ui` block show up here. A call goes to the server as a chat run's
 would: with the user's identity (forwardIdentity, signed for "mcp:<server>") and
 a storage token (storageAccess), so the server sees the same person whether
 Claude or a button asked. These routes don't need storage. While MCP_SERVERS
-isn't set here, they pass through to the TypeScript server, which reads its own.
+isn't set here and TS_AGENT_URL is, they pass through to that server.
 """
 
 from __future__ import annotations

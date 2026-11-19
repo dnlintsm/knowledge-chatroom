@@ -5,17 +5,17 @@ The chatroom's chat agent in Python, on the
 (`ag_ui_claude_sdk`) and FastAPI. The app reaches it through `AGENT_URL`, as any
 remote backend ([docs/remote-agent.md](../../docs/remote-agent.md)); this repo's
 Python API server (`services/api-py`) serves storage, skills and memory on
-`LOCAL_AGENT_URL`; no TypeScript agent process is required.
+`LOCAL_AGENT_URL`.
 
-It is phase 2 of moving the backend to Python (issue #169), built in steps under
-issue #176. So far it chats with the app's own tools (task board, workbench panes,
-and the browser's file tools while files live only in the browser), tells the model
-where the user is on every run, and works on the workspace's files on the server
-through the storage API (step 2), including starting and finishing runs, with the
-user's skills (step 3), their memory (step 4), and the outside MCP servers and tool
-chips (step 5). The follow-up chips after each reply come from the agent server's
-`/suggest` (step 6), so this agent doesn't write them. `pnpm dev:python`, a compose
-profile and an e2e run with the app came last (step 7).
+It was phase 2 of moving the backend to Python (issue #169), built in steps under
+issue #176, and replaced the TypeScript agent in phase 4 (issue #264). It chats with
+the app's own tools (task board, workbench panes, and the browser's file tools while
+files live only in the browser), tells the model where the user is on every run, and
+works on the workspace's files on the server through the storage API, including
+starting and finishing runs, with the user's skills, their memory, the outside MCP
+servers and tool chips, a working folder and, when allowed, skills' scripts. The
+follow-up chips after each reply come from the API server's `/suggest`, so this agent
+doesn't write them.
 
 ## Run it
 
@@ -49,10 +49,10 @@ for a gateway) in this server's environment.
 
 | Variable | Meaning |
 | --- | --- |
-| `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model, chosen as the TypeScript agent does (default `claude-sonnet-5`). |
-| `KNOWLEDGE_PUBLIC_KEY` | With login on: the agent server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
-| `LOCAL_AGENT_URL` | The agent server with the storage API, as for the app (default `http://localhost:8000`). |
-| `MCP_SERVERS` | Outside MCP servers and tool chips: give it the agent server's value, so the chat's "+" menu (from the agent server) names the servers this agent connects to. |
+| `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model: `CLAUDE_MODEL`, else `ANTHROPIC_MODEL` (default `claude-sonnet-5`). |
+| `KNOWLEDGE_PUBLIC_KEY` | With login on: the API server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
+| `LOCAL_AGENT_URL` | The API server, as for the app (default `http://localhost:8000`). |
+| `MCP_SERVERS` | Outside MCP servers and tool chips: give it the API server's value, so the chat's "+" menu (from the API server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
 | `AGENT_PY_WORKDIR` | Where each user's working folder goes (one per user and workspace), holding their skills and the workspace copy (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
 | `AGENT_WORKDIR` | `off`: no workspace copy in the working folder, and no Read/Glob/Grep or `save_file`. |
@@ -74,20 +74,17 @@ for a gateway) in this server's environment.
   result. The browser's
   `forwardedProps` don't reach the SDK options, so a browser can't pick the model or
   resume someone else's session. Claude Code's built-in tools are off.
-- `agent_py/workspace.py`: the workspace tools, with the TypeScript agent's names,
-  descriptions and results (`list_nodes`, `create_node`, `list_files`, `read_file`,
+- `agent_py/workspace.py`: the workspace tools (`list_nodes`, `create_node`, `list_files`, `read_file`,
   `search_files`, `write_file`, `edit_file`, `list_experiments`, `create_experiment`,
-  `set_experiment_results`, `update_experiment`, `propose_experiment`;
-  `apps/agent/src/storage/tools.ts`). Runs start and finish through
+  `set_experiment_results`, `update_experiment`, `propose_experiment`). Runs start and finish through
   `POST /experiments/runs` and `POST /experiments/{id}/finish`, which record the
   chat, model, skill and tool versions in the run's report.md front matter. Each call goes to the
   storage API with the run's `X-Knowledge-Storage` token, so Claude acts for the
   signed-in user: only what they can reach, writes in a knowledge node and to skills
   as proposals, no renaming, deleting or sharing. Without login there is no token and
   the API answers as the local user, so files Claude writes show as the user's.
-  `agent_py/text.py` numbers lines and applies exact edits as the TypeScript agent does.
-- `agent_py/skills.py`: the run's skills, as the TypeScript agent gives them
-  (`apps/agent/src/skills/run.ts`). Each run asks the agent server which skills the
+  `agent_py/text.py` numbers lines and applies exact edits.
+- `agent_py/skills.py`: the run's skills. Each run asks the API server which skills the
   user has in this chat (`GET /skills/run`, with the run's token: built-in, hub and
   workspace skills that aren't off, with their files), writes them to the user's own
   folder under `AGENT_PY_WORKDIR` (`.claude/skills/`, only when the set changed) and
@@ -97,8 +94,7 @@ for a gateway) in this server's environment.
   used goes to the chat as a `skill_used` event and to the usage history
   (`POST /skills/used`). `!` commands in a SKILL.md never run, and there is no shell
   unless skills' scripts are on (below).
-- `agent_py/workdir.py`: the working folder, as the TypeScript agent keeps it
-  (`apps/agent/src/storage/workdir.ts`). At the start of each run the user's folder gets
+- `agent_py/workdir.py`: the working folder. At the start of each run the user's folder gets
   `workspace/`, a read-only copy of every file they can read in the run's workspace
   (`root/`, `nodes/<tech>/<module>/...`, `experiments/<title> (<id>)/`, and `.places.json`
   mapping folders to ids and roles), fetched through the storage API with the run's
@@ -107,8 +103,7 @@ for a gateway) in this server's environment.
   script made there. An experiment Claude starts gets its inputs copied to
   `run-inputs/<id>/`. When the copy can't be made (or `AGENT_WORKDIR=off`), any old one
   is removed and the run has none of this.
-- `agent_py/scripts.py` and `agent_py/keyproxy.py`: skills' scripts, as the TypeScript
-  agent runs them. With `SKILL_SCRIPTS=on`, a run whose skills include one with scripts
+- `agent_py/scripts.py` and `agent_py/keyproxy.py`: skills' scripts. With `SKILL_SCRIPTS=on`, a run whose skills include one with scripts
   (`needsExecution`) gets Bash in Claude Code's sandbox: no network, writes only in the
   user's run folder (not its skills or the files Claude Code reads as instructions),
   this checkout or `/app`, its home, `AGENT_PY_WORKDIR`'s other folders, the usual secret
@@ -120,22 +115,20 @@ for a gateway) in this server's environment.
   needs bubblewrap and socat (and, in a container, permission to create user
   namespaces) plus the interpreters the skills use; a run with scripts fails when the
   sandbox can't start.
-- `agent_py/memory.py`: the user's memory in the chat, as the TypeScript agent gives it
-  (`apps/agent/src/memory/run.ts`). With the run's `X-Knowledge-Memory` token (the app
-  sends one per run; memory needs `MEMORY=on` on the agent server), each run asks
+- `agent_py/memory.py`: the user's memory in the chat. With the run's `X-Knowledge-Memory` token (the app
+  sends one per run; memory needs `MEMORY=on` on the API server), each run asks
   `/memory/agent` for the memory section of the system prompt and the `memory_*` and
   `chats_*` tools, which run there. Changes are made with Undo until the run uses any
   other tool, then wait in the user's inbox (a `PreToolUse` hook marks the run). Each
   note read or changed goes to the chat as a `memory` event. Incognito chats and memory
   turned off get none of it.
-- `agent_py/mcp.py`: the servers in `MCP_SERVERS`, read as the TypeScript agent reads
-  them (`apps/agent/src/mcp.ts`). Each run connects to them with every tool allowed,
+- `agent_py/mcp.py`: the servers in `MCP_SERVERS`, read as the API server
+  reads them. Each run connects to them with every tool allowed,
   leaves out a `"mode": "manual"` server unless its chip is on, and tells Claude to use
   the servers whose chips are on. For `forwardIdentity`, `storageAccess` and
   `memoryAccess` it trades the run's storage and memory tokens for the server's own at
-  the agent server (`POST /identity/mcp-tokens`), since it holds no `AUTH_SECRET`.
-- `agent_py/prompt.py`: the system prompt, the TypeScript agent's without its demo
-  backend tools.
+  the API server (`POST /identity/mcp-tokens`), since it holds no `AUTH_SECRET`.
+- `agent_py/prompt.py`: the system prompt.
 
 ## Tests
 

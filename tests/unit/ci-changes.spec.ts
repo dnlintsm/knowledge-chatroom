@@ -15,12 +15,18 @@ test("Python services run only the E2E suites that start them", () => {
   expect(affectedSuites(["packages/knowledge-py/src/knowledge_chatroom/api.py"])).toEqual({ ...none, python: true, storage: true, pyagent: true });
 });
 
+test("api-py's migrations and built-in skills run every suite", () => {
+  for (const path of ["services/api-py/migrations/024_example.sql", "services/api-py/skills/tldr/SKILL.md"]) {
+    expect(affectedSuites([path]), path).toEqual(allSuites());
+  }
+});
+
 test("suites from several paths add up", () => {
   expect(affectedSuites(["services/api-py/x.py", "services/agent-py/y.py", "docs/a.md"])).toEqual({ ...none, python: true, storage: true, pyagent: true });
 });
 
 test("anything without a rule runs every suite", () => {
-  for (const path of ["apps/web/src/app/page.tsx", "packages/contracts/openapi/storage.yaml", ".github/workflows/quality.yml", "e2e/login.spec.ts", "scripts/ci-changes.mjs", "apps/agent/skills/tldr/SKILL.md", "pnpm-lock.yaml", "new-dir/file"]) {
+  for (const path of ["apps/web/src/app/page.tsx", "packages/contracts/openapi/storage.yaml", ".github/workflows/quality.yml", "e2e/login.spec.ts", "scripts/ci-changes.mjs", "pnpm-lock.yaml", "new-dir/file"]) {
     expect(affectedSuites([path]), path).toEqual(allSuites());
   }
   // A prefix match needs the directory separator.

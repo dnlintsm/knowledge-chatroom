@@ -17,7 +17,7 @@
  * checks statuses and bodies.
  *
  * Runs after storage.test.ts against the same backend (see
- * apps/agent/scripts/test-conformance.mjs): the workspace owner is that suite's
+ * scripts/test-conformance.mjs): the workspace owner is that suite's
  * first user, CONFORMANCE_OWNER (default "conformance|alice"). On a fresh
  * database it becomes the owner here instead.
  *

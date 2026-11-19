@@ -3,13 +3,13 @@ info:
   title: knowledge-chatroom storage API
   version: 0.2.3
   description: |
-    The storage API served by the agent server (apps/agent/src/storage/http.ts):
+    The storage API served by the Python API server (services/api-py/api_py/storage_routes.py):
     workspace files, the knowledge tree, experiments, search, proposals, chat
     history and access; and the rest of that server's HTTP routes: memory
-    (apps/agent/src/memory/http.ts), skills and the skill hub (apps/agent/src/skills/http.ts), the "+" menu's tools
-    (apps/agent/src/tools-api.ts), follow-up suggestions, the identity public key
-    and the health check. It is the contract a Python service has to match before
-    it can take over a route group (issue #169). The chat run itself (`POST /`) is
+    (services/api-py/api_py/memory_routes.py), skills and the skill hub (services/api-py/api_py/skills_routes.py), the "+" menu's tools
+    (services/api-py/api_py/tools.py), follow-up suggestions, the identity public key
+    and the health check. The API server's answers are checked against it
+    (issue #169). The chat run itself (`POST /`) is
     an AG-UI endpoint, specified by AG-UI rather than here.
 
     This file is the source of truth. `pnpm -C packages/contracts openapi` turns it
@@ -1954,7 +1954,7 @@ paths:
       security: [{}, {user: []}]
       description: |
         One Messages API call on a small model that answers CopilotKit's forced
-        `copilotkitSuggest` tool call (apps/agent/src/suggest.ts). The body is an AG-UI
+        `copilotkitSuggest` tool call (services/api-py/api_py/suggest.py). The body is an AG-UI
         RunAgentInput whose `tools` include `copilotkitSuggest`; the answer is an AG-UI event
         stream: RUN_STARTED, then the tool call (TOOL_CALL_START, TOOL_CALL_ARGS,
         TOOL_CALL_END) and RUN_FINISHED, or RUN_ERROR with the reason. Nothing is stored.
@@ -1990,7 +1990,7 @@ paths:
       operationId: listTools
       summary: The chat's "+" menu of outside tools
       security: [{}, {user: []}]
-      description: The MCP servers in MCP_SERVERS that have a `ui` block (apps/agent/src/tools-api.ts).
+      description: The MCP servers in MCP_SERVERS that have a `ui` block (services/api-py/api_py/tools.py).
       responses:
         "200":
           description: The menu.

@@ -103,10 +103,8 @@ pnpm dev                       # UI :3000, Python API :8000, Python chat agent :
 ```
 
 `pnpm dev` (also `pnpm dev:python`) needs [uv](https://docs.astral.sh/uv/).
-It starts `api-py` and `agent-py` directly, with no TypeScript agent process or API
-fallback. Storage, skills and persistent chat history need PostgreSQL and S3 below.
-The retired TypeScript backend remains available only through explicit legacy commands
-such as `pnpm dev:ts`; it is not part of the Node 26 frontend validation.
+It starts `api-py` and `agent-py`. Storage, skills and persistent chat history need
+PostgreSQL and S3 below.
 
 Open <http://localhost:3000>. Without server storage, files stay in your browser. Runs,
 the knowledge tree, sharing and memory need it: `docker compose up -d` starts
@@ -160,15 +158,13 @@ changed and how you validated it.
 | Directory | Responsibility |
 | --- | --- |
 | `apps/web` | The Next.js UI (`@knowledge-chatroom/web`) |
-| `apps/agent` | Retired TypeScript backend, kept for legacy comparisons and shared SQL/skill assets |
 | `apps/web/src/app` | Next.js routes, providers, authentication, and storage proxies |
 | `apps/web/src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
 | `apps/web/src/hooks` | Starter examples (charts, meeting picker) |
-| `apps/agent/src` | Legacy Claude SDK adapter, server, storage and tools |
-| `apps/agent/src/storage/migrations` | Database schema and access policies |
-| `apps/agent/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
-| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts used by both the UI and the agent (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) |
-| `scripts` | The E2E runner, CI summaries, and `env:check`/`env:upgrade` |
+| `services/api-py/migrations` | Database schema and access policies |
+| `services/api-py/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
+| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts the UI shares with the backend (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) and the API conformance suite |
+| `scripts` | The E2E and conformance runners, CI summaries, and `env:check`/`env:upgrade` |
 | `services/api-py` | Python storage, access, skills, memory and suggestions API at `LOCAL_AGENT_URL` |
 | `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (issue #176) |
 | `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
@@ -180,8 +176,8 @@ changed and how you validated it.
 | `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
 | `.github/workflows` | Quality checks, storage tests, and UI previews |
 
-The UI uses Next.js/React and CopilotKit. The TypeScript agent uses the Claude Agent
-SDK over AG-UI; optional server storage uses PostgreSQL and an S3-compatible store.
+The UI uses Next.js/React and CopilotKit. The chat agent runs the Claude Agent SDK
+(Python) over AG-UI; optional server storage uses PostgreSQL and an S3-compatible store.
 
 </details>
 

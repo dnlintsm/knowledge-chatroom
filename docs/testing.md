@@ -7,9 +7,8 @@ The default test command runs only fast units; integration and E2E are explicit.
 | Command | Services/credentials | Coverage |
 | --- | --- | --- |
 | `pnpm check:web` | None | Frontend ESLint, root/web/contracts TypeScript, frontend unit tests |
-| `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
-| `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
-| `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every agent server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
+| `pnpm test` / `pnpm test:unit` | None | Frontend pure tests |
+| `pnpm test:conformance` | Disposable PostgreSQL + S3 + uv | Every API server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
 | `pnpm test:e2e:storage` | Chromium + uv + PostgreSQL + S3 | Python API storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `pnpm test:e2e:login` | Chromium + uv + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
@@ -18,10 +17,7 @@ The default test command runs only fast units; integration and E2E are explicit.
 | `pnpm test:live` | Chromium + uv + Anthropic key | Opt-in live smoke coverage: the browser suite with the chat on the Python agent and the real model |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
-browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
-are listed one by one: service-free ones in `apps/agent/package.json` (`test:unit`), ones
-that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a new
-`*.test.ts` to the matching list, or it never runs.
+browser installation. Put new pure frontend specs under `tests/unit`.
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
 `services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
@@ -77,17 +73,17 @@ export S3_ACCESS_KEY_ID=knowledge
 export S3_SECRET_ACCESS_KEY=knowledge-secret
 export S3_BUCKET=knowledge-test
 export S3_PUBLIC_URL=http://localhost:8333
-pnpm test:integration
+pnpm test:conformance
 ```
 
-Create each database once. This bucket name matches the integration fixtures and
-avoids reserving separate SeaweedFS volume collections for each suite. Test blobs
-are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testing;
-integration does not fall back to `DATABASE_URL`.
+Create each database once. One bucket avoids reserving separate SeaweedFS volume
+collections for each suite. Test blobs are disposable. Missing `TEST_DATABASE_URL` or
+`S3_ENDPOINT` fails before testing; it does not fall back to `DATABASE_URL`. api-py's
+own database tests use the same values (`services/api-py/README.md`).
 
 `pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values. It resets the
 database and starts the Python API server (`services/api-py`, which needs uv) on it with
-a throwaway `AUTH_SECRET` and no TypeScript server behind it, as `pnpm dev` does (#264).
+a throwaway `AUTH_SECRET`, as `pnpm dev` does.
 Then it runs `packages/contracts/conformance/storage.test.ts` against it. That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
@@ -121,10 +117,10 @@ cd packages/knowledge-py && API_SAMPLES=/tmp/api-samples.jsonl uv run pytest -q 
 After changing the spec, regenerate the models with `uv run datamodel-codegen` in
 `packages/knowledge-py` (the Quality workflow runs it with `--check`).
 
-The normal integration suite tests vector search using a deterministic embedder.
-Set `EMBEDDING_TEST=1` to also run the real model-download test (in the agent and in
-`services/api-py`, which loads the same model through ONNX Runtime); it needs network
-access and caches roughly 120 MB for each. api-py's search tests use pgvector when the
+api-py's search tests use a deterministic embedder for vector search.
+Set `EMBEDDING_TEST=1` to also run the real model-download test in `services/api-py`,
+which loads the model through ONNX Runtime; it needs network access and caches
+roughly 120 MB. api-py's search tests use pgvector when the
 test database has it and skip search by meaning otherwise. For local UI tests, `EMBEDDING_MODEL=off` keeps
 keyword-search coverage without downloading the model.
 
@@ -175,12 +171,12 @@ mock coverage. It is not run by required CI.
 See [CI merge gates](ci.md) for the repository ruleset settings that enforce
 successful checks before merging and for preview-step limits.
 
-- `quality.yml`: the `checks` job (locked root/agent install, lint/types/units,
+- `quality.yml`: the `checks` job (locked install, lint/types/units,
   unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
   suites of `packages/knowledge-py` and every `services/*` project.
-- `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
-  including the cached real embedding-model test (`EMBEDDING_TEST=1`), then the storage
-  API conformance suite against the running agent.
+- `storage.yml`: for storage-related changes, the storage API conformance suite against
+  api-py and api-py's own tests on real PostgreSQL/pgvector/S3, including the cached
+  real embedding-model test (`EMBEDDING_TEST=1`).
 - `ui-preview.yml`: browser, storage + login, and Python agent E2E in parallel jobs,
   gated by the required `preview` job; then `publish` (not required) makes the GIF,
   uploads the images and updates the preview comment. See [CI merge gates](ci.md).
@@ -227,8 +223,8 @@ both tabs. Its fixture uses a dedicated note and removes it after testing.
 
 `tests/unit/chat-history.spec.ts` checks the chat runner and history routes with
 chats in memory: a chat replays after a new runner (as after a restart), and with
-login on each user sees, continues and changes only their own chats. The storage
-integration suite covers the `/chats` API and its row-level security, and
+login on each user sees, continues and changes only their own chats. api-py's
+`tests/test_chats.py` covers the `/chats` API and its row-level security, and
 `e2e/chat-history.spec.ts` (storage mode) chats, finds the chat in Postgres,
 reloads and reopens it from the history. `e2e/preview.spec.ts` does the same with
 chats in memory.

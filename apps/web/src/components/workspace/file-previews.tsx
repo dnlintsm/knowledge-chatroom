@@ -209,7 +209,7 @@ const linkClass =
 
 function OpenLink({ file, url }: { file: WorkspaceFile; url: string }) {
   // A blob: URL opens as this app's origin, where an SVG's scripts would run;
-  // the server sandboxes the files it serves (apps/agent/src/storage/http.ts).
+  // the server sandboxes the files it serves (services/api-py/api_py/storage_routes.py).
   if (url.startsWith("blob:") && file.mime === "image/svg+xml") return null;
   return (
     <a href={url} target="_blank" rel="noreferrer" className={linkClass}>

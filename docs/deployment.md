@@ -5,8 +5,7 @@
 `docker compose --profile demo up --build` builds the Node 26 UI from the root
 `Dockerfile` (target `app`), the Python API from `services/api-py/Dockerfile`, and
 the Python chat agent from `services/agent-py/Dockerfile`. PostgreSQL and SeaweedFS
-provide storage. The demo starts no TypeScript agent; `api` has legacy forwarding
-disabled and `app` sends chat runs to `agent-py:9300` by default.
+provide storage. `app` sends chat runs to `agent-py:9300` and everything else to `api`.
 
 The UI (3000), object store (8333, for signed binary downloads), and PostgreSQL
 (5432, for local development) are published on the host. Python services stay on the
@@ -21,8 +20,6 @@ the profile and the matching `MCP_SERVERS` line from `docker-compose.yml` to `.e
 service names such as `http://papers:9200/mcp` rather than localhost.
 
 The `python-agent` profile remains an alias for selecting the Python chat service.
-The retired TypeScript image is available only under `legacy-agent`, on Node 22;
-it is outside the Node 26 frontend migration.
 
 ## Production
 
@@ -42,11 +39,11 @@ as the Dockerfile does.
 Deploy `api-py` and `agent-py` separately with the locked Python dependencies.
 Point the UI's `LOCAL_AGENT_URL` at api-py and `AGENT_URL` at agent-py. Point
 agent-py's `LOCAL_AGENT_URL` and MCP servers' `KNOWLEDGE_STORAGE_URL` at api-py.
-Leave `TS_AGENT_URL` unset: it is only an explicit legacy fallback. api-py applies
+Leave `TS_AGENT_URL` unset: it only forwards to an older release's TypeScript server. api-py applies
 migrations, serves the API directly, and checks its own storage readiness.
 PostgreSQL and S3 are required for skills, shared storage and persistent chat history.
-`AGENT_URL` unset means agent-py at `http://127.0.0.1:9300`; `AGENT_URL=local` sends the
-chat to the legacy TypeScript agent server at `LOCAL_AGENT_URL` instead.
+`AGENT_URL` unset means agent-py at `http://127.0.0.1:9300`. (`AGENT_URL=local` posts the
+chat to `LOCAL_AGENT_URL`, which only the e2e mock agent serves.)
 
 Give api-py the settings for everything it serves (its
 [README](../services/api-py/README.md) lists each one): `DATABASE_URL`, the `S3_*`
@@ -126,8 +123,8 @@ downloads; signed links expire after five minutes. Without it, binary files are 
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
 50 MB) caps one upload.
 
-Migrations apply when the Python API server starts (a legacy TypeScript agent server
-behind it needs `MIGRATIONS=off`, and then waits for them). Back up database metadata and blob contents
+Migrations (`services/api-py/migrations`) apply when the Python API server starts
+(`MIGRATIONS=off` makes it wait for another process to apply them). Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.
@@ -136,7 +133,7 @@ documented in [Architecture](architecture.md) and restart. Verify its enabled st
 for deployments that depend on database-enforced access.
 
 Image digests in compose and CI are intentionally pinned. Update a tag and its
-verified multi-platform digest together, rerun storage integration and storage/
+verified multi-platform digest together, rerun the storage tests and storage/
 login E2E, and review the migration/runtime impact in a separate PR.
 
 `/health` confirms the HTTP server is alive; it does not prove storage migrations
@@ -145,8 +142,7 @@ startup. CI's live provider smoke test is opt-in; required mock tests establish
 application behavior without promising provider availability.
 
 The chat agent keeps a copy of each user's readable files in their run folder
-(agent-py's `AGENT_PY_WORKDIR`, or the legacy TypeScript server's `SKILLS_RUN_DIR`; default a
-temp folder) for Claude's Read/Glob/Grep: give that folder disk for up to `AGENT_WORKDIR_MAX_MB`
+(agent-py's `AGENT_PY_WORKDIR`; default a temp folder) for Claude's Read/Glob/Grep: give that folder disk for up to `AGENT_WORKDIR_MAX_MB`
 (default 500) per active user and workspace, or set `AGENT_WORKDIR=off` on it. agent-py fetches
 the copy through api-py; binary files api-py serves as store links (`S3_PUBLIC_URL`) come from
 that link, so make it reachable from agent-py too, or they are left out. See

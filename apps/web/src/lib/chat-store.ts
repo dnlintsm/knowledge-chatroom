@@ -4,8 +4,8 @@ import { WORKSPACE_HEADER } from "./workspace-request";
 
 /**
  * Where each user's chat history is kept (issue #91). With server storage
- * (DATABASE_URL on the agent server) that is the agent's `/chats` API
- * (apps/agent/src/storage/chats.ts), in Postgres, so chats survive restarts.
+ * (DATABASE_URL on the API server) that is its `/chats` API
+ * (services/api-py/api_py/chats.py), in Postgres, so chats survive restarts.
  * Without it, this process's memory: lost on restart, but still one history
  * per user. src/lib/chat-runner.ts saves runs here and replays them.
  *
