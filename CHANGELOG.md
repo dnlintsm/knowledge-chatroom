@@ -1,159 +1,155 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-### Changed
+The backend is Python now: the Python API server (`services/api-py`) and chat agent
+(`services/agent-py`) replace the TypeScript agent server, which is gone. Workspaces arrive:
+several per deployment, each with its own members (Owner, Admin, Member), screens to create,
+switch, rename, archive and leave them, and an inventory for the deployment's admins.
+Experiments get a maintainer and collaborators and can be handed over. Files lose their
+read-only flag, so roles alone decide who may write. Four database migrations run on start.
 
-- The Python workspace, including the `knowledge-chatroom` library, now requires
-  Python 3.12 or later; Python 3.10 and 3.11 are no longer supported.
+### Upgrading from 0.2.3
+
+- Move the backend to Python (issues #169, #176, #190 and #264; the [Deployment](docs/deployment.md)
+  guide and the [api-py](services/api-py/README.md) and
+  [agent-py](services/agent-py/README.md) READMEs have the details). The compose demo does
+  all of this; for your own deployment:
+  1. Back up the database and the bucket first, as for any release with migrations: api-py
+     applies them now. On a newer database than it knows, api-py refuses to start.
+  2. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+, or build
+     `services/api-py/Dockerfile` and `services/agent-py/Dockerfile`. Build and run the UI
+     on Node 26 with pnpm 12.18.0.
+  3. Stop the agent server and start api-py at its address. `LOCAL_AGENT_URL` (Next.js) and
+     the MCP servers' `KNOWLEDGE_STORAGE_URL` keep pointing there. Leave `TS_AGENT_URL`
+     unset. Give api-py the agent server's settings:
+     - storage: `DATABASE_URL`, `AUTH_MODE`, `AUTH_SECRET`, the `S3_*` settings and
+       `MAX_UPLOAD_BYTES`;
+     - search: `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY`, and a writable
+       `EMBEDDING_CACHE_DIR`;
+     - skills: `HUB_ADMINS` and `SKILL_SCRIPTS`;
+     - workspaces: `WORKSPACE_CREATORS` and `PLATFORM_ADMINS`;
+     - the "+" menu: `MCP_SERVERS`, `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS`;
+     - memory and the follow-up chips: `MEMORY`, `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES`,
+       `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`,
+       `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
+  4. Start agent-py on a private address with the model settings, `MCP_SERVERS`,
+     `SKILL_SCRIPTS` and `SKILL_SCRIPTS_DENY_READ` if scripts are on (with bubblewrap and
+     socat on its host), the `AGENT_WORKDIR*` settings and an `AGENT_PY_WORKDIR` with disk
+     for the working folders, `LOCAL_AGENT_URL` pointing at api-py and, with login on,
+     `KNOWLEDGE_PUBLIC_KEY` from api-py's `GET /identity/public-key`. Set the app's
+     `AGENT_URL` to it, or leave it unset if agent-py runs at `http://127.0.0.1:9300` next
+     to the app.
+
+  This release no longer has the TypeScript agent server, so there is no falling back to
+  its chat: stay on 0.2.3 until the Python chat agent works for you. `pnpm env:check`
+  can't spot this change, since it comes from settings your `.env` doesn't have.
+- Four migrations run when api-py starts, in this order; none of them changes who can read what:
+  `022_drop_read_only.sql`, `023_workspace_members.sql`, `024_workspace_departures.sql` and
+  `025_experiment_maintainers.sql`. Back up the database and the bucket first (step 1 above).
+- Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
+  files, linked inputs, locked skill files) become ordinary files when it runs.
+- Migration `023_workspace_members.sql` adds workspace memberships and fills them from
+  today's access: root owners (directly or through groups) become Owners, anyone else with
+  a grant, or with their own chats, memory or skill settings in the workspace, becomes a
+  Member, and the local user owns every workspace. No grant changes. Requests that name
+  no workspace, and tokens without a `ws` claim, keep using the default workspace until
+  a cut-off release that this changelog will name.
+- Migration `024_workspace_departures.sql` records who was removed from a workspace or left
+  it, so signing in doesn't add them back to the default workspace. It starts empty.
+- Migration `025_experiment_maintainers.sql` makes every existing Experiment's author its
+  maintainer, with no collaborators.
+- Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends
+  `X-File-Read-Only`, and `FileInfo` and 403 errors no longer carry `readOnly`. Clients that
+  relied on them should check the user's role instead. Deleting a skill no longer refuses
+  because one of its files is read-only.
+- The repository is a pnpm workspace with a new layout (issue #164), so commands and paths
+  change: run `pnpm install` and `pnpm <script>` instead of npm (`npm run env:check` is
+  `pnpm env:check`), the UI is in `apps/web`, the Python services in `services/`
+  (`api-py`, `agent-py`, `papers-mcp`, `lab-tools`), the shared code in `packages/`, and
+  `deploy/` is `infra/`. Compose profiles keep their names; update your own scripts and
+  compose overrides that name the old paths.
+- `pnpm env:check` lists four new optional settings: `TS_AGENT_URL`, `WORKSPACE_CREATORS`,
+  `PLATFORM_ADMINS` and `RECOVERY_IDLE_DAYS`; `pnpm env:upgrade` appends them commented out.
+  It also flags `AGENT_HOST`, `AGENT_PORT`, `SKILLS_RUN_DIR` and `SEARCH_INDEXER`, which only
+  the TypeScript agent server read, and comments them out. api-py listens on
+  `API_PY_HOST`/`API_PY_PORT` (`127.0.0.1:8000` outside its image) and agent-py on
+  `AGENT_PY_HOST`/`AGENT_PY_PORT` (`127.0.0.1:9300`).
+- Remote agent backends keep working: forwarded props stay at version 2. The run's storage
+  and memory tokens now carry its workspace (`ws`), so a backend that uses them stays in the
+  workspace the run started in without any change ([Remote agent](docs/remote-agent.md)).
 
 ### Added
 
-- The Python API server, `services/api-py` (issue #190, phase 3 of #169). It sits in front
-  of the agent server at `LOCAL_AGENT_URL`, and the agent's routes move to it one group at a
-  time. For now it passes every request through unchanged, SSE included, and checks that the
-  database has exactly the migrations it knows. It refuses to start on a newer database. The
-  agent server still applies the migrations. `pnpm dev` runs it on :8000 with the agent server
-  on :8100, so `pnpm dev` now needs [uv](https://docs.astral.sh/uv/). `pnpm dev:ts` runs the UI
-  and the agent server alone, as before. The demo compose file has a new `api` service, and the
-  app, `agent-py`, `lab-tools` and `papers` reach the agent through `http://api:8000`. The
-  conformance suite and the storage and login e2e run through it. A deployment without it
-  keeps working while it only passes requests through ([Deployment](docs/deployment.md)).
-- api-py now serves `/access` and `/nodes` itself (issue #190, step 2): people, groups,
-  grants, the admin panel's lists, the audit log and the knowledge tree, with the same
-  answers, refusals, audit entries, row-level security and change events as the agent
-  server. It passes them through until the database has the migrations it knows. Run
-  api-py in front of the agent server from this release on: without it these routes still
-  work on the agent server alone, which keeps them until phase 4.
-- api-py now serves `/files` too (issue #190, step 3): listing, reading, versions, writes,
-  renames and deletes at the workspace root and in knowledge nodes, signed store links for
-  binary files, the full-text index a write adds, and the `?watch` event stream, which
-  hears changes from both servers through Postgres. An experiment's files (`?experiment=`)
-  and proposed versions (`?propose`) still go to the agent server until step 4. api-py now
-  reads the same `S3_*` and `MAX_UPLOAD_BYTES` settings as the agent server, so give both
-  the same values; the demo compose file does.
-- api-py now serves `/experiments` and an experiment's files too (issue #190, step 4a):
-  creating and forking experiments, runs with their inputs, finishing and rerunning them,
-  status changes and deletes, with each run's `report.md` front matter written byte for
-  byte as the agent server writes it. Proposals (`/proposals`, `?propose`) and
-  `/experiments/upload` still go to the agent server until step 4b.
-- api-py now serves proposals and experiment uploads too (issue #190, step 4b): proposing a
-  file with `?propose`, listing proposals, accepting (the new version is credited to its
-  proposer), rejecting and withdrawing them, promoting an experiment's changes to its node,
-  and the multipart `POST /experiments/upload`, read part by part as the agent server reads
-  it. With this, all of step 4 is in Python.
-- api-py now serves `/search` and runs the search indexer (issue #190, step 5): words and
-  meaning ranked as the agent server ranks them, indexing files stored before search
-  existed, and embedding passages with the same local model (through ONNX Runtime) or
-  `EMBEDDING_*` API, giving the same vectors, so nothing is re-embedded. Start the agent
-  server with the new `SEARCH_INDEXER=off` so only api-py indexes (`pnpm dev`, the e2e and
-  the compose file do), and give api-py the same `EMBEDDING_*` and `SEARCH_MIN_SIMILARITY`
-  settings and a writable `EMBEDDING_CACHE_DIR`. The compose `api` service caches its model
-  in a new `api-models` volume.
-- api-py now serves `/chats` too (issue #190, step 6): each user's chat history, listed a
-  page at a time, opened, replayed run by run, saved as each run finishes, renamed, archived
-  and deleted, with the same answers and row-level security as the agent server: a chat is
-  its user's alone, workspace owners included, and storage tokens can't reach it. Searching
-  past chats for Claude stays on the agent server with memory until step 8.
+- The Python API server, `services/api-py` (FastAPI; issue #190, phase 3 of #169). It serves
+  the whole storage API at the address the agent server had (`LOCAL_AGENT_URL`), with the
+  same answers, refusals, audit entries, row-level security and change events: people,
+  groups and grants, the knowledge tree, files with versions and the `?watch` stream,
+  experiments, runs, proposals and `POST /experiments/upload`, search and its indexer, chat
+  history, skills and the skill hub, the "+" menu's `/tools` (when `MCP_SERVERS` is set for
+  it), memory with import, `/memory/agent` and the learner (with `MEMORY=on`), the follow-up
+  chips (`POST /suggest`), `GET /identity/public-key` and `POST /identity/mcp-tokens`. It
+  applies the SQL migrations under the same lock as before (`MIGRATIONS=off` waits for
+  another process instead) and refuses to start on a newer database than it knows. Search
+  embeds with the same local model (through ONNX Runtime) or `EMBEDDING_*` API as before,
+  giving the same vectors, so nothing is re-embedded; the compose `api` service caches the
+  model in a new `api-models` volume. Memory import, the learner and the chips use the
+  `ANTHROPIC_*` and model settings it is given. `TS_AGENT_URL` forwards routes it doesn't
+  know to an older release's agent server, for comparisons; unset by default.
+- The Python chat agent, `services/agent-py` (FastAPI and `ag_ui_claude_sdk`; issue #176,
+  phase 2 of #169, and #264). The app sends chats to it at `AGENT_URL`, by default
+  `http://127.0.0.1:9300`. It has everything the TypeScript chat had: the app's tools, the
+  user's open file and place on every run, file and run tools over the storage API with the
+  run's storage token, the user's skills (auto and manual modes, `/name`, `skill_used`
+  events and usage history), the user's memory (the memory prompt, the `memory_*` and
+  `chats_*` tools and `memory` events), the outside MCP servers in `MCP_SERVERS` with the
+  chat's tool chips; the follow-up chips come from api-py. With `SKILL_SCRIPTS=on`, skills'
+  scripts run in Claude Code's sandbox as before: no network, writes only in the
+  user's run folder (not its skills), agent-py's own folder, its home, other users' folders,
+  the usual secret mounts and `SKILL_SCRIPTS_DENY_READ` unreadable, and an environment with
+  no secrets. The run talks to Anthropic with a stand-in key through a proxy inside agent-py
+  on 127.0.0.1 (`agent_py/keyproxy.py`), which sends on the real one; the host needs
+  bubblewrap and socat, plus the interpreters the skills use. The working folder works as
+  before: at the start of each run, the user's folder under `AGENT_PY_WORKDIR` gets
+  `workspace/`, a read-only copy of every file they can read in the run's workspace, which
+  Claude searches with Read, Glob and Grep, confined to that folder; `save_file` stores a
+  file from it in the workspace, and an experiment Claude starts gets its inputs in
+  `run-inputs/<id>/`. `AGENT_WORKDIR=off`, `AGENT_WORKDIR_MAX_MB` and
+  `AGENT_WORKDIR_MAX_FILE_MB` work as before. Binary files served as store links
+  (`S3_PUBLIC_URL`) are fetched from that link, so it must be reachable from agent-py, or
+  those files are left out of the copy.
+- Routes for chat backends outside this repo, which the Python chat agent uses too
+  (issue #176):
+  - `POST /experiments/runs` (`{nodeId?, title?, hypothesis?, params?, inputs?, rerunOf?,
+    provenance?}`) starts a run with its inputs linked read-only and a report.md whose front
+    matter records where it came from, and `POST /experiments/{id}/finish`
+    (`{results, state?: done|failed}`) finishes it;
+  - `GET /skills/run?thread=<id>` lists the skills a run gets in that chat (mode, source,
+    files in base64), and `POST /skills/used` (`{thread, run?, skill, trigger}`) records a
+    use;
+  - `POST /identity/mcp-tokens` trades the run's `X-Knowledge-Storage` (and
+    `X-Knowledge-Memory`) tokens for its outside MCP servers' tokens (`forwardIdentity`,
+    `storageAccess`, `memoryAccess`): same user, chat and workspace, expiring no later, so a
+    backend needs no `AUTH_SECRET`.
 
-- api-py now serves `/skills` and the skill hub (`/hub`) too (issue #190, step 7a): skill
-  lists and modes (yours, the workspace's, a chat's), what an outside agent's run gets
-  (`/skills/run`, `/skills/used`), .zip export and import, deleting a workspace skill, and
-  publishing, installing, forking, diffing, verifying, yanking and reporting hub skills, with
-  the same scan flags, fingerprints and sort order as the agent server. Give api-py the same
-  `HUB_ADMINS` and `SKILL_SCRIPTS` as the agent. `/tools` follows in step 7b.
-- api-py serves the chat's "+" menu, `/tools`, too (issue #190, step 7b): the menu of
-  `MCP_SERVERS` entries with a `ui` block, and the app's calls to their `ui.tools` over
-  streamable HTTP or SSE, as the signed-in user, with the same identity and storage tokens,
-  refusals and answers as the agent server. It does this only when `MCP_SERVERS` is set
-  for api-py, so give it the same `MCP_SERVERS` (and `TOOLS_CALL_TIMEOUT_MS`,
-  `STORAGE_TOKEN_SECONDS`) as the agent; without it `/tools` stays with the agent server.
-  The demo compose file passes `MCP_SERVERS` to both.
-- api-py serves each user's own memory notes too (issue #190, step 8a): reading, writing,
-  restoring, archiving and deleting notes, the memory mode and incognito chats, the inbox's
-  accept and reject, Claude's recent changes and their Undo, and the .zip export, with the
-  same checks, versions, answers and row-level security as the agent server. It does this
-  only with `MEMORY=on` for api-py, so give it the same `MEMORY` as the agent. Import and
-  `/memory/agent` stay on the agent server for now; chats keep using memory there.
-- With `MEMORY=on`, api-py serves the rest of the memory page too (issue #190, step 8b):
-  the overview at `GET /memory`, shared notes for the workspace, a node or a group (sharing,
-  editing, deleting, Auto/Manual/Off for you or for everyone, and proposals with accept,
-  reject and withdraw), and memory packs (publish, install, fork, uninstall, and verify and
-  yank for `HUB_ADMINS`). Answers, checks and versions match the agent server's.
-- api-py imports memory too (issue #190, step 8c): pasted memory, `.md` files with front
-  matter and `.zip` exports go to the Memory inbox as on the agent server, and plain text
-  is sorted into notes by the same small model. Give api-py the agent's
-  `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL` and model settings
-  (`MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL`); without a key, the text waits as
-  one note. The demo compose file passes them.
-- api-py serves `/memory/agent` for remote backends too (issue #190, step 8c): a run's
-  memory token `via` `remote` (the Python chat agent's) gets the same prompt section, the
-  `memory_*` and `chats_*` tools and the same answers as from the agent server, with
-  search by meaning through api-py's embedding model when `EMBEDDING_*` is set there.
-  Outside MCP servers' memory tokens (`memoryAccess`) still go to the agent server, which
-  shows what they do under the chat's live reply.
-- api-py learns from quiet chats too (issue #190, step 8d): the same small model, prompt
-  and rules as the agent server's learner, with Undo in `on` mode and the inbox in Ask
-  first. Start the agent server with `MEMORY_LEARN=off` (`pnpm dev`, the compose file, the
-  e2e and conformance runs do) and give api-py your `MEMORY_LEARN` and
-  `MEMORY_IDLE_MINUTES`; without it both servers learn from each chat.
-- api-py serves the agent server's own routes too (issue #190, step 9a):
-  `GET /identity/public-key`, `POST /identity/mcp-tokens` for remote backends' MCP servers,
-  and the chat's follow-up chips (`POST /suggest`), with the same tokens, prompt, model and
-  event stream. The chips now come from api-py's model settings, so give it the agent's
-  `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`, `SUGGESTIONS_MODEL`
-  and `CLAUDE_MODEL` (the compose file does).
-- api-py applies the database migrations (issue #190, step 9b), as the agent server's
-  `migrate()` does and under the same lock. The agent server takes `MIGRATIONS=off`: it then
-  waits until the database has every migration it knows before it opens storage. `pnpm dev`,
-  the compose file, the e2e and the conformance runs start it so. `MIGRATIONS=off` for
-  api-py leaves the migrations to the agent server instead. With this, the agent server's
-  work is all in api-py except its own chat (`POST /`); it still serves every route itself
-  when run alone, until phase 4.
-- The Python chat agent runs with the app: `pnpm dev:python` starts it beside the UI and
-  the agent server with `AGENT_URL` pointing at it, the `python-agent` compose profile
-  builds `services/agent-py/Dockerfile`, and `pnpm test:e2e:python` (also in CI) runs the
-  chat against it with a real Claude Code engine and a scripted model
-  (`e2e/mock-anthropic.mjs`), so it needs no key (issue #176).
-
-- Start, rerun and finish runs over the storage API, as the agent's own run tools do:
-  `POST /experiments/runs` (`{nodeId?, title?, hypothesis?, params?, inputs?, rerunOf?,
-  provenance?}`) starts a run in state running with its inputs linked read-only and a
-  report.md whose front matter records where it came from, and
-  `POST /experiments/{id}/finish` (`{results, state?: done|failed}`) finishes it. Storage
-  tokens may use both, so a remote backend can run analyses (issue #176).
-- A run's skills over HTTP, for backends outside the agent server:
-  `GET /skills/run?thread=<id>` lists the skills a run gets in that chat (mode, source,
-  files in base64) and `POST /skills/used` (`{thread, run?, skill, trigger}`) records a
-  use. Both take the run's storage token (issue #176).
-- `POST /identity/mcp-tokens` on the agent server: a remote backend trades its run's
-  `X-Knowledge-Storage` (and `X-Knowledge-Memory`) tokens for its outside MCP servers'
-  tokens, as the agent signs them for its own servers (`forwardIdentity`, `storageAccess`,
-  `memoryAccess`): same user and chat, expiring no later. A remote backend needs no
-  `AUTH_SECRET` for them (issue #176).
-- Memory for a remote backend's chat agent: for each run with `AGENT_URL` the app also sends
+  All of them take the run's storage token. For each run with `AGENT_URL` the app also sends
   an `X-Knowledge-Memory` token for that chat (`via` `remote`; unsigned `local.` form without
-  login). With it, `/memory/agent` treats the backend as Claude in the chat: the past-chat
+  login), with which `/memory/agent` treats the backend as Claude in the chat: the past-chat
   tools too, changes made with Undo until the run has used another tool (`?tainted=1`), and
-  each tool answer lists the notes it read or changed (`events`, `tainted`). Outside MCP
-  servers' memory tokens work as before (issue #176).
-- `services/agent-py`: the chat agent in Python (FastAPI and `ag_ui_claude_sdk`), for
-  `AGENT_URL` (issue #176, step 1 of phase 2 of #169). It chats with the app's own tools,
-  checks the run's user, and gives the model the user's open file and place on every run.
-  It works on the workspace's files through the storage API with the run's storage token,
-  with the TypeScript agent's file and run tools (step 2), and has the user's skills, as
-  on the agent server: auto and manual modes, `/name`, `skill_used` events and usage
-  history, without scripts (step 3), and the user's memory in the chat: the memory prompt,
-  the `memory_*` and `chats_*` tools and `memory` events (step 4), and the outside MCP
-  servers in `MCP_SERVERS` with the chat's tool chips (step 5). Follow-up chips follow in
-  a later step. The uv workspace now needs Python 3.11 or later (the AG-UI
-  adapter does).
+  each tool answer lists the notes it read or changed (`events`, `tainted`).
 - The storage API's HTTP contract as an OpenAPI spec (`packages/contracts/openapi/storage.yaml`),
-  with TypeScript types generated from it and checks that keep the spec, the generated types
-  and the agent's own types in step (issue #169). No change to how the API behaves.
-- A storage API conformance suite (`pnpm test:conformance`) that calls every operation in the
-  spec against a running backend and checks each answer against it; CI runs it against the
-  agent in the Storage tests workflow (issue #169).
+  covering every route, with TypeScript types and Python models (`knowledge_chatroom.api` in
+  `packages/knowledge-py`, with the `api` extra for pydantic) generated from it, and a
+  conformance suite (`pnpm test:conformance`) that calls every operation against a running
+  backend and checks each answer against the spec and the Python models. CI keeps the spec,
+  the generated code and the server in step (issue #169).
+- `pnpm test:e2e:python` (also in CI) runs the chat against the Python chat agent with a real
+  Claude Code engine and a scripted model (`e2e/mock-anthropic.mjs`), so it needs no key.
+
+- File explorer toolbar (#162, #163): **New file** opens a path box (each folder has a
+  hover **+** to start there; names without an extension get `.md`), plus **Filter files**,
+  **Reveal** the open file, **Refresh** and **Collapse all**. It replaces the **New note**
+  button.
 - Upload an experiment with its files in one request: `POST /experiments/upload`
   (`/api/experiments/upload` through the UI) takes `multipart/form-data` with a `meta`
   part, `{id, path, title, hypothesis?, params?, results?, state?}`, and one part per file,
@@ -172,43 +168,33 @@
     -F 'meta={"id":"0b8f6c2e-3d1a-4f5b-9c7e-2a4d6e8f0a1b","path":"Etch/Module 3/Endpoint/Recipe tuning","title":"Higher RF"}' \
     -F 'report.md=@./report.md' -F 'data/metrics.csv=@./metrics.csv'
   ```
-- The spec and the conformance suite also cover memory, skills, the skill hub, the "+" menu's tools,
-  follow-up suggestions, the identity public key and the health check (issue #169).
-- Python models of the whole API: `knowledge_chatroom.api` (`packages/knowledge-py`, install
-  the `api` extra for pydantic) is generated from the OpenAPI spec, and CI checks that it is
-  up to date and that it parses every request and answer of the conformance run (issue #169).
 - Workspaces on the backend (issue #226, step 4 of [the design](docs/workspaces.md)): any
   signed-in user can create a workspace and becomes its Owner, with Full access on its root.
   Owners and Admins add people who have signed in, looked up by exact email, as Member or
   Admin with a starting access of none, Can view or Can edit. New routes: `GET`/`POST
   /workspaces`, `GET /workspaces/<id>`, `GET`/`POST /workspaces/<id>/members` and `GET
-  /workspaces/<id>/lookup`, all on api-py. Every storage, memory and skills request runs in
-  one workspace, chosen by the `X-Knowledge-Workspace` header, the `?workspace=` parameter or
-  a token's `ws` claim; with none of them, the default workspace. Nodes, files, experiments,
+  /workspaces/<id>/lookup`. Every storage, memory and skills request runs in one workspace,
+  chosen by the `X-Knowledge-Workspace` header, the `?workspace=` parameter or a token's
+  `ws` claim; with none of them, the default workspace. Nodes, files, experiments,
   proposals, grants, groups, chats, memory, search and `?watch` streams stay in their
-  workspace, and membership is checked on every request. The app has no screens for this
-  yet (steps 5 and 6).
-- Chat runs on the agent server keep the workspace they start in (issue #226, step 4b), named
-  the same way as other requests: Claude's file, memory and past-chat tools, the run's skills
-  and its working copy are that workspace's, and the storage and memory tokens for outside
-  MCP servers carry its `ws` claim. Each of Claude's tool calls checks again that the user
-  still belongs to the workspace. `/memory/agent` takes the workspace from the token. The
-  memory learner learns from every workspace's chats. The agent server alone (without
-  api-py) still serves `/files`, `/nodes` and the rest of the storage and skills APIs for
-  the default workspace only, and refuses (400) requests that name another.
+  workspace, and membership is checked on every request.
+- Chat runs keep the workspace they start in (issue #226, step 4b), named the same way as
+  other requests: Claude's file, memory and past-chat tools, the run's skills and its
+  working copy are that workspace's, and the storage and memory tokens for outside MCP
+  servers carry its `ws` claim. Each of Claude's tool calls checks again that the user still
+  belongs to the workspace. `/memory/agent` takes the workspace from the token. The memory
+  learner learns from every workspace's chats.
 - The app works in one workspace at a time (issue #226, step 5): its page is `/w/<slug>`,
-  and `/` and links made before workspaces (such as `/?experiment=<id>`) go to
-  `/w/default` with their query. Every call the page makes names its workspace, by the
+  and `/` and links made before workspaces (such as `/?experiment=<id>`) go to `/w/default`
+  with their query. Every call the page makes names its workspace, by the
   `X-Knowledge-Workspace` header or, for the change stream, file links and downloads,
   `?workspace=`, and opening another workspace cancels what was still loading for the old
   one. Chats, the chat history and a remote backend's storage and memory tokens are that
-  workspace's. What the browser keeps (open tabs, the last place, folded folders) is kept per
-  user and workspace; what it kept before moves into the default workspace once. Layout and
-  chat preferences stay the same everywhere. Without api-py the app opens the default
-  workspace as before. The Python chat
-  agent (`services/agent-py`) sends the run's workspace with its storage, skills and memory
-  calls, also without login, and api-py's `/identity/mcp-tokens` keeps it in local memory
-  tokens.
+  workspace's. What the browser keeps (open tabs, the last place, folded folders) is kept
+  per user and workspace; what it kept before moves into the default workspace once. Layout
+  and chat preferences stay the same everywhere. The Python chat agent (`services/agent-py`)
+  sends the run's workspace with its storage, skills and memory calls, also without login,
+  and api-py's `/identity/mcp-tokens` keeps it in local memory tokens.
 - The workspace screens (issue #226, step 6). The root of the breadcrumb is now the
   workspace switcher: the workspace's name (the knowledge tree's root shows it too) and a
   menu of your workspaces, with recent ones first once the list is long, and Create
@@ -230,52 +216,52 @@
   then (issue #226).
 - Share and the Admin panel call the top content access **Full access** instead of
   Owner, so it doesn't read like the Owner workspace role next to it (issue #226).
-- Workspace administration on the API server (issue #255, step 2 of
-  [Administration and handover](docs/workspaces.md#administration-and-handover)), with no
-  screens yet. `PATCH /workspaces/{id}/members/{userId}` changes a role: Owners set any
-  role, Admins make a Member an Admin or step down themselves, and the last Owner can't be
-  demoted (409); transferring ownership is making someone Owner, then stepping down.
-  `DELETE /workspaces/{id}/members/{userId}` removes a member (Owners anyone, Admins
-  Members) or, with your own id, leaves; with the membership go the person's direct grants
-  and memberships of the workspace's groups, and the default workspace no longer adds them
-  back when they sign in. `GET .../removal` previews that. `PATCH /workspaces/{id}` renames
-  a workspace (Owners and Admins) or archives and restores it (Owners; not the default
+- Workspace administration on the API server (issue #255, step 2 of [Administration and
+  handover](docs/workspaces.md#administration-and-handover)). `PATCH
+  /workspaces/{id}/members/{userId}` changes a role: Owners set any role, Admins make a
+  Member an Admin or step down themselves, and the last Owner can't be demoted (409);
+  transferring ownership is making someone Owner, then stepping down. `DELETE
+  /workspaces/{id}/members/{userId}` removes a member (Owners anyone, Admins Members) or,
+  with your own id, leaves; with the membership go the person's direct grants and
+  memberships of the workspace's groups, and the default workspace no longer adds them back
+  when they sign in. `GET .../removal` previews that. `PATCH /workspaces/{id}` renames a
+  workspace (Owners and Admins) or archives and restores it (Owners; not the default
   workspace), and `GET /workspaces?archived=true` lists the archived ones you own. Every
-  workspace in the answers has a `status`. A chat run, with the TypeScript or the Python
-  agent, whose user is removed, leaves, or whose workspace is archived stops at its next
-  tool boundary: a tool call already running ends and keeps its result, then the run
-  ends without another model turn; a later tool call, of any kind, is refused. A grant or
-  group membership written while its user is being removed goes with them.
-- Experiment maintainers and collaborators on both servers (issue #255, step 3). An
-  Experiment keeps its author as provenance, and has a **maintainer**, who is responsible
-  for it now: its author, until they hand it over with `PUT /experiments/{id}/maintainer`
-  (`keepAsCollaborator` keeps them on, by default). The maintainer adds and removes
-  **collaborators** with `PUT` and `DELETE /experiments/{id}/collaborators/{userId}`, and a
-  collaborator may leave. Both must be members who can view its node. Collaborators edit
-  it, its files and its runs, and see it while it is a draft; only the maintainer changes
-  its status, deletes it or chooses who works on it. Owners and Admins hand over shared or
-  archived Experiments, never drafts. Each Experiment says `maintainerId`,
-  `maintainerName`, `maintainerIsMember` and `collaborators`, and `mine` now means you
-  maintain it. Removing someone from a workspace also ends their collaborator places
-  (`collaborations` in the answer and the preview, which lists what they maintain).
-  Storage tokens can't use these routes. Migration `025_experiment_maintainers.sql` makes
-  every existing Experiment's author its maintainer, with no change in who sees what.
-  Adding a collaborator or a new maintainer holds their membership, as grants and group
-  writes do, so a removal at the same moment takes it away too; grants and group writes
-  now take the workspace's row first, which also keeps them from deadlocking with a
-  removal. An `experiment` change event names in `left` whoever just stopped working on
-  it, and they hear it even once they can't see it, so an open draft closes for them.
+  workspace in the answers has a `status`. A chat run whose user is removed or leaves, or
+  whose workspace is archived, stops at its next tool boundary: a tool call already running
+  ends and keeps its result, then the run ends without another model turn; a later tool
+  call, of any kind, is refused. A grant or group membership written while its user is being
+  removed goes with them.
+- Experiment maintainers and collaborators (issue #255, step 3). An Experiment keeps its
+  author as provenance, and has a **maintainer**, who is responsible for it now: its author,
+  until they hand it over with `PUT /experiments/{id}/maintainer` (`keepAsCollaborator`
+  keeps them on, by default). The maintainer adds and removes **collaborators** with `PUT`
+  and `DELETE /experiments/{id}/collaborators/{userId}`, and a collaborator may leave. Both
+  must be members who can view its node. Collaborators edit it, its files and its runs, and
+  see it while it is a draft; only the maintainer changes its status, deletes it or chooses
+  who works on it. Owners and Admins hand over shared or archived Experiments, never drafts.
+  Each Experiment says `maintainerId`, `maintainerName`, `maintainerIsMember` and
+  `collaborators`, and `mine` now means you maintain it. Removing someone from a workspace
+  also ends their collaborator places (`collaborations` in the answer and the preview, which
+  lists what they maintain). Storage tokens can't use these routes. Migration
+  `025_experiment_maintainers.sql` makes every existing Experiment's author its maintainer,
+  with no change in who sees what. Adding a collaborator or a new maintainer holds their
+  membership, as grants and group writes do, so a removal at the same moment takes it away
+  too; grants and group writes now take the workspace's row first, which also keeps them
+  from deadlocking with a removal. An `experiment` change event names in `left` whoever just
+  stopped working on it, and they hear it even once they can't see it, so an open draft
+  closes for them.
 - The workspace inventory and Owner recovery on the API server (issue #255, step 4 of
-  [Administration and handover](docs/workspaces.md#workspace-inventory)), with no screen
-  yet. `PLATFORM_ADMINS` names the deployment's admins (emails or login subjects; in local
-  mode the local user is one; nobody by default). `GET /platform/workspaces` lists every
-  workspace, active and archived, with its creator, member count, Owners, when it was
-  last used and whether someone who signed in lately holds Full access on its root
-  (`RECOVERY_IDLE_DAYS`, 90 by default), and no content. `POST
-  /platform/workspaces/{id}/owners` makes someone who has signed in an Owner of a
-  workspace whose Owners can no longer sign in, and with `fullAccess` gives them alone
-  Full access on its root. Both are audited in that workspace, with the admin as the
-  actor; admins can't name themselves, and being one gives no membership or content.
+  [Administration and handover](docs/workspaces.md#workspace-inventory)). `PLATFORM_ADMINS`
+  names the deployment's admins (emails or login subjects; in local mode the local user is
+  one; nobody by default). `GET /platform/workspaces` lists every workspace, active and
+  archived, with its creator, member count, Owners, when it was last used and whether
+  someone who signed in lately holds Full access on its root (`RECOVERY_IDLE_DAYS`, 90 by
+  default), and no content. `POST /platform/workspaces/{id}/owners` makes someone who has
+  signed in an Owner of a workspace whose Owners can no longer sign in, and with
+  `fullAccess` gives them alone Full access on its root. Both are audited in that workspace,
+  with the admin as the actor; admins can't name themselves, and being one gives no
+  membership or content.
 - Screens for workspace administration (issue #255, step 5). In the Admin panel's People
   tab, Owners and Admins change each member's role, with only the roles they may set, and
   remove members after a confirmation that says what goes (direct access, groups,
@@ -300,42 +286,26 @@
   last used, and a filter. "Add an Owner" finds someone by the email they signed in with
   (the new `GET /platform/users?email=` on the API server) and can give them Full access
   on the workspace, preselected when nobody active holds it. Anyone else is refused.
-- The Python chat agent runs skills' scripts (issue #264, step 2). With `SKILL_SCRIPTS=on`
-  on agent-py, a run whose skills include one with scripts gets Bash in Claude Code's
-  sandbox, as on the TypeScript agent server: no network, writes only in the user's run
-  folder (not its skills), agent-py's own folder, its home, other users' folders, the usual
-  secret mounts and `SKILL_SCRIPTS_DENY_READ` unreadable, and an environment with no
-  secrets. The run talks to Anthropic with a stand-in key through a proxy inside agent-py
-  on 127.0.0.1 (`agent_py/keyproxy.py`), which sends on the real one. agent-py's host needs
-  bubblewrap and socat, plus the interpreters the skills use (Node.js for the built-in
-  `analysis` skill's script).
-- The Python chat agent has the working folder (issue #264, step 3), as the TypeScript
-  agent server has: at the start of each run, the user's folder under `AGENT_PY_WORKDIR`
-  gets `workspace/`, a read-only copy of every file they can read in the run's workspace,
-  fetched through api-py with the run's token, and Claude searches it with Read, Glob and
-  Grep, confined to that folder. `save_file` stores a file from the folder (a script's
-  plot or CSV) in the workspace, and an experiment Claude starts gets its inputs copied to
-  `run-inputs/<id>/`. `AGENT_WORKDIR=off`, `AGENT_WORKDIR_MAX_MB` and
-  `AGENT_WORKDIR_MAX_FILE_MB` work as on the TypeScript server. Each workspace now has its
-  own folder per user, as on the TypeScript server. Binary files that api-py serves as
-  store links (`S3_PUBLIC_URL`) are fetched from that link, so it must be reachable from
-  agent-py, or those files are left out of the copy.
 
 ### Changed
 
-- The backend is Python by default (issue #264, phase 4 of #169): `pnpm dev` and the compose
-  demo run the Python API server (`services/api-py`) on its own and the Python chat agent
-  (`services/agent-py`), with no TypeScript agent server. api-py no longer forwards
-  anything unless `TS_AGENT_URL` is set (it used to default to `http://127.0.0.1:8100`):
-  unknown routes answer 404, and storage that is still starting answers 503. Unset,
-  `AGENT_URL` now means the Python chat agent at `http://127.0.0.1:9300`; `AGENT_URL=local`
-  sends the chat to `LOCAL_AGENT_URL` itself, which only the e2e mock agent serves now.
+- The backend is Python (issue #264, phase 4 of #169): `pnpm dev` runs the UI, the Python API
+  server and the Python chat agent, so it needs [uv](https://docs.astral.sh/uv/), and the
+  compose demo runs the `api` and `agent-py` services. With `AGENT_URL` unset, chats go to
+  the Python chat agent at `http://127.0.0.1:9300` (before, to the agent server itself);
+  `AGENT_URL=local` sends them to `LOCAL_AGENT_URL`, which only the e2e mock agent serves now.
+- The repository is one pnpm workspace (pnpm 12.18.0) and a uv workspace for Python
+  (issue #164): `apps/web` (the UI), `packages/contracts` (was `shared/`),
+  `packages/knowledge-py` (the `knowledge_chatroom` library the Python services share),
+  `services/` for the Python services (`papers-mcp`, moved from `examples/`, and the Python
+  agent sample's `lab-tools` server), and `infra/` (was `deploy/`). `examples/` keeps the
+  Python agent sample.
+- The Python workspace, including the `knowledge-chatroom` library, now requires
+  Python 3.12 or later; Python 3.10 and 3.11 are no longer supported.
 - The tests no longer need the TypeScript agent server (#264, step 5). `pnpm test:live`
   runs the browser suite with the chat on the Python chat agent and the real model, and
   the mock agent server (or api-py, with `DATABASE_URL` and the S3 settings) for the rest,
-  so it needs uv. `CONFORMANCE_TARGET=ts` and `E2E_API_PY=off` are gone: the conformance
-  suite and the storage and login e2e only run against api-py. The memory tools' schema
-  check (`memory-tools.json`) and the built-in skills' checks moved to api-py's tests.
+  so it needs uv. The conformance suite and the storage and login e2e run against api-py.
 - The built-in `analysis` skill profiles CSV files with `scripts/profile.py` (plain
   Python 3) instead of `profile.mjs`, since the Python chat agent's image has no Node. The
   output is the same.
@@ -350,9 +320,9 @@
   an owner, even if every signed-in owner is gone. Until a cut-off release, every
   signed-in user is a Member of the default workspace, which gives no content access, as
   before.
-- Follow-up chips work with a remote backend (`AGENT_URL`): the app keeps asking this
-  repo's API server's `POST /suggest`, which needs only the messages, instead of
-  keeping the first-round chips (issue #176).
+- Follow-up chips work with a remote backend (`AGENT_URL`): the app asks this repo's API
+  server's `POST /suggest`, which needs only the messages, instead of keeping the
+  first-round chips (issue #176).
 - Files no longer have a read-only flag: roles alone decide who may write, rename or delete a
   file (a node's or the root's editors, an experiment's author while it isn't archived), the
   same as for everything else. A run's generated `models/general_rules.md` is now an ordinary
@@ -379,13 +349,12 @@
 
 ### Removed
 
-- The TypeScript agent server, `apps/agent` (#264, step 6), with `pnpm dev:ts`,
-  `pnpm dev:agent`, `pnpm test:integration`, the compose profile `legacy-agent` and its
-  `agent` image, and the TypeScript storage tests on Node 22. The Python API server and
-  chat agent do everything it did. Its SQL migrations and built-in skills moved to
-  `services/api-py/migrations` and `services/api-py/skills`, where `MIGRATIONS_DIR` and
-  `BUILTIN_SKILLS_DIR` now default; the api-py image has them where it did. Settings only
-  it read, such as `SKILLS_RUN_DIR` and `SEARCH_INDEXER`, do nothing now.
+- The TypeScript agent server (`agent/` in 0.2.3, later `apps/agent`; #264, step 6), with
+  its npm scripts, compose service and `agent` image, and its TypeScript storage tests. The
+  Python API server and chat agent do everything it did. Its SQL migrations and built-in
+  skills moved to `services/api-py/migrations` and `services/api-py/skills`, where
+  `MIGRATIONS_DIR` and `BUILTIN_SKILLS_DIR` now default; the api-py image has them where it
+  did. Settings only it read, such as `SKILLS_RUN_DIR` and `SEARCH_INDEXER`, do nothing now.
 - The starter's A2UI demo tools: `generate_a2ui` and the flight search, the web app's demo
   catalog and its `@copilotkit/a2ui-renderer` dependency (#264, step 4; #74). No app feature
   used them, and the Python chat agent now has everything else the TypeScript one had.
@@ -397,55 +366,22 @@
   #175 made `inputs/` editable: it no longer silently picks up an edited copy. If a recorded
   input is gone, or an old record doesn't say what it held, the rerun fails and says which;
   passing `inputs` reads those files at their current versions instead (#187).
+- High-severity vulnerabilities in transitive dependencies (body-parser, follow-redirects,
+  graphql-scalars, undici) are updated (#160). The UI still needs Zod 3 through CopilotKit,
+  which the audit still reports (GHSA-mrhx-c7xc-m3w5); no patched Zod 3 exists yet.
 - `POST /experiments/upload` reads part names (the files' paths) as UTF-8. The agent server
   read them as Latin-1, so a file named `métrics.csv` was stored under a garbled path.
 
-### Upgrading
+### Known limitations
 
-- Move the backend to Python (issues #190 and #264; the [Deployment](docs/deployment.md)
-  guide and the [api-py](services/api-py/README.md) and
-  [agent-py](services/agent-py/README.md) READMEs have the details). The compose demo does
-  all of this; for your own deployment:
-  1. Back up the database and the bucket first, as for any release with migrations: api-py
-     applies them now. On a newer database than it knows, api-py refuses to start.
-  2. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+, or build
-     `services/api-py/Dockerfile` and `services/agent-py/Dockerfile`. Build and run the UI
-     on Node 26 with pnpm 12.18.0.
-  3. Stop the agent server and start api-py at its address. `LOCAL_AGENT_URL` (Next.js) and
-     the MCP servers' `KNOWLEDGE_STORAGE_URL` keep pointing there. Leave `TS_AGENT_URL`
-     unset. Give api-py the agent server's settings:
-     - storage: `DATABASE_URL`, `AUTH_MODE`, `AUTH_SECRET`, the `S3_*` settings and
-       `MAX_UPLOAD_BYTES`;
-     - search: `EMBEDDING_*`, `SEARCH_MIN_SIMILARITY`, and a writable
-       `EMBEDDING_CACHE_DIR`;
-     - skills: `HUB_ADMINS` and `SKILL_SCRIPTS`;
-     - workspaces: `WORKSPACE_CREATORS` and `PLATFORM_ADMINS`;
-     - the "+" menu: `MCP_SERVERS`, `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS`;
-     - memory and the follow-up chips: `MEMORY`, `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES`,
-       `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`), `ANTHROPIC_BASE_URL`,
-       `MEMORY_MODEL`, `SUGGESTIONS_MODEL` and `CLAUDE_MODEL`.
-  4. Start agent-py on a private address with the model settings, `MCP_SERVERS`,
-     `SKILL_SCRIPTS` and `SKILL_SCRIPTS_DENY_READ` if scripts are on (with bubblewrap and
-     socat on its host), the `AGENT_WORKDIR*` settings and an `AGENT_PY_WORKDIR` with disk
-     for the working folders, `LOCAL_AGENT_URL` pointing at api-py and, with login on, `KNOWLEDGE_PUBLIC_KEY` from
-     api-py's `GET /identity/public-key`. Set the app's `AGENT_URL` to it, or leave it unset
-     if agent-py runs at `http://127.0.0.1:9300` next to the app.
-
-  This release no longer has the TypeScript agent server, so there is no falling back to
-  its chat: stay on 0.2.3 until the Python chat agent works for you. `pnpm env:check`
-  can't spot this change, since it comes from settings your `.env` doesn't have.
-- Migration `023_workspace_members.sql` adds workspace memberships and fills them from
-  today's access: root owners (directly or through groups) become Owners, anyone else with
-  a grant, or with their own chats, memory or skill settings in the workspace, becomes a
-  Member, and the local user owns every workspace. No grant changes. Requests that name
-  no workspace, and tokens without a `ws` claim, keep using the default workspace until
-  a cut-off release that this changelog will name.
-- Migration `022_drop_read_only.sql` drops `files.read_only`. Files that were read-only (rules
-  files, linked inputs, locked skill files) become ordinary files when it runs.
-- Storage API: `PUT /files` no longer reads `X-Read-Only`, `GET /files/<path>` no longer sends
-  `X-File-Read-Only`, and `FileInfo` and 403 errors no longer carry `readOnly`. Clients that
-  relied on them should check the user's role instead. Deleting a skill no longer refuses
-  because one of its files is read-only.
+- The agent-py image has no bubblewrap or socat, so with `SKILL_SCRIPTS=on` in the compose
+  demo, a run whose skills have scripts fails to start its sandbox. Run agent-py on a host
+  that has them to use skill scripts.
+- Until a later cut-off release, requests and tokens that name no workspace use the default
+  workspace, and every signed-in user becomes a Member of it (with no content access).
+- Many docstrings in api-py and agent-py still name the TypeScript file each function was
+  ported from (`apps/agent/src/…`); those files are gone. `TS_AGENT_URL` forwarding is
+  still there; both go in a cleanup.
 
 ## 0.2.3
 

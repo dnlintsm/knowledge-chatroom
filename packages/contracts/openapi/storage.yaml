@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: knowledge-chatroom storage API
-  version: 0.2.3
+  version: 0.3.0
   description: |
     The storage API served by the Python API server (services/api-py/api_py/storage_routes.py):
     workspace files, the knowledge tree, experiments, search, proposals, chat

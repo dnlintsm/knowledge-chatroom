@@ -1,6 +1,6 @@
 [project]
 name = "agent-py"
-version = "0.2.3"
+version = "0.3.0"
 description = "The chatroom's chat agent in Python, served to the app through AGENT_URL (issue #176)"
 requires-python = ">=3.12"
 dependencies = [
