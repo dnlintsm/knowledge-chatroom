@@ -629,9 +629,12 @@ test("chat composer uses the advertised model and stops a streamed reply", async
   await expect(page.getByTestId("chat-model")).toBeDisabled();
   const answer = page.getByTestId("copilot-assistant-message").last();
   await expect(answer).toContainText("mock agent");
+  await expect(fileRef(page, "welcome.md")).toBeVisible();
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toHaveCount(0);
   await stop.click();
   await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
   await expect(answer).toContainText("mock agent");
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toBeVisible();
   await expect(page.getByTestId("chat-model")).toBeEnabled();
   const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
   expect(lastRun.forwardedProps.knowledge_chatroom.model).toBe("claude-test-model");

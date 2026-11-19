@@ -106,6 +106,8 @@ from the signed-in session (`apps/web/src/agent.ts`), replacing anything the bro
 | `tools` | The tool chips the user turned on in this chat from the "+" menu: names of MCP servers in this repo's `MCP_SERVERS` that have a `ui` block, e.g. `"papers"` for paper search. Empty when none is on. See step 8 below. Added without a new `version`. |
 | `model` | Optional model ID selected in this chat. The app shows the picker when `GET /agent/models` returns `{ "default": "<id>", "models": ["<id>", "<another-id>"] }`. The backend validates the selection against its own allowed models before passing it to the SDK. |
 
+The app keeps the model selection per chat for the lifetime of the workspace page. Reloading the page or opening the chat on another device starts with the backend's default model.
+
 Paths are relative to the place: the experiment when there is one, else the node, else the
 workspace root. That is how the storage API (`/files/<path>?node=` or `?experiment=`) and file
 references (below) name files.

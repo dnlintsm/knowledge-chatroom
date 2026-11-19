@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { ChevronDown } from "lucide-react";
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import type { ChatModels } from "@/lib/chat-models";
+import { isAborted, workspaceFetch } from "@/lib/workspace-request";
 
 const ModelContext = createContext<{ available: ChatModels | null; model?: string; choose: (model: string) => void }>({
   available: null, choose: () => {},
@@ -18,11 +19,11 @@ export function ChatModelProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function load(retry: boolean) {
       try {
-        const response = await fetch("/api/chat/models", { signal: abort.signal });
+        const response = await workspaceFetch("/api/chat/models", { signal: abort.signal });
         if (response.status >= 500) throw new Error("Model discovery is temporarily unavailable.");
         if (response.ok && response.status !== 204) setAvailable(await response.json() as ChatModels);
-      } catch {
-        if (retry && !abort.signal.aborted) timer = setTimeout(() => void load(false), 750);
+      } catch (error) {
+        if (retry && !abort.signal.aborted && !isAborted(error)) timer = setTimeout(() => void load(false), 750);
       }
     }
     void load(true);

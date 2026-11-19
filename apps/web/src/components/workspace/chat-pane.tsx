@@ -23,7 +23,7 @@ import { useWorkbench } from "./workbench";
 /** Answers, and narration inside a steps block (agent-steps-view.tsx). */
 function AssistantMessage(props: CopilotChatAssistantMessageProps) {
   const content = typeof props.message.content === "string" ? props.message.content : "";
-  const { sources, markdownRenderer } = useAnswerReferences(content);
+  const { sources, markdownRenderer } = useAnswerReferences(content, Boolean(props.isRunning && props.isLatest));
   return <AnswerSources value={sources}><StepAssistantMessage {...props} markdownRenderer={markdownRenderer} /></AnswerSources>;
 }
 

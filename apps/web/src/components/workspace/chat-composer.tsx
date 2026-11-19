@@ -2,7 +2,7 @@
 
 import type { ComponentProps } from "react";
 import { ArrowUp, CornerDownRight, FileText, FlaskConical, Square, TextSelect } from "lucide-react";
-import { useSuggestions } from "@copilotkit/react-core/v2";
+import { useAgent, useSuggestions, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { ChatModelPicker } from "./chat-model";
 import { ChatMemoryControl } from "./memory";
@@ -50,8 +50,9 @@ export function ChatDraftContext() {
 }
 
 /** CopilotKit supplies the real send/stop callback and enables the button for the active operation. */
-export function ChatSendButton({ children, className, ...props }: ComponentProps<"button">) {
-  const stopping = Boolean(children);
+export function ChatSendButton({ className, ...props }: ComponentProps<"button">) {
+  const { agent } = useAgent({ updates: [UseAgentUpdate.OnRunStatusChanged] });
+  const stopping = agent.isRunning;
   const label = stopping ? "Stop generating" : "Send message";
   return (
     <div className="kc-send-controls">

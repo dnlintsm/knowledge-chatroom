@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import { ExternalLink, FileText, MessagesSquare } from "lucide-react";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { defaultRehypePlugins } from "streamdown";
@@ -46,24 +46,30 @@ function answerSources(markdown: string, isFile: (ref: FileRef) => boolean, isNo
 }
 
 /** Share the same reference order between inline markers and the Sources view. */
-export function useAnswerReferences(content: string) {
+export function useAnswerReferences(content: string, streaming: boolean) {
   const { getFile } = useWorkspace();
-  return useMemo(() => {
-    const isNote = ({ path }: FileRef) => {
-      const file = /\.md(?:own)?$|\.markdown$/i.test(path) ? getFile(path) : undefined;
-      return Boolean(file && isTextFile(file));
-    };
-    const sources = answerSources(content, ({ path }) => Boolean(getFile(path)), isNote);
+  const isNote = useCallback(({ path }: FileRef) => {
+    const file = /\.md(?:own)?$|\.markdown$/i.test(path) ? getFile(path) : undefined;
+    return Boolean(file && isTextFile(file));
+  }, [getFile]);
+  // Streamdown can render clickable links as they arrive. Number and index
+  // references once the message settles to avoid parsing the full answer per delta.
+  const settledContent = streaming ? "" : content;
+  const sources = useMemo(
+    () => answerSources(settledContent, ({ path }) => Boolean(getFile(path)), isNote),
+    [settledContent, getFile, isNote],
+  );
+  const markdownRenderer = useMemo<CopilotChatAssistantMessageProps["markdownRenderer"]>(() => {
     const noteImages = () => workspaceNoteImages((href) => {
       const ref = parseFileRef(href);
       return ref !== null && isNote(ref);
     });
-    const markdownRenderer: CopilotChatAssistantMessageProps["markdownRenderer"] = {
+    return {
       components: { a: AnswerLink },
       rehypePlugins: [...Object.values(beforeHarden), noteImages, rootRelativeLinks, harden],
     };
-    return { sources, markdownRenderer };
-  }, [content, getFile]);
+  }, [isNote]);
+  return { sources, markdownRenderer };
 }
 
 export const AnswerSources = SourcesContext.Provider;

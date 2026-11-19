@@ -565,7 +565,7 @@ const server = http.createServer(async (req, res) => {
           : remember
             ? REMEMBER_REPLY
             : asked === "Preview a streamed response"
-              ? `${REPLY} `.repeat(6).trim()
+              ? `See [welcome.md](/notes/welcome.md#L1). ${`${REPLY} `.repeat(6).trim()}`
               : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
