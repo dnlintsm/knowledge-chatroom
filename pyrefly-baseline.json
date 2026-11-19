@@ -44,27 +44,6 @@
       "severity": "error"
     },
     {
-      "column": 11,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "bad-assignment",
-      "concise_description": "`_Environ[str] | dict[str, str]` is not assignable to variable `env` with type `dict[str, str] | None`",
-      "severity": "error"
-    },
-    {
-      "column": 13,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `get`",
-      "severity": "error"
-    },
-    {
-      "column": 40,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `get`",
-      "severity": "error"
-    },
-    {
       "column": 60,
       "path": "services/agent-py/agent_py/skills.py",
       "name": "bad-argument-type",

@@ -18,6 +18,7 @@ class FakeClaude:
     def __init__(self, options: Any = None) -> None:
         self.options = options
         self.prompts: list[Any] = []
+        self.model_changes: list[str] = []
         FakeClaude.created.append(self)
 
     async def connect(self) -> None:
@@ -28,6 +29,9 @@ class FakeClaude:
 
     async def interrupt(self) -> None:
         pass
+
+    async def set_model(self, model: str) -> None:
+        self.model_changes.append(model)
 
     async def query(self, prompt: Any, session_id: str = "default") -> None:
         if not isinstance(prompt, str):

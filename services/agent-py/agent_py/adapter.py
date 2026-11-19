@@ -11,8 +11,8 @@ the thread's first run. Three things change that for this app:
   user message, so its note goes after that tool's result.
 - `forwardedProps` come from the browser. The adapter turns whitelisted keys
   (`model`, `resume`, `max_budget_usd`, ...) into SDK options, so a browser
-  could pick the model or resume another chat's session. They are dropped; the
-  app's own `knowledge_chatroom` is read by place.py.
+  could pass arbitrary SDK settings. They are dropped. The app reads the
+  namespaced model choice separately and checks it against the deployment's models.
 - No built-in Claude Code tools (Bash, Read, Write, ...): the model works on
   the workspace through the browser's tools and this agent's workspace tools
   (workspace.py), which call the storage API with the run's storage token.
@@ -41,10 +41,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from weakref import WeakValueDictionary
 
 import httpx
 from ag_ui.core import (
@@ -52,6 +54,7 @@ from ag_ui.core import (
     CustomEvent,
     EventType,
     RunAgentInput,
+    RunErrorEvent,
     TextInputContent,
     ToolMessage,
     UserMessage,
@@ -61,7 +64,7 @@ from ag_ui_claude_sdk import ClaudeAgentAdapter
 from .keyproxy import KeyProxy, KeyRoute
 from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
-from .place import workspace_note
+from .place import chatroom_props, workspace_note
 from .revocation import membership_hooks
 from .scripts import Scripts, needs_scripts, script_options
 from .skills import (
@@ -91,6 +94,7 @@ class Run:
     """What a thread's latest run has: its folder, skills and memory, and events not yet sent."""
 
     cwd: Path | None = None
+    model: str | None = None
     skills: Sequence[RunSkill] = ()
     memory: RunMemory | None = None
     servers: RunServers | None = None
@@ -107,6 +111,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self,
         *args: Any,
         system_prompt: str = "",
+        models: tuple[str, ...] = (),
         storage_url: str | None = None,
         skills_root: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -117,6 +122,9 @@ class ChatroomAdapter(ClaudeAgentAdapter):
     ) -> None:
         super().__init__(*args, **kwargs)
         self._system_prompt = system_prompt
+        self._models = models
+        # Serialize preparation with the SDK query so a model change can't race a run on this thread.
+        self._admissions: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
         # The outside MCP servers in MCP_SERVERS (mcp.py).
         self._servers = dict(mcp_servers or {})
         self._storage_url = storage_url
@@ -149,6 +157,8 @@ class ChatroomAdapter(ClaudeAgentAdapter):
     ):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
         run = self._runs.get(thread_id or "")
+        if run and run.model:
+            options.model = run.model
         memory = run.memory if run else None
         servers = run.servers if run else None
         scripts = (
@@ -244,10 +254,43 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         `storage_token` is its X-Knowledge-Storage header (with login), `memory_token` its
         X-Knowledge-Memory, `workspace` its X-Knowledge-Workspace (None: the default workspace).
         """
+        requested = chatroom_props(input_data).get("model")
+        if (
+            self._models
+            and requested is not None
+            and (not isinstance(requested, str) or requested not in self._models)
+        ):
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+                message="The selected chat model isn't available in this deployment.",
+            )
+            return
+        model = (requested or self._models[0]) if self._models else None
+        lock = self._admissions.setdefault(input_data.thread_id, asyncio.Lock())
+        async with (
+            lock,
+            aclosing(
+                self._run(input_data, storage_token, user, memory_token, workspace, model)
+            ) as stream,
+        ):
+            async for event in stream:
+                yield event
+
+    async def _run(
+        self,
+        input_data: RunAgentInput,
+        storage_token: str | None,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> AsyncGenerator[BaseEvent, None]:
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
         remember(self._workspaces, thread_id, workspace, self._max_workers)
-        run = Run()
+        run = Run(model=model)
         if self._skills_root is not None:
             # A folder per user and workspace (issue #226): skills and the copy differ by workspace.
             folder = f"{user}@{workspace}" if workspace else user
@@ -298,16 +341,54 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             )
             run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
         remember(self._runs, thread_id, run, self._max_workers)
+        try:
+            if model and len(self._models) > 1:
+                await self._switch_cached_model(input_data, model)
+        except Exception as error:
+            logger.warning("couldn't switch chat model: %s", error)
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't switch the chat model. Please try again.",
+            )
+            return
         prepared, slash = self.prepare(input_data, run.skills)
         if slash:
             self._used(thread_id, slash.name, "slash")
         started = False
-        async for event in super().run(prepared):
-            yield event
-            started = started or event.type == EventType.RUN_STARTED
-            while started and run.pending:
-                name, value = run.pending.pop(0)
-                yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
+            async for event in stream:
+                yield event
+                started = started or event.type == EventType.RUN_STARTED
+                while started and run.pending:
+                    name, value = run.pending.pop(0)
+                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+
+    async def _switch_cached_model(self, input_data: RunAgentInput, model: str) -> None:
+        # The pinned adapter rebuilds the worker for recovery and frontend tools.
+        # A plain chat can reuse a worker; its SDK client switches in place.
+        thread = input_data.thread_id
+        entry = self._workers.get(thread)
+        if (
+            not entry
+            or input_data.tools
+            or thread in self._memory_bindings
+            or self._session_binding_store is not None
+            or self._defer_tools
+            or getattr(input_data, "resume", None)
+            or (input_data.messages and isinstance(input_data.messages[-1], ToolMessage))
+        ):
+            return
+        worker = entry["worker"]
+        client = worker._client
+        if (
+            worker.is_alive()
+            and client
+            and entry.get("chatroom_model", worker._options.model) != model
+        ):
+            await client.set_model(model)
+            entry["chatroom_model"] = model
 
     async def _keys(self) -> KeyRoute | None:
         """The key proxy for runs with scripts, started on first use; None if it can't start."""

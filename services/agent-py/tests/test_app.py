@@ -94,6 +94,25 @@ def test_a_run_streams_the_models_answer(client, claude):
     assert text == claude.reply
 
 
+def test_model_discovery_and_switching_in_one_thread(claude):
+    env = {"CLAUDE_MODEL": "claude-sonnet-5", "CHAT_MODELS": "claude-haiku-4.5, claude-sonnet-5"}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as client:
+        assert client.get("/agent/models").json() == {
+            "default": "claude-sonnet-5",
+            "models": ["claude-sonnet-5", "claude-haiku-4-5"],
+        }
+        bad = client.post("/agent/report", json=run_input(user=LOCAL, model="unavailable"))
+        assert types(events(bad)) == ["RUN_ERROR"]
+        assert claude.created == []
+        for model in ("claude-haiku-4-5", None, "claude-haiku-4-5"):
+            response = client.post("/agent/report", json=run_input(user=LOCAL, model=model))
+            assert types(events(response))[-1] == "RUN_FINISHED"
+        (session,) = claude.created
+        assert session.options.model == "claude-haiku-4-5"
+        assert session.model_changes == ["claude-sonnet-5", "claude-haiku-4-5"]
+
+
 def test_the_session_has_the_chatrooms_options(client, claude):
     body = run_input(user=LOCAL, context=OPEN_FILE)
     # The browser can't pick the model or resume another chat's session.

@@ -4,6 +4,7 @@
 
 Environment:
     CLAUDE_MODEL / ANTHROPIC_MODEL  the model (model.py), as for the TypeScript agent
+    CHAT_MODELS                    comma-separated additional models users can select
     ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...  read by Claude Code itself
     KNOWLEDGE_PUBLIC_KEY            the agent server's GET /identity/public-key; set it with login on
     AGENT_RUN_TIMEOUT_SECONDS       stop a run after this long (default 1800, 0 = never)
@@ -39,7 +40,7 @@ from knowledge_chatroom.identity import User, caller, public_key
 from .adapter import ChatroomAdapter
 from .mcp import servers_from_env
 from .memory import MEMORY_HEADER
-from .model import resolve_model
+from .model import chat_models
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
 from .scripts import scripts_from_env
@@ -58,11 +59,12 @@ def make_adapter(
     # Absolute: run folders, the sandbox's paths and the working folder's
     # checks all build on it.
     root = str(Path(env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-")).resolve())
+    models = chat_models(env)
     return ChatroomAdapter(
         name="report",
         description="The chatroom's chat agent",
         options={
-            "model": resolve_model(dict(env)),
+            "model": models[0],
             # No built-in Claude Code tools: the browser's tools and this
             # agent's own MCP tools are the only ones (adapter.py), plus Skill,
             # Read/Glob/Grep for the working folder (workdir.py) and Bash for
@@ -71,6 +73,7 @@ def make_adapter(
             "cwd": root,
         },
         system_prompt=SYSTEM_PROMPT,
+        models=models,
         storage_url=storage_url(env),
         skills_root=Path(root),
         transport=transport,
@@ -114,6 +117,13 @@ def create_app(
 
     app = FastAPI(title="agent-py", lifespan=lifespan)
     app.state.adapter = adapter
+
+    @app.get("/agent/models")
+    async def models(request: Request) -> dict[str, str | tuple[str, ...]]:
+        if caller(dict(request.headers), key, audience=None) is None:  # pyrefly: ignore[bad-argument-type]
+            raise HTTPException(401, "Sign in first")
+        available = chat_models(env)
+        return {"default": available[0], "models": available}
 
     @app.post("/agent/report")
     async def report(input_data: RunAgentInput, request: Request) -> StreamingResponse:

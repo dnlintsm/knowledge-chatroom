@@ -50,6 +50,7 @@ for a gateway) in this server's environment.
 | Variable | Meaning |
 | --- | --- |
 | `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model: `CLAUDE_MODEL`, else `ANTHROPIC_MODEL` (default `claude-sonnet-5`). |
+| `CHAT_MODELS` | Additional model IDs that this deployment allows in the chat picker, comma-separated. `GET /agent/models` advertises these IDs and the default. |
 | `KNOWLEDGE_PUBLIC_KEY` | With login on: the API server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
 | `LOCAL_AGENT_URL` | The API server, as for the app (default `http://localhost:8000`). |
 | `MCP_SERVERS` | Outside MCP servers and tool chips: give it the API server's value, so the chat's "+" menu (from the API server) names the servers this agent connects to. |
@@ -71,9 +72,9 @@ for a gateway) in this server's environment.
   experiment) and shared state go in a `<workspace>` note in front of the user's
   message, only when they changed (`agent_py/place.py`). A run that goes on after a
   browser tool such as `openRun` has no user message, so the note follows that tool's
-  result. The browser's
-  `forwardedProps` don't reach the SDK options, so a browser can't pick the model or
-  resume someone else's session. Claude Code's built-in tools are off.
+  result. The adapter drops the browser's raw `forwardedProps` before passing the
+  input to the SDK. A model chosen in `knowledge_chatroom.model` is checked against
+  the server's allowed model IDs. Claude Code's built-in tools are off.
 - `agent_py/workspace.py`: the workspace tools (`list_nodes`, `create_node`, `list_files`, `read_file`,
   `search_files`, `write_file`, `edit_file`, `list_experiments`, `create_experiment`,
   `set_experiment_results`, `update_experiment`, `propose_experiment`). Runs start and finish through

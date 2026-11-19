@@ -113,6 +113,7 @@ export function blocksForLines(blocks: LineRange[], lines: LineRange): number[] 
 /** The parts of a hast (HTML syntax tree) node the rehype plugins below use. */
 interface HastNode {
   type: string;
+  value?: string;
   tagName?: string;
   properties?: Record<string, unknown>;
   children?: HastNode[];
@@ -134,6 +135,21 @@ function rootRelative(node: HastNode) {
  * root-relative ones, so this turns the first kind into the second.
  */
 export const rootRelativeLinks = () => rootRelative;
+
+/** Legacy Markdown images that name a workspace note use the ordinary link renderer. */
+export function workspaceNoteImages(isNote: (href: string) => boolean) {
+  function visit(node: HastNode, insideLink = false) {
+    const src = node.tagName === "img" ? node.properties?.src : undefined;
+    if (!insideLink && typeof src === "string" && isNote(src)) {
+      const alt = node.properties?.alt;
+      node.tagName = "a";
+      node.properties = { href: src };
+      node.children = [{ type: "text", value: typeof alt === "string" ? alt : src }];
+    }
+    node.children?.forEach((child) => visit(child, insideLink || node.tagName === "a"));
+  }
+  return (root: HastNode) => visit(root);
+}
 
 /** Block elements a reference can land on in the markdown preview. */
 const LINE_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "tr", "hr", "pre"]);
