@@ -170,7 +170,8 @@ and `POST /api/skills/import?replace=1` move `.zip` files. For trust:
 A **run** is an experiment (see Experiments below) with a report: its `report.md`. There
 is no separate run folder or mode (issue #82):
 
-- The **Runs** view on the icon rail lists the runs where you are and below it. At the
+- The **Experiments** view (from the place switcher at the top of the Files view) lists
+  the runs where you are and below it. At the
   workspace root that is every run you can see, so the app name in the title bar goes there.
   **+** starts a run where you are (a fork of the node's files, or an empty run at the root),
   and **Compare** opens the **Runs** tab: one row per run with its state, place, author and
@@ -611,7 +612,8 @@ For local setup, see [Development](development.md).
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this
   browser's files.
-  The Knowledge view in the left rail shows the tree; clicking a node moves the workspace
+  The place switcher at the top of the Files view opens the Knowledge view, which shows
+  the tree (with the Experiments view beside it); clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
   are used instead.

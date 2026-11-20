@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Role, ServerEvent, ServerFile } from "../apps/web/src/components/workspace/server-files";
+import { showPlaces } from "./places";
 
 /** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
 async function showFiles(page: Page) {
@@ -116,7 +117,7 @@ test("overlapping saves remain ordered when leaving a place", async ({ page }) =
     await page.getByTestId("file-editor").fill("# First");
     await expect.poll(() => backend.writes).toEqual(["# First"]);
     await page.getByTestId("file-editor").fill("# Latest");
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     first.release();
@@ -177,7 +178,7 @@ test("a remote response from the previous place cannot replace the current file"
     await event(page, { op: "write", node: null, path: PATH, sha256: info.sha256 });
     await expect.poll(() => loading).toBe(true);
     backend.transport.beforeRead = async () => {};
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     await showFiles(page);
@@ -195,7 +196,7 @@ test("a file still loading when you leave and come back loads on return", async 
   let loading = false;
   try {
     const enterOther = async () => {
-      await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+      await showPlaces(page);
       await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
       await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     };

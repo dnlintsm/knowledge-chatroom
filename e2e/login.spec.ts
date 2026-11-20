@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { expectStoredNote } from "./storage-assertions";
+import { showPlaces } from "./places";
 
 /** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
 async function showFiles(page: Page) {
@@ -42,7 +43,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
 
   // Alice signs in first, so she owns the workspace.
   const alice = await signIn(browser, "Alice Admin");
-  await alice.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(alice);
   const aliceTree = alice.getByRole("tree", { name: "Knowledge tree" });
   await aliceTree.getByRole("button", { name: /^New / }).click();
   await alice.getByPlaceholder(/^New .* name$/).fill(TECH);
@@ -58,7 +59,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
 
   // Bob signs in: nothing is shared with him yet.
   const bob = await signIn(browser, "Bob Builder");
-  await bob.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(bob);
   await expect(bob.getByRole("tree", { name: "Knowledge tree" })).toContainText(
     "Nothing in the knowledge tree is shared with you yet.",
   );
@@ -76,7 +77,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
 
   // Bob now sees it, can read the note, and gets no editing controls.
   await bob.reload();
-  await bob.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(bob);
   const bobTree = bob.getByRole("tree", { name: "Knowledge tree" });
   await bobTree.getByTestId("knowledge-node").filter({ hasText: TECH }).click();
   await showFiles(bob);
