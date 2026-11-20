@@ -9,7 +9,7 @@ work easier to find, understand, and reuse.
 
 ## Features
 
-- **Experiments** — list and compare experiments in the Experiments view, all of them or
+- **Experiments** — list and compare experiments in the Experiments view (open it from the place switcher above the file tree), all of them or
   a node's, then open one with its files, report, parameters, results, and chat together.
 - **Work with Claude in context** — discuss the open file or selected lines; follow
   file citations back to the editor and let Claude read, write and edit the files you

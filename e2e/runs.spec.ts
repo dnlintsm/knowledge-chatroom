@@ -2,9 +2,11 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 // The agent's database client: provenance is only written by Claude's tools,
 // which the mock agent doesn't run, so this test writes one directly.
 import postgres from "postgres";
+import { showPlaces } from "./places";
 
 /** Shows a sidebar view; clicking it while it is already shown would fold the sidebar away. */
 async function showView(page: Page, name: "Files" | "Experiments") {
+  if (name === "Experiments") return showPlaces(page, "Experiments");
   const button = page.getByRole("button", { name, exact: true });
   if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
 }
@@ -142,7 +144,7 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await expect(rows).toHaveCount(3);
 
     // Going to a node in the tree points the list there, sub-levels included.
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     const tree = page.getByRole("tree", { name: "Knowledge tree" });
     await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
     await showView(page, "Experiments");
@@ -188,7 +190,7 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await expect(page).toHaveURL(/[?&]list=all/);
 
     // On a node, All chosen with ✕ survives a reload too.
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
     await showView(page, "Experiments");
     await expect(scope).toContainText("In Scope etch");
