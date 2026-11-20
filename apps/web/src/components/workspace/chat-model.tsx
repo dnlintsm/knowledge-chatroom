@@ -56,12 +56,17 @@ export function ChatModelPicker({ disabled }: { disabled: boolean }) {
   const { available, model, choose } = useContext(ModelContext);
   if (!available || available.models.length < 2) return null;
   const selected = model ?? available.default;
+  // Short names in the list too, unless two IDs share one (dated snapshots), where only the ID tells them apart.
+  const labels = available.models.map(modelLabel);
+  const optionLabel = (id: string, i: number) => labels.indexOf(labels[i]) === labels.lastIndexOf(labels[i]) ? labels[i] : id;
   return (
     <label className="kc-model-picker" title={selected}>
       <span aria-hidden="true">{modelLabel(selected)}</span><ChevronDown aria-hidden="true" />
       <select aria-label="Chat model" data-testid="chat-model" value={selected} disabled={disabled}
         onChange={(event) => choose(event.target.value)}>
-        {available.models.map((id) => <option key={id} value={id}>{id}</option>)}
+        {available.models.map((id, i) => (
+          <option key={id} value={id}>{optionLabel(id, i)}{id === available.default ? " (default)" : ""}</option>
+        ))}
       </select>
     </label>
   );

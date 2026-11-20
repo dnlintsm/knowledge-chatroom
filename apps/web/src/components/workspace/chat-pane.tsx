@@ -5,7 +5,9 @@ import { History, MessageSquarePlus, MessagesSquare } from "lucide-react";
 import {
   CopilotChat,
   CopilotChatUserMessage,
+  useAgent,
   useCopilotChatConfiguration,
+  UseAgentUpdate,
   type CopilotChatAssistantMessage,
   type CopilotChatAssistantMessageProps,
   type CopilotChatInput,
@@ -17,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { ChatStepsProvider, ReasoningStep, StepAssistantMessage, StepsModeButton, stepRows, useChatSteps } from "./agent-steps-view";
 import { AnswerSources, useAnswerReferences } from "./chat-answer";
 import { ChatHistory } from "./chat-history";
+import { useMemory } from "./memory";
 import { SkillChatInput } from "./skills";
 import { useWorkbench } from "./workbench";
 
@@ -110,7 +113,7 @@ function ChatPaneView() {
         </div>
       )}
       {/* Kept mounted under the history so the conversation and its tools survive. */}
-      <div className={cn("min-h-0 flex-1", history && "hidden")}>
+      <div className={cn("relative min-h-0 flex-1", history && "hidden")}>
         <CopilotChat
           attachments={{ enabled: true }}
           // A slot may be any component taking the input's props; the type asks for its statics too.
@@ -120,7 +123,26 @@ function ChatPaneView() {
           welcomeScreen={false}
           className="h-full"
         />
+        <ChatEmptyState />
       </div>
     </section>
+  );
+}
+
+/** A new chat says what Claude can work with, above the suggestions and the composer. */
+function ChatEmptyState() {
+  const { agent } = useAgent({ updates: [UseAgentUpdate.OnMessagesChanged, UseAgentUpdate.OnRunStatusChanged] });
+  const { status, mode, incognito } = useMemory();
+  if (agent.messages.length > 0 || agent.isRunning) return null;
+  const remembers = status === "ready" && mode !== "off" && !incognito;
+  return (
+    <div data-testid="chat-empty" className="kc-chat-empty">
+      <p className="kc-chat-empty-title">Ask Claude about your workspace</p>
+      <p>
+        Claude sees the file you have open and any text you select, and can read, create and edit files here.
+        {remembers && " It remembers what helps across chats."}
+      </p>
+      <p>Pick a suggestion below, or type <kbd>/</kbd> to run a skill.</p>
+    </div>
   );
 }

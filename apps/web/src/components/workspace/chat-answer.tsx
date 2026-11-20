@@ -93,8 +93,9 @@ function FileRefLink({ fileRef, children }: { fileRef: FileRef; children: ReactN
   if (!file) return <span title={`${label} (not a file in your workspace)`} className="text-muted-foreground underline decoration-dashed">{children}</span>;
   return (
     <button type="button" data-testid="file-ref" title={label} aria-label={`Open ${label}`}
-      onClick={() => open(file.path, lines)} className={number ? "kc-citation" : "kc-citation-link"}>
-      {number ? <><span aria-hidden="true">{number}</span><span className="sr-only">{children}</span></> : children}
+      onClick={() => open(file.path, lines)} className="kc-citation-link">
+      {/* The link text is often a noun the sentence needs, so it stays visible; the number matches Sources. */}
+      {children}{number > 0 && <span className="kc-citation" aria-hidden="true">{number}</span>}
     </button>
   );
 }

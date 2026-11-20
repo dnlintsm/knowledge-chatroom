@@ -1,5 +1,4 @@
 .kc-chat {
-  container: kc-chat / inline-size;
   --kc-surface: #f6f5fa;
   --kc-accent: #5943a5;
   --kc-accent-text: #493590;
@@ -33,6 +32,23 @@
   color: var(--kc-accent-text);
 }
 
+.kc-chat-empty {
+  position: absolute;
+  inset: 0 0 auto;
+  display: grid;
+  gap: .375rem;
+  padding: 12% 1.5rem 0;
+  color: var(--muted-foreground);
+  font-size: .8125rem;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+  /* Over the empty message list, under CopilotKit's input overlay (z-20). */
+  z-index: 10;
+}
+.kc-chat-empty-title { color: var(--foreground); font-size: .9375rem; font-weight: 650; }
+.kc-chat-empty kbd { padding: 0 .3125rem; border: 1px solid var(--border); border-radius: .25rem; font-family: var(--font-code); font-size: .75rem; }
+
 .kc-chat .kc-user-row { align-items: flex-end; padding-top: 1.125rem; }
 .kc-chat .kc-user-bubble {
   max-width: 90%;
@@ -45,6 +61,8 @@
 .kc-chat .kc-user-row [data-testid="copilot-user-toolbar"] { visibility: visible; opacity: 0; pointer-events: none; }
 .kc-chat .kc-user-row:hover [data-testid="copilot-user-toolbar"],
 .kc-chat .kc-user-row [data-testid="copilot-user-toolbar"]:focus-within { opacity: 1; pointer-events: auto; }
+/* Touch screens have no hover, so copy and edit stay visible there. */
+@media (hover: none) { .kc-chat .kc-user-row [data-testid="copilot-user-toolbar"] { opacity: 1; pointer-events: auto; } }
 .kc-chat .kc-assistant-heading { margin-bottom: .625rem; }
 .kc-chat .kc-answer-markdown { min-width: 0; overflow-wrap: anywhere; }
 .kc-answer-views {
@@ -83,20 +101,30 @@
 .kc-source-row svg { flex: none; width: 1rem; height: 1rem; }
 .kc-source-preview { border-radius: .5rem; background: var(--kc-surface); padding: .625rem; }
 .kc-source-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; margin-top: .375rem; font-size: .75rem; }
+.kc-citation-link {
+  color: var(--kc-accent-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: .125rem;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.kc-citation-link:hover { text-decoration-color: currentColor; }
 .kc-citation {
   display: inline-grid;
   place-items: center;
-  min-width: 1.375rem;
-  min-height: 1.375rem;
-  vertical-align: baseline;
-  color: var(--kc-accent-text);
-  font-size: .6875rem;
+  min-width: 1rem;
+  height: 1rem;
+  margin-inline-start: .1875rem;
+  padding-inline: .1875rem;
+  border-radius: .25rem;
+  background: var(--kc-tint);
+  font-size: .625rem;
   font-weight: 650;
-  cursor: pointer;
+  line-height: 1;
+  vertical-align: super;
 }
-.kc-citation > span[aria-hidden] { display: grid; place-items: center; min-width: 1rem; height: 1rem; padding-inline: .125rem; border-radius: .25rem; background: var(--kc-tint); }
-.kc-citation:hover > span[aria-hidden], .kc-citation:focus-visible > span[aria-hidden] { outline: 1px solid var(--kc-accent); }
-.kc-citation-link { color: var(--kc-accent-text); text-decoration: underline; cursor: pointer; }
+.kc-citation-link:hover > .kc-citation, .kc-citation-link:focus-visible > .kc-citation { outline: 1px solid var(--kc-accent); }
 
 .kc-chat-composer {
   pointer-events: auto;
@@ -132,6 +160,7 @@
   color: var(--muted-foreground);
   background: var(--card);
 }
+.kc-draft-context > .kc-draft-label { padding-inline: .125rem; background: none; }
 .kc-draft-context svg { width: .75rem; height: .75rem; flex: none; }
 .kc-composer-context [data-testid="tool-chips"] { margin: 0; padding: 0; }
 .kc-chat-composer [data-testid="skill-status"] { padding: .1875rem .5rem .3125rem; border-top: 1px solid var(--border); }
@@ -191,21 +220,25 @@
 @keyframes kc-generating { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .kc-send[data-running]::before { animation: none; } }
 
+/* Chips size to their labels and wrap, so a label is never cut off: it has to be read before choosing. */
 .kc-suggestions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: .3125rem;
   margin: 0 .75rem .4375rem;
   pointer-events: auto;
 }
 .kc-suggestions button {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 100%;
   min-width: 0;
-  align-items: center;
+  align-items: flex-start;
   gap: .25rem;
-  padding: .375rem .375rem;
+  padding: .375rem .5rem;
   border-radius: .375rem;
   font-size: .75rem;
+  line-height: 1.35;
   text-align: start;
   background: var(--kc-surface);
   color: var(--kc-accent-text);
@@ -213,12 +246,8 @@
 }
 .kc-suggestions button:disabled { cursor: progress; }
 .kc-suggestions button:hover:not(:disabled) { background: var(--kc-tint); }
-.kc-suggestions button > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.kc-suggestions svg { width: .75rem; height: .75rem; flex: none; }
-@container kc-chat (max-width: 400px) {
-  .kc-suggestions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .kc-suggestions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
-}
+.kc-suggestions button > span { min-width: 0; overflow-wrap: anywhere; }
+.kc-suggestions svg { width: .75rem; height: .75rem; flex: none; margin-top: .125rem; }
 @media (pointer: coarse) { .kc-send { width: 2.75rem; height: 2.75rem; } }
 
 .kc-memory-activity {

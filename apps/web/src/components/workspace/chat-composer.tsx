@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { ArrowUp, CornerDownRight, FileText, FlaskConical, Square, TextSelect } from "lucide-react";
+import { ArrowUp, CornerDownRight, Eye, FileText, FlaskConical, Square, TextSelect } from "lucide-react";
 import { useAgent, useSuggestions, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
 import { ChatModelPicker } from "./chat-model";
@@ -35,7 +35,9 @@ export function ChatSuggestions() {
 export function ChatDraftContext() {
   const { activeFile, selection, experiment } = useWorkspace();
   return (
-    <div data-testid="chat-context" aria-label="Available to Claude" className="kc-draft-context">
+    <div data-testid="chat-context" className="kc-draft-context">
+      {/* Labelled, so the chips read as what Claude sees rather than attachments to remove. */}
+      <span className="kc-draft-label"><Eye aria-hidden="true" /> Claude sees</span>
       {experiment && (
         <span data-testid="chat-context-run" title={`Experiment: ${experiment.title}`}>
           <FlaskConical aria-hidden="true" /><span className="truncate">{experiment.title}</span>
