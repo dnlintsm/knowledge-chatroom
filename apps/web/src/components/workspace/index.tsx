@@ -128,6 +128,8 @@ function WorkspaceLayout() {
   );
 }
 
+const INSPECTOR_SHOWN = process.env.NODE_ENV === "development";
+
 function TitleBar() {
   const { setTheme } = useTheme();
   const { panes } = useWorkbench();
@@ -135,8 +137,10 @@ function TitleBar() {
   const button =
     "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer";
   return (
-    // Right padding leaves room for the CopilotKit inspector button pinned top-right.
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4 pr-24">
+    // In development, right padding leaves room for the CopilotKit inspector
+    // button pinned top-right; CopilotKit shows it only there (on localhost), so
+    // elsewhere the title bar's buttons sit at the right edge.
+    <header className={cn("flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4", INSPECTOR_SHOWN ? "pr-24" : "pr-2")}>
       <HomeLink />
       <StorageStatus />
       <PlaceBreadcrumb />
