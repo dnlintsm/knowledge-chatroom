@@ -60,9 +60,12 @@ export function ChatModelPicker({ disabled }: { disabled: boolean }) {
   const labels = available.models.map(modelLabel);
   const optionLabel = (id: string, i: number) => labels.indexOf(labels[i]) === labels.lastIndexOf(labels[i]) ? labels[i] : id;
   return (
-    <label className="kc-model-picker" title={selected}>
-      <span aria-hidden="true">{modelLabel(selected)}</span><ChevronDown aria-hidden="true" />
+    // A real <select> under a styled label: the native list stays accessible.
+    <label title={selected}
+      className="relative inline-flex min-w-0 items-center gap-0.75 rounded p-1 text-label text-brand-text focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand has-disabled:opacity-55 [&_svg]:size-3.5 [&_svg]:shrink-0">
+      <span aria-hidden="true" className="min-w-0 truncate">{modelLabel(selected)}</span><ChevronDown aria-hidden="true" />
       <select aria-label="Chat model" data-testid="chat-model" value={selected} disabled={disabled}
+        className="absolute inset-0 size-full cursor-pointer opacity-0"
         onChange={(event) => choose(event.target.value)}>
         {available.models.map((id, i) => (
           <option key={id} value={id}>{optionLabel(id, i)}{id === available.default ? " (default)" : ""}</option>

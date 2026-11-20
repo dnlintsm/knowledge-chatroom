@@ -15,9 +15,10 @@ import {
   type CopilotChatUserMessageProps,
   type Message,
 } from "@copilotkit/react-core/v2";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { ChatStepsProvider, ReasoningStep, StepAssistantMessage, StepsModeButton, stepRows, useChatSteps } from "./agent-steps-view";
-import { AnswerSources, useAnswerReferences } from "./chat-answer";
+import { AnswerSources, BrandMark, useAnswerReferences } from "./chat-answer";
 import { ChatHistory } from "./chat-history";
 import { useMemory } from "./memory";
 import { SkillChatInput } from "./skills";
@@ -30,8 +31,20 @@ function AssistantMessage(props: CopilotChatAssistantMessageProps) {
   return <AnswerSources value={sources}><StepAssistantMessage {...props} markdownRenderer={markdownRenderer} /></AnswerSources>;
 }
 
+// The toolbar (copy, edit) shows on hover or focus, and always on touch screens,
+// which have no hover. It is CopilotKit's, so it is found by its test ID.
+// `!` wins over CopilotKit's classes on the same element.
+const userRow = [
+  "items-end! pt-4.5!",
+  "[&_[data-testid=copilot-user-toolbar]]:visible! [&_[data-testid=copilot-user-toolbar]]:pointer-events-none! [&_[data-testid=copilot-user-toolbar]]:opacity-0!",
+  "hover:[&_[data-testid=copilot-user-toolbar]]:pointer-events-auto! hover:[&_[data-testid=copilot-user-toolbar]]:opacity-100!",
+  "[&_[data-testid=copilot-user-toolbar]]:focus-within:pointer-events-auto! [&_[data-testid=copilot-user-toolbar]]:focus-within:opacity-100!",
+  "hover-none:[&_[data-testid=copilot-user-toolbar]]:pointer-events-auto! hover-none:[&_[data-testid=copilot-user-toolbar]]:opacity-100!",
+].join(" ");
+const userBubble = "max-w-[90%]! wrap-anywhere! bg-brand-tint! text-[var(--foreground)]! rounded-[.875rem_.875rem_.25rem_.875rem]! px-3! py-2!";
+
 function UserMessage(props: CopilotChatUserMessageProps) {
-  return <CopilotChatUserMessage {...props} className={cn("kc-user-row", props.className)} messageRenderer={{ className: "kc-user-bubble" }} />;
+  return <CopilotChatUserMessage {...props} className={cn(userRow, props.className)} messageRenderer={{ className: userBubble }} />;
 }
 
 const groupWhileRunning = (messages: Message[]) => stepRows(messages, true);
@@ -74,37 +87,30 @@ function ChatPaneView() {
     }),
     [running],
   );
-  const headerButton =
-    "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer";
-
   return (
-    <section aria-label="Chat" className="kc-chat flex h-full min-h-0 flex-col bg-[var(--background)]">
+    <section aria-label="Chat" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
       {/* Controls stay left: the CopilotKit inspector button floats at the top-right. */}
-      <header className="kc-chat-header flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3">
-        <span className="kc-chat-title"><MessagesSquare aria-hidden="true" /> Chat</span>
-        <button
-          type="button"
+      <header className="flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3">
+        <span className="flex items-center gap-2 text-body font-semibold"><BrandMark icon={MessagesSquare} /> Chat</span>
+        <IconButton
           title="New chat"
           aria-label="New chat"
           onClick={() => {
             setHistory(false);
             chat.newThread();
           }}
-          className={headerButton}
         >
-          <MessageSquarePlus className="size-4" />
-        </button>
-        <button
-          type="button"
+          <MessageSquarePlus />
+        </IconButton>
+        <IconButton
           title={history ? "Back to chat" : "Chat history"}
           aria-label="Chat history"
           aria-pressed={history}
           onClick={() => setHistory(!history)}
-          className={cn(headerButton, history && "bg-[var(--card)] text-[var(--foreground)] shadow-sm")}
         >
-          <History className="size-4" />
-        </button>
-        <StepsModeButton className={headerButton} />
+          <History />
+        </IconButton>
+        <StepsModeButton />
       </header>
 
       {history && (
@@ -136,13 +142,15 @@ function ChatEmptyState() {
   if (agent.messages.length > 0 || agent.isRunning) return null;
   const remembers = status === "ready" && mode !== "off" && !incognito;
   return (
-    <div data-testid="chat-empty" className="kc-chat-empty">
-      <p className="kc-chat-empty-title">Ask Claude about your workspace</p>
+    // Over the empty message list, under CopilotKit's input overlay (z-20).
+    <div data-testid="chat-empty"
+      className="pointer-events-none absolute inset-x-0 top-0 z-10 grid gap-1.5 px-6 pt-[12%] text-center text-body text-[var(--muted-foreground)]">
+      <p className="text-title font-semibold text-[var(--foreground)]">Ask Claude about your workspace</p>
       <p>
         Claude sees the file you have open and any text you select, and can read, create and edit files here.
         {remembers && " It remembers what helps across chats."}
       </p>
-      <p>Pick a suggestion below, or type <kbd>/</kbd> to run a skill.</p>
+      <p>Pick a suggestion below, or type <kbd className="rounded border border-[var(--border)] px-1.25 font-[family-name:var(--font-code)] text-label">/</kbd> to run a skill.</p>
     </div>
   );
 }

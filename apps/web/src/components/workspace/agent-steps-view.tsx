@@ -23,6 +23,7 @@ import {
   type MessageGroupWrapperProps,
   type MessageRow,
 } from "@copilotkit/react-core/v2";
+import { IconButton } from "@/components/ui/icon-button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ChatAnswer } from "./chat-answer";
@@ -130,23 +131,21 @@ export function useChatSteps() {
 }
 
 /** The chat header's switch between Compact and Detailed steps. */
-export function StepsModeButton({ className }: { className?: string }) {
+export function StepsModeButton() {
   const { mode, setMode } = useChatSteps();
   const detailed = mode === "detailed";
   const title = detailed ? "Detailed steps: showing every step. Switch to compact" : "Compact steps: showing results. Switch to detailed";
   const Icon = detailed ? ListTree : ListCollapse;
   return (
-    <button
-      type="button"
+    <IconButton
       data-testid="steps-mode"
       title={title}
       aria-label="Show every step"
       aria-pressed={detailed}
       onClick={() => setMode(detailed ? "compact" : "detailed")}
-      className={cn(className, detailed && "bg-[var(--card)] text-[var(--foreground)] shadow-sm")}
     >
-      <Icon className="size-4" />
-    </button>
+      <Icon />
+    </IconButton>
   );
 }
 
@@ -284,7 +283,7 @@ export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
             {text && <ChatAnswer isRunning={props.isRunning && current}>{markdownRenderer}</ChatAnswer>}
             {toolCallsView}
             {current && !hasSteps && (skills.used.length > 0 || memory.events.some((event) => event.kind === "read")) && (
-              <details className="kc-turn-activity"><summary>Activity</summary><ChatTurnActivity /></details>
+              <details className="mt-1.5 text-label text-[var(--muted-foreground)]"><summary className="cursor-pointer">Activity</summary><ChatTurnActivity /></details>
             )}
             {current && <ChatMemoryActivity />}
             {toolbarVisible && toolbar}

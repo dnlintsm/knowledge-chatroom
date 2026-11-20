@@ -18,12 +18,17 @@ const buttonVariants = cva(
           "hover:bg-[var(--secondary)] hover:text-[var(--secondary-foreground)]",
         destructive:
           "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:opacity-90",
+        // Low-emphasis controls beside content. `aria-pressed` shows the selected one.
+        quiet:
+          "text-[var(--muted-foreground)] hover:bg-brand-tint hover:text-brand-text aria-pressed:bg-brand-tint aria-pressed:text-brand-text",
       },
       size: {
         default: "h-9 px-4 py-2",
         sm: "h-8 rounded-md px-3 text-xs",
         lg: "h-10 rounded-md px-6",
         icon: "h-9 w-9",
+        // Inline controls in dense surfaces such as the chat.
+        xs: "h-auto gap-1.25 rounded-md px-1.75 py-1 text-label font-normal [&_svg]:size-3.5 [&_svg]:shrink-0",
       },
     },
     defaultVariants: {

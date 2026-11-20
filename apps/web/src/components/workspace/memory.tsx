@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Archive, Bot, Brain, Check, Download, EyeOff, History, Inbox, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
+import { buttonVariants } from "@/components/ui/button";
+import { PopoverMenu, PopoverMenuItem, closePopoverMenu } from "@/components/ui/popover-menu";
 import { cn } from "@/lib/utils";
 import { ImportMemory, InstalledPacks, PACKS, PackBrowser } from "./memory-packs";
 import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
@@ -1009,25 +1011,20 @@ export function ChatMemoryControl() {
   if (status !== "ready") return null;
   const label = mode === "off" ? "Off" : incognito ? "Incognito" : mode === "ask" ? "Ask" : "On";
   return (
-    <details className="kc-memory-control" data-testid="memory-status" onKeyDown={(event) => {
-      if (event.key !== "Escape" || !event.currentTarget.open) return;
-      event.currentTarget.open = false;
-      event.currentTarget.querySelector("summary")?.focus();
-    }}>
-      <summary className="kc-control"><Brain aria-hidden="true" /><span>Memory · {label}</span></summary>
-      <div className="kc-control-popover">
-        {mode !== "off" && (
-          <button type="button" data-testid="memory-incognito" aria-pressed={incognito}
-            onClick={() => void setIncognito(!incognito)}>
-            <EyeOff aria-hidden="true" /> {incognito ? "Resume memory in this chat" : "Pause memory in this chat"}
-          </button>
-        )}
-        <button type="button" onClick={(event) => {
-          event.currentTarget.closest("details")?.removeAttribute("open");
-          sidebar.show("memory");
-        }}><Brain aria-hidden="true" /> Manage memory</button>
-      </div>
-    </details>
+    <PopoverMenu className="me-auto" data-testid="memory-status"
+      triggerClassName={buttonVariants({ variant: "quiet", size: "xs" })}
+      trigger={<><Brain aria-hidden="true" /><span>Memory · {label}</span></>}>
+      {mode !== "off" && (
+        <PopoverMenuItem data-testid="memory-incognito" aria-pressed={incognito}
+          onClick={() => void setIncognito(!incognito)}>
+          <EyeOff aria-hidden="true" /> {incognito ? "Resume memory in this chat" : "Pause memory in this chat"}
+        </PopoverMenuItem>
+      )}
+      <PopoverMenuItem onClick={(event) => {
+        closePopoverMenu(event.currentTarget);
+        sidebar.show("memory");
+      }}><Brain aria-hidden="true" /> Manage memory</PopoverMenuItem>
+    </PopoverMenu>
   );
 }
 
@@ -1048,7 +1045,7 @@ export function ChatMemoryActivity({ reads = false }: { reads?: boolean }) {
   const chips = [...byNote.values()].filter((event) => (event.kind === "read") === reads);
   if (chips.length === 0) return null;
   return (
-    <div className="kc-memory-activity">
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-raised px-2 py-1.5 text-label text-[var(--muted-foreground)]">
       <Brain className="size-3.5 shrink-0 text-violet-500" aria-hidden="true" />
       {chips.map((event) => (
           <span
