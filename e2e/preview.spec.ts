@@ -54,6 +54,8 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toBeVisible();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await expect(page.getByTestId("chat-context-run")).toHaveCount(0);
+  // A new chat says what Claude can work with instead of starting blank.
+  await expect(page.getByTestId("chat-empty")).toContainText("Ask Claude about your workspace");
   await shot(page, "01-workspace");
 
   // A report from a sample run folder, and Claude seeing it.
@@ -69,6 +71,7 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByTestId("chat-context")).toContainText("selected chars");
 
   await send(page, "Summarize this file and save it under artifacts/");
+  await expect(page.getByTestId("chat-empty")).toHaveCount(0);
   // The suggestion chips hide while a run streams and come back once it ends.
   await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
@@ -525,7 +528,12 @@ test("file references in answers open the cited lines", async ({ page }) => {
   test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await openHome(page);
   await send(page, citesFiles);
-  await fileRef(page, "The Pragmatic Programmer").click(reply);
+  // The link text stays readable in the sentence, with its source number beside it.
+  const book = fileRef(page, "The Pragmatic Programmer");
+  await expect(book).toBeVisible(reply);
+  expect((await book.boundingBox())!.width).toBeGreaterThan(80);
+  await expect(book.locator(".kc-citation")).toHaveText("1");
+  await book.click();
 
   // The preview switches to the file and highlights the cited table row.
   await expect(page.getByRole("tab", { name: /reading-list\.md/ })).toHaveAttribute("aria-selected", "true");
@@ -601,6 +609,10 @@ test("chat suggestions: first round follows what is open, then follow-ups", asyn
   if (process.env.E2E_MODE !== "live") {
     await expect(chip("Check the evidence")).toBeVisible();
     await expect(page.getByTestId("copilot-suggestion")).toHaveCount(3);
+    // No label is cut off: it has to be read before choosing.
+    const clipped = await page.getByTestId("copilot-suggestion").locator("span").evaluateAll((labels) =>
+      labels.filter((label) => label.scrollWidth > label.clientWidth).map((label) => label.textContent));
+    expect(clipped).toEqual([]);
     await chip(/Compare which assumptions/).click();
     await expect(input).toHaveValue(/and point to the supporting lines\./);
     await page.setViewportSize({ width: 390, height: 844 });
