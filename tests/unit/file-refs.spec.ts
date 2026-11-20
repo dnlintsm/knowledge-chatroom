@@ -7,6 +7,7 @@ import {
   parseFileRef,
   rootRelativeLinks,
   sourceLines,
+  workspaceNoteImages,
 } from "../../apps/web/src/components/workspace/file-refs";
 
 /**
@@ -116,6 +117,21 @@ test("chat links become root-relative, so Streamdown keeps them", () => {
     "#top",
     "https://example.com",
   ]);
+});
+
+test("legacy image syntax links to known notes and leaves images and linked images intact", () => {
+  const note = (src: string) => ({ type: "element", tagName: "img", properties: { src, alt: "note.md" } });
+  const local = note("notes/note.md#L2-L3");
+  const image = note("/uploads/diagram.png");
+  const external = note("https://example.com/note.md");
+  const linked = element("a", 1, 1, [note("notes/note.md#L2-L3")], "https://example.com");
+  const tree = { type: "root", children: [local, image, external, linked] };
+  workspaceNoteImages((href) => parseFileRef(href)?.path === "notes/note.md")(tree);
+  rootRelativeLinks()(tree);
+  expect(local).toMatchObject({
+    tagName: "a", properties: { href: "/notes/note.md#L2-L3" }, children: [{ type: "text", value: "note.md" }],
+  });
+  expect([image, external, linked.children![0]].map((node) => node.tagName)).toEqual(["img", "img", "img"]);
 });
 
 test("preview blocks carry their source lines", () => {

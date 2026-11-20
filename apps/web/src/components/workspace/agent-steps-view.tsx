@@ -25,6 +25,9 @@ import {
 } from "@copilotkit/react-core/v2";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ChatAnswer } from "./chat-answer";
+import { ChatMemoryActivity, useMemory } from "./memory";
+import { useSkills } from "./skills";
 import {
   StepTimes,
   currentActivity,
@@ -178,7 +181,8 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
   // The live block is the latest turn's, while the run lasts.
   const lastId = messages[messages.length - 1]?.id;
   const at = agent.messages.findIndex((m) => m.id === lastId);
-  const live = running && at >= 0 && !agent.messages.slice(at + 1).some((m) => m.role === "user");
+  const latest = at >= 0 && !agent.messages.slice(at + 1).some((m) => m.role === "user");
+  const live = running && latest;
   useTicker(live);
 
   const detailed = mode === "detailed";
@@ -212,8 +216,21 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
       </button>
       <div id={id} className={cn(open && "mt-1 ml-1.5 border-l border-[var(--border)] pl-3")}>
         <StepsContext.Provider value={{ inBlock: true, open, detailed }}>{children}</StepsContext.Provider>
+        {open && latest && <ChatTurnActivity />}
       </div>
     </div>
+  );
+}
+
+function ChatTurnActivity() {
+  const { turn } = useSkills();
+  return (
+    <>
+      {turn.used.map((use) => (
+        <p key={use.skill} className="my-1 text-xs text-muted-foreground">Used skill <code>/{use.skill}</code></p>
+      ))}
+      <ChatMemoryActivity reads />
+    </>
   );
 }
 
@@ -227,6 +244,16 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
  */
 export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
   const view = useStepsView();
+  const { turn: memory } = useMemory();
+  const { turn: skills } = useSkills();
+  // CopilotKit memoizes old message rows, so their message-list prop may predate this turn.
+  const { agent } = useAgent({ updates: [] });
+  const messages = agent.messages;
+  const turn = messages.slice(messages.findLastIndex((message) => message.role === "user") + 1);
+  const answer = turn.findLast((message) => message.role === "assistant" && message.content?.trim());
+  const current = answer?.id === props.message.id;
+  const hasSteps = current && turn.slice(0, turn.findIndex((message) => message.id === props.message.id)).some((message) =>
+    message.role === "reasoning" || (message.role === "assistant" && message.toolCalls?.length));
   return (
     <CopilotChatAssistantMessage {...props}>
       {({ markdownRenderer, toolCallsView, toolbar, toolbarVisible, message }) => {
@@ -254,8 +281,12 @@ export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
             data-message-id={message.id}
             className={cn("copilotKitMessage copilotKitAssistantMessage", props.className)}
           >
-            <div className="cpk:prose cpk:max-w-full cpk:break-words cpk:dark:prose-invert">{markdownRenderer}</div>
+            {text && <ChatAnswer isRunning={props.isRunning && current}>{markdownRenderer}</ChatAnswer>}
             {toolCallsView}
+            {current && !hasSteps && (skills.used.length > 0 || memory.events.some((event) => event.kind === "read")) && (
+              <details className="kc-turn-activity"><summary>Activity</summary><ChatTurnActivity /></details>
+            )}
+            {current && <ChatMemoryActivity />}
             {toolbarVisible && toolbar}
           </div>
         );

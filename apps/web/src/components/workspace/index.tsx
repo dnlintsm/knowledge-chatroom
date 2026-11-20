@@ -23,6 +23,7 @@ import { AdminButton } from "./admin";
 import { useWorkspaceAgent } from "./agent-bridge";
 import { useChatSuggestions } from "./use-chat-suggestions";
 import { ChatPane } from "./chat-pane";
+import { ChatModelProvider } from "./chat-model";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
@@ -56,7 +57,7 @@ export function Workspace() {
         <SkillsProvider>
           <MemoryProvider>
             <ToolMenuProvider>
-              <WorkspaceLayout />
+              <ChatModelProvider><WorkspaceLayout /></ChatModelProvider>
             </ToolMenuProvider>
           </MemoryProvider>
         </SkillsProvider>

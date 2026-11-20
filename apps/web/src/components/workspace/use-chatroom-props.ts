@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { useCopilotKit } from "@copilotkit/react-core/v2";
 import { CHATROOM_PROPS, chatroomPlace } from "@/lib/chatroom-props";
+import { useChatModel } from "./chat-model";
 import { findReport } from "./runs";
 import { useWorkspace } from "./store";
 import { useToolMenu } from "./tool-menu";
@@ -22,10 +23,11 @@ export function useChatroomProps() {
   const report = experiment ? findReport(files.map((f) => f.path)) : null;
   // The chat's tool chips from the "+" menu (tool-menu.tsx).
   const { chips: tools } = useToolMenu();
+  const model = useChatModel();
 
   const place = useMemo(
-    () => chatroomPlace({ storage: storageMode, lineage, experiment, report, selectedPath, tools }),
-    [storageMode, lineage, experiment, report, selectedPath, tools],
+    () => chatroomPlace({ storage: storageMode, lineage, experiment, report, selectedPath, tools, model }),
+    [storageMode, lineage, experiment, report, selectedPath, tools, model],
   );
 
   useEffect(() => {

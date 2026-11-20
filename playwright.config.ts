@@ -67,7 +67,7 @@ if (withLogin) {
 // live. Skills, follow-up chips and the "+" menu come from LOCAL_AGENT_URL.
 const scripted = `ANTHROPIC_API_KEY=mock-key ANTHROPIC_BASE_URL=http://localhost:${MODEL_PORT}`;
 const pythonAgent = [
-  ...(live ? [] : [scripted, "CLAUDE_MODEL= ANTHROPIC_MODEL="]),
+  ...(live ? [] : [scripted, "CLAUDE_MODEL= ANTHROPIC_MODEL= CHAT_MODELS=claude-haiku-4-5"]),
   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
   "KNOWLEDGE_PUBLIC_KEY= MCP_SERVERS=",
   `LOCAL_AGENT_URL=${process.env.LOCAL_AGENT_URL}`,

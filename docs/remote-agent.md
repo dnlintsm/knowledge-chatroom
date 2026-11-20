@@ -104,6 +104,9 @@ from the signed-in session (`apps/web/src/agent.ts`), replacing anything the bro
 | `experiment` | The experiment (run) the user is working in, a sandbox on `node` with its own copy of the node's files, or at the workspace root (`node_id` null). When set, file work belongs here, not in the node. `state` is how far the run got (`ready`, `running`, `done`, `failed`), `report` its report's path in it (`null` until it has one), and `can_change` is false when the user isn't its author or it's archived. |
 | `selected_path` | The file open in the middle pane. `null` when a non-file tab is open, such as the task board. |
 | `tools` | The tool chips the user turned on in this chat from the "+" menu: names of MCP servers in this repo's `MCP_SERVERS` that have a `ui` block, e.g. `"papers"` for paper search. Empty when none is on. See step 8 below. Added without a new `version`. |
+| `model` | Optional model ID selected in this chat. The app shows the picker when `GET /agent/models` returns `{ "default": "<id>", "models": ["<id>", "<another-id>"] }`. The backend validates the selection against its own allowed models before passing it to the SDK. |
+
+The app keeps the model selection per chat for the lifetime of the workspace page. Reloading the page or opening the chat on another device starts with the backend's default model.
 
 Paths are relative to the place: the experiment when there is one, else the node, else the
 workspace root. That is how the storage API (`/files/<path>?node=` or `?experiment=`) and file

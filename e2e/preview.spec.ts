@@ -229,13 +229,16 @@ test("Claude remembers across chats, and you see, undo and edit it", async ({ pa
   await shot(page, "29b-memory-panel");
 
   // An incognito chat leaves memory alone.
+  await page.getByTestId("memory-status").locator("summary").click();
   await page.getByTestId("memory-incognito").click();
   await expect(page.getByTestId("memory-status")).toContainText("Incognito");
+  await page.getByTestId("memory-status").locator("summary").click();
   await send(page, "Remember that I like tables.");
   await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("mock agent", reply);
   await expect(chip).toHaveCount(0);
   await expect(page.getByTestId("skill-status")).toContainText("auto ·");
   await shot(page, "29c-memory-incognito");
+  await page.getByTestId("memory-status").locator("summary").click();
   await page.getByTestId("memory-incognito").click();
   await expect(page.getByTestId("memory-incognito")).toHaveAttribute("aria-pressed", "false");
 
@@ -542,6 +545,15 @@ test("file references in answers open the cited lines", async ({ page }) => {
   // A range highlights each row it covers.
   await fileRef(page, "sales.csv:3-4").click();
   await expect(page.getByTestId("file-preview").locator("tr[data-revealed]")).toHaveText([/2026-08/, /2026-09/]);
+
+  // The image-form Markdown for a workspace note is a citation too.
+  await expect(fileRef(page, "welcome.md")).toHaveAccessibleName(/Open notes\/welcome\.md · Line 1/);
+  await page.getByRole("button", { name: "Sources 3", exact: true }).click();
+  const sources = page.getByTestId("chat-sources");
+  await sources.getByRole("button", { name: /reading-list\.md/ }).click();
+  await expect(sources.locator("pre")).toContainText("The Pragmatic Programmer");
+  await sources.getByRole("button", { name: "Open in editor" }).click();
+  await expect(page.getByRole("tab", { name: /reading-list\.md/ })).toHaveAttribute("aria-selected", "true");
 });
 
 test("file references on a phone show the editor", async ({ page }) => {
@@ -575,15 +587,57 @@ test("chat suggestions: first round follows what is open, then follow-ups", asyn
   await page.getByRole("treeitem", { name: /effects\.csv/ }).click();
   await expect(chip("Summarize effects.csv")).toBeVisible();
   await chip("Draft a note").click();
-  await expect(page.getByText("draft a short note at notes/next-steps.md")).toBeVisible();
+  const input = page.getByTestId("copilot-chat-textarea");
+  await expect(input).toHaveValue(/draft a short note at notes\/next-steps\.md/);
+  await expect(page.getByTestId("copilot-user-message")).toHaveCount(0);
+  await page.getByTestId("copilot-send-button").click();
+  await expect(page.getByTestId("copilot-user-message")).toContainText("draft a short note at notes/next-steps.md");
 
   // After the reply, the suggester's follow-ups replace the first round
   // (the mock agent's canned ones without an API key).
   await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
   await expect(chip("Draft a note")).toHaveCount(0);
-  if (process.env.E2E_MODE !== "live") await expect(chip("Check the evidence")).toBeVisible();
+  if (process.env.E2E_MODE !== "live") {
+    await expect(chip("Check the evidence")).toBeVisible();
+    await expect(page.getByTestId("copilot-suggestion")).toHaveCount(3);
+    await chip(/Compare which assumptions/).click();
+    await expect(input).toHaveValue(/and point to the supporting lines\./);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const prompts = page.getByTestId("copilot-suggestions");
+    await expect(prompts).toBeVisible();
+    const boxes = await prompts.locator("button").evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top));
+    expect(boxes[0]).toBe(boxes[1]);
+    expect(boxes[2]).toBeGreaterThan(boxes[1]);
+    const composer = await page.getByTestId("copilot-chat-input").boundingBox();
+    const promptBox = await prompts.boundingBox();
+    expect(composer!.y - (promptBox!.y + promptBox!.height)).toBeLessThan(45);
+  }
   await shot(page, "17-chat-follow-ups");
+});
+
+test("chat composer uses the advertised model and stops a streamed reply", async ({ page, request }) => {
+  test.skip(process.env.E2E_MODE === "live", "Uses the mock agent's slow response and captured run.");
+  await page.route("**/api/chat/models", (route) => route.fulfill({ json: {
+    default: "claude-sonnet-5", models: ["claude-sonnet-5", "claude-test-model"],
+  } }));
+  await openHome(page);
+  await page.getByTestId("chat-model").selectOption("claude-test-model");
+  await send(page, "Preview a streamed response");
+  const stop = page.getByRole("button", { name: "Stop generating", exact: true });
+  await expect(stop).toBeVisible();
+  await expect(page.getByTestId("chat-model")).toBeDisabled();
+  const answer = page.getByTestId("copilot-assistant-message").last();
+  await expect(answer).toContainText("mock agent");
+  await expect(fileRef(page, "welcome.md")).toBeVisible();
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toHaveCount(0);
+  await stop.click();
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
+  await expect(answer).toContainText("mock agent");
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-model")).toBeEnabled();
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom.model).toBe("claude-test-model");
 });
 
 test("each chat run tells the agent who the user is and where (docs/remote-agent.md)", async ({ page, request }) => {

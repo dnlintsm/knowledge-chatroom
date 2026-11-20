@@ -14,11 +14,12 @@ import {
 import { AlertTriangle, Sparkles, SquareTerminal } from "lucide-react";
 import { CopilotChatInput, useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { cn } from "@/lib/utils";
-import { MemoryStatus } from "./memory";
+import { ChatDraftContext, ChatSendButton, ChatSuggestions } from "./chat-composer";
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 import { ToolChipRow, toolsMenuItems, useToolMenu } from "./tool-menu";
 import { workspaceFetch } from "@/lib/workspace-request";
+import { useWorkbench } from "./workbench";
 
 /**
  * Skill management in the workspace (issue #7):
@@ -476,12 +477,15 @@ const SkillTextArea = forwardRef<HTMLTextAreaElement, CopilotChatInput.TextAreaP
 
 type ChatInputProps = Parameters<typeof CopilotChatInput>[0];
 
-/** The chat's input slot: CopilotKit's input plus the skills "/" menu, the memory line and the skills status bar. */
+/** The composer keeps CopilotKit's submission and attachment handlers and adds the workspace actions. */
 export function SkillChatInput(props: ChatInputProps) {
   const { skills, status, turn } = useSkills();
+  const { chat } = useWorkbench();
   const value = props.value ?? "";
+  const [picker, setPicker] = useState(false);
+  const [settings, setSettings] = useState(false);
   // The menu shows while the first word is still a /command being typed.
-  const query = /^\/([a-z0-9-]*)$/i.exec(value)?.[1]?.toLowerCase() ?? null;
+  const query = picker ? "" : /^\/([a-z0-9-]*)$/i.exec(value)?.[1]?.toLowerCase() ?? null;
   const matches = useMemo(() => {
     if (query === null) return [];
     const usable = skills.filter((s) => s.mode !== "off" && s.userInvocable && s.name.includes(query));
@@ -489,26 +493,43 @@ export function SkillChatInput(props: ChatInputProps) {
   }, [skills, query]);
   const [highlight, setHighlight] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const open = matches.length > 0 && dismissed !== value;
+  const open = matches.length > 0 && (picker || dismissed !== value);
   const active = Math.min(highlight, matches.length - 1);
 
   useEffect(() => setHighlight(0), [query]);
 
-  const pick = (skill: SkillInfo) => props.onChange?.(`/${skill.name} `);
+  const pick = (skill: SkillInfo) => {
+    props.onChange?.(`/${skill.name} ${picker ? value.trimStart() : ""}`);
+    setPicker(false);
+    chat.focus();
+  };
 
   // The "+" menu's tool servers (tool-menu.tsx), and buttons that fill this box.
   const tools = useToolMenu();
   const { registerComposer } = tools;
   const onChange = props.onChange;
   useEffect(() => {
-    registerComposer(onChange ? (text) => onChange(text) : null);
+    registerComposer(onChange ? (text) => {
+      setPicker(false);
+      setSettings(false);
+      onChange(text);
+    } : null);
     return () => registerComposer(null);
   }, [registerComposer, onChange]);
-  const toolsMenu = useMemo(() => toolsMenuItems(tools), [tools]);
+  const toolsMenu = useMemo(() => [
+    ...toolsMenuItems(tools),
+    ...(status === "ready" && skills.length ? [
+      ...(skills.some((skill) => skill.mode !== "off" && skill.userInvocable) ? [{
+        label: "Use a skill",
+        action: () => { setSettings(false); setPicker(true); chat.focus(); },
+      }] : []),
+      { label: "Skills in this chat", action: () => { setPicker(false); setSettings((open) => !open); } },
+    ] : []),
+  ], [chat, skills, status, tools]);
 
   const slash: SlashMenu = {
     onKey: (e) => {
-      if (!open || e.nativeEvent.isComposing) return false;
+      if (!open || e.nativeEvent.isComposing || e.keyCode === 229) return false;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -522,6 +543,7 @@ export function SkillChatInput(props: ChatInputProps) {
       }
       if (e.key === "Escape") {
         e.preventDefault();
+        setPicker(false);
         setDismissed(value);
         return true;
       }
@@ -531,7 +553,8 @@ export function SkillChatInput(props: ChatInputProps) {
 
   return (
     <SlashContext.Provider value={slash}>
-      <div className="relative">
+      {!props.isRunning && props.onSubmitMessage && <ChatSuggestions />}
+      <div className="kc-chat-composer relative">
         {open && (
           <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mx-auto max-w-3xl px-4 @3xl:px-0">
             <div
@@ -547,10 +570,8 @@ export function SkillChatInput(props: ChatInputProps) {
                   role="option"
                   aria-selected={i === active}
                   onMouseEnter={() => setHighlight(i)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(skill);
-                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => pick(skill)}
                   className={cn(
                     "flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm cursor-pointer",
                     i === active && "bg-[var(--secondary)]",
@@ -566,30 +587,29 @@ export function SkillChatInput(props: ChatInputProps) {
             </div>
           </div>
         )}
-        <ToolChipRow />
+        <div className="kc-composer-context"><ChatDraftContext /><ToolChipRow /></div>
         <CopilotChatInput
           {...props}
           // CopilotKit opens its own "/" menu (attach file, tools) when it has items; ours replaces it.
           onAddFile={value.startsWith("/") ? undefined : props.onAddFile}
           toolsMenu={value.startsWith("/") ? undefined : toolsMenu}
           textArea={SkillTextArea}
+          sendButton={ChatSendButton}
+          onChange={(text) => {
+            setPicker(false);
+            props.onChange?.(text);
+          }}
           disclaimer={() => null}
         />
-        <MemoryStatus />
-        {status === "ready" ? (
-          <SkillStatusBar skills={skills} turn={turn} />
-        ) : (
-          <div className="pb-4" />
-        )}
+        {status === "ready" && <SkillStatusBar skills={skills} turn={turn} open={settings} setOpen={setSettings} />}
       </div>
     </SlashContext.Provider>
   );
 }
 
 /** One line under the input: the skills that are on, then what this turn used; and this chat's own choices. */
-function SkillStatusBar({ skills, turn }: { skills: SkillInfo[]; turn: Turn }) {
+function SkillStatusBar({ skills, turn, open, setOpen }: { skills: SkillInfo[]; turn: Turn; open: boolean; setOpen: (open: boolean) => void }) {
   const { setMode } = useSkills();
-  const [open, setOpen] = useState(false);
   const auto = skills.filter((s) => s.mode === "auto").length;
   const manual = skills.filter((s) => s.mode === "manual").length;
   const changed = skills.filter((s) => s.chatMode !== null).length;
@@ -649,7 +669,7 @@ function SkillStatusBar({ skills, turn }: { skills: SkillInfo[]; turn: Turn }) {
           type="button"
           data-testid="chat-skills-toggle"
           aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => setOpen(!open)}
           className="ml-auto rounded px-1.5 py-0.5 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
         >
           This chat{changed > 0 ? ` · ${changed} changed` : ""}

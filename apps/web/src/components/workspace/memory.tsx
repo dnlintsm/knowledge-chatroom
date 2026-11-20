@@ -1003,9 +1003,37 @@ const CHANGE_LABEL: Record<MemoryEvent["kind"], string> = {
   propose: "for review",
 };
 
-/** Under the chat input: what Claude read and changed in this turn, Undo, and incognito. */
-export function MemoryStatus() {
-  const { status, mode, incognito, setIncognito, turn, undo, openNote } = useMemory();
+export function ChatMemoryControl() {
+  const { status, mode, incognito, setIncognito } = useMemory();
+  const { sidebar } = useWorkbench();
+  if (status !== "ready") return null;
+  const label = mode === "off" ? "Off" : incognito ? "Incognito" : mode === "ask" ? "Ask" : "On";
+  return (
+    <details className="kc-memory-control" data-testid="memory-status" onKeyDown={(event) => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.currentTarget.open = false;
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
+      <summary className="kc-control"><Brain aria-hidden="true" /><span>Memory · {label}</span></summary>
+      <div className="kc-control-popover">
+        {mode !== "off" && (
+          <button type="button" data-testid="memory-incognito" aria-pressed={incognito}
+            onClick={() => void setIncognito(!incognito)}>
+            <EyeOff aria-hidden="true" /> {incognito ? "Resume memory in this chat" : "Pause memory in this chat"}
+          </button>
+        )}
+        <button type="button" onClick={(event) => {
+          event.currentTarget.closest("details")?.removeAttribute("open");
+          sidebar.show("memory");
+        }}><Brain aria-hidden="true" /> Manage memory</button>
+      </div>
+    </details>
+  );
+}
+
+/** What Claude read or changed in the current turn, with links and Undo for changes. */
+export function ChatMemoryActivity({ reads = false }: { reads?: boolean }) {
+  const { status, turn, undo, openNote } = useMemory();
   const { sidebar } = useWorkbench();
   const [failed, setFailed] = useState<string | null>(null);
   if (status !== "ready") return null;
@@ -1017,20 +1045,12 @@ export function MemoryStatus() {
     const seen = byNote.get(key);
     if (!seen || event.kind !== "read") byNote.set(key, event);
   }
-  const chips = [...byNote.values()];
-  const off = mode === "off";
+  const chips = [...byNote.values()].filter((event) => (event.kind === "read") === reads);
+  if (chips.length === 0) return null;
   return (
-    <div
-      data-testid="memory-status"
-      className="pointer-events-auto mx-auto flex max-w-3xl flex-wrap items-center gap-1.5 px-5 pt-1 text-xs text-[var(--muted-foreground)]"
-    >
-      <Brain className="size-3 shrink-0 text-violet-500" />
-      {off ? (
-        <span>Memory is off</span>
-      ) : incognito ? (
-        <span title="Claude doesn&apos;t read or save memory in this chat">Incognito: no memory in this chat</span>
-      ) : chips.length > 0 ? (
-        chips.map((event) => (
+    <div className="kc-memory-activity">
+      <Brain className="size-3.5 shrink-0 text-violet-500" aria-hidden="true" />
+      {chips.map((event) => (
           <span
             key={event.shared ? `shared:${event.shared.id || event.name}` : event.name}
             data-testid="memory-chip"
@@ -1080,26 +1100,8 @@ export function MemoryStatus() {
               </button>
             )}
           </span>
-        ))
-      ) : (
-        <span>{turn.running ? "No memory used yet" : "Claude remembers what helps across chats"}</span>
-      )}
+      ))}
       {failed && <span role="alert" className="text-red-600">{failed}</span>}
-      {!off && (
-        <button
-          type="button"
-          data-testid="memory-incognito"
-          aria-pressed={incognito}
-          title={incognito ? "Use memory in this chat again" : "Keep this chat out of memory"}
-          onClick={() => void setIncognito(!incognito)}
-          className={cn(
-            "ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer",
-            incognito && "bg-[var(--secondary)] text-[var(--foreground)]",
-          )}
-        >
-          <EyeOff className="size-3" /> Incognito
-        </button>
-      )}
     </div>
   );
 }
