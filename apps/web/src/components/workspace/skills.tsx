@@ -460,12 +460,14 @@ const SlashContext = createContext<SlashMenu | null>(null);
 
 /** CopilotKit's text area, with the "/" menu's keys taken first. */
 const SkillTextArea = forwardRef<HTMLTextAreaElement, CopilotChatInput.TextAreaProps>(
-  function SkillTextArea({ onKeyDown, ...props }, ref) {
+  function SkillTextArea({ onKeyDown, className, ...props }, ref) {
     const slash = useContext(SlashContext);
     return (
       <CopilotChatInput.TextArea
         ref={ref}
         {...props}
+        // `!` wins over CopilotKit's own classes on the same element.
+        className={cn(className, "min-h-9! bg-surface-raised! px-1.25! py-2! text-sm! leading-normal! shadow-none!")}
         onKeyDown={(e) => {
           if (slash?.onKey(e)) return;
           onKeyDown?.(e);
@@ -476,6 +478,21 @@ const SkillTextArea = forwardRef<HTMLTextAreaElement, CopilotChatInput.TextAreaP
 );
 
 type ChatInputProps = Parameters<typeof CopilotChatInput>[0];
+
+// CopilotKit's input renders its own pill and grid. These reach into that DOM
+// to make it one surface with the context row: the "+" button and the send
+// controls share the row under the text area. They go once the composer
+// renders its own layout through the slots. `!` wins over CopilotKit's classes.
+const copilotInputLayout = [
+  "[&>[data-copilotkit]>div:first-child]:px-0!",
+  "[&_[data-testid=copilot-chat-input]]:rounded-none! [&_[data-testid=copilot-chat-input]]:bg-surface-raised! [&_[data-testid=copilot-chat-input]]:shadow-none!",
+  "[&_[data-testid=copilot-chat-input]>[data-layout]]:grid-cols-[auto_minmax(0,1fr)]! [&_[data-testid=copilot-chat-input]>[data-layout]]:grid-rows-[auto_auto]!",
+  "[&_[data-testid=copilot-chat-input]>[data-layout]]:gap-x-1.5! [&_[data-testid=copilot-chat-input]>[data-layout]]:gap-y-1!",
+  "[&_[data-testid=copilot-chat-input]>[data-layout]]:px-1.75! [&_[data-testid=copilot-chat-input]>[data-layout]]:pt-0.5! [&_[data-testid=copilot-chat-input]>[data-layout]]:pb-1.5!",
+  "[&_[data-layout]>[data-layout]>:nth-child(1)]:[grid-area:2/1]!",
+  "[&_[data-layout]>[data-layout]>:nth-child(2)]:[grid-area:1/1/2/-1]! [&_[data-layout]>[data-layout]>:nth-child(2)]:min-h-0!",
+  "[&_[data-layout]>[data-layout]>:nth-child(3)]:[grid-area:2/2]! [&_[data-layout]>[data-layout]>:nth-child(3)]:min-w-0!",
+].join(" ");
 
 /** The composer keeps CopilotKit's submission and attachment handlers and adds the workspace actions. */
 export function SkillChatInput(props: ChatInputProps) {
@@ -554,7 +571,7 @@ export function SkillChatInput(props: ChatInputProps) {
   return (
     <SlashContext.Provider value={slash}>
       {!props.isRunning && props.onSubmitMessage && <ChatSuggestions />}
-      <div className="kc-chat-composer relative">
+      <div className={cn("pointer-events-auto relative mx-3 mb-2.5 rounded-[.875rem] border border-[var(--border)] bg-surface-raised", copilotInputLayout)}>
         {open && (
           <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mx-auto max-w-3xl px-4 @3xl:px-0">
             <div
@@ -587,7 +604,7 @@ export function SkillChatInput(props: ChatInputProps) {
             </div>
           </div>
         )}
-        <div className="kc-composer-context"><ChatDraftContext /><ToolChipRow /></div>
+        <div className="flex flex-wrap items-center gap-1 px-2 pt-1.75"><ChatDraftContext /><ToolChipRow /></div>
         <CopilotChatInput
           {...props}
           // CopilotKit opens its own "/" menu (attach file, tools) when it has items; ours replaces it.
@@ -618,7 +635,7 @@ function SkillStatusBar({ skills, turn, open, setOpen }: { skills: SkillInfo[]; 
       {open && (
         <div
           data-testid="chat-skills"
-          className="absolute inset-x-4 bottom-full z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 text-xs shadow-lg @3xl:inset-x-0"
+          className="absolute inset-x-4 bottom-[calc(100%+4rem)] z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 text-xs shadow-lg @3xl:inset-x-0"
         >
           <p className="px-1 pb-1.5 text-[var(--muted-foreground)]">
             Skills in this chat only. &ldquo;Yours&rdquo; follows your choice in the Skills panel.
@@ -640,7 +657,7 @@ function SkillStatusBar({ skills, turn, open, setOpen }: { skills: SkillInfo[]; 
       )}
       <div
         data-testid="skill-status"
-        className="pointer-events-auto flex flex-wrap items-center gap-1.5 px-5 pt-1.5 pb-3 text-xs text-[var(--muted-foreground)]"
+        className="pointer-events-auto flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] px-2 pt-0.75 pb-1.25 text-xs text-[var(--muted-foreground)]"
       >
         <Sparkles className="size-3 shrink-0 text-amber-500" />
         {turn.used.length > 0 ? (

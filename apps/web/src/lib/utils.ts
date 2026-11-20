@@ -1,6 +1,12 @@
 import { clsx } from "clsx";
 import type { ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+// The type scale in globals.css, so `text-label` is read as a size and not a
+// color: otherwise `cn("text-label", "text-brand-text")` drops the size.
+const twMerge = extendTailwindMerge({
+  extend: { theme: { text: ["caption", "label", "body", "title"] } },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

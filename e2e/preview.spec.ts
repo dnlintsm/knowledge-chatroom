@@ -532,7 +532,7 @@ test("file references in answers open the cited lines", async ({ page }) => {
   const book = fileRef(page, "The Pragmatic Programmer");
   await expect(book).toBeVisible(reply);
   expect((await book.boundingBox())!.width).toBeGreaterThan(80);
-  await expect(book.locator(".kc-citation")).toHaveText("1");
+  await expect(book.getByTestId("citation-number")).toHaveText("1");
   await book.click();
 
   // The preview switches to the file and highlights the cited table row.

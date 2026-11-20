@@ -150,7 +150,7 @@ export function ToolChipRow() {
   const { menu, chips, setChip } = useToolMenu();
   if (!chips.length) return null;
   return (
-    <div data-testid="tool-chips" className="pointer-events-none relative z-20 mx-auto flex max-w-3xl flex-wrap gap-1.5 px-4 pb-1.5 @3xl:px-0">
+    <div data-testid="tool-chips" className="pointer-events-none relative z-20 flex max-w-3xl flex-wrap gap-1.5">
       {chips.map((server) => {
         const item = menu.find((m) => m.server === server)!;
         const Icon = toolIcon(item.icon);

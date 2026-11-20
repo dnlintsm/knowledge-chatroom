@@ -2,7 +2,6 @@
 
 import "./globals.css";
 import "@copilotkit/react-core/v2/styles.css";
-import "@/components/workspace/chat-pane.css";
 
 import { ThemeProvider } from "@/hooks/use-theme";
 

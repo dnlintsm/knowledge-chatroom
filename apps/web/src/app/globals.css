@@ -6,6 +6,41 @@
 @source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* Touch screens, which have no hover: show what hover would reveal. */
+@custom-variant hover-none (@media (hover: none));
+
+/*
+ * Brand and surface tokens as Tailwind theme values, so components write
+ * `bg-brand` rather than `bg-[var(--brand)]`. `inline` keeps the var()
+ * reference, so the light and dark values switch with the class.
+ *
+ * The older tokens (--border, --muted, --card...) are still written as
+ * `border-[var(--border)]`. Mapping them here would also turn on the
+ * `border-border`, `bg-muted` and `text-muted-foreground` classes that
+ * Streamdown ships, which restyles Markdown previews (table borders, code
+ * backgrounds). That is a separate design change.
+ */
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-text: var(--brand-text);
+  --color-brand-tint: var(--brand-tint);
+  --color-surface-raised: var(--surface-raised);
+
+  /*
+   * Type scale for interface text: `text-caption`, `text-label`, `text-body`,
+   * `text-title`. Chat answers keep the prose size, and inputs keep `text-sm`.
+   * Pair a title with `font-semibold`.
+   */
+  --text-caption: 0.6875rem;
+  --text-caption--line-height: 1.5;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.5;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.5;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.5;
+}
 
 :root {
   --background: #ffffff;
@@ -20,13 +55,25 @@
   --secondary-foreground: #010507;
   --muted: #ededf5;
   --muted-foreground: #57575b;
-  --accent: #eee6fe;
+  /* Hover and selection fills: the brand tint in light mode. */
+  --accent: var(--brand-tint);
   --accent-foreground: #010507;
   --destructive: #fa5f67;
   --destructive-foreground: #ffffff;
   --border: #dbdbe5;
   --input: #dbdbe5;
   --ring: #bec2ff;
+
+  /* Brand: the purple accent for actions, links and selection. */
+  --brand: #5943a5;
+  /* Text and icons on a --brand fill. */
+  --brand-foreground: #ffffff;
+  /* Brand-colored text on the page, a --brand-tint or a raised surface. */
+  --brand-text: #493590;
+  /* A quiet brand fill: hover, selection, the user's chat bubble. */
+  --brand-tint: #eeebfb;
+  /* A panel raised off the page, such as the chat composer. */
+  --surface-raised: #f6f5fa;
 
   /* Chart tokens */
   --chart-tooltip-bg: #ffffff;
@@ -80,6 +127,13 @@
   --border: #303136;
   --input: #303136;
   --ring: #bec2ff;
+
+  --brand: #d0c4ff;
+  --brand-foreground: #211840;
+  --brand-text: #d7cbff;
+  --brand-tint: #312a49;
+  /* Neutral, on the same scale as --card and --secondary. */
+  --surface-raised: #242529;
 
   --chart-tooltip-bg: #191a1e;
   --chart-tooltip-border: #303136;
