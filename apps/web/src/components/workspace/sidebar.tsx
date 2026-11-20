@@ -13,9 +13,7 @@ import {
   FlaskConical,
   ListFilter,
   ListTodo,
-  LocateFixed,
   Network,
-  Package,
   Pencil,
   Plus,
   RefreshCw,
@@ -71,8 +69,6 @@ const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "memory", label: "Memory", icon: Brain },
-  { id: "uploads", label: "Uploads", icon: Upload },
-  { id: "artifacts", label: "Artifacts", icon: Package },
 ];
 
 /** VS Code-style icon rail. Clicking the active view collapses the panel. */
@@ -161,7 +157,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           <FilePlus className="size-4" />
         </IconButton>
       )}
-      {canEdit && (view === "files" || view === "uploads") && (
+      {canEdit && view === "files" && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
           <Upload className="size-4" />
         </IconButton>
@@ -229,18 +225,6 @@ export function SidePanel({ view }: { view: SidebarView }) {
               />
             )}
             {view === "memory" && <MemoryPanel />}
-            {view === "uploads" && (
-              <FlatList
-                files={files.filter((f) => f.kind === "upload")}
-                empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
-              />
-            )}
-            {view === "artifacts" && (
-              <FlatList
-                files={files.filter((f) => f.kind === "artifact")}
-                empty="Files Claude creates show up here."
-              />
-            )}
           </>
         )}
       </div>
@@ -532,10 +516,10 @@ type CollapsedFolders = ReturnType<typeof useCollapsedFolders>;
 
 /**
  * State behind the Files view's toolbar: folders, the name filter, the
- * new-file box, and requests to scroll the open file into view.
+ * new-file box, and requests to scroll a new file into view.
  */
 function useExplorer() {
-  const { files, activeFile, refresh, storageMode } = useWorkspace();
+  const { files, refresh, storageMode } = useWorkspace();
   const { notify } = useWorkbench();
   const folders = useCollapsedFolders();
   const tree = useMemo(() => buildTree(files), [files]);
@@ -565,7 +549,6 @@ function useExplorer() {
     revealed,
     hasFolders: allFolders.length > 0,
     canRefresh: storageMode === "server",
-    activeFile,
     toggleAll() {
       folders.set(allCollapsed ? new Set() : new Set(allFolders));
     },
@@ -576,17 +559,6 @@ function useExplorer() {
     closeFilter() {
       setQuery("");
       setFilterOpen(false);
-    },
-    /** Opens the folders down to the open file and scrolls to it. */
-    revealActive() {
-      if (!activeFile) return;
-      // Keep the filter only while it still shows the file.
-      if (filtering && !filterFiles([activeFile], query).length) {
-        setQuery("");
-        setFilterOpen(false);
-      }
-      folders.expand(ancestorFolders(activeFile.path));
-      setReveal({ path: activeFile.path, at: Date.now() });
     },
     /** Opens the new-file box in `folder` ("a/b/"), or notes/ by default. */
     startNewFile(folder = "notes/") {
@@ -633,13 +605,6 @@ function ExplorerTools({ explorer }: { explorer: Explorer }) {
         onClick={explorer.toggleFilter}
       >
         <ListFilter className="size-4" />
-      </IconButton>
-      <IconButton
-        label="Reveal open file"
-        disabled={!explorer.activeFile}
-        onClick={explorer.revealActive}
-      >
-        <LocateFixed className="size-4" />
       </IconButton>
       {explorer.canRefresh && (
         <IconButton

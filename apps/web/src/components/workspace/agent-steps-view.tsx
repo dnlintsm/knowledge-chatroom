@@ -255,7 +255,7 @@ export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
     message.role === "reasoning" || (message.role === "assistant" && message.toolCalls?.length));
   return (
     <CopilotChatAssistantMessage {...props}>
-      {({ markdownRenderer, toolCallsView, toolbar, toolbarVisible, message }) => {
+      {({ markdownRenderer, toolCallsView, toolbar, toolbarVisible, copyButton, inspectorButton, message }) => {
         const text = typeof message.content === "string" && message.content.trim().length > 0;
         if (view.inBlock) {
           return (
@@ -280,13 +280,18 @@ export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
             data-message-id={message.id}
             className={cn("copilotKitMessage copilotKitAssistantMessage", props.className)}
           >
-            {text && <ChatAnswer isRunning={props.isRunning && current}>{markdownRenderer}</ChatAnswer>}
+            {text && (
+              // The answer's actions sit in its header row rather than a toolbar row of their own.
+              <ChatAnswer isRunning={props.isRunning && current} actions={toolbarVisible && <>{copyButton}{inspectorButton}</>}>
+                {markdownRenderer}
+              </ChatAnswer>
+            )}
             {toolCallsView}
             {current && !hasSteps && (skills.used.length > 0 || memory.events.some((event) => event.kind === "read")) && (
               <details className="mt-1.5 text-label text-[var(--muted-foreground)]"><summary className="cursor-pointer">Activity</summary><ChatTurnActivity /></details>
             )}
             {current && <ChatMemoryActivity />}
-            {toolbarVisible && toolbar}
+            {!text && toolbarVisible && toolbar}
           </div>
         );
       }}

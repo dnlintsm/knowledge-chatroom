@@ -12,13 +12,10 @@ export type SidebarView =
   | "runs"
   | "knowledge"
   | "skills"
-  | "memory"
-  | "uploads"
-  | "artifacts";
+  | "memory";
 
 export interface Layout {
   sideOpen: boolean;
-  chatOpen: boolean;
   sideWidth: number;
   chatWidth: number;
   /** Which view the explorer pane shows (picked on the icon rail). */
@@ -29,7 +26,6 @@ export interface Layout {
 
 export const DEFAULT_LAYOUT: Layout = {
   sideOpen: true,
-  chatOpen: true,
   sideWidth: 260,
   chatWidth: 420,
   view: "files",
@@ -44,7 +40,7 @@ export const PANE_WIDTHS: Record<ResizablePane, { min: number; max: number }> = 
 };
 
 /** What survives a reload; the view and the phone pane start fresh. */
-export const PERSISTED_KEYS = ["sideOpen", "chatOpen", "sideWidth", "chatWidth"] as const;
+export const PERSISTED_KEYS = ["sideOpen", "sideWidth", "chatWidth"] as const;
 
 export type LayoutCommand =
   | { type: "show"; pane: PaneId }
@@ -62,16 +58,17 @@ export type LayoutCommand =
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
-/** The editor is the main pane and is always open. */
+/**
+ * The editor and, on a wide screen, the chat are always open; only the
+ * explorer can be hidden. Hiding the chat on a phone moves to the editor.
+ */
 export function isPaneOpen(layout: Layout, pane: PaneId): boolean {
   if (pane === "explorer") return layout.sideOpen;
-  if (pane === "chat") return layout.chatOpen;
   return true;
 }
 
 function setOpen(layout: Layout, pane: PaneId, open: boolean): Layout {
   if (pane === "explorer") return { ...layout, sideOpen: open };
-  if (pane === "chat") return { ...layout, chatOpen: open };
   return layout;
 }
 
@@ -108,7 +105,6 @@ export function reduceLayout(layout: Layout, command: LayoutCommand): Layout {
       const saved = (command.saved ?? {}) as Partial<Record<string, unknown>>;
       let next = layout;
       if (typeof saved.sideOpen === "boolean") next = { ...next, sideOpen: saved.sideOpen };
-      if (typeof saved.chatOpen === "boolean") next = { ...next, chatOpen: saved.chatOpen };
       if (typeof saved.sideWidth === "number" && Number.isFinite(saved.sideWidth)) {
         next = reduceLayout(next, { type: "resize", pane: "explorer", width: saved.sideWidth });
       }
