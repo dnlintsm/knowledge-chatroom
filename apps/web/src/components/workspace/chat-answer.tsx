@@ -113,18 +113,38 @@ export function BrandMark({ icon: Icon }: { icon: LucideIcon }) {
   return <Icon aria-hidden="true" className="box-content size-3.5 rounded-lg bg-brand-tint p-1.25 text-brand-text" />;
 }
 
-export function ChatAnswer({ children, isRunning }: { children: ReactNode; isRunning?: boolean }) {
+/**
+ * Copy and the like, small, at the end of a header row. Keeps CopilotKit's
+ * toolbar test id so the buttons are found the same way as before.
+ */
+function AnswerActions({ children }: { children: ReactNode }) {
+  return (
+    <div data-testid="copilot-assistant-toolbar"
+      className="ms-auto flex shrink-0 items-center gap-0.5 font-normal [&_button]:size-6! [&_button]:rounded-md! [&_svg]:size-3.5!">
+      {children}
+    </div>
+  );
+}
+
+export function ChatAnswer({ children, isRunning, actions }: { children: ReactNode; isRunning?: boolean; actions?: ReactNode }) {
   const sources = useContext(SourcesContext);
   const [view, setView] = useState<"answer" | "sources">("answer");
   const showSources = sources.length > 0 && view === "sources";
+  const tools = actions ? <AnswerActions>{actions}</AnswerActions> : null;
   return (
     <>
-      <div className="mb-2.5 flex items-center gap-2 text-body font-semibold"><BrandMark icon={MessagesSquare} /> Claude</div>
+      <div className="mb-2.5 flex items-center gap-2 text-body font-semibold">
+        <BrandMark icon={MessagesSquare} /> Claude
+        {sources.length === 0 && tools}
+      </div>
       {sources.length > 0 && (
-        <SegmentedControl aria-label="Answer view" className="mb-2.5">
-          <SegmentedControlItem selected={!showSources} onClick={() => setView("answer")}>Answer</SegmentedControlItem>
-          <SegmentedControlItem selected={showSources} onClick={() => setView("sources")}>Sources <span>{sources.length}</span></SegmentedControlItem>
-        </SegmentedControl>
+        <div className="mb-2.5 flex items-center gap-2 border-b border-[var(--border)] pb-1">
+          <SegmentedControl aria-label="Answer view" className="border-0 pb-0">
+            <SegmentedControlItem selected={!showSources} onClick={() => setView("answer")}>Answer</SegmentedControlItem>
+            <SegmentedControlItem selected={showSources} onClick={() => setView("sources")}>Sources <span>{sources.length}</span></SegmentedControlItem>
+          </SegmentedControl>
+          {tools}
+        </div>
       )}
       {showSources ? <ChatSources sources={sources} /> : (
         <div aria-busy={isRunning || undefined} className="cpk:prose cpk:max-w-full cpk:break-words cpk:dark:prose-invert min-w-0 wrap-anywhere!">{children}</div>

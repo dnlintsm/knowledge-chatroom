@@ -106,21 +106,17 @@ function WorkspaceLayout() {
           <EditorPane />
         </div>
 
-        {/* Kept mounted when hidden so the conversation and its tools survive toggling. */}
-        {layout.chatOpen && (
-          <Splitter
-            label="Resize chat"
-            onDragStart={() => (dragStart.current = layout.chatWidth)}
-            onDrag={(dx) => panes.resize("chat", dragStart.current - dx)}
-            onReset={() => panes.resetSize("chat")}
-          />
-        )}
+        <Splitter
+          label="Resize chat"
+          onDragStart={() => (dragStart.current = layout.chatWidth)}
+          onDrag={(dx) => panes.resize("chat", dragStart.current - dx)}
+          onReset={() => panes.resetSize("chat")}
+        />
         <div
           data-pane="chat"
           style={{ width: layout.chatWidth }}
           className={cn(
             "min-w-0 shrink-0",
-            !layout.chatOpen && "lg:hidden",
             mobilePane === "chat" ? "max-lg:!w-auto max-lg:flex-1" : "max-lg:hidden",
           )}
         >
@@ -134,9 +130,8 @@ function WorkspaceLayout() {
 
 function TitleBar() {
   const { setTheme } = useTheme();
-  const { panes, chat } = useWorkbench();
+  const { panes } = useWorkbench();
   const sideOpen = panes.isOpen("explorer");
-  const chatOpen = panes.isOpen("chat");
   const button =
     "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer";
   return (
@@ -151,16 +146,6 @@ function TitleBar() {
         <AccountMenu />
         <button
           type="button"
-          aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}
-          title={sideOpen ? "Hide sidebar" : "Show sidebar"}
-          aria-pressed={sideOpen}
-          onClick={() => panes.toggle("explorer")}
-          className={cn(button, "max-lg:hidden")}
-        >
-          <PanelLeft className="size-4" />
-        </button>
-        <button
-          type="button"
           aria-label="Toggle theme"
           title="Toggle theme"
           onClick={() =>
@@ -171,21 +156,16 @@ function TitleBar() {
           <Sun className="size-4 dark:hidden" />
           <Moon className="hidden size-4 dark:block" />
         </button>
-        {/* Last, at the top-right corner, where people look for the chat. */}
+        {/* The chat has no toggle: it stays open beside the editor. */}
         <button
           type="button"
-          aria-label={chatOpen ? "Hide chat" : "Show chat"}
-          title={chatOpen ? "Hide chat" : "Chat with Claude"}
-          aria-pressed={chatOpen}
-          onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
-          // Phones switch to the chat with the bottom pane switcher instead.
-          className={cn(
-            button,
-            "ml-1 border border-[var(--border)] max-lg:hidden",
-            chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
-          )}
+          aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}
+          title={sideOpen ? "Hide sidebar" : "Show sidebar"}
+          aria-pressed={sideOpen}
+          onClick={() => panes.toggle("explorer")}
+          className={cn(button, "max-lg:hidden")}
         >
-          <MessagesSquare className="size-4" />
+          <PanelLeft className="size-4" />
         </button>
       </div>
     </header>

@@ -103,13 +103,8 @@ test("workspace walkthrough", async ({ page }) => {
   // Hidden while showing the history, the chat reopens on the conversation.
   await page.getByRole("button", { name: "Chat history" }).click();
 
-  await page.getByRole("button", { name: "Hide chat" }).click();
-  await page.getByRole("button", { name: "Files", exact: true }).click();
-  await shot(page, "08-hidden-chat");
-  // The chat icon at the top-right opens the chat with the cursor in its input.
-  await page.getByRole("button", { name: "Show chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
-  await shot(page, "08b-chat-reopened");
+  // The chat has no toggle: it stays open beside the editor.
+  await expect(page.getByRole("button", { name: /^(Hide|Show) chat$/ })).toHaveCount(0);
 
   // The app name at the top-left goes home to the Runs view, which needs server storage.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
@@ -326,10 +321,6 @@ test("a workspace with no runs still has the chat", async ({ page }) => {
   }, "knowledge-chatroom.workspace.v1");
   await page.goto("/");
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
-  await page.getByRole("button", { name: "Hide chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
-  await page.getByRole("button", { name: "Show chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
   await shot(page, "20-chat-without-runs");
 });
 
@@ -373,13 +364,14 @@ test("files and layout survive a reload", async ({ page }) => {
   await page.getByRole("button", { name: "New file", exact: true }).click();
   await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill("# Kept after reload");
-  await page.getByRole("button", { name: "Hide chat" }).click();
   await page.reload();
   await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveAttribute(
     "title",
     "notes/untitled-1.md",
   );
-  await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
 });
 
 test("collapsed folders stay collapsed across views and reloads", async ({ page }) => {
@@ -407,24 +399,26 @@ test("collapsed folders stay collapsed across views and reloads", async ({ page 
   await expect(skill).toBeVisible();
 });
 
-test("file toolbar: collapse all, reveal, filter and new file in a folder", async ({ page }) => {
+test("file toolbar: collapse all, filter and new file in a folder", async ({ page }) => {
   await gotoReport(page);
   const folder = (name: string) => page.getByRole("button", { name, exact: true });
   const report = page.locator(`[role="treeitem"][title="${REPORT}"]`);
 
-  // Collapse all, then bring the open report back into view.
+  // Collapse all, then expand all again.
   await page.getByRole("button", { name: "Collapse all folders" }).click();
   for (const name of ["notes", "runs", "skills", "uploads"]) {
     await expect(folder(name)).toHaveAttribute("aria-expanded", "false");
   }
   await expect(report).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Expand all folders" })).toBeVisible();
-  await page.getByRole("button", { name: "Reveal open file" }).click();
-  await expect(report).toBeFocused();
+  await page.getByRole("button", { name: "Expand all folders" }).click();
+  await expect(report).toBeVisible();
   await expect(folder("runs")).toHaveAttribute("aria-expanded", "true");
-  await expect(folder("notes")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("button", { name: "Collapse all folders" })).toBeVisible();
-  await shot(page, "35-file-toolbar-reveal");
+  await expect(page.getByRole("button", { name: "Reveal open file" })).toHaveCount(0);
+  await shot(page, "35-file-toolbar");
+  await folder("uploads").click();
+  await expect(folder("uploads")).toHaveAttribute("aria-expanded", "false");
 
   // The name filter shows matches inside collapsed folders, without opening them for good.
   await page.getByRole("button", { name: "Filter files" }).click();
@@ -569,7 +563,7 @@ test("file references on a phone show the editor", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "Files" }).last().click();
-  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  // Uploads are a folder in the Files tree; there is no Uploads view.
   await page.getByRole("treeitem", { name: /sales\.csv/ }).click();
   // The CopilotKit inspector sometimes pops open over the editor toolbar on a phone.
   await page.getByRole("button", { name: "edit", exact: true }).dispatchEvent("click");
