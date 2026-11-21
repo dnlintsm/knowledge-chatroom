@@ -3,9 +3,9 @@
 Status: creating, joining and switching workspaces is **done**
 ([#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), the milestone in
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479)).
-Administration and handover is **being specified**, tracked in
-[#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255): see
-[Administration and handover](#administration-and-handover).
+Administration and handover is **done** too
+([#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255)): see
+[Administration and handover](#administration-and-handover). Both shipped in 0.3.0.
 
 This is the short spec and operation matrix that #178 asks for before implementation. It
 covers creating, joining and switching workspaces, the isolation that has to be in place

@@ -67,10 +67,15 @@ Expose the UI through HTTPS and keep both Python service ports private. For logi
 set `AUTH_MODE=oidc`, OIDC settings, `APP_URL`, and the same `AUTH_SECRET` on the UI
 and api-py. Give agent-py and outside MCP servers only api-py's public key from
 `GET /identity/public-key` as `KNOWLEDGE_PUBLIC_KEY`, never the signing secret.
-For a single-user deployment use `AUTH_MODE=local`; production refuses an unset
-authentication mode without a secret.
+For a single-user deployment use `AUTH_MODE=local`. The UI's production build refuses an
+unset authentication mode without a secret. api-py does so only with `NODE_ENV=production`
+in its environment, which its image does not set, and agent-py and the MCP servers run
+without login whenever `KNOWLEDGE_PUBLIC_KEY` is empty
+([#283](https://github.com/dnlintsm/knowledge-chatroom/issues/283)): set `AUTH_MODE` on
+api-py and the key on the others explicitly, and after deploying check that api-py
+answers a request without an identity with 401.
 
-The first person to sign in owns the workspace. Owners see an **Admin** button next
+The first person to sign in owns the default workspace. Owners see an **Admin** button next
 to Share: people who have signed in and when they were last active, workspace roles,
 groups and their members, and recent access changes. A removed role applies on the
 user's next request; their login session stays valid until it expires.

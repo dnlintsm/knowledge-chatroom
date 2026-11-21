@@ -7,8 +7,8 @@ the Claude Agent SDK. With `AGENT_URL` set, the chat goes to a remote backend's
 user and their place in `forwardedProps.knowledge_chatroom`.
 The Python API server (`services/api-py`, at `LOCAL_AGENT_URL`) serves storage, skills,
 memory, chat history and every route but the chat itself, and applies the database
-migrations. The chat agent reaches the same database and object store through api-py's
-modules, with per-user file, node and experiment tools.
+migrations. The chat agent holds no database or object-store connection: its per-user
+file, node and experiment tools call api-py's HTTP API as the signed-in user.
 `apps/web/src/lib/agent-proxy.ts` forwards storage requests and attaches a signed identity
 when login is enabled. Browser state and authenticated storage access meet in
 `apps/web/src/components/workspace/store.tsx`; pane commands live in `workbench.tsx`.
@@ -21,10 +21,9 @@ flowchart LR
   Next -.->|AGENT_URL| Remote[Remote chat backend]
   Agent --> Claude[Claude Agent SDK]
   Agent --> MCP[Outside MCP servers]
+  Agent -->|storage, skills, memory| Api
   Api --> PG[(PostgreSQL metadata and versions)]
   Api --> S3[(S3 content bytes)]
-  Agent --> PG
-  Agent --> S3
   PG --> Events[LISTEN / NOTIFY]
   Events --> Browser
 ```
