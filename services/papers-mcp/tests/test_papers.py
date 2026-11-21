@@ -127,7 +127,7 @@ def web(monkeypatch):
 
 @pytest.fixture
 def ctx(monkeypatch):
-    monkeypatch.setattr(server, "PUBLIC_KEY", TEST_KEY.public_key())
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=True, key=TEST_KEY.public_key()))
     monkeypatch.setattr(server, "SERVER_NAME", "papers")
     return SimpleNamespace(headers={identity.HEADER: FOR_PAPERS})
 
@@ -442,7 +442,7 @@ def test_tool_list_is_the_contract():
 
 def test_results_go_out_as_structured_content_and_json_text(web, monkeypatch):
     """Through the MCP protocol, as the chatroom's agent calls it."""
-    monkeypatch.setattr(server, "PUBLIC_KEY", None)  # no login: the local user
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=False))  # no login: the local user
 
     async def call():
         async with Client(server.mcp) as client:

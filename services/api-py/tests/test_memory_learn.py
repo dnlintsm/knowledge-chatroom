@@ -112,9 +112,9 @@ def test_the_transcript_and_settings():
         idle_minutes("-1") == 10 and idle_minutes("soon") == 10 and idle_minutes("Infinity") == 10
     )
     env = {"MEMORY": "on", "MEMORY_LEARN": " OFF ", "MEMORY_IDLE_MINUTES": "1"}
-    settings = settings_from_env(env)
+    settings = settings_from_env({"AUTH_MODE": "local", **env})
     assert (settings.memory_learn, settings.memory_idle_minutes) == (False, 1)
-    assert settings_from_env({"MEMORY_LEARN": "on"}).memory_learn is True
+    assert settings_from_env({"AUTH_MODE": "local", "MEMORY_LEARN": "on"}).memory_learn is True
 
 
 def model(changes: list | Exception, calls: list | None = None):

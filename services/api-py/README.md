@@ -106,7 +106,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `TS_AGENT_URL` | unset | An older release's TypeScript server to forward unknown routes to. Unset disables forwarding. |
 | `API_PY_HOST`, `API_PY_PORT` | `127.0.0.1`, `8000` | Where it listens. |
 | `DATABASE_URL` | unset | Postgres, the same one agent-py uses. Unset means no storage. |
-| `AUTH_MODE`, `AUTH_SECRET` | | Login, with the app's rules and the same secret. |
+| `AUTH_MODE`, `AUTH_SECRET` | | Login: `oidc` with the app's `AUTH_SECRET`, or `local` for none. One of them is required: with neither, api-py refuses to start (`pnpm dev` passes `local`). Without login, a request signed for a user is answered 401. |
 | `MIGRATIONS_DIR` | `services/api-py/migrations` | The migrations to apply and expect. |
 | `MIGRATIONS` | unset | `off`: don't apply the migrations, wait for another process to. Otherwise api-py applies them. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | | The blob store; give agent-py the same values. |

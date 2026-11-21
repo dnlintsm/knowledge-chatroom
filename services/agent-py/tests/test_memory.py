@@ -116,7 +116,7 @@ def memory_server() -> MemoryServer:
 @pytest.fixture
 def client(claude, memory_server, tmp_path):
     # No working folder: these tests count the storage calls memory makes.
-    env = {"AGENT_PY_WORKDIR": str(tmp_path), "AGENT_WORKDIR": "off"}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path), "AGENT_WORKDIR": "off"}
     adapter = make_adapter(env, transport=httpx.MockTransport(memory_server.handle))
     with TestClient(create_app(env=env, adapter=adapter)) as c:
         yield c

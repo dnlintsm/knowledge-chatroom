@@ -176,9 +176,11 @@ async def test_adding_someone_who_left_clears_their_departure(database):
 def test_the_settings():
     assert parse_admins(" A@x.org,  kc|Bob ,,") == frozenset({"a@x.org", "kc|bob"})
     assert parse_admins(None) == frozenset()
-    settings = settings_from_env({"PLATFORM_ADMINS": "a@x.org", "RECOVERY_IDLE_DAYS": "14"})
+    settings = settings_from_env(
+        {"AUTH_MODE": "local", "PLATFORM_ADMINS": "a@x.org", "RECOVERY_IDLE_DAYS": "14"}
+    )
     assert settings.platform_admins == "a@x.org" and settings.recovery_idle_days == 14
-    assert settings_from_env({}).recovery_idle_days == 90
+    assert settings_from_env({"AUTH_MODE": "local"}).recovery_idle_days == 90
     for bad in ("0", "-3", "soon"):
         with pytest.raises(ConfigError):
-            settings_from_env({"RECOVERY_IDLE_DAYS": bad})
+            settings_from_env({"AUTH_MODE": "local", "RECOVERY_IDLE_DAYS": bad})
