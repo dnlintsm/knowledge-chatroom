@@ -318,3 +318,26 @@ async def test_json_bodies_are_bounded_and_big_ones_parsed_off_the_loop(api, mon
     assert len(large) > storage_routes.PARSE_INLINE_BYTES
     assert (await storage_routes.parse_body(large))["events"][0] == "x" * 1000
     assert seen[0] == threading.current_thread().name and seen[1] != seen[0]
+
+
+async def test_a_malformed_escape_or_id_is_a_bad_request_not_a_server_error(api):
+    """Issue #297: an id that isn't one must not reach the database or a traceback."""
+    from api_py import identity, memory, shared_memory
+
+    await api.get("/access", headers=ALICE)
+    # Bytes that aren't UTF-8, where a handler decodes an id out of the path
+    # (test_experiments.py has /experiments, which needs the blob store).
+    bad = "%E0%A4%A"
+    for path in (
+        f"/nodes/{bad}",
+        f"/access/grants/{bad}",
+    ):
+        for method in ("GET", "PATCH", "DELETE"):
+            answer = await api.request(method, path, headers=ALICE, json={})
+            assert answer.status_code in (400, 404, 405), (method, path, answer.status_code)
+    # Thirty-six dashes used to pass as an id and fail in Postgres.
+    dashes = "-" * 36
+    real = "11111111-2222-4333-8444-555555555555"
+    for pattern in (identity._UUID, memory._ID, shared_memory._UUID):
+        assert not pattern.fullmatch(dashes) and pattern.fullmatch(real)
+    assert not shared_memory.is_uuid("1111111122224333-8444-555555555555----")

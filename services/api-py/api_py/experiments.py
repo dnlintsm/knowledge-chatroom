@@ -424,7 +424,7 @@ async def update(
     async with conn.transaction():
         cur = await conn.execute(
             """
-            SELECT status, node_id FROM experiments
+            SELECT status, node_id, state, results FROM experiments
             WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL
             FOR UPDATE""",
             (experiment_id, storage.workspace_id),
@@ -432,7 +432,17 @@ async def update(
         before = await cur.fetchone()
         if not before:
             return False
-        status, node = before
+        status, node, state, results = before
+        # A finished run stays as it ended, whoever asks and through whichever
+        # route: checked here, under the row's lock, so neither a PATCH nor a
+        # second finish racing the first can rewrite it (issue #297).
+        if state in ("done", "failed") and (
+            fields.get("state", state) != state
+            or ("results" in fields and not same_json(fields["results"], results))
+        ):
+            raise ExperimentError(
+                f"This run already finished ({state}); its state and results stay as they ended"
+            )
         values = {k: Jsonb(v) if k in ("params", "results") else v for k, v in fields.items()}
         if values:
             assignments = ", ".join(f"{column} = %s" for column in values)

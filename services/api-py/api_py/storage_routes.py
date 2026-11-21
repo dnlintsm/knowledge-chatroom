@@ -357,6 +357,9 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         if isinstance(session, Response):
             return session
         return await handler(request, session)
+    except _MalformedPath:
+        # A percent-escape that isn't one (%zz, a lone %), wherever a handler decodes an id.
+        return error(400, "Malformed path encoding")
     except NodeNotFoundError as err:
         return error(404, str(err))
     except (ForbiddenError, ChatTakenError) as err:

@@ -26,7 +26,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from . import tokens
 from .access import LEGACY_TOKEN, AccessService, Principal
 
-_UUID = re.compile(r"[0-9a-fA-F-]{36}")
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 logger = logging.getLogger("api_py")
 
 LOGIN_MISMATCH = (
