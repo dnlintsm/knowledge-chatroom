@@ -243,13 +243,41 @@ async def test_the_answer_is_one_forced_call_streamed_as_events():
         raise RuntimeError("overloaded")
 
     failed = await suggest(run_input(), fails)
-    assert failed[1] == {"type": "RUN_ERROR", "message": "overloaded"}
+    # The reason is logged, not sent: a provider's error can name keys and URLs (issue #288).
+    assert failed[1] == {"type": "RUN_ERROR", "message": "Suggestions are unavailable right now."}
 
     async def no_call(params: dict) -> dict:
         return {"content": [{"type": "tool_use", "name": "copilotkitSuggest", "input": {}}]}
 
     # {} is a call (it is truthy in JavaScript); null isn't.
     assert len(await suggest(run_input(), no_call)) == 5
+
+
+def test_a_request_adds_only_so_much_to_the_model_call():
+    """Issue #288: the deployment pays for this call, so the sender doesn't set its size."""
+    from api_py.suggest import MAX_CONTEXTS, MAX_REQUEST_CHARS, suggest_prompt
+
+    long = run_input()
+    long["messages"][-1]["content"] = "x" * 50_000
+    long["context"] = [{"description": f"c{i}", "value": "v"} for i in range(40)]
+    long["tools"] = [
+        {
+            **SUGGEST,
+            "description": "d" * 50_000,
+            "parameters": {"type": "object", "x": "p" * 50_000},
+        }
+    ]
+    prompt = suggest_prompt(long)
+    assert prompt is not None
+    assert prompt["user"].count("<context description=") == MAX_CONTEXTS
+    assert (
+        "x" * MAX_REQUEST_CHARS + "…" in prompt["user"]
+        and "x" * (MAX_REQUEST_CHARS + 1) not in prompt["user"]
+    )
+    assert len(prompt["tool"]["description"]) < 10_000 and "input_schema" not in prompt["tool"]
+    # The app's own request is untouched.
+    usual = suggest_prompt(run_input())
+    assert usual is not None and usual["tool"].get("input_schema") == SUGGEST.get("parameters")
 
 
 def test_the_content_type_follows_the_accept_header_as_the_ag_ui_encoder_picks_it():

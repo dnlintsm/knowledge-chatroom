@@ -653,11 +653,10 @@ def _send(status: int, body: Any) -> JSONResponse:
 
 
 async def _read_json(request: Request) -> dict[str, Any] | None:
-    try:
-        body = await request.json()
-    except ValueError:
-        return None
-    return body if isinstance(body, dict) else None
+    """The JSON object in the body, at most 64 KiB (storage_routes.read_json), or None."""
+    from .storage_routes import read_json
+
+    return await read_json(request)
 
 
 @router.api_route("/workspaces", methods=_ALL_METHODS, include_in_schema=False)

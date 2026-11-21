@@ -223,6 +223,20 @@ def parse_json(text: str) -> Any:
     return json.loads(text, parse_constant=_refuse, parse_int=_js_int, parse_float=_js_float)
 
 
+# Above this, a body is parsed in a worker thread: parsing megabytes of JSON
+# takes seconds, and on the event loop that would stall every other request.
+PARSE_INLINE_BYTES = 256 * 1024
+
+
+async def parse_body(data: bytes) -> Any:
+    """`data` as JSON (parse_json's rules); raises ValueError when it isn't."""
+    # As TextDecoder reads it: a leading byte order mark dropped.
+    text = data.decode("utf-8", errors="replace").removeprefix("\ufeff")
+    if len(data) <= PARSE_INLINE_BYTES:
+        return parse_json(text)
+    return await asyncio.to_thread(parse_json, text)
+
+
 async def read_json(request: Request) -> dict[str, Any] | None:
     """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
     body = await read_body(request, MAX_JSON_BYTES)
@@ -428,9 +442,8 @@ async def read_run(request: Request) -> dict[str, Any] | Response:
     if data is None:
         return error(413, f"A run may be at most {MAX_RUN_BYTES} bytes")
     try:
-        # As TextDecoder reads it: a leading byte order mark dropped.
-        body = parse_json(data.decode("utf-8", errors="replace").removeprefix("\ufeff"))
-    except ValueError:
+        body = await parse_body(data)
+    except (ValueError, RecursionError):
         body = None
     if (
         not isinstance(body, dict)

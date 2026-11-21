@@ -510,3 +510,36 @@ async def test_large_text_fields_are_refused_while_they_stream():
             await read_parts("multipart/form-data; boundary=b", body(name), 1024)
         assert refused.value.status == status
     assert MAX_META_BYTES == 256 * 1024
+
+
+async def test_an_uploads_files_are_limited_together_and_in_number(monkeypatch):
+    """Issue #288: every part is held until the upload is written, so each one's limit isn't enough."""
+    from api_py import uploads
+    from api_py.uploads import UploadError, read_parts
+
+    def form(count: int, size: int):
+        async def body():
+            yield b'--b\r\nContent-Disposition: form-data; name="meta"\r\n\r\n{}\r\n'
+            for i in range(count):
+                head = (
+                    f'--b\r\nContent-Disposition: form-data; name="f{i}"; filename="f{i}"\r\n\r\n'
+                )
+                yield head.encode() + b"x" * size + b"\r\n"
+            yield b"--b--\r\n"
+
+        return body()
+
+    kind = "multipart/form-data; boundary=b"
+    # Four files' worth by default; "meta" doesn't count toward it.
+    found = await read_parts(kind, form(4, 1000), 1000)
+    assert len(found.files) == 4 and found.meta == "{}"
+    with pytest.raises(UploadError) as refused:
+        await read_parts(kind, form(5, 1000), 1000)
+    assert (refused.value.status, str(refused.value)) == (
+        413,
+        "The upload's files exceed 4000 bytes in all",
+    )
+    assert len((await read_parts(kind, form(5, 1000), 1000, 10_000)).files) == 5
+    monkeypatch.setattr(uploads, "MAX_FILES", 3)
+    with pytest.raises(UploadError, match="at most 3 files"):
+        await read_parts(kind, form(4, 10), 1000)

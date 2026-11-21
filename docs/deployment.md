@@ -132,7 +132,9 @@ Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
 downloads; signed links expire after five minutes. Without it, binary files are served
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
-50 MB) caps one upload.
+50 MB) caps one file. An experiment upload (`POST /experiments/upload`) is held in memory
+until it is written, so its files together may be at most four times that, and 2,000 in
+number. Other request bodies have fixed limits: 64 KiB for JSON, 32 MiB for a chat run.
 
 Migrations (`services/api-py/migrations`) apply when the Python API server starts
 (`MIGRATIONS=off` makes it wait for another process to apply them). Back up database metadata and blob contents

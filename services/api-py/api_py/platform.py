@@ -332,10 +332,9 @@ async def _route(request: Request, platform: Platform, principal: Principal) -> 
     if len(parts) == 3 and parts[0] == "workspaces" and parts[2] == "owners":
         if method != "POST":
             return _send(405, {"error": "Method not allowed"})
-        try:
-            body = await request.json()
-        except ValueError:
-            body = None
+        from .storage_routes import read_json
+
+        body = await read_json(request)  # at most 64 KiB
         user_id = body.get("userId") if isinstance(body, dict) else None
         full_access = body.get("fullAccess", False) if isinstance(body, dict) else None
         if not isinstance(user_id, str) or not isinstance(full_access, bool):

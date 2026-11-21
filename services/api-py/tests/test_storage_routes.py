@@ -286,3 +286,35 @@ async def test_whoever_adds_a_node_owns_it(database, row_security):
         assert (await api.delete(f"/nodes/{made['id']}", headers=BOB)).json() == {
             "deleted": made["id"]
         }
+
+
+async def test_json_bodies_are_bounded_and_big_ones_parsed_off_the_loop(api, monkeypatch):
+    """Issue #288: no route reads a body without a limit, and megabytes of JSON don't stall the server."""
+    import threading
+
+    from api_py import storage_routes
+
+    # /workspaces and /platform read their bodies with the 64 KiB reader the other routers use.
+    big = json.dumps({"name": "Lab", "pad": "x" * 70_000})
+    for path in ("/workspaces", "/platform/workspaces/00000000-0000-4000-8000-000000000000/owners"):
+        answer = await api.post(
+            path, headers={**ALICE, "content-type": "application/json"}, content=big
+        )
+        assert answer.status_code in (400, 403), (path, answer.text)
+    made = await api.post("/workspaces", headers=ALICE, json={"name": "Lab"})
+    assert made.status_code == 201, made.text
+
+    # A small body is parsed where it is read; a large one in a worker thread.
+    seen: list[str] = []
+    parse = storage_routes.parse_json
+
+    def spy(text: str):
+        seen.append(threading.current_thread().name)
+        return parse(text)
+
+    monkeypatch.setattr(storage_routes, "parse_json", spy)
+    assert await storage_routes.parse_body(b'{"a": 1}') == {"a": 1}
+    large = json.dumps({"events": ["x" * 1000] * 400}).encode()
+    assert len(large) > storage_routes.PARSE_INLINE_BYTES
+    assert (await storage_routes.parse_body(large))["events"][0] == "x" * 1000
+    assert seen[0] == threading.current_thread().name and seen[1] != seen[0]
