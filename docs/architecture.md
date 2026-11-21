@@ -216,6 +216,9 @@ is no separate run folder or mode (issue #82):
 
 Runs need server storage; a browser-only workspace has none.
 
+Input drift, reading past versions, recording which Rules a run read, and restoring deleted
+Experiments are specified in [run-evidence.md](run-evidence.md) (#267).
+
 ### Actions
 
 Inside a run the Files view ends with a foldable **Actions** block (like VS Code's Outline
