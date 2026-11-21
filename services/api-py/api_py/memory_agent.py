@@ -637,6 +637,8 @@ class AgentRequest:
     recall: MemoryRecall | None
     search_chats: Any
     read_chat: Any
+    # (chat id) -> whether the chat's saved runs read outside content (chats.py).
+    chat_read_outside: Any = None
 
 
 def _send(status: int, body: Any) -> Response:
@@ -664,10 +666,20 @@ async def serve(request: Request, raw: str, given: AgentRequest, read_json: Any)
     )
     if memory is None:
         return _send(403, {"error": "Memory is off in this chat (incognito, or turned off)"})
-    # Outside the chat: every change waits for the user.
+    # Outside the chat: every change waits for the user. In it, they wait once
+    # the run has used another tool (the agent says so with ?tainted=1), and
+    # also when the server can see a reason itself (issue #285), which a
+    # client that forgets the flag can't undo:
+    # - an earlier run of this chat read outside content, which is still in
+    #   the conversation Claude is continuing;
+    # - the prompt carries other people's words: the shared notes' index.
     memory.tainted = (
         bool(_TAINTED.fullmatch(first_param(request, "tainted") or "")) if chat else True
     )
+    if not memory.tainted and any(n["mode"] == "auto" for n in memory.shared):
+        memory.tainted = True
+    if not memory.tainted and given.chat_read_outside is not None:
+        memory.tainted = await given.chat_read_outside(given.thread)
     has_chats = chat and memory.search_chats is not None
     specs = tool_specs(has_chats)
     parts = [p for p in raw[len("/memory") :].split("/") if p]
