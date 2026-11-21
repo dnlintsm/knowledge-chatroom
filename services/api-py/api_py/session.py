@@ -1061,8 +1061,16 @@ class Session:
     # The org tree and grants
 
     async def users(self) -> list[dict[str, Any]]:
-        """The workspace's members, not everyone who has signed in."""
-        return await self.access.users()
+        """
+        The workspace's members, not everyone who has signed in: names for a
+        Member, and emails too for an Owner or Admin (issue #287).
+        """
+        return await self.access.users(private=self.membership in ("owner", "admin"))
+
+    async def me(self) -> dict[str, Any] | None:
+        """The caller's own id, subject, email and name, while they are a member here."""
+        user_id = self.principal.user_id
+        return await self.access.user(user_id) if await self.access.is_member(user_id) else None
 
     async def people(self) -> list[dict[str, Any]]:
         """The workspace's members, with roles and groups: for its Owners and Admins."""

@@ -1,7 +1,7 @@
 """The storage API's routes that have moved to Python (#190), as apps/agent/src/storage/http.ts serves them.
 
     GET    /access                  {me, rootRole}
-    GET    /access/users            everyone who has signed in
+    GET    /access/users            the workspace's members: names, and emails for Owners and Admins
     GET    /access/people           the same, with sign-up and last-active times,
                                     workspace role and groups (workspace owners only)
     GET    /access/groups           the org tree, with direct members
@@ -558,8 +558,7 @@ async def handle_access(request: Request, session: Session) -> Response:
     if not section:
         if method != "GET":
             return error(405, "Method not allowed")
-        me = next((u for u in await session.users() if u["id"] == session.principal.user_id), None)
-        return json_response(200, {"me": me, "rootRole": await session.role(None)})
+        return json_response(200, {"me": await session.me(), "rootRole": await session.role(None)})
 
     if section == "users" and not ident and method == "GET":
         return json_response(200, {"users": await session.users()})

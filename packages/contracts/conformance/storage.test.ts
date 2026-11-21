@@ -217,9 +217,9 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/access", { headers: bob, expect: 200 });
     await call("GET", "/access/people", { headers: alice, expect: 200 });
     await call("GET", "/access/people", { headers: bob, expect: 403 });
-    const users = await call<{ users: Schema["User"][] }>("GET", "/access/users", { headers: alice, expect: 200 });
-    bobId = users.data.users.find((u) => u.subject === "conformance|bob")!.id;
-    aliceId = users.data.users.find((u) => u.subject === "conformance|alice")!.id;
+    const users = await call<{ users: Schema["UserSummary"][] }>("GET", "/access/users", { headers: alice, expect: 200 });
+    bobId = users.data.users.find((u) => u.email === "bob@example.com")!.id;
+    aliceId = users.data.users.find((u) => u.email === "alice@example.com")!.id;
   });
 
   step("workspaces", async () => {

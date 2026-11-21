@@ -367,6 +367,19 @@ class User(BaseModel):
     name: str | None
 
 
+class UserSummary(BaseModel):
+    """
+    A member as others in the workspace see them.
+    """
+
+    id: str
+    name: str | None
+    email: str | None = None
+    """
+    Only in answers to the workspace's Owners and Admins.
+    """
+
+
 class Person(User):
     createdAt: Timestamp
     lastSeenAt: Timestamp | None
@@ -1246,7 +1259,7 @@ class GetMyAccessResponse(BaseModel):
 
 
 class ListUsersResponse(BaseModel):
-    users: list[User]
+    users: list[UserSummary]
 
 
 class ListPeopleResponse(BaseModel):

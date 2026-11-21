@@ -12,11 +12,15 @@ import { useWorkspace } from "./store";
  * also reaches it, so that is said rather than repeated.
  */
 
+/**
+ * A member. /access/users gives everyone the name, and Owners and Admins the
+ * email; only /access/people (Owners and Admins) has the login subject.
+ */
 export interface Person {
   id: string;
   name: string | null;
-  email: string | null;
-  subject: string;
+  email?: string | null;
+  subject?: string;
 }
 
 export interface Group {
@@ -55,7 +59,7 @@ export async function access<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export const personLabel = (p: Person) => p.name ?? p.email ?? p.subject;
+export const personLabel = (p: Person) => p.name ?? p.email ?? p.subject ?? "Unnamed member";
 
 /** The signed-in user, and signing out. Shown only with login on. */
 export function AccountMenu() {

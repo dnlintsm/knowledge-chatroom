@@ -270,18 +270,34 @@ class AccessService:
             row = await cur.fetchone()
         return {**row, "id": str(row["id"])} if row else None
 
-    async def users(self) -> list[dict[str, Any]]:
-        """The workspace's members (workspace_members), not everyone who has signed in."""
+    async def users(self, private: bool = False) -> list[dict[str, Any]]:
+        """
+        The workspace's members (workspace_members), not everyone who has signed in:
+        {id, name}, and the email only when `private` (for Owners and Admins).
+        Never the login subject (issue #287), as WorkspacesService.members().
+        """
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
                 """
-                SELECT u.id, u.subject, u.email, u.name
+                SELECT u.id, u.name, u.email
                 FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = %s
                 ORDER BY coalesce(u.name, u.email, u.subject)""",
                 (self.workspace_id,),
             )
-            return [{**row, "id": str(row["id"])} for row in await cur.fetchall()]
+            rows = await cur.fetchall()
+        return [
+            {"id": str(r["id"]), "name": r["name"]} | ({"email": r["email"]} if private else {})
+            for r in rows
+        ]
+
+    async def is_member(self, user_id: str) -> bool:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (self.workspace_id, user_id),
+            )
+            return await cur.fetchone() is not None
 
     async def people(self) -> list[dict[str, Any]]:
         """The workspace's members, with their root role and groups; not the built-in local user."""
