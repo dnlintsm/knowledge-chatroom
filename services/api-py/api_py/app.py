@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
+from .identity import RefuseSignedWithoutLogin
 from .memory_learn import MemoryLearner
 from .platform import Platform, parse_admins
 from .proxy import client, forward
@@ -258,6 +259,10 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         return JSONResponse(
             {"status": "degraded", "upstream": upstream, "database": database}, status_code=503
         )
+
+    if not settings.auth_secret:
+        # Without login, a request signed for a user is refused, not made the local user.
+        app.add_middleware(RefuseSignedWithoutLogin)
 
     for router in ROUTERS:
         app.include_router(router)

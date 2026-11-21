@@ -49,7 +49,15 @@ export async function GET(req: NextRequest) {
   const app = appUrl(req);
   const destination = new URL(safeReturnTo(login.returnTo), app);
   const res = NextResponse.redirect(destination.origin === new URL(app).origin ? destination : new URL("/", app));
-  res.cookies.set(sessionCookie(req, userFromClaims(claims)));
+  const user = userFromClaims(claims);
+  if (claims.email && !user.email) {
+    // Says why this person has no email in member lists and admin settings.
+    console.warn(
+      `[auth] ${user.sub} signed in with an email the provider did not mark verified; it is ignored. ` +
+        "If your provider verifies emails but sends no email_verified claim, set OIDC_ASSUME_EMAIL_VERIFIED=true.",
+    );
+  }
+  res.cookies.set(sessionCookie(req, user));
   res.cookies.set(clearCookie(req, LOGIN_COOKIE, "/api/auth"));
   return res;
 }

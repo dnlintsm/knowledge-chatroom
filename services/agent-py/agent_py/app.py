@@ -35,7 +35,7 @@ from ag_ui.encoder import EventEncoder
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from knowledge_chatroom.identity import User, caller, public_key
+from knowledge_chatroom.identity import LoginConfigError, User, caller, login_from_env
 
 from .adapter import ChatroomAdapter
 from .mcp import servers_from_env
@@ -107,7 +107,14 @@ def create_app(
     env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | None = None
 ) -> FastAPI:
     env = os.environ if env is None else env
-    key = public_key(env["KNOWLEDGE_PUBLIC_KEY"]) if env.get("KNOWLEDGE_PUBLIC_KEY") else None
+    # Whether runs must be signed (issue #283): AUTH_MODE says, and a missing key
+    # never means "no login". Unconfigured, this raises and the server won't start.
+    login = login_from_env(env)
+    if login.required and login.key is None:
+        logger.warning(
+            "Login is on but KNOWLEDGE_PUBLIC_KEY is not set: every run is refused until it is "
+            "(the API server's GET /identity/public-key)."
+        )
     adapter = adapter or make_adapter(env)
 
     @asynccontextmanager
@@ -115,13 +122,24 @@ def create_app(
         yield
         await adapter.shutdown()
 
+    # What a caller who can't be identified is told.
+    if not login.required:
+        refused = (
+            "This agent runs without login (AUTH_MODE=local) but the request is signed, so the "
+            "app has login on. Set AUTH_MODE=oidc and KNOWLEDGE_PUBLIC_KEY here"
+        )
+    elif login.key is None:
+        refused = "Set KNOWLEDGE_PUBLIC_KEY: login is on"
+    else:
+        refused = "Sign in first"
+
     app = FastAPI(title="agent-py", lifespan=lifespan)
     app.state.adapter = adapter
 
     @app.get("/agent/models")
     async def models(request: Request) -> dict[str, str | tuple[str, ...]]:
-        if caller(dict(request.headers), key, audience=None) is None:  # pyrefly: ignore[bad-argument-type]
-            raise HTTPException(401, "Sign in first")
+        if caller(dict(request.headers), login, audience=None) is None:
+            raise HTTPException(401, refused)
         available = chat_models(env)
         return {"default": available[0], "models": available}
 
@@ -129,11 +147,9 @@ def create_app(
     async def report(input_data: RunAgentInput, request: Request) -> StreamingResponse:
         # The app's X-Knowledge-User has no audience. Without login there is
         # no header and everyone is the local user.
-        user = caller(dict(request.headers), key, audience=None)  # pyrefly: ignore[bad-argument-type]
+        user = caller(dict(request.headers), login, audience=None)
         if user is None:
-            raise HTTPException(
-                401, "Sign in first" if key else "Set KNOWLEDGE_PUBLIC_KEY: login is on"
-            )
+            raise HTTPException(401, refused)
         encoder = EventEncoder(accept=request.headers.get("accept"))
         reason = refusal(input_data, user)
 
@@ -164,8 +180,12 @@ def main() -> None:
     import uvicorn
 
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    try:
+        app = create_app()
+    except LoginConfigError as err:
+        raise SystemExit(f"[agent-py] {err}") from None
     uvicorn.run(
-        create_app(),
+        app,
         host=os.environ.get("AGENT_PY_HOST", "127.0.0.1"),
         port=int(os.environ.get("AGENT_PY_PORT", "9300")),
     )

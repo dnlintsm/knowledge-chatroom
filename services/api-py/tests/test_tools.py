@@ -62,11 +62,14 @@ def servers(config: dict[str, Any], **env: str) -> dict[str, ExternalServer]:
 def test_mcp_servers_unset_serves_an_empty_menu_unless_legacy_forwarding_is_explicit():
     assert servers_from_env({}) is None
     assert servers_from_env({"MCP_SERVERS": " \n"}) is None
-    settings = settings_from_env({})
+    settings = settings_from_env({"AUTH_MODE": "local"})
     assert settings.tools is not None and settings.tools.servers == {}
-    whitespace = settings_from_env({"MCP_SERVERS": " \n"})
+    whitespace = settings_from_env({"AUTH_MODE": "local", "MCP_SERVERS": " \n"})
     assert whitespace.tools is not None and whitespace.tools.servers == {}
-    assert settings_from_env({"TS_AGENT_URL": "http://legacy:8100"}).tools is None
+    assert (
+        settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://legacy:8100"}).tools
+        is None
+    )
 
 
 def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCaptureFixture):
@@ -159,8 +162,10 @@ def test_timeouts_and_token_lifetimes():
         with pytest.raises(ValueError, match="STORAGE_TOKEN_SECONDS"):
             storage_token_seconds({"STORAGE_TOKEN_SECONDS": bad})
     with pytest.raises(ConfigError, match="STORAGE_TOKEN_SECONDS"):
-        settings_from_env({"MCP_SERVERS": "{}", "STORAGE_TOKEN_SECONDS": "5"})
-    tools = settings_from_env({"MCP_SERVERS": "{}", "TOOLS_CALL_TIMEOUT_MS": "500"}).tools
+        settings_from_env({"AUTH_MODE": "local", "MCP_SERVERS": "{}", "STORAGE_TOKEN_SECONDS": "5"})
+    tools = settings_from_env(
+        {"AUTH_MODE": "local", "MCP_SERVERS": "{}", "TOOLS_CALL_TIMEOUT_MS": "500"}
+    ).tools
     assert tools == ToolsSettings(servers={}, timeout=0.5, storage_token_seconds=3600)
 
 

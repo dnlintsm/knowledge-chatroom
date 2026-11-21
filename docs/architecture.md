@@ -389,13 +389,21 @@ Code's memory files and `SKILL.md`.
   hook marks the run, since files, web pages and MCP results may carry injected text),
   Claude's saves, edits and deletes become proposals in `memory_inbox` instead. The user
   accepts or rejects them in the Memory view; accepting applies the change against the
-  version it was made on, or reports a conflict.
+  version it was made on, or reports a conflict. Three more cases count as having read
+  outside content, because the text is in the conversation without a tool call in that run:
+  the run's context holds workspace text (the open file, a selection, an experiment's
+  details or report; `agent_py/place.py`), an earlier run of the same chat used such a
+  tool (api-py reads the chat's saved messages, so a backend can't forget to say so), and
+  an Auto shared note is in the prompt. In practice a save made directly, with Undo, is
+  one from a chat about the user's own words.
 - `services/api-py/api_py/memory_learn.py` is the background learner. Every minute it picks chats idle
   for `MEMORY_IDLE_MINUTES` (default 10) and at most 3 days old, not incognito, whose
   owner has memory on or ask, and asks a small model (`MEMORY_MODEL`, else the follow-up
   chips' model) for at most 5 changes to the notes, covering new facts, duplicates,
   contradictions and stale notes. Changes apply directly in `on` mode (with Undo, listed
-  under "Recent changes by Claude") or go to the inbox in `ask` mode.
+  under "Recent changes by Claude") or go to the inbox in `ask` mode. A chat in which
+  Claude read outside content is learned from as in `ask` mode, since its replies may
+  repeat text from there.
   `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
   it off.
 - Shared memory (`020_shared_memory.sql`, `services/api-py/api_py/shared_memory.py`): notes for

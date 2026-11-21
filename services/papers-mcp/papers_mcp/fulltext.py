@@ -17,6 +17,9 @@ from . import net
 from .models import Section
 
 MAX_PDF_BYTES = int(os.environ.get("PAPERS_MAX_PDF_BYTES", str(30_000_000)))
+# A PDF is someone else's file: how much of one is read, whatever it claims to hold.
+MAX_PDF_PAGES = int(os.environ.get("PAPERS_MAX_PDF_PAGES", "500"))
+MAX_PDF_CHARS = 3_000_000
 CACHE_SIZE = 16
 _cache: OrderedDict[str, list[str]] = OrderedDict()
 
@@ -34,7 +37,14 @@ def pdf_lines(data: bytes) -> list[str]:
 
     try:
         reader = PdfReader(io.BytesIO(data))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        pages: list[str] = []
+        size = 0
+        for number, page in enumerate(reader.pages):
+            if number >= MAX_PDF_PAGES or size > MAX_PDF_CHARS:
+                break
+            pages.append(page.extract_text() or "")
+            size += len(pages[-1])
+        text = "\n".join(pages)
     except Exception as err:  # pypdf raises many kinds for broken files
         raise net.SourceError(f"Couldn't read the PDF: {err}") from err
     lines: list[str] = []
@@ -55,7 +65,8 @@ def lines_for(pdf_url: str) -> list[str]:
     if pdf_url in _cache:
         _cache.move_to_end(pdf_url)
         return _cache[pdf_url]
-    data = net.get(pdf_url, accept="application/pdf", max_bytes=MAX_PDF_BYTES)
+    # The link is whatever a source's answer said: fetched only as a public https address.
+    data = net.get_public(pdf_url, accept="application/pdf", max_bytes=MAX_PDF_BYTES)
     if not data.startswith(b"%PDF"):
         raise net.SourceError(
             f"{pdf_url} isn't a PDF (the publisher may want a login); use the abstract instead."

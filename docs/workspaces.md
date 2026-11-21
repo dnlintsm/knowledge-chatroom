@@ -327,7 +327,10 @@ signed-in user with only chats.
 ## Adding a member
 
 **The member list** is the current workspace's members only. Members see names. Owners and
-Admins also see email, sign-up and last-active times. OIDC subjects aren't returned.
+Admins also see email, sign-up and last-active times. OIDC subjects aren't returned. The
+sharing picker's list (`GET /access/users`) follows the same rule: names for a Member, emails
+too for an Owner or Admin, and never subjects. A user gets their own subject from
+`GET /access`, and Owners and Admins see members' subjects in `GET /access/people`.
 
 **Looking someone up to add them** is separate from the member list:
 

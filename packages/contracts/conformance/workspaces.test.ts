@@ -137,8 +137,10 @@ describe("workspaces: setup", { skip: !enabled && "STORAGE_URL and AUTH_SECRET n
     const me = await ok<{ rootRole: string | null }>(200, "GET", "/access", { headers: owner });
     assert.equal(me.rootRole, "owner", `${OWNER} must own the default workspace: run after storage.test.ts, or on a fresh database`);
     for (const who of [carol, dave, erin]) await ok(200, "GET", "/access", { headers: who });
-    const { users } = await ok<{ users: { id: string; subject: string }[] }>(200, "GET", "/access/users", { headers: owner });
-    for (const name of ["carol", "dave", "erin"] as const) ids[name] = users.find((u) => u.subject === `workspaces|${name}`)!.id;
+    // The Owner gets emails with the names; nobody gets login subjects (issue #287).
+    const { users } = await ok<{ users: { id: string; email?: string | null }[] }>(200, "GET", "/access/users", { headers: owner });
+    assert.ok(users.every((u) => !("subject" in u)), "no login subjects in the member list");
+    for (const name of ["carol", "dave", "erin"] as const) ids[name] = users.find((u) => u.email === `${name}@example.com`)!.id;
   });
 });
 
@@ -292,8 +294,14 @@ describe("workspaces: multi-workspace", { skip: !enabled && "STORAGE_URL and AUT
     const asMember = await ok<{ members: Json[] }>(200, "GET", `/workspaces/${ws2}/members`, { headers: dave });
     assert.ok(asMember.members.every((m) => !("email" in m)), "a Member sees names only");
     await ok(404, "GET", `/workspaces/${ws2}/members`, { headers: erin });
-    const users = await ok<{ users: { id: string }[] }>(200, "GET", "/access/users", { headers: { ...dave, ...inWs(ws2) } });
+    const users = await ok<{ users: Json[] }>(200, "GET", "/access/users", { headers: { ...dave, ...inWs(ws2) } });
     assert.ok(!users.users.some((u) => u.id === ids.erin), "no directory of every signed-in user");
+    // The same rule as the member list (issue #287): names for a Member, emails for an Owner, subjects for nobody.
+    assert.ok(users.users.every((u) => !("email" in u) && !("subject" in u)), "a Member sees names only");
+    const forOwner = await ok<{ users: Json[] }>(200, "GET", "/access/users", { headers: { ...carol, ...inWs(ws2) } });
+    assert.ok(forOwner.users.every((u) => "email" in u && !("subject" in u)), "an Owner also sees emails");
+    const self = await ok<{ me: Json }>(200, "GET", "/access", { headers: { ...dave, ...inWs(ws2) } });
+    assert.equal(self.me.subject, "workspaces|dave", "a user still gets their own subject");
   });
 
   test("search, chats, memory and change streams stay in their workspace", async () => {
@@ -699,9 +707,9 @@ describe("workspaces: inventory and Owner recovery (#255)", { skip: !enabled && 
 
   test("setup: gina's workspace, with carol and dave as Members without access, and some content", async () => {
     for (const who of [admin, gina]) await ok(200, "GET", "/access", { headers: who });
-    const { users } = await ok<{ users: { id: string; subject: string }[] }>(200, "GET", "/access/users", { headers: owner });
-    ginaId = users.find((u) => u.subject === "workspaces|gina")!.id;
-    adminId = users.find((u) => u.subject === "workspaces|platform")!.id;
+    // Each asks for their own id: the member list has no login subjects to find them by (issue #287).
+    ginaId = (await ok<{ me: { id: string } }>(200, "GET", "/access", { headers: gina })).me.id;
+    adminId = (await ok<{ me: { id: string } }>(200, "GET", "/access", { headers: admin })).me.id;
     ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: gina, json: { name: `Gina's lab ${stamp}` } })).id;
     for (const id of [ids.carol, ids.dave]) await ok(201, "POST", `/workspaces/${ws}/members`, { headers: gina, json: { userId: id, role: "member", access: "none" } });
     const node = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(gina), json: { parentId: null, name: `Gina's secret node ${stamp}` } })).id;

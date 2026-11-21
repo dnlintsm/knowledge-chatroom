@@ -65,7 +65,11 @@ class ConfigError(ValueError):
 
 
 def auth_secret(env: Mapping[str, str]) -> str | None:
-    """AUTH_SECRET when login is on, None without login; refuses what auth-mode.ts refuses."""
+    """AUTH_SECRET when login is on, None without login (AUTH_MODE=local, said outright).
+
+    Refuses what auth-mode.ts refuses, and also the case it allows in
+    development: neither AUTH_MODE nor AUTH_SECRET.
+    """
     requested = (env.get("AUTH_MODE") or "").strip().lower() or None
     secret = env.get("AUTH_SECRET") or None
     if requested and requested not in ("oidc", "local"):
@@ -82,12 +86,14 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
         return secret
     if requested == "oidc":
         raise ConfigError(f"AUTH_MODE=oidc needs AUTH_SECRET {_SECRET_HINT}")
-    if env.get("NODE_ENV") == "production":
-        raise ConfigError(
-            "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET and OIDC_* for sign-in, "
-            "or AUTH_MODE=local to run without login (everyone is one user)"
-        )
-    return None
+    # Neither set. The app (auth-mode.ts) lets this through in development and
+    # refuses it in a production build; this server has no such build, so it
+    # always refuses: a secret left out must not quietly turn login off (issue
+    # #283). `pnpm dev` passes AUTH_MODE=local for it (scripts/dev-py.mjs).
+    raise ConfigError(
+        "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET (the app's) for sign-in, "
+        "or AUTH_MODE=local to run without login (everyone is one user)"
+    )
 
 
 @dataclass(frozen=True)

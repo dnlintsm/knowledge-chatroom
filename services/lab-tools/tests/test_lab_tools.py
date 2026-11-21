@@ -51,7 +51,7 @@ def test_compare_runs_verdicts():
 
 
 def test_tools_need_a_known_caller_when_login_is_on(monkeypatch):
-    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=True, key=PUBLIC_KEY))
     monkeypatch.setattr(server, "SERVER_NAME", "lab")
     assert server.whoami(SimpleNamespace(headers={identity.HEADER: FOR_LAB}))["sub"] == "test|alice"
     with pytest.raises(server.ToolError):
@@ -95,7 +95,7 @@ def storage_api(monkeypatch):
     httpd = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     monkeypatch.setattr(server, "STORAGE_URL", f"http://127.0.0.1:{httpd.server_port}")
-    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=True, key=PUBLIC_KEY))
     monkeypatch.setattr(server, "SERVER_NAME", "lab")
     yield seen
     httpd.shutdown()
@@ -164,7 +164,7 @@ def memory_api(monkeypatch):
     httpd = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     monkeypatch.setattr(server, "STORAGE_URL", f"http://127.0.0.1:{httpd.server_port}")
-    monkeypatch.setattr(server, "PUBLIC_KEY", PUBLIC_KEY)
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=True, key=PUBLIC_KEY))
     monkeypatch.setattr(server, "SERVER_NAME", "lab")
     yield seen
     httpd.shutdown()

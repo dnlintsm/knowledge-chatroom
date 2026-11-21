@@ -257,6 +257,76 @@ async def test_binary_files_get_signed_links(database):
         assert (await api.get("/files/notes/a.md", headers=ALICE)).content == b"text"
 
 
+async def test_only_media_opens_in_place_from_the_object_store(database):
+    """
+    Issue #286: a signed link is served by the store's own origin, without the
+    sandbox the app puts on files it serves. So the type a writer claims is
+    normalised, a page-like type is served by the app instead, and whatever
+    still goes to the store as something a browser could run is a download.
+    """
+    async with Client(database, SECRET, s3=s3(public_url="http://files.example.test")) as (
+        api,
+        _app,
+    ):
+        page = b"<script>alert(1)</script>"
+
+        async def put(path: str, kind: str) -> None:
+            made = await api.put(
+                f"/files/{path}", headers={**ALICE, "content-type": kind}, content=page
+            )
+            assert made.status_code == 200, made.text
+
+        # However the type is spelled, text is text: served here, sandboxed.
+        await put("uploads/a.bin", "Text/HTML; charset=utf-8")
+        got = await api.get("/files/uploads/a.bin", headers=ALICE)
+        assert (got.status_code, got.headers["content-type"].split(";")[0]) == (200, "text/html")
+        assert got.headers["content-security-policy"] == "sandbox"
+        # Something that isn't a content type at all is ignored: the path decides.
+        await put("uploads/b.bin", "not a type")
+        listed = (await api.get("/files", headers=ALICE)).json()["files"]
+        assert {f["path"]: f["mime"] for f in listed} == {
+            "uploads/a.bin": "text/html",
+            "uploads/b.bin": "application/octet-stream",
+        }
+        # Binary types a browser would run as a document are downloaded from the store.
+        for path, kind in (
+            ("uploads/c.bin", "application/xhtml+xml"),
+            ("uploads/d.bin", "application/XML"),
+        ):
+            await put(path, kind)
+            link = await api.get(f"/files/{path}", headers=ALICE)
+            assert link.status_code == 302, path
+            disposition = httpx.URL(link.headers["location"]).params["response-content-disposition"]
+            assert disposition.startswith("attachment; "), (path, disposition)
+        # A picture or a PDF still opens in place.
+        await api.put(
+            "/files/uploads/doc.pdf",
+            headers={**ALICE, "content-type": "application/pdf"},
+            content=b"%PDF-1.7",
+        )
+        link = await api.get("/files/uploads/doc.pdf", headers=ALICE)
+        assert (
+            httpx.URL(link.headers["location"])
+            .params["response-content-disposition"]
+            .startswith("inline; ")
+        )
+
+
+async def test_a_json_route_reads_only_a_body_sent_as_json(files):
+    """Issue #286: a form or plain-text post from another site needs no preflight; application/json does."""
+    body = b'{"parentId": null, "name": "Etch"}'
+    for kind in ("text/plain", "application/x-www-form-urlencoded", ""):
+        headers = {**ALICE, "content-type": kind} if kind else dict(ALICE)
+        refused = await files.post("/nodes", headers=headers, content=body)
+        assert refused.status_code == 400, (kind, refused.text)
+    assert (await files.get("/nodes", headers=ALICE)).json()["nodes"] == []
+    kinds = ("application/json", "application/json; charset=utf-8", "Application/JSON")
+    for number, kind in enumerate(kinds):
+        named = b'{"parentId": null, "name": "Etch %d"}' % number
+        made = await files.post("/nodes", headers={**ALICE, "content-type": kind}, content=named)
+        assert made.status_code == 201, (kind, made.text)
+
+
 @asynccontextmanager
 async def served(app) -> AsyncIterator[str]:
     """`app` on a real socket: ASGITransport would wait for the whole of an endless event stream."""

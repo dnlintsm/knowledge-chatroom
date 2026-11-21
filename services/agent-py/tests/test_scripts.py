@@ -184,7 +184,7 @@ def scripted_server() -> AgentServer:
 def test_a_run_with_a_scripted_skill_gets_sandboxed_bash(claude, tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgres://secret")
     server = scripted_server()
-    env = {"AGENT_PY_WORKDIR": str(tmp_path), "SKILL_SCRIPTS": "on"}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path), "SKILL_SCRIPTS": "on"}
     adapter = make_adapter(env, transport=httpx.MockTransport(server.handle))
     with TestClient(create_app(env=env, adapter=adapter)) as c:
         events(c.post("/agent/report", json=run_input("hi")))
@@ -204,8 +204,11 @@ def test_a_run_with_a_scripted_skill_gets_sandboxed_bash(claude, tmp_path, monke
 
 def test_no_bash_with_scripts_off_or_no_scripted_skill(claude, tmp_path):
     for env, server in (
-        ({"AGENT_PY_WORKDIR": str(tmp_path)}, scripted_server()),
-        ({"AGENT_PY_WORKDIR": str(tmp_path), "SKILL_SCRIPTS": "on"}, AgentServer()),
+        ({"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}, scripted_server()),
+        (
+            {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path), "SKILL_SCRIPTS": "on"},
+            AgentServer(),
+        ),
     ):
         claude.created = []
         adapter = make_adapter(env, transport=httpx.MockTransport(server.handle))

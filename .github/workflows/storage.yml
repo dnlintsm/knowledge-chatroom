@@ -1,5 +1,7 @@
 # Runs the storage API conformance suite and api-py's database tests against real
-# Postgres and SeaweedFS whenever the storage code changes.
+# Postgres and SeaweedFS whenever the storage code changes. Not a required check:
+# api-py's database tests also run in the required `python` check (quality.yml,
+# issue #303); here they add the real embedding model (EMBEDDING_TEST).
 name: Storage tests
 
 on:
@@ -12,10 +14,14 @@ on:
       - "uv.lock"
       - "services/api-py/**"
       - "scripts/ci-*.mjs"
+      - "scripts/test-conformance.mjs"
       - "docker-compose.yml"
       - "infra/**"
       - ".github/workflows/storage.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:

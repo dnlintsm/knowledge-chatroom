@@ -79,6 +79,7 @@ def agent_server() -> AgentServer:
 @pytest.fixture
 def client(claude, agent_server, tmp_path):
     env = {
+        "AUTH_MODE": "local",
         "AGENT_PY_WORKDIR": str(tmp_path),
         "MCP_SERVERS": json.dumps(SERVERS),
         "LAB_TOKEN": "s3cret",

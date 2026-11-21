@@ -1,7 +1,9 @@
 """Who a request is from, as identify() in apps/agent/src/storage/identity.ts.
 
-Without AUTH_SECRET there is no login: every request is the built-in local
-user. With it, the app signs the user into X-Knowledge-User, and a request
+Without login (AUTH_MODE=local) every request is the built-in local user,
+except one that carries a signed identity: that caller has login on, so it is
+refused rather than made the local user (RefuseSignedWithoutLogin, issue #283).
+With AUTH_SECRET, the app signs the user into X-Knowledge-User, and a request
 without a valid one is refused. On the storage API a valid X-Knowledge-Storage
 token wins: Claude acting for its user through the outside service it names
 (`via`). The port must stay private either way; the header is only as
@@ -12,16 +14,49 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import tokens
 from .access import LEGACY_TOKEN, AccessService, Principal
 
 _UUID = re.compile(r"[0-9a-fA-F-]{36}")
+logger = logging.getLogger("api_py")
+
+LOGIN_MISMATCH = (
+    "This API server runs without login (AUTH_MODE=local), but the request is signed for a "
+    "user: the app has login on. Set AUTH_MODE=oidc and the app's AUTH_SECRET on the API server."
+)
+_SIGNED_HEADERS = (tokens.IDENTITY_HEADER.encode(), tokens.STORAGE_HEADER.encode())
+
+
+class RefuseSignedWithoutLogin:
+    """Without login, answers 401 to any request carrying X-Knowledge-User or X-Knowledge-Storage.
+
+    The app and the chat agent send those only with login on. Treating such a
+    request as the local user would give every signed-in person the built-in
+    owner's access, which is what a secret missing from this server used to do.
+    The unsigned `local.` memory token is not one of them.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.warned = False
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and any(name in _SIGNED_HEADERS for name, _ in scope["headers"]):
+            if not self.warned:
+                self.warned = True
+                logger.error(LOGIN_MISMATCH)
+            await JSONResponse({"error": LOGIN_MISMATCH}, status_code=401)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 async def identify(
@@ -46,7 +81,8 @@ async def identify(
     claims = tokens.verify(header, secret) if header is not None else None
     if not claims:
         return None
-    return Principal(user_id=await _user_for(access, claims))
+    # The app's own token: its email (or the lack of one) is the provider's word.
+    return Principal(user_id=await _user_for(access, claims, from_app=True))
 
 
 def token_ws(claims: dict[str, Any]) -> str:
@@ -55,13 +91,14 @@ def token_ws(claims: dict[str, Any]) -> str:
     return ws if isinstance(ws, str) else LEGACY_TOKEN
 
 
-async def _user_for(access: AccessService, claims: dict) -> str:
+async def _user_for(access: AccessService, claims: dict, *, from_app: bool = False) -> str:
     email = claims.get("email")
     name = claims.get("name")
     return await access.user_for_subject(
         claims["sub"],
         email if isinstance(email, str) else None,
         name if isinstance(name, str) else None,
+        from_app=from_app,
     )
 
 

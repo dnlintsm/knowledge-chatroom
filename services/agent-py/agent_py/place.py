@@ -41,6 +41,31 @@ def workspace_note(input_data: RunAgentInput) -> str:
     return "<workspace>\n" + "\n\n".join(parts) + "\n</workspace>"
 
 
+def carries_content(input_data: RunAgentInput) -> bool:
+    """
+    Whether the run's context holds text from the workspace: the open file, the
+    user's selection, or an experiment's details and report. That text is in
+    the prompt before any tool runs, and other people may have written it, so a
+    run with it is one that has read outside content (issue #285): its memory
+    changes wait for the user. Where the user is and the list of file names
+    don't count. Context this can't read does: unknown is not known to be safe.
+    """
+    for item in input_data.context or []:
+        try:
+            value = json.loads(item.value)
+        except (TypeError, ValueError):
+            return True
+        if not isinstance(value, dict):
+            return True
+        if (
+            isinstance(value.get("openFile"), dict)
+            or value.get("selection")
+            or value.get("currentExperiment")
+        ):
+            return True
+    return False
+
+
 def _compact(value: str) -> str:
     """The app sends JSON; keep it on as few lines as the content allows."""
     try:

@@ -331,7 +331,7 @@ def run_once(api: StorageAPI, env: dict[str, str], claude, headers: dict[str, st
 
 
 def test_a_run_reads_its_copy_with_confined_tools(api, claude, tmp_path: Path):
-    options = run_once(api, {"AGENT_PY_WORKDIR": str(tmp_path)}, claude)
+    options = run_once(api, {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}, claude)
     cwd = Path(options.cwd)
     assert (cwd / "workspace/root/notes/welcome.md").read_bytes() == b"# Welcome\n"
     assert options.tools == ["Read", "Glob", "Grep"]
@@ -341,7 +341,7 @@ def test_a_run_reads_its_copy_with_confined_tools(api, claude, tmp_path: Path):
 
 
 def test_without_a_copy_the_old_one_goes_and_the_tools_too(api, claude, tmp_path: Path):
-    env = {"AGENT_PY_WORKDIR": str(tmp_path)}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
     cwd = Path(run_once(api, env, claude).cwd)
     assert (cwd / "workspace").is_dir()
     for off, down in (({"AGENT_WORKDIR": "off"}, False), ({}, True)):
@@ -354,7 +354,7 @@ def test_without_a_copy_the_old_one_goes_and_the_tools_too(api, claude, tmp_path
 
 
 def test_each_workspace_has_its_own_folder(api, claude, tmp_path: Path):
-    env = {"AGENT_PY_WORKDIR": str(tmp_path)}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
     default = Path(run_once(api, env, claude).cwd)
     other = Path(run_once(api, env, claude, {"X-Knowledge-Workspace": "w2"}).cwd)
     assert default != other and default.parent == other.parent == tmp_path

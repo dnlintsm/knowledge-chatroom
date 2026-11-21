@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .access import Principal
-from .chats import get_chat
+from .chats import get_chat, read_outside_content
 from .llm import CreateMessage, learn_model
 from .memory import (
     LEARN_RUN,
@@ -260,6 +260,12 @@ class MemoryLearner:
             async with session.scoped() as conn:
                 found = await get_chat(conn, s.workspace_id, user, chat["id"])
             mode = (await memory.settings(chat["id"]))["mode"]
+            # A chat in which Claude read a file, a search result or anyone
+            # else's words is learned from as in Ask first: its replies may
+            # repeat text from there, so what it would save waits for the user
+            # (issue #285), as a save in such a chat does.
+            if found and mode == "on" and read_outside_content(found["messages"]):
+                mode = "ask"
             if found and mode != "off":
                 notes, versions = await memory.notes_for_learning()
                 changes = await propose_changes(notes, found["messages"], self.create())

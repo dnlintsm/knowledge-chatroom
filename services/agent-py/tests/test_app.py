@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from agent_py.app import create_app, make_adapter
 from agent_py.prompt import SYSTEM_PROMPT
+from knowledge_chatroom.identity import LoginConfigError
 
 KEY = Ed25519PrivateKey.generate()
 PUBLIC_KEY = base64.urlsafe_b64encode(
@@ -78,7 +79,7 @@ def no_skills(request: httpx.Request) -> httpx.Response:
 @pytest.fixture
 def client(claude):
     adapter = make_adapter({}, transport=httpx.MockTransport(no_skills))
-    with TestClient(create_app(env={}, adapter=adapter)) as c:
+    with TestClient(create_app(env={"AUTH_MODE": "local"}, adapter=adapter)) as c:
         yield c
 
 
@@ -95,7 +96,11 @@ def test_a_run_streams_the_models_answer(client, claude):
 
 
 def test_model_discovery_and_switching_in_one_thread(claude):
-    env = {"CLAUDE_MODEL": "claude-sonnet-5", "CHAT_MODELS": "claude-haiku-4.5, claude-sonnet-5"}
+    env = {
+        "AUTH_MODE": "local",
+        "CLAUDE_MODEL": "claude-sonnet-5",
+        "CHAT_MODELS": "claude-haiku-4.5, claude-sonnet-5",
+    }
     adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
     with TestClient(create_app(env=env, adapter=adapter)) as client:
         assert client.get("/agent/models").json() == {
@@ -181,6 +186,26 @@ def test_a_header_without_a_key_is_refused(client):
     assert "KNOWLEDGE_PUBLIC_KEY" in response.json()["detail"]
 
 
+def test_login_is_never_guessed_from_a_missing_key(claude):
+    """Issue #283: a setting left out must not turn login off."""
+    with pytest.raises(LoginConfigError, match="Login is not configured"):
+        create_app(env={}, adapter=make_adapter({}, httpx.MockTransport(no_skills)))
+    with pytest.raises(LoginConfigError, match="must not be set"):
+        env = {"AUTH_MODE": "local", "KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
+        create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+    # Login is on (the mode says so, or the shared .env has the app's secret) but
+    # the key is missing: nobody is the local user, signed or not.
+    for env in ({"AUTH_MODE": "oidc"}, {"AUTH_SECRET": "0123456789abcdef0123456789abcdef"}):
+        app = create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+        with TestClient(app) as c:
+            for headers in ({}, {"X-Knowledge-User": ALICE}):
+                response = c.post("/agent/report", json=run_input(user=LOCAL), headers=headers)
+                assert response.status_code == 401
+                assert "KNOWLEDGE_PUBLIC_KEY" in response.json()["detail"]
+            assert c.get("/agent/models").status_code == 401
+    assert claude.created == []
+
+
 @pytest.fixture
 def login_client(claude):
     env = {"KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
@@ -231,7 +256,7 @@ def test_the_note_also_goes_in_front_of_a_message_with_parts(client, claude):
 
 
 def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     with TestClient(
         create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
     ) as c:
@@ -255,7 +280,7 @@ def test_the_runs_workspace_goes_with_its_storage_calls(claude):
         seen.append(request)
         return no_skills(request)
 
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     with TestClient(
         create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(server)))
     ) as c:

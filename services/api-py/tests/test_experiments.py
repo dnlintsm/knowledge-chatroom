@@ -350,7 +350,7 @@ async def test_runs_record_inputs_finish_and_rerun(api):
     # Integers past 2**53 are read as JSON.parse reads them, so the record and its report agree.
     big = await api.post(
         "/experiments/runs",
-        headers=ALICE,
+        headers={**ALICE, "content-type": "application/json"},
         content=b'{"nodeId": null, "title": "Big", "params": {"n": 9007199254740993, "m": 12345678901234567890}}',
     )
     assert big.json()["params"] == {"m": 12345678901234567000, "n": 9007199254740992}
