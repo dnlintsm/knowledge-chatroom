@@ -45,9 +45,8 @@ process.env.AGENT_PORT = String(AGENT_PORT);
 if (!live) {
   process.env.ANTHROPIC_API_KEY = "";
   process.env.CPK_INTELLIGENCE_API_KEY = "";
-  // The example MCP app is outside the mock suites' coverage. Refuse discovery
-  // locally rather than depending on an external demo server and DNS timeouts.
-  process.env.MCP_SERVER_URL = `${process.env.LOCAL_AGENT_URL}/mcp`;
+  // No MCP app server (the default): the mock suites reach no outside host.
+  process.env.MCP_SERVER_URL = "";
 }
 if (!withStorage) process.env.DATABASE_URL = "";
 // CI serves a production build, which needs the login mode spelled out.
