@@ -21,6 +21,8 @@ from typing import Any
 from python_multipart.exceptions import MultipartParseError
 from python_multipart.multipart import MultipartParser
 
+from .paths import clean_mime
+
 # The "meta" part is small JSON: a title, a hypothesis (at most 20000
 # characters) and params and results (at most 64 KiB of JSON each), with room to spare.
 MAX_META_BYTES = 256 * 1024
@@ -286,8 +288,10 @@ class _Reader:
                 self._set_meta(content.decode("utf-8-sig", errors="replace"))
                 return
             upload: dict[str, Any] = {"path": part.name, "bytes": content}
-            if part.mime and part.mime != "application/octet-stream":
-                upload["mime"] = part.mime
+            # Stored as PUT /files stores it: lowercase type/subtype, or left to the path.
+            mime = clean_mime(part.mime)
+            if mime:
+                upload["mime"] = mime
             if len(self.files) >= MAX_FILES:
                 raise UploadError(413, f"An upload may hold at most {MAX_FILES} files")
             self.files.append(upload)

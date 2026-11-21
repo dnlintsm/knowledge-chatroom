@@ -116,6 +116,11 @@ pick one:
 - **Signed links to the store**: keep the second block and set
   `S3_PUBLIC_URL=https://knowledge.example.com:8443` on api-py. Left at
   `http://localhost:8333`, previews break on an https page as mixed content.
+  The store's origin has none of the sandboxing the app puts on files it serves, so api-py
+  signs a link to open in place only for pictures (not SVG), PDF, audio and video; any other
+  binary file is a download, and text, HTML and SVG are served by the app. A store on its
+  own site (another registrable domain) is safer still than another port of the app's host:
+  a page there can't send the app's cookies.
 
 `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
 `AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,

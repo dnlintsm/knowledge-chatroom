@@ -88,6 +88,7 @@ from .skills_routes import js_to_number
 from .storage_routes import (
     ALL_METHODS,
     _MalformedPath,
+    declares_json,
     decode_component,
     first_param,
     parse_json,
@@ -131,7 +132,7 @@ def send(status: int, body: Any) -> Response:
 async def read_json(request: Request, limit: int = MAX_JSON_BYTES) -> dict[str, Any] | None:
     """The JSON object in the body (at most `limit` bytes, empty: {}), or None, as json() in http.ts."""
     data = await read_body(request, limit)
-    if data is None:
+    if data is None or (data and not declares_json(request)):
         return None
     try:
         # Buffer.toString keeps a byte order mark, which JSON.parse refuses.

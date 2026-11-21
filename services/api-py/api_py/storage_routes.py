@@ -110,6 +110,7 @@ from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
 from .paths import (
     InvalidPathError,
+    clean_mime,
     is_text_file,
     js_trim,
     kind_for_path,
@@ -237,10 +238,24 @@ async def parse_body(data: bytes) -> Any:
     return await asyncio.to_thread(parse_json, text)
 
 
+def declares_json(request: Request) -> bool:
+    """
+    Whether the body says it is JSON. A page on another site can post a form
+    or plain text here with the user's cookie and no preflight, but not
+    application/json: the browser asks first, and the app's proxy doesn't
+    answer for other origins. So a JSON route reads nothing else (issue #286).
+    """
+    media = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    return media == "application/json" or media.endswith("+json")
+
+
 async def read_json(request: Request) -> dict[str, Any] | None:
-    """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
+    """
+    The JSON object in the body (at most 64 KiB), or None: also when the body
+    isn't sent as application/json (declares_json).
+    """
     body = await read_body(request, MAX_JSON_BYTES)
-    if body is None:
+    if body is None or (body and not declares_json(request)):
         return None
     try:
         # As TextDecoder reads it: a leading byte order mark dropped.
@@ -712,8 +727,8 @@ async def handle_files(request: Request, session: Session) -> Response:
         content = await read_body(request, limit)
         if content is None:
             return error(413, f"File exceeds {limit} bytes")
-        header = js_trim(request.headers.get("content-type", "").split(";")[0])
-        mime = header if header and header != "application/octet-stream" else None
+        # Lowercase type/subtype only; anything else and the path decides (paths.clean_mime).
+        mime = clean_mime(request.headers.get("content-type"))
         if "propose" in request.query_params:
             if experiment:
                 return error(
