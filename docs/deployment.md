@@ -58,6 +58,10 @@ model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
 [README](../services/agent-py/README.md).
 
 Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
+Name people in these lists by login subject (`<issuer>|<subject>`) where you can. An
+email matches only when the login provider marked it verified; a provider that verifies
+emails but sends no `email_verified` claim needs `OIDC_ASSUME_EMAIL_VERIFIED=true` on the
+UI, or its users have no email here at all (the UI logs a line at each such sign-in).
 `PLATFORM_ADMINS` names the deployment admins who can inspect the
 [workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also from the
 workspace switcher) and recover an Owner

@@ -8,12 +8,16 @@ sign-in times, departures, groups, local mode and the settings.
 
 from __future__ import annotations
 
+import time
+
 import psycopg
 import pytest
 from support import SECRET, URL, Client, storage_token, user
 
+from api_py import tokens
 from api_py.config import ConfigError, settings_from_env
 from api_py.platform import parse_admins
+from api_py.workspaces import SHARED_EMAIL
 
 pytestmark = [
     pytest.mark.skipif(not URL, reason="needs TEST_DATABASE_URL"),
@@ -63,6 +67,63 @@ async def test_only_the_admins_it_names_by_subject_or_email(database):
         token = await api.get("/platform/workspaces", headers=storage_token("test|admin"))
         assert token.status_code == 403
         assert (await api.get("/platform/nothing", headers=ADMIN)).status_code == 404
+
+
+def _app_token(sub: str, email: str | None) -> dict[str, str]:
+    """The app's X-Knowledge-User for a session with, or without, an email it trusts."""
+    claims = {"sub": sub, "name": "Someone", "exp": int(time.time()) + 3600}
+    if email:
+        claims["email"] = email
+    return {tokens.IDENTITY_HEADER: tokens.sign(claims, SECRET)}
+
+
+async def _email(database: str, subject: str) -> str | None:
+    async with await psycopg.AsyncConnection.connect(database) as conn:
+        cur = await conn.execute("SELECT email FROM users WHERE subject = %s", (subject,))
+        (email,) = await cur.fetchone()  # type: ignore[misc]
+    return email
+
+
+async def test_an_email_the_app_stops_vouching_for_stops_counting(database):
+    """
+    Issue #284: admin lists match on the stored email. The app now leaves out an
+    email the provider didn't verify, and that must clear one stored earlier,
+    or an account that once claimed an admin's address would keep the match.
+    """
+    async with Client(database, SECRET, platform_admins="admin@example.com") as (api, _app):
+        claimed = _app_token("test|mallory", "admin@example.com")
+        assert (await api.get("/platform/workspaces", headers=claimed)).status_code == 200
+        # A storage token carries no email at all: that says nothing about it.
+        assert (await api.get("/access", headers=storage_token("test|mallory"))).status_code == 200
+        assert await _email(database, "test|mallory") == "admin@example.com"
+        # The app's own token without it is the provider's word.
+        unverified = _app_token("test|mallory", None)
+        assert (await api.get("/platform/workspaces", headers=unverified)).status_code == 403
+        assert await _email(database, "test|mallory") is None
+        # A verified email later counts again.
+        assert (await api.get("/platform/workspaces", headers=claimed)).status_code == 200
+        assert await _email(database, "test|mallory") == "admin@example.com"
+
+
+async def test_an_email_two_accounts_share_names_nobody(database):
+    """Issue #284: never the most recent of several accounts with one email."""
+    async with Client(database, SECRET, platform_admins="test|admin") as (api, _app):
+        lab, _alice, bob_id = await _lab(api)
+        found = await api.get(f"/workspaces/{lab}/lookup?email=bob@example.com", headers=ALICE)
+        assert found.status_code == 200 and found.json()["user"]["id"] == bob_id
+        # A second account signs in with Bob's address.
+        assert (
+            await api.get("/access", headers=_app_token("test|bob2", "Bob@example.com"))
+        ).status_code == 200
+        for path, headers in (
+            (f"/workspaces/{lab}/lookup?email=bob@example.com", ALICE),
+            ("/platform/users?email=BOB@example.com", ADMIN),
+        ):
+            answer = await api.get(path, headers=headers)
+            assert answer.status_code == 404 and answer.json()["error"] == SHARED_EMAIL, path
+        # Alice's is still hers alone.
+        alone = await api.get("/platform/users?email=alice@example.com", headers=ADMIN)
+        assert alone.status_code == 200
 
 
 async def test_in_local_mode_the_local_user_is_an_admin_and_cant_be_made_an_owner(database):

@@ -245,7 +245,11 @@ Generate one with `openssl rand -hex 32`. Configure `OIDC_ISSUER`, `OIDC_CLIENT_
 and, for confidential clients, `OIDC_CLIENT_SECRET`. Register
 `<APP_URL>/api/auth/callback` with the provider; set `APP_URL` to the external UI URL.
 The issuer and `APP_URL` must use https unless they are on localhost; set
-`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. The first person to
+`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. A user's email is kept
+only when the provider marks it verified (`email_verified`), because `PLATFORM_ADMINS`,
+`HUB_ADMINS`, `WORKSPACE_CREATORS` and adding people by email match on it; for a provider
+that verifies emails but sends no such claim, set `OIDC_ASSUME_EMAIL_VERIFIED=true`. Login
+subjects (`<issuer>|<subject>`) always work in those lists. The first person to
 sign in owns the default workspace. Without login (`AUTH_MODE=local`, or neither
 `AUTH_MODE` nor `AUTH_SECRET` under `pnpm dev`), one built-in user owns it. The Python
 services need the mode spelled out: `pnpm dev` passes `AUTH_MODE=local` for them when

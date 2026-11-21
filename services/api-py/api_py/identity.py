@@ -81,7 +81,8 @@ async def identify(
     claims = tokens.verify(header, secret) if header is not None else None
     if not claims:
         return None
-    return Principal(user_id=await _user_for(access, claims))
+    # The app's own token: its email (or the lack of one) is the provider's word.
+    return Principal(user_id=await _user_for(access, claims, from_app=True))
 
 
 def token_ws(claims: dict[str, Any]) -> str:
@@ -90,13 +91,14 @@ def token_ws(claims: dict[str, Any]) -> str:
     return ws if isinstance(ws, str) else LEGACY_TOKEN
 
 
-async def _user_for(access: AccessService, claims: dict) -> str:
+async def _user_for(access: AccessService, claims: dict, *, from_app: bool = False) -> str:
     email = claims.get("email")
     name = claims.get("name")
     return await access.user_for_subject(
         claims["sub"],
         email if isinstance(email, str) else None,
         name if isinstance(name, str) else None,
+        from_app=from_app,
     )
 
 

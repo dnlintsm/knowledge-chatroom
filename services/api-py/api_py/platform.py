@@ -32,6 +32,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .access import Principal, is_uuid, iso
 from .identity import identify
+from .workspaces import SHARED_EMAIL, SharedEmail
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -161,12 +162,16 @@ class Platform:
                 """
                 SELECT id, name, email FROM users
                 WHERE lower(email) = lower(%s) AND subject <> 'local'
-                ORDER BY last_seen_at DESC NULLS LAST, created_at DESC
-                LIMIT 1""",
+                LIMIT 2""",
                 (address,),
             )
-            row = await cur.fetchone()
-        return {"id": str(row[0]), "name": row[1], "email": row[2]} if row else None
+            rows = await cur.fetchall()
+        if len(rows) > 1:
+            # Never the most recent of several: an Owner must not go to the wrong account.
+            raise SharedEmail(SHARED_EMAIL)
+        if not rows:
+            return None
+        return {"id": str(rows[0][0]), "name": rows[0][1], "email": rows[0][2]}
 
     async def add_owner(
         self, workspace_id: str, admin: str, user_id: str, full_access: bool
@@ -317,7 +322,10 @@ async def _route(request: Request, platform: Platform, principal: Principal) -> 
         if method != "GET":
             return _send(405, {"error": "Method not allowed"})
         emails = request.query_params.getlist("email")
-        person = await platform.lookup(emails[0]) if emails else None
+        try:
+            person = await platform.lookup(emails[0]) if emails else None
+        except SharedEmail as err:
+            return _send(404, {"error": str(err)})
         if person is None:
             return _send(404, {"error": NOBODY})
         return _send(200, {"user": person})
