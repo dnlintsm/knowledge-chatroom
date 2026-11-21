@@ -281,7 +281,9 @@ def _save(
     if include_pdf:
         if not paper.pdf_url:
             raise ToolError(f"{paper.title} has no open-access PDF; save it without include_pdf.")
-        data = net.get(paper.pdf_url, accept="application/pdf", max_bytes=fulltext.MAX_PDF_BYTES)
+        data = net.get_public(
+            paper.pdf_url, accept="application/pdf", max_bytes=fulltext.MAX_PDF_BYTES
+        )
         if not data.startswith(b"%PDF"):
             raise ToolError(f"{paper.pdf_url} isn't a PDF; save it without include_pdf.")
         pdf_path = target.removesuffix(".md") + ".pdf"

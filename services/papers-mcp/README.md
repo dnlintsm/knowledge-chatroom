@@ -56,6 +56,12 @@ docker compose --profile demo --profile papers up --build
 | `KNOWLEDGE_STORAGE_URL` | The chatroom's agent server, where `save_paper` writes (default `http://127.0.0.1:8000`). |
 | `OPENALEX_API_KEY`, `OPENALEX_MAILTO` | Optional. A key raises OpenAlex's daily budget; an email joins its "polite pool". |
 | `PAPERS_MAX_PDF_BYTES` | Largest PDF `read_paper` and `save_paper` download (default 30 MB). |
+| `PAPERS_MAX_PDF_PAGES` | How many pages of a PDF `read_paper` reads (default 500). |
+
+A paper's PDF link comes from the source's answer, so it is fetched only over https and only
+from a public address, checked again on each redirect; links into the network (private,
+loopback, link-local or metadata addresses) are refused. Behind an `HTTPS_PROXY` the proxy
+resolves names, so keeping it off internal addresses is the proxy's job.
 
 ## The tools
 
