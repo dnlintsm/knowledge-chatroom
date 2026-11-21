@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import threading
+import urllib.error
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -451,3 +452,33 @@ def test_results_go_out_as_structured_content_and_json_text(web, monkeypatch):
     assert not result.is_error
     assert result.structured_content["results"][0]["id"] == "openalex:W3027879771"
     assert json.loads(result.content[0].text) == result.structured_content
+
+
+def test_errors_leave_the_openalex_key_and_address_out(monkeypatch):
+    """Error messages reach Claude and the chat, so they name the URL without them."""
+    monkeypatch.setenv("OPENALEX_API_KEY", "secret-key")
+    monkeypatch.setenv("OPENALEX_MAILTO", "ops@example.com")
+    url = openalex._url("/works/doi:10.1/x", {"select": "id,title"})
+    assert "secret-key" in url and "ops%40example.com" in url  # still sent to the source
+
+    def refuse(code: int):
+        def urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(request.full_url, code, "", None, None)
+
+        return urlopen
+
+    def unreachable(request, timeout=None):
+        raise urllib.error.URLError("no route")
+
+    for urlopen in (refuse(404), refuse(500), unreachable):
+        monkeypatch.setattr(net.urllib.request, "urlopen", urlopen)
+        with pytest.raises(net.SourceError) as caught:
+            net.get(url)
+        message = str(caught.value)
+        assert "secret-key" not in message and "ops" not in message
+        assert "https://api.openalex.org/works/doi:10.1/x?select=id,title" in message
+
+    # A URL with nothing private is shown as it was asked.
+    assert (
+        net.shown("https://arxiv.org/pdf/2005.11401?v=1") == "https://arxiv.org/pdf/2005.11401?v=1"
+    )

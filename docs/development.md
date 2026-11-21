@@ -45,7 +45,7 @@ Uncomment the workspace storage values in `.env.example` when copying to `.env`:
 `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` and `S3_PUBLIC_URL`. Local defaults
 are documented there and in `infra/seaweedfs/s3.json`.
 
-Migrations run at agent startup. PostgreSQL stores metadata/history; the object
+Migrations run when the Python API server (api-py) starts. PostgreSQL stores metadata/history; the object
 store holds content keyed by SHA-256. Keep both volumes to retain the workspace.
 `docker compose down` stops services without deleting volumes.
 
@@ -281,7 +281,8 @@ inputs but is not a substitute for upgrading the affected dependency.
 
 ## Troubleshooting
 
-- Agent connection errors: check port 8000, the health endpoint and the API key.
+- Connection errors: check `GET /health` on the Python API (port 8000) and on the chat
+  agent (port 9300), and the API key for chat.
 - Dependency errors: select Node 26, stop dev/test servers, then run `pnpm install`.
 - Test port in use: stop your existing server or override the E2E ports listed in
   [Testing](testing.md). The runner intentionally refuses to reuse an unknown server.

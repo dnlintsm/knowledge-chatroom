@@ -39,6 +39,10 @@ const intelligence = Boolean(process.env.CPK_INTELLIGENCE_API_KEY);
 const chats = new AutoChatStore();
 const chatRunner = new ChatRunner(chats);
 const BASE_PATH = "/api/copilotkit";
+// An MCP app server for the chat (CopilotKit's MCP apps), only when
+// MCP_SERVER_URL names one: unset, no run contacts an outside host. The
+// starter this app began from defaulted to https://mcp.excalidraw.com/mcp.
+const mcpAppUrl = process.env.MCP_SERVER_URL?.trim() || null;
 
 // "suggester" writes the chat's follow-up chips on this repo's agent server,
 // whichever agent serves the chat; without it (CHAT_SUGGESTIONS=static) the
@@ -73,15 +77,9 @@ const runtime = new CopilotRuntime({
     : { runner: chatRunner }),
   // --- /copilotkit:intelligence ---
   openGenerativeUI: true,
-  mcpApps: {
-    servers: [
-      {
-        type: "http",
-        url: process.env.MCP_SERVER_URL || "https://mcp.excalidraw.com/mcp",
-        serverId: "example_mcp_app",
-      },
-    ],
-  },
+  ...(mcpAppUrl
+    ? { mcpApps: { servers: [{ type: "http" as const, url: mcpAppUrl, serverId: "example_mcp_app" }] } }
+    : {}),
 });
 
 const app = createCopilotEndpoint({
