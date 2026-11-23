@@ -257,7 +257,11 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
             503,
             {"status": "degraded", "upstream": "off", "database": "ready", "rowSecurity": "off"},
         )
-        assert (await api.get("/files")).status_code == 503
+        refused = await api.get("/files")
+        assert (refused.status_code, refused.json()) == (
+            503,
+            {"error": "Storage is not served: row-level security is required and off"},
+        )
         # An admin grants the role while it runs: the next poll serves storage.
         can_use_role = True
         for _ in range(200):
@@ -265,6 +269,40 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
                 break
             await anyio.sleep(0.05)
         assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
+
+    # A legacy upstream (TS_AGENT_URL) that is up doesn't get the storage requests
+    # either, and doesn't make the server healthy: it would serve them unprotected.
+    can_use_role = False
+    asked: list[str] = []
+
+    async def legacy(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+
+        async def body():
+            yield b'{"status":"ok"}'
+
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
+
+    app = create_app(
+        dataclasses.replace(settings(database), row_security_required=True),
+        transport=httpx.MockTransport(legacy),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        assert not await storage_opens(app)
+        health = await api.get("/health")
+        assert (health.status_code, health.json()) == (
+            503,
+            {"status": "degraded", "upstream": "ok", "database": "ready", "rowSecurity": "off"},
+        )
+        for path in ("/files", "/files/a.md", "/memory", "/skills", "/workspaces"):
+            assert (await api.get(path)).status_code == 503, path
+        assert set(asked) == {"/health"}
+        # What isn't storage still passes through.
+        assert (await api.get("/something/else")).status_code == 200
+        assert "/something/else" in asked
 
 
 @pytest.mark.anyio

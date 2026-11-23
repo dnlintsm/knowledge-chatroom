@@ -77,14 +77,17 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             )
         except RowSecurityOffError as err:
             # Not served until an admin grants the role; said once, checked again each poll.
-            if app.state.row_security != "off":
+            if not app.state.row_security_refused:
                 logger.error("not serving storage: %s", err)
             app.state.row_security = "off"
+            # Refused, not merely not ready: a legacy upstream doesn't get the requests either (proxy.forward).
+            app.state.row_security_refused = True
             return False
         except Exception as err:  # Try again while the database may still be settling.
             logger.warning("can't open storage yet: %s", err)
             return False
         app.state.row_security = "on" if storage.row_security else "off"
+        app.state.row_security_refused = False
         _start_search(app, storage, settings)
         _start_learner(app, settings)
         app.state.storage = storage
@@ -185,6 +188,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.state.schema = None
         # "on" or "off" once storage was opened (or refused for it, ROW_SECURITY=required).
         app.state.row_security = None
+        # ROW_SECURITY=required and it is off: storage requests are refused (503), also with a legacy upstream.
+        app.state.row_security_refused = False
         # The ported storage routes; None while they pass through (no database, or not ready yet).
         app.state.storage = None
         app.state.storage_lock = asyncio.Lock()
@@ -283,7 +288,9 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         # Whether Postgres enforces access too, once storage was opened (or refused over it).
         row_security: str | None = request.app.state.row_security
         extra = {"rowSecurity": row_security} if row_security else {}
-        if upstream != "down" and database_ready and storage_ready:
+        # Required and off: not healthy, whatever a legacy upstream answers.
+        refused = request.app.state.row_security_refused
+        if upstream != "down" and database_ready and storage_ready and not refused:
             return JSONResponse({"status": "ok", **extra})  # the spec's answer (getHealth)
         return JSONResponse(
             {"status": "degraded", "upstream": upstream, "database": database, **extra},
