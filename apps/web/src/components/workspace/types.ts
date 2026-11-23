@@ -37,6 +37,18 @@ export class FileExistsError extends Error {
   }
 }
 
+/**
+ * A save that named the version it replaces, when the server holds another one
+ * by now: someone else saved (or deleted) the file meanwhile.
+ */
+export class FileChangedError extends Error {
+  /** `sha256`: the server's version now; null when the file is gone there. */
+  constructor(readonly path: string, readonly sha256: string | null) {
+    super(`${path} changed on the server since it was opened here`);
+    this.name = "FileChangedError";
+  }
+}
+
 /** A tab in the middle pane: a file path, or the built-in task board. */
 export type TabId = string;
 export const TASKS_TAB: TabId = "::tasks";

@@ -225,6 +225,10 @@ reload or navigation after a failed save.
 context share a real workspace and receive its real stream. It checks both
 persisted bytes and the other tab's editor, then confirms remote deletion closes
 both tabs. Its fixture uses a dedicated note and removes it after testing.
+It also covers the two overwrites issue #293 closed: someone else saves a file while
+this page's own save is held back (the editor asks which version to keep, and both
+choices are followed to the stored bytes), and a proposal is revised after its diff
+loaded (the accept is refused, the diff reloads, and accepting again writes the revision).
 
 ## Chat history
 

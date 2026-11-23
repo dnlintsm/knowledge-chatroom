@@ -46,6 +46,7 @@ test.describe("agentProxy", () => {
       headers: {
         accept: "text/plain",
         "if-none-match": '"00000"',
+        "if-match": '"11111"',
         "x-custom-browser-header": "dropped",
         "x-knowledge-workspace": "11111111-2222-4333-8444-555555555555",
       },
@@ -68,6 +69,8 @@ test.describe("agentProxy", () => {
     const forwardedReqHeaders = new Headers(init.headers);
     expect(forwardedReqHeaders.get("accept")).toBe("text/plain");
     expect(forwardedReqHeaders.get("if-none-match")).toBe('"00000"');
+    // A save's precondition must reach the API server, or it would overwrite (issue #293).
+    expect(forwardedReqHeaders.get("if-match")).toBe('"11111"');
     expect(forwardedReqHeaders.get("x-custom-browser-header")).toBeNull();
     // The page's workspace goes on unchanged; the API server checks it (issue #226).
     expect(forwardedReqHeaders.get("x-knowledge-workspace")).toBe("11111111-2222-4333-8444-555555555555");
