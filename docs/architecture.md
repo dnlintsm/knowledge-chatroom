@@ -179,9 +179,10 @@ is no separate run folder or mode (issue #82):
   already open. Claude gets it as `currentExperiment`, with its state and report.
 - A run's **state** says how far it got (ready, running, done, failed), apart from its
   **status**, which says who sees it (draft, shared, archived).
-- The run you're in is in the URL (`/?experiment=<id>`), so links open a run directly and
+- The run you're in is in the URL (`/?experiment_id=<id>`), so links open a run directly and
   back/forward move between runs. A link to one that isn't there, or isn't shared with you,
-  drops out of the URL with a notice. Old `?run=` links are dropped the same way.
+  drops out of the URL with a notice. Links made before `experiment_id` (`?experiment=<id>`)
+  still open their run and are rewritten to `?experiment_id=`; old `?run=` links are dropped.
 
 - **Runs Claude starts** (`create_experiment`, `services/api-py/api_py/session.py` `start_run`)
   begin in state running. The files the run works from are its **inputs**: each is linked

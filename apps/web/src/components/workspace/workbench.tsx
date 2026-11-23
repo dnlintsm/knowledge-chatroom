@@ -26,7 +26,7 @@ import {
   type SidebarView,
 } from "./layout";
 import { hasListScope, writeListScope } from "./list-scope";
-import { experimentFromSearch, findReport, searchWithExperiment } from "./runs";
+import { experimentFromSearch, findReport, hasLegacyExperiment, searchWithExperiment } from "./runs";
 import { useHydrated, useWorkspace } from "./store";
 import { EXPERIMENT_TAB, type TabId } from "./types";
 
@@ -130,7 +130,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // The run (experiment) the user is in is in the URL as ?experiment=<id>,
+  // The run (experiment) the user is in is in the URL as ?experiment_id=<id>,
   // so links open it and back/forward move between runs. The store opens a
   // linked one on load; a link to one that isn't there (or that you can't
   // see) drops out of the URL with a notice once the workspace has loaded.
@@ -154,7 +154,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     if (!urlChecked.current) {
       urlChecked.current = true;
       if (linked && linked !== experimentId) notify("That experiment isn't there, or isn't shared with you.", "warning");
-      if (linked !== experimentId || new URLSearchParams(search).has("run")) go("replace");
+      // Old ?experiment= and ?run= links are rewritten to ?experiment_id=.
+      if (linked !== experimentId || hasLegacyExperiment(search)) go("replace");
       return;
     }
     if (popTarget.current !== undefined) {
