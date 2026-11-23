@@ -289,6 +289,10 @@ read-only flag, so roles alone decide who may write. Four database migrations ru
 
 ### Changed
 
+- The experiment you're in is in the URL as `?experiment_id=<id>` (was `?experiment=<id>`),
+  so `<host>/?experiment_id=<id>` or `<host>/w/<slug>?experiment_id=<id>` opens that
+  experiment. Links made with `?experiment=<id>` still open it and are rewritten to the new
+  form. The storage API's `?experiment=` parameter is unchanged.
 - The backend is Python (issue #264, phase 4 of #169): `pnpm dev` runs the UI, the Python API
   server and the Python chat agent, so it needs [uv](https://docs.astral.sh/uv/), and the
   compose demo runs the `api` and `agent-py` services. With `AGENT_URL` unset, chats go to
