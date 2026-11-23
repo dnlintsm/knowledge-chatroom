@@ -11,9 +11,20 @@ allowBuilds:
 
 # Patched transitive versions (docs/development.md, "Dependency security").
 overrides:
+  '@hono/node-server': 1.19.18
   body-parser: 2.4.0
   follow-redirects: 1.16.2
   graphql-scalars: 2.0.1
   katex: 0.18.11
   sharp: 0.35.5
   undici: 6.29.1
+
+# Advisories `pnpm audit` reports that no compatible upgrade fixes yet, each
+# explained in docs/development.md ("Dependency security"). The JS audit
+# workflow fails on anything not listed here.
+auditConfig:
+  ignoreGhsas:
+    # zod 3: CopilotKit declares a Zod 3 range; the fix is in Zod 4.
+    - GHSA-mrhx-c7xc-m3w5
+    # @hono/node-server serveStatic, fixed only in 2.x; this app serves no static files with it.
+    - GHSA-rmxm-3fg6-px4f
