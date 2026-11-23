@@ -34,6 +34,7 @@ test("compose changes run only the compose check", () => {
 
 test("changes outside the images build nothing", () => {
   expect(affectedImages(["docs/ci.md", "README.md", "e2e/login.spec.ts", "tests/unit/x.spec.ts", ".github/workflows/quality.yml"])).toEqual(build());
+  expect(affectedImages(["SECURITY.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md", ".github/pull_request_template.md"])).toEqual(build());
 });
 
 test("a rename or deletion counts on both sides", () => {

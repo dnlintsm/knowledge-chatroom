@@ -139,47 +139,10 @@ Two examples show how to bring outside tools in as MCP servers:
 [Python agent](examples/python-agent/README.md) (an existing agent's tools and prompt) and
 [paper search](services/papers-mcp/README.md) (OpenAlex and arXiv, with the chat's "+" menu).
 
-<details>
-<summary><strong>Contributor commands and project map</strong></summary>
-
-Before opening a PR, run:
-
-```bash
-pnpm check:web              # frontend lint, types and service-free units
-pnpm build                  # production compile with TypeScript checks
-```
-
-Use `pnpm test:e2e` for browser changes. Storage changes also need integration
-and storage/login E2E coverage; [Testing](docs/testing.md) explains prerequisites.
-A PR that changes the UI adds a `shot()` step to `e2e/preview.spec.ts` (or the storage
-specs), so the preview comment shows it. Keep PRs small and describe the behavior
-changed and how you validated it.
-
-| Directory | Responsibility |
-| --- | --- |
-| `apps/web` | The Next.js UI (`@knowledge-chatroom/web`) |
-| `apps/web/src/app` | Next.js routes, providers, authentication, and storage proxies |
-| `apps/web/src/components/workspace` | File/editor UI, workbench controls, admin panel, and workspace state |
-| `apps/web/src/hooks` | Starter examples (charts, meeting picker) |
-| `services/api-py/migrations` | Database schema and access policies |
-| `services/api-py/skills` | Built-in skills (`analysis`, `paper-search`, `tldr`, `write-skill`) |
-| `packages/contracts` | `@knowledge-chatroom/contracts`: contracts the UI shares with the backend (files, identity tokens, text edits, and the storage API's OpenAPI spec in `openapi/storage.yaml`) and the API conformance suite |
-| `scripts` | The E2E and conformance runners, CI summaries, and `env:check`/`env:upgrade` |
-| `services/api-py` | Python storage, access, skills, memory and suggestions API at `LOCAL_AGENT_URL` |
-| `services/agent-py` | The chat agent in Python, served to the app through `AGENT_URL` (issue #176) |
-| `services/papers-mcp` | Paper search (OpenAlex + arXiv) as an MCP server for Claude |
-| `services/lab-tools` | The Python agent sample's tools as an MCP server |
-| `packages/knowledge-py` | `knowledge_chatroom`: identity, storage and memory clients shared by the Python services |
-| `examples/python-agent` | Guide: bringing a Python agent in (its prompt as a skill, its tools as `services/lab-tools`) |
-| `infra/seaweedfs` | The S3 store's local credentials (`s3.json`) used by compose and CI |
-| `tests/unit` | Pure frontend tests without an application server or browser |
-| `e2e` | UI specs, mock AG-UI agent, and test OIDC provider |
-| `.github/workflows` | Quality checks, storage tests, and UI previews |
-
-The UI uses Next.js/React and CopilotKit. The chat agent runs the Claude Agent SDK
-(Python) over AG-UI; optional server storage uses PostgreSQL and an S3-compatible store.
-
-</details>
+To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run, what a pull
+request needs, and a map of the repository. [SECURITY.md](SECURITY.md) says how to report a
+vulnerability and what each role and process is trusted with. Coding agents start from
+[AGENTS.md](AGENTS.md).
 
 <details>
 <summary><strong>How pull request previews work</strong></summary>
