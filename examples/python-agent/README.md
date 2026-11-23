@@ -68,7 +68,10 @@ docker compose --profile demo --profile python-sample up --build
 
 ## Login and the forwarded user
 
-Without login, nobody is forwarded and every call is the local user.
+Without login, nobody is forwarded and every call is the local user. Say so with
+`AUTH_MODE=local`: the server reads its login setting with
+`identity.login_from_env()`, which refuses to start when neither `AUTH_MODE` nor
+`KNOWLEDGE_PUBLIC_KEY` is set, so a forgotten key can't turn login off.
 
 With login on, give the tools server the chatroom's public key as
 `KNOWLEDGE_PUBLIC_KEY`. The agent logs it at startup and serves it at

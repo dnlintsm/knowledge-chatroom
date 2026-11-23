@@ -46,7 +46,7 @@ MAX_SHARED_NOTES = 200
 # Open proposals per author; more are refused until some are decided.
 MAX_SHARED_PROPOSALS = 50
 
-_UUID = re.compile(r"[0-9a-fA-F-]{36}")
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _SPACES = re.compile(f"[{JS_SPACE}]+")
 _PROPOSAL_COLUMNS = (
     "p.id::text AS id, p.op, p.scope, p.node_id::text AS node_id, p.group_id::text AS group_id, "

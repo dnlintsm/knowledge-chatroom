@@ -247,12 +247,25 @@ export function oidcConfig(): Promise<oidc.Configuration> {
   return provider;
 }
 
-/** The person a finished sign-in names. */
-export function userFromClaims(claims: oidc.IDToken): SessionUser {
+/**
+ * Whether the provider vouches for the email in `claims` (issue #284). Admin
+ * lists and adding people by email match on it, so an address a user typed in
+ * themselves must not count: only `email_verified: true` does. A provider that
+ * verifies emails but never sends the claim needs OIDC_ASSUME_EMAIL_VERIFIED=true;
+ * an explicit `false` is never trusted.
+ */
+export function emailIsTrusted(claims: oidc.IDToken, env: Record<string, string | undefined> = process.env): boolean {
+  if (claims.email_verified === true) return true;
+  return claims.email_verified === undefined && env.OIDC_ASSUME_EMAIL_VERIFIED === "true";
+}
+
+/** The person a finished sign-in names. An email the provider doesn't vouch for is left out. */
+export function userFromClaims(claims: oidc.IDToken, env: Record<string, string | undefined> = process.env): SessionUser {
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  const email = emailIsTrusted(claims, env) ? str(claims.email) : undefined;
   return {
     sub: `${claims.iss}|${claims.sub}`,
-    email: str(claims.email),
-    name: str(claims.name) ?? str(claims.preferred_username) ?? str(claims.email),
+    email,
+    name: str(claims.name) ?? str(claims.preferred_username) ?? email,
   };
 }

@@ -64,7 +64,7 @@ from ag_ui_claude_sdk import ClaudeAgentAdapter
 from .keyproxy import KeyProxy, KeyRoute
 from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
-from .place import chatroom_props, workspace_note
+from .place import carries_content, chatroom_props, workspace_note
 from .revocation import membership_hooks
 from .scripts import Scripts, needs_scripts, script_options
 from .skills import (
@@ -324,10 +324,12 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 logger.warning("couldn't load memory; running without it: %s", err)
             # After a browser tool (its result is the last message) the turn has
             # used another tool already: changes wait in the inbox from the start.
-            if (
-                run.memory
-                and input_data.messages
-                and isinstance(input_data.messages[-1], ToolMessage)
+            # The same when the run's context already holds workspace text (the
+            # open file, a selection, an experiment's report). What earlier runs
+            # of the chat read is the API server's to check (/memory/agent).
+            if run.memory and (
+                (input_data.messages and isinstance(input_data.messages[-1], ToolMessage))
+                or carries_content(input_data)
             ):
                 run.memory.tainted = True
         if self._servers:

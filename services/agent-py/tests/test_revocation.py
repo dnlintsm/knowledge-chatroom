@@ -102,7 +102,7 @@ def test_an_archived_workspace_counts_as_gone_and_a_storage_failure_doesnt():
 
 def test_the_adapter_checks_first_before_each_call_and_after_each_batch():
     ws = Workspace()
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     options = make_adapter(env, httpx.MockTransport(ws.handler)).build_options(None, "t1")
     hooks = cast(dict[str, Any], options.hooks)
     assert hooks["PreToolUse"][0].matcher is None

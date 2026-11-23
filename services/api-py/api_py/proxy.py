@@ -59,17 +59,31 @@ def end_to_end(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
     return [(n, v) for n, v in headers if n.lower() not in HOP_BY_HOP and n.lower() not in named]
 
 
+def _storage_path(request: Request, also: tuple[str, ...] = ()) -> bool:
+    """Whether the request is for a route storage serves (routes.STORAGE_PREFIXES), or one under `also`."""
+    from .routes import STORAGE_PREFIXES
+
+    path = request.url.path
+    return any(path == p or path.startswith(p + "/") for p in (*STORAGE_PREFIXES, *also))
+
+
 async def forward(request: Request, http: httpx.AsyncClient | None) -> Response:
     """Sends `request` to the TypeScript server and streams its answer back."""
+    # /memory too: users' notes are in the same database, behind the same policies.
+    if getattr(request.app.state, "row_security_refused", False) and _storage_path(
+        request, ("/memory",)
+    ):
+        # ROW_SECURITY=required, and Postgres can't enforce access: storage is
+        # refused here, not handed to a legacy upstream that would serve it anyway.
+        return JSONResponse(
+            {"error": "Storage is not served: row-level security is required and off"},
+            status_code=503,
+        )
     if http is None:
         # No implicit connection to the retired TypeScript API. A configured
         # database that is still starting must not look like missing content.
-        from .routes import STORAGE_PREFIXES
-
-        path = request.url.path
-        storage_path = any(path == p or path.startswith(p + "/") for p in STORAGE_PREFIXES)
         if (
-            storage_path
+            _storage_path(request)
             and request.app.state.settings.database_url
             and request.app.state.storage is None
         ):

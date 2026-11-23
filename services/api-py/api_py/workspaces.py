@@ -77,6 +77,16 @@ SLUG_TAKEN = "Another workspace already has this address"
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 SLUG_MAX = 48
 NO_SUCH_EMAIL = "No one with that email has signed in yet. They need to sign in once first."
+SHARED_EMAIL = (
+    "More than one account has signed in with that email, so it doesn't say who you mean. "
+    "Ask your login provider's administrator which account is theirs."
+)
+
+
+class SharedEmail(LookupError):
+    """An email lookup matched more than one account."""
+
+
 LAST_OWNER = "A workspace needs at least one owner. Make someone else an Owner first."
 NOT_A_MEMBER = "Not a member of this workspace"
 _ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -246,6 +256,18 @@ class Workspaces:
         (keeps,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         return keeps
 
+    async def _role_now(self, conn: AsyncConnection, workspace_id: str, by: str) -> str:
+        """
+        The caller's own role, read under the workspace's lock. The route read
+        it before the lock to decide whether to ask at all, and an Owner or
+        Admin demoted or removed in between must not get one more change
+        through (issue #297). Gone from the workspace: it isn't theirs to see.
+        """
+        role = await self._member_role(conn, workspace_id, by)
+        if role is None:
+            raise WorkspaceError(404, NOT_FOUND)
+        return role
+
     async def change_role(
         self, workspace_id: str, by: str, by_role: str, user_id: str, role: str
     ) -> str:
@@ -256,6 +278,7 @@ class Workspaces:
         """
         async with self.pool.connection() as conn, conn.transaction():
             await self._lock(conn, workspace_id)
+            by_role = await self._role_now(conn, workspace_id, by)
             current = await self._member_role(conn, workspace_id, user_id)
             if current is None:
                 raise WorkspaceError(404, NOT_A_MEMBER)
@@ -297,6 +320,7 @@ class Workspaces:
         leaving = user_id == by
         async with self.pool.connection() as conn, conn.transaction():
             await self._lock(conn, workspace_id)
+            by_role = await self._role_now(conn, workspace_id, by)
             current = await self._member_role(conn, workspace_id, user_id, lock=True)
             if current is None:
                 raise WorkspaceError(404, NOT_A_MEMBER)
@@ -508,7 +532,11 @@ class Workspaces:
         )
 
     async def lookup(self, email: str) -> dict[str, Any] | None:
-        """Someone who has signed in with exactly this email (case ignored): {id, name}, or None."""
+        """
+        Someone who has signed in with exactly this email (case ignored): {id, name}, or None.
+        Raises SharedEmail when more than one account has it: an email names
+        one person only if the login provider keeps it unique (issue #284).
+        """
         address = email.strip()
         if not address or "@" not in address:
             return None
@@ -517,12 +545,13 @@ class Workspaces:
                 """
                 SELECT id, name FROM users
                 WHERE lower(email) = lower(%s) AND subject <> 'local'
-                ORDER BY last_seen_at DESC NULLS LAST, created_at DESC
-                LIMIT 1""",
+                LIMIT 2""",
                 (address,),
             )
-            row = await cur.fetchone()
-        return {"id": str(row[0]), "name": row[1]} if row else None
+            rows = await cur.fetchall()
+        if len(rows) > 1:
+            raise SharedEmail(SHARED_EMAIL)
+        return {"id": str(rows[0][0]), "name": rows[0][1]} if rows else None
 
     async def add_member(
         self, workspace_id: str, by: Principal, user_id: str, role: str, access: str | None
@@ -638,11 +667,10 @@ def _send(status: int, body: Any) -> JSONResponse:
 
 
 async def _read_json(request: Request) -> dict[str, Any] | None:
-    try:
-        body = await request.json()
-    except ValueError:
-        return None
-    return body if isinstance(body, dict) else None
+    """The JSON object in the body, at most 64 KiB (storage_routes.read_json), or None."""
+    from .storage_routes import read_json
+
+    return await read_json(request)
 
 
 @router.api_route("/workspaces", methods=_ALL_METHODS, include_in_schema=False)
@@ -742,7 +770,10 @@ async def _route(request: Request, workspaces: Workspaces, principal: Principal)
         return _send(403, {"error": "Only the workspace's Owners and Admins can add people"})
     if section == "lookup" and method == "GET":
         params = request.query_params.getlist("email")
-        person = await workspaces.lookup(params[0]) if params else None
+        try:
+            person = await workspaces.lookup(params[0]) if params else None
+        except SharedEmail as err:
+            return _send(404, {"error": str(err)})
         return _send(200, {"user": person}) if person else _send(404, {"error": NO_SUCH_EMAIL})
     if section == "members" and method == "POST":
         body = await _read_json(request)

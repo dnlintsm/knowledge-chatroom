@@ -269,7 +269,7 @@ async def test_bodies_and_methods(api):
     assert (await api.get("/experiments/not-a-uuid", headers=ALICE)).status_code == 404
     assert (
         await api.get("/experiments/%E0%A4%A", headers=ALICE)
-    ).status_code == 500  # decodeURIComponent throws
+    ).status_code == 400  # not a path: it used to be a 500, as decodeURIComponent throwing was
     # %2F decodes before the route is picked, as in http.ts.
     assert (
         await api.post(f"/experiments/{exp['id']}%2Ffinish", headers=ALICE, json={})
@@ -350,7 +350,7 @@ async def test_runs_record_inputs_finish_and_rerun(api):
     # Integers past 2**53 are read as JSON.parse reads them, so the record and its report agree.
     big = await api.post(
         "/experiments/runs",
-        headers=ALICE,
+        headers={**ALICE, "content-type": "application/json"},
         content=b'{"nodeId": null, "title": "Big", "params": {"n": 9007199254740993, "m": 12345678901234567890}}',
     )
     assert big.json()["params"] == {"m": 12345678901234567000, "n": 9007199254740992}
@@ -495,3 +495,38 @@ async def test_other_spellings_stay_with_typescript(api):
     assert (await api.get("/%65xperiments", headers=ALICE)).json() == {"from": "typescript"}
     assert forwarded == ["GET /%65xperiments"]
     forwarded.clear()
+
+
+@needs_services
+async def test_a_finished_run_stays_as_it_ended_through_every_route(api):
+    """Issue #297: PATCH could rewrite the state and results of a run that had finished."""
+    await api.get("/access", headers=ALICE)
+    made = await api.post(
+        "/experiments/runs", headers=ALICE, json={"nodeId": None, "title": "Etch rate"}
+    )
+    assert made.status_code == 201, made.text
+    run = made.json()["id"]
+    done = {"results": {"rate": 4.2}, "state": "done"}
+    assert (
+        await api.post(f"/experiments/{run}/finish", headers=ALICE, json=done)
+    ).status_code == 200
+
+    for change in (
+        {"state": "running"},
+        {"results": {"rate": 99}},
+        {"state": "failed", "title": "x"},
+    ):
+        refused = await api.patch(f"/experiments/{run}", headers=ALICE, json=change)
+        assert refused.status_code == 400, (change, refused.text)
+        assert "already finished (done)" in refused.json()["error"]
+    kept = (await api.get(f"/experiments/{run}", headers=ALICE)).json()
+    assert (kept["state"], kept["results"], kept["title"]) == ("done", {"rate": 4.2}, "Etch rate")
+
+    # What isn't its outcome can still change, and saying the same outcome again is no change.
+    renamed = await api.patch(
+        f"/experiments/{run}", headers=ALICE, json={"title": "Etch rate, lot 7", **done}
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert (renamed.json()["title"], renamed.json()["state"]) == ("Etch rate, lot 7", "done")
+    again = await api.post(f"/experiments/{run}/finish", headers=ALICE, json=done)
+    assert again.status_code == 200

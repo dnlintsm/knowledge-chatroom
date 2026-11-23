@@ -7,6 +7,7 @@ TypeScript storage tests do); each test gets a new, empty database.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -169,7 +170,8 @@ async def test_applies_the_migrations_itself(database):
                 break
             await anyio.sleep(0.05)
         assert app.state.schema.state is db.SchemaState.READY
-        assert (await api.get("/health")).json() == {"status": "ok"}
+        # Storage is open: /health also says whether Postgres enforces access (issue #297).
+        assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
     async with await psycopg.AsyncConnection.connect(database) as conn:
         cur = await conn.execute("SELECT name FROM schema_migrations ORDER BY name")
         assert [name for (name,) in await cur.fetchall()] == KNOWN
@@ -205,3 +207,132 @@ async def test_migrate_applies_each_once_in_order_and_one_process_at_a_time(data
         assert (await db.schema(pool, tmp_path)).missing == ("900_first.sql", "901_broken.sql")
     finally:
         await pool.close()
+
+
+@pytest.mark.anyio
+@needs_postgres
+async def test_row_security_off_is_reported_and_refused_when_required(database, monkeypatch):
+    """Issue #297: a database user who can't use the restricted role used to cost one log line."""
+    from api_py import app as app_module
+    from api_py import storage as storage_module
+
+    monkeypatch.setattr(app_module, "SCHEMA_POLL_SECONDS", 0.05)
+    can_use_role = False
+    prepare = storage_module.prepare_row_security
+
+    async def prepare_or_not(conn) -> bool:
+        return await prepare(conn) if can_use_role else False
+
+    monkeypatch.setattr(storage_module, "prepare_row_security", prepare_or_not)
+
+    async def storage_opens(app) -> bool:
+        for _ in range(200):
+            if app.state.storage is not None:
+                return True
+            if app.state.row_security == "off":
+                await anyio.sleep(0.2)  # a few more polls: it must stay closed
+                return app.state.storage is not None
+            await anyio.sleep(0.05)
+        return False
+
+    # By default it is served, with the app's own checks only, and /health says so.
+    alone = dataclasses.replace(settings(database), ts_agent_url=None)
+    app = create_app(alone)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        assert await storage_opens(app)
+        assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "off"}
+
+    # ROW_SECURITY=required: storage stays closed, and the server reports itself unhealthy.
+    app = create_app(dataclasses.replace(alone, row_security_required=True))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        assert not await storage_opens(app)
+        health = await api.get("/health")
+        assert (health.status_code, health.json()) == (
+            503,
+            {"status": "degraded", "upstream": "off", "database": "ready", "rowSecurity": "off"},
+        )
+        refused = await api.get("/files")
+        assert (refused.status_code, refused.json()) == (
+            503,
+            {"error": "Storage is not served: row-level security is required and off"},
+        )
+        # An admin grants the role while it runs: the next poll serves storage.
+        can_use_role = True
+        for _ in range(200):
+            if app.state.storage is not None:
+                break
+            await anyio.sleep(0.05)
+        assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
+
+    # A legacy upstream (TS_AGENT_URL) that is up doesn't get the storage requests
+    # either, and doesn't make the server healthy: it would serve them unprotected.
+    can_use_role = False
+    asked: list[str] = []
+
+    async def legacy(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+
+        async def body():
+            yield b'{"status":"ok"}'
+
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
+
+    app = create_app(
+        dataclasses.replace(settings(database), row_security_required=True),
+        transport=httpx.MockTransport(legacy),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        assert not await storage_opens(app)
+        health = await api.get("/health")
+        assert (health.status_code, health.json()) == (
+            503,
+            {"status": "degraded", "upstream": "ok", "database": "ready", "rowSecurity": "off"},
+        )
+        for path in ("/files", "/files/a.md", "/memory", "/skills", "/workspaces"):
+            assert (await api.get(path)).status_code == 503, path
+        assert set(asked) == {"/health"}
+        # What isn't storage still passes through.
+        assert (await api.get("/something/else")).status_code == 200
+        assert "/something/else" in asked
+
+
+@pytest.mark.anyio
+@needs_postgres
+async def test_migrations_off_is_served_once_the_migrate_command_ran(database, monkeypatch, capsys):
+    """MIGRATIONS=off used to wait for a TypeScript server that no longer exists (issue #297)."""
+    from api_py import app as app_module
+    from api_py import migrate
+
+    monkeypatch.setattr(app_module, "SCHEMA_POLL_SECONDS", 0.05)
+    app = create_app(dataclasses.replace(settings(database, migrations=False), ts_agent_url=None))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
+    ):
+        await anyio.sleep(0.2)
+        assert app.state.schema.state is db.SchemaState.BEHIND
+        waiting = await api.get("/health")
+        assert (waiting.status_code, waiting.json()["database"]) == (503, "behind")
+
+        # The deploy step: `python -m api_py.migrate` (run here in a thread; it has its own loop).
+        env = {"DATABASE_URL": database}
+        await anyio.to_thread.run_sync(migrate.main, env)
+        assert capsys.readouterr().out.startswith("applied: 001_init.sql, ")
+        for _ in range(200):
+            if app.state.storage is not None:
+                break
+            await anyio.sleep(0.05)
+        assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
+    await anyio.to_thread.run_sync(migrate.main, env)
+    assert capsys.readouterr().out == "nothing to apply: the database is up to date\n"
+    with pytest.raises(SystemExit, match="DATABASE_URL is not set"):
+        migrate.main({})

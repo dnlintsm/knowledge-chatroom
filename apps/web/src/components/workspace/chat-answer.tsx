@@ -8,7 +8,7 @@ import type { CopilotChatAssistantMessageProps } from "@copilotkit/react-core/v2
 import { buttonVariants } from "@/components/ui/button";
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
-import { lineOffsets, parseFileRef, rootRelativeLinks, workspaceNoteImages, type FileRef } from "./file-refs";
+import { lineOffsets, localImagesOnly, parseFileRef, rootRelativeLinks, workspaceNoteImages, type FileRef } from "./file-refs";
 import { useWorkspace } from "./store";
 import { fileName, isTextFile } from "./types";
 import { useWorkbench } from "./workbench";
@@ -68,7 +68,8 @@ export function useAnswerReferences(content: string, streaming: boolean) {
     });
     return {
       components: { a: AnswerLink },
-      rehypePlugins: [...Object.values(beforeHarden), noteImages, rootRelativeLinks, harden],
+      // Images from other servers become links before harden runs (issue #291).
+      rehypePlugins: [...Object.values(beforeHarden), noteImages, rootRelativeLinks, localImagesOnly, harden],
     };
   }, [isNote]);
   return { sources, markdownRenderer };

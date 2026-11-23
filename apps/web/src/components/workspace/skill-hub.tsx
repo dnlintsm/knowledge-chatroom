@@ -5,7 +5,8 @@ import { ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store,
 import { cn } from "@/lib/utils";
 import { Diff } from "./review-panel";
 import { ScriptsBadge, useSkills, type SkillInfo } from "./skills";
-import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
+import { workspaceUrl } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
 
 /**
  * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
@@ -87,7 +88,8 @@ const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
 
 /** Calls the skills or hub API; throws the server's error message. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await workspaceFetch(path, { cache: "no-store", ...init });
+  // apiFetch: a session that ended sends the browser to sign in (issue #297).
+  const res = await apiFetch(path, { cache: "no-store", ...init });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);

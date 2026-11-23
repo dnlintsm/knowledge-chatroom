@@ -245,9 +245,15 @@ Generate one with `openssl rand -hex 32`. Configure `OIDC_ISSUER`, `OIDC_CLIENT_
 and, for confidential clients, `OIDC_CLIENT_SECRET`. Register
 `<APP_URL>/api/auth/callback` with the provider; set `APP_URL` to the external UI URL.
 The issuer and `APP_URL` must use https unless they are on localhost; set
-`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. The first person to
-sign in owns the workspace. Without login (`AUTH_MODE=local`, or no `AUTH_SECRET`
-in development), one built-in user owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
+`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. A user's email is kept
+only when the provider marks it verified (`email_verified`), because `PLATFORM_ADMINS`,
+`HUB_ADMINS`, `WORKSPACE_CREATORS` and adding people by email match on it; for a provider
+that verifies emails but sends no such claim, set `OIDC_ASSUME_EMAIL_VERIFIED=true`. Login
+subjects (`<issuer>|<subject>`) always work in those lists. The first person to
+sign in owns the default workspace. Without login (`AUTH_MODE=local`, or neither
+`AUTH_MODE` nor `AUTH_SECRET` under `pnpm dev`), one built-in user owns it. The Python
+services need the mode spelled out: `pnpm dev` passes `AUTH_MODE=local` for them when
+`.env` sets no login, and started any other way they refuse to start without it. The [Deployment guide](deployment.md) covers the private agent boundary.
 
 Chat history needs nothing extra: each user's chats are kept by the API server, in
 Postgres with `DATABASE_URL` and in memory without it ([Architecture](architecture.md#chat-history)).
@@ -264,7 +270,7 @@ same version as the UI's `@ag-ui/client`:
 
 | Where | What |
 | --- | --- |
-| `pnpm-workspace.yaml` `overrides` | `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
+| `pnpm-workspace.yaml` `overrides` | `@hono/node-server`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
 | Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
 
 When updating these dependencies, recheck the overrides and run the build and tests
@@ -278,6 +284,17 @@ upgrade; forcing Zod 4 across that dependency tree can break the app. On shared
 deployments, configure request-size limits at the reverse proxy according to the
 files and requests the deployment needs. This reduces exposure to oversized
 inputs but is not a substitute for upgrading the affected dependency.
+
+`@hono/node-server` comes in through CopilotKit's MCP packages. The override takes it to
+1.19.18, the last 1.x fix; [GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)
+is fixed only in 2.x, which those packages don't accept yet. It concerns `serveStatic`,
+which this app doesn't use.
+
+Those two advisories are listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`,
+so `pnpm audit --prod` passes while they are the only ones. The **JavaScript dependency
+audit** workflow runs it weekly and on pull requests that change a `package.json` or the
+lockfile, and fails on any advisory not listed there. When an upgrade fixes one, remove
+it from the list in the same PR.
 
 ## Troubleshooting
 

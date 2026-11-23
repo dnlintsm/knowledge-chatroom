@@ -390,15 +390,25 @@ Code's memory files and `SKILL.md`.
   hook marks the run, since files, web pages and MCP results may carry injected text),
   Claude's saves, edits and deletes become proposals in `memory_inbox` instead. The user
   accepts or rejects them in the Memory view; accepting applies the change against the
-  version it was made on, or reports a conflict.
+  version it was made on, or reports a conflict. Three more cases count as having read
+  outside content, because the text is in the conversation without a tool call in that run:
+  the run's context holds workspace text (the open file, a selection, an experiment's
+  details or report; `agent_py/place.py`), an earlier run of the same chat used such a
+  tool (api-py reads the chat's saved messages, so a backend can't forget to say so), and
+  an Auto shared note is in the prompt. In practice a save made directly, with Undo, is
+  one from a chat about the user's own words.
 - `services/api-py/api_py/memory_learn.py` is the background learner. Every minute it picks chats idle
   for `MEMORY_IDLE_MINUTES` (default 10) and at most 3 days old, not incognito, whose
   owner has memory on or ask, and asks a small model (`MEMORY_MODEL`, else the follow-up
   chips' model) for at most 5 changes to the notes, covering new facts, duplicates,
   contradictions and stale notes. Changes apply directly in `on` mode (with Undo, listed
-  under "Recent changes by Claude") or go to the inbox in `ask` mode.
-  `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
-  it off.
+  under "Recent changes by Claude") or go to the inbox in `ask` mode. A chat in which
+  Claude read outside content is learned from as in `ask` mode, since its replies may
+  repeat text from there.
+  `memory_learned_chats` records how far each chat was learned. The same row is the
+  claim that keeps two API server processes off one chat, and it carries the error when a
+  try fails: a failed or abandoned try is retried every 30 minutes for 6 hours after the
+  chat went quiet, then given up. `MEMORY_LEARN=off` turns it off.
 - Shared memory (`020_shared_memory.sql`, `services/api-py/api_py/shared_memory.py`): notes for
   the workspace, a knowledge node (and everything below it) or a group (and its
   sub-groups). `shared_memory_rank` decides who reads and edits each place from the
@@ -486,7 +496,8 @@ For local setup, see [Development](development.md).
 - **Postgres** (15 or newer) holds the file tree, every version of every file, and who
   wrote it (`services/api-py/migrations`). Migrations run when the Python API
   server starts, under an advisory lock; with `MIGRATIONS=off` it waits for another
-  process to apply them instead.
+  process to apply them instead: another server, or `python -m api_py.migrate` as a deploy
+  step. Until then `/health` answers 503 with `database: "behind"`.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
@@ -496,8 +507,12 @@ For local setup, see [Development](development.md).
   renames it within the same place (history kept; 412 when the name is taken),
   `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
-  LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
-  (412 if the file exists). `PUT`, `PATCH` and `DELETE` need write access to the place (403
+  LISTEN/NOTIFY, so it works across processes). A stream never skips a change: when it
+  can't check one against the user's access, falls 1000 changes behind, or the server's own
+  events connection breaks, it ends, and the browser reconnects and lists the files again.
+  A `PUT` with `If-None-Match: *` only creates
+  (412 if the file exists), and one with `If-Match: "<sha256>"` only replaces that version
+  (412 with the version it is now). `PUT`, `PATCH` and `DELETE` need write access to the place (403
   otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the API server's and chat agent's ports private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
@@ -526,7 +541,10 @@ For local setup, see [Development](development.md).
   Anyone who can view a node may propose; editors there accept or reject in the Proposed
   changes tab, which shows each one as a diff against the file as it is now, and accepting
   writes it as the file's next version, credited to whoever proposed it. Proposing again
-  revises your open proposal. `GET /api/proposals` lists open ones (`?node=`,
+  revises your open proposal. So that nobody accepts something they haven't seen, an accept
+  names what its reviewer looked at (`{sha256, base}`: the proposed content, and the file it
+  was compared with): if the proposal was revised or the file changed meanwhile, the answer is
+  409, nothing is written, and the tab loads the diff again. `GET /api/proposals` lists open ones (`?node=`,
   `?experiment=`, `?status=`), `PUT /api/files/<path>?node=<id>&propose` proposes, `POST
   /api/proposals {experimentId, paths?, note?}` promotes an experiment, and `POST
   /api/proposals/<id>/accept|reject|withdraw` decides.
@@ -552,6 +570,11 @@ For local setup, see [Development](development.md).
   `EMBEDDING_DIMENSIONS` asks for shorter vectors. pgvector indexes up to 2000 dimensions,
   so longer vectors are compared one by one (fine for small workspaces). Each model scores
   similarity differently, so tune `SEARCH_MIN_SIMILARITY` (default 0.5, 0.82 for E5).
+  A search embeds its query before it takes a database connection and waits at most 10
+  seconds for it, then matches words only, so a slow embeddings API can't use up the pool.
+  When servers with different models share a database (a rolling change of
+  `EMBEDDING_MODEL`), the one whose model is no longer the recorded one stops embedding
+  and searches by words until it is restarted with the same model.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
@@ -584,9 +607,11 @@ For local setup, see [Development](development.md).
   experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
-  otherwise the agent logs that row-level security is off, and an admin can enable it with
+  otherwise the API server logs that row-level security is off, `/health` answers
+  `rowSecurity: "off"`, and an admin can enable it with
   `CREATE ROLE knowledge_user NOLOGIN; GRANT knowledge_user TO <app user>;` before the next
-  start.
+  start. With `ROW_SECURITY=required` the server doesn't serve storage in that state: `/health`
+  answers 503 until the role is granted (it checks again every few seconds).
 - **Download links**: set `S3_PUBLIC_URL` to the object store's address as browsers reach it
   (e.g. `http://localhost:8333` with `docker compose`, or `https://s3.<region>.amazonaws.com`)
   and images and other binary files download straight from the store. After the access
@@ -612,11 +637,19 @@ For local setup, see [Development](development.md).
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this
   browser's files.
+  A save names the version it replaces (`If-Match` with the sha256 last seen), so two people
+  editing one file don't overwrite each other: the second save answers 412, the editor keeps
+  the edits unsaved and asks which version to keep (Compare shows both), and the other one
+  stays in the file's history. A write without `If-Match` (an upload, Claude's writes, an
+  API client that doesn't send it) replaces the file as before.
   The place switcher at the top of the Files view opens the Knowledge view, which shows
   the tree (with the Experiments view beside it); clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
-  are used instead.
+  are used instead. That fallback is only for a page with no server behind it: when the
+  user is signed in, or the server named the workspace, the page keeps loading, says
+  "Storage unreachable" and asks again every few seconds, so edits are never made to a
+  browser copy that would not be uploaded.
 - **Tests**: `pnpm test:conformance` and the api-py tests require `TEST_DATABASE_URL` and
   `S3_ENDPOINT`; they reset a disposable test database. See [Testing](testing.md).
 
@@ -670,7 +703,9 @@ Valid existing v1 files/tabs remain compatible, including the read-only flag old
 (now ignored).
 
 `workspace/save-scheduler.ts` owns debounce timers, ordered per-place/path write
-chains, in-flight/failed protection and observed server hashes. The provider injects
+chains, in-flight/failed protection, observed server hashes (each save names the one it
+replaces) and save conflicts: a file whose save was refused is protected like a failed
+draft, and nothing more is sent for it, until the user keeps their copy or takes the server's. The provider injects
 its current mode/place/files and the PUT transport; the scheduler has no React or
 HTTP imports. Pure tests use a controlled clock and delayed/failing writes. The
 provider retains storage bootstrap, SSE routing and reconciliation, which depend

@@ -79,7 +79,7 @@ def agent_server() -> AgentServer:
 
 @pytest.fixture
 def client(claude, agent_server, tmp_path):
-    env = {"AGENT_PY_WORKDIR": str(tmp_path)}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
     adapter = make_adapter(env, transport=httpx.MockTransport(agent_server.handle))
     with TestClient(create_app(env=env, adapter=adapter)) as c:
         yield c
@@ -227,7 +227,7 @@ def test_a_skill_claude_picks_is_reported(client, claude, agent_server, monkeypa
 
 
 def test_without_the_agent_server_the_run_goes_on_without_skills(claude, tmp_path):
-    env = {"AGENT_PY_WORKDIR": str(tmp_path)}
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
     down = httpx.MockTransport(
         lambda r: httpx.Response(503, json={"error": "Storage is not available"})
     )

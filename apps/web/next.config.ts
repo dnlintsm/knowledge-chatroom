@@ -11,7 +11,21 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 // folder it loaded.)
 dotenv.config({ path: path.join(REPO_ROOT, ".env"), quiet: true });
 
+// Sent with every page (issue #291). The API routes are left out: stored files
+// served through them carry their own, stricter policy (`sandbox`) from the API
+// server, and a second Content-Security-Policy here must not get in its way.
+// No script-src or img-src: Next's inline scripts and the object store's signed
+// links would need per-deployment values; images in rendered markdown are
+// limited in the renderer instead (localImagesOnly).
+const SECURITY_HEADERS = [
+  // No other site frames the app (clickjacking); no plugins; no <base> rewrites.
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self'; object-src 'none'; base-uri 'self'" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+];
+
 const nextConfig: NextConfig = {
+  headers: async () => [{ source: "/((?!api/).*)", headers: SECURITY_HEADERS }],
   output: "standalone",
   outputFileTracingRoot: REPO_ROOT,
   turbopack: { root: REPO_ROOT },

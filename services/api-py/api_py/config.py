@@ -10,8 +10,13 @@ AUTH_MODE, AUTH_SECRET
                      login, with the rules of packages/contracts/src/auth-mode.ts
 MIGRATIONS_DIR       the SQL migrations to apply and expect in the database
                      (default services/api-py/migrations in this repository)
-MIGRATIONS           off: don't apply them, only wait for another process to;
+MIGRATIONS           off: don't apply them, only wait for another process to
+                     (another server, or `python -m api_py.migrate`);
                      otherwise this server does
+ROW_SECURITY         required: don't serve storage unless Postgres enforces
+                     access too (row-level security, storage.py); otherwise
+                     a database user who can't use the restricted role only
+                     gets a log line, and /health says rowSecurity: off
 S3_*                 the blob store (blobs.py)
 MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
@@ -65,7 +70,11 @@ class ConfigError(ValueError):
 
 
 def auth_secret(env: Mapping[str, str]) -> str | None:
-    """AUTH_SECRET when login is on, None without login; refuses what auth-mode.ts refuses."""
+    """AUTH_SECRET when login is on, None without login (AUTH_MODE=local, said outright).
+
+    Refuses what auth-mode.ts refuses, and also the case it allows in
+    development: neither AUTH_MODE nor AUTH_SECRET.
+    """
     requested = (env.get("AUTH_MODE") or "").strip().lower() or None
     secret = env.get("AUTH_SECRET") or None
     if requested and requested not in ("oidc", "local"):
@@ -82,12 +91,24 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
         return secret
     if requested == "oidc":
         raise ConfigError(f"AUTH_MODE=oidc needs AUTH_SECRET {_SECRET_HINT}")
-    if env.get("NODE_ENV") == "production":
-        raise ConfigError(
-            "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET and OIDC_* for sign-in, "
-            "or AUTH_MODE=local to run without login (everyone is one user)"
-        )
-    return None
+    # Neither set. The app (auth-mode.ts) lets this through in development and
+    # refuses it in a production build; this server has no such build, so it
+    # always refuses: a secret left out must not quietly turn login off (issue
+    # #283). `pnpm dev` passes AUTH_MODE=local for it (scripts/dev-py.mjs).
+    raise ConfigError(
+        "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET (the app's) for sign-in, "
+        "or AUTH_MODE=local to run without login (everyone is one user)"
+    )
+
+
+def row_security_required(env: Mapping[str, str]) -> bool:
+    """ROW_SECURITY: unset or `optional` (the default), or `required`."""
+    value = (env.get("ROW_SECURITY") or "").strip().lower()
+    if value in ("", "optional"):
+        return False
+    if value == "required":
+        return True
+    raise ConfigError(f"ROW_SECURITY must be required or optional, not {value!r}")
 
 
 @dataclass(frozen=True)
@@ -99,6 +120,8 @@ class Settings:
     host: str = "127.0.0.1"
     # Whether this server applies the migrations (MIGRATIONS not off), or waits for another process to.
     migrations: bool = True
+    # ROW_SECURITY=required: storage isn't served while row-level security is off.
+    row_security_required: bool = False
     port: int = 8000
     # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
     s3: S3Settings | None = None
@@ -137,6 +160,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         auth_secret=auth_secret(env),
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),
         migrations=env.get("MIGRATIONS") != "off",
+        row_security_required=row_security_required(env),
         host=env.get("API_PY_HOST") or "127.0.0.1",
         port=int(port),
         s3=S3Settings.from_env(env),

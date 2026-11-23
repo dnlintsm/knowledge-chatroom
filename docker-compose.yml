@@ -137,8 +137,10 @@ services:
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
       MCP_SERVERS: ${MCP_SERVERS:-}
       LOCAL_AGENT_URL: http://api:8000
-      # The demo has no login. With login, give it the agent server's public
-      # key (GET /identity/public-key), never AUTH_SECRET.
+      # The demo has no login, and says so: without AUTH_MODE the agent won't
+      # start. With login, AUTH_MODE: oidc and the API server's public key
+      # (GET /identity/public-key), never AUTH_SECRET.
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
     depends_on:
       api:
@@ -162,9 +164,10 @@ services:
       LAB_TOOLS_NAME: lab
       # Workspace files, read through the storage API as the calling user.
       KNOWLEDGE_STORAGE_URL: http://api:8000
-      # The demo has no login, so every call is the local user. With login, give
-      # this server the agent's public key, never AUTH_SECRET
+      # The demo has no login, so every call is the local user. With login,
+      # AUTH_MODE: oidc and the API server's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
 
   # --- Paper search (services/papers-mcp, issue #151) ---
@@ -179,8 +182,9 @@ services:
       PAPERS_NAME: papers
       # save_paper writes through the storage API as the calling user.
       KNOWLEDGE_STORAGE_URL: http://api:8000
-      # The demo has no login, so every call is the local user. With login, give
-      # this server the agent's public key, never AUTH_SECRET.
+      # The demo has no login, so every call is the local user. With login,
+      # AUTH_MODE: oidc and the API server's public key, never AUTH_SECRET.
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
       # Optional: a bigger OpenAlex budget, and the "polite pool".
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}

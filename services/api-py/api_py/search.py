@@ -11,6 +11,7 @@ existed; the server runs it once storage opens.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -30,6 +31,11 @@ logger = logging.getLogger("api_py")
 
 SNIPPET_CHARS = 220
 MAX_RESULTS = 50
+MAX_QUERY_CHARS = 500
+# How long a search waits for its query's vector before matching words only.
+# The model may be a remote API (EMBEDDING_BASE_URL), which is given far longer
+# to embed passages in the background (semantic.py).
+QUERY_EMBED_SECONDS = 10.0
 # Files each kind of search hands over for merging.
 CANDIDATES = 100
 # Passages the meaning search looks at, before access and scope filters.
@@ -152,23 +158,51 @@ class SearchService:
         row = await cur.fetchone()
         return row[0] if row else None
 
+    async def meaning(self, query: str) -> str | None:
+        """
+        The query's vector for search by meaning, or None to match words only:
+        no model here (or not loaded yet), a query asking for exact words
+        ("phrases", -exclusions), one search() refuses anyway, or a model that
+        fails or takes over QUERY_EMBED_SECONDS.
+
+        Call it before taking a database connection, and pass the answer to
+        search(): the model may be a remote API, and a connection held while it
+        answers is one no other request can use (issue #296).
+        """
+        query = js_trim(query)
+        semantic = self.semantic
+        if not semantic or not semantic.ready:
+            return None
+        if not query or utf16_len(query) > MAX_QUERY_CHARS or _EXACT.search(query):
+            return None
+        try:
+            return await asyncio.wait_for(semantic.query_vector(query), QUERY_EMBED_SECONDS)
+        except Exception:
+            logger.exception("[search] could not embed the query; matching words only")
+            return None
+
     async def search(
         self,
         conn: AsyncConnection,
         user_id: str,
         query: str,
         *,
+        vector: str | None = None,
         scope: str | None = None,
         near: str | None = None,
         near_experiment: str | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Files `user_id` may read that match `query`, best first. SearchError for a bad query or scope."""
+        """
+        Files `user_id` may read that match `query`, best first. SearchError for
+        a bad query or scope. `vector` is the query's, from meaning(): without
+        it only words match.
+        """
         query = js_trim(query)
         if not query:
             raise SearchError("Search for at least one word")
-        if utf16_len(query) > 500:
-            raise SearchError("Search text is too long (500 characters at most)")
+        if utf16_len(query) > MAX_QUERY_CHARS:
+            raise SearchError(f"Search text is too long ({MAX_QUERY_CHARS} characters at most)")
         limit = min(max(int(limit if limit is not None else 20), 1), MAX_RESULTS)
 
         scope_path = None
@@ -188,10 +222,9 @@ class SearchService:
             working_in=near_experiment if near_experiment and is_uuid(near_experiment) else None,
         )
 
-        # Words always; meaning too when it's available and the query isn't
-        # asking for exact words ("phrases", -exclusions).
+        # Words always; meaning too when the caller embedded the query (meaning()).
         by_words = await self._by_words(conn, query, where)
-        by_meaning = [] if _EXACT.search(query) else await self._by_meaning(conn, query, where)
+        by_meaning = await self._by_meaning(conn, vector, where) if vector else []
 
         # One list: word matches score by relevance (plus 1 for a path match),
         # meaning matches add up to MEANING_WEIGHT by how close they are, and
@@ -311,16 +344,11 @@ class SearchService:
         ]
 
     async def _by_meaning(
-        self, conn: AsyncConnection, query: str, where: _Where
+        self, conn: AsyncConnection, vector: str, where: _Where
     ) -> list[dict[str, Any]]:
-        """Files with a passage close in meaning to the query, each with its closest passage (semantic.py)."""
+        """Files with a passage close in meaning to the query `vector` is of, each with its closest passage (semantic.py)."""
         semantic = self.semantic
         if not semantic or not semantic.ready:
-            return []
-        try:
-            vector = await semantic.query_vector(query)
-        except Exception:
-            logger.exception("[search] could not embed the query; matching words only")
             return []
         async with conn.transaction():
             # Keep scanning the index past passages the filters drop (pgvector 0.8+).

@@ -56,6 +56,14 @@ class Error(BaseModel):
     """
     The path already has a file.
     """
+    changed: Literal[True] | None = None
+    """
+    What the request named as seen (If-Match, or an accept's sha256 and base) is another version now.
+    """
+    sha256: str | None = None
+    """
+    With `changed` on a file write, the file's version now; null when it is gone.
+    """
 
 
 class IdOnly(BaseModel):
@@ -365,6 +373,19 @@ class User(BaseModel):
     subject: str
     email: str | None
     name: str | None
+
+
+class UserSummary(BaseModel):
+    """
+    A member as others in the workspace see them.
+    """
+
+    id: str
+    name: str | None
+    email: str | None = None
+    """
+    Only in answers to the workspace's Owners and Admins.
+    """
 
 
 class Person(User):
@@ -1109,6 +1130,19 @@ class ListPromotableResponse(BaseModel):
     files: list[Promotable]
 
 
+class DecideProposalRequest(BaseModel):
+    sha256: str | None = None
+    """
+    For accept, the proposed content reviewed (the proposal's `sha256`).
+    """
+    base: str | None = None
+    """
+    For accept, the sha256 of the file the proposal was compared with; null when
+    there was no file. Left out, the file is replaced whatever it holds.
+
+    """
+
+
 class ListChatsResponse(BaseModel):
     threads: list[ChatSummary]
     nextCursor: str | None
@@ -1246,7 +1280,7 @@ class GetMyAccessResponse(BaseModel):
 
 
 class ListUsersResponse(BaseModel):
-    users: list[User]
+    users: list[UserSummary]
 
 
 class ListPeopleResponse(BaseModel):
@@ -1306,6 +1340,13 @@ class GetAuditLogResponse(BaseModel):
 
 class GetHealthResponse(BaseModel):
     status: Literal["ok"]
+    rowSecurity: Literal["on", "off"] | None = None
+    """
+    Once storage is open: whether Postgres enforces access too (row-level
+    security). `off` means only the app's own checks apply; the database user
+    can't use the restricted role. Absent before storage opens and without a database.
+
+    """
 
 
 class GetIdentityPublicKeyResponse(BaseModel):

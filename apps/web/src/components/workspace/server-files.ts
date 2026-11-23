@@ -2,7 +2,7 @@ import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-c
 import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
 export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
 import { WORKSPACE_HEADER, workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
-import { FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
+import { FileChangedError, FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
 
 /**
  * Client for the server file API (/api/files, forwarded to the agent's
@@ -159,19 +159,20 @@ export async function loadServerFile(info: ServerFile, place: PlaceId = null): P
 export async function loadServerText(path: string, place: PlaceId = null): Promise<{ content: string; sha256: string | null }> {
   const res = await apiFetch(fileUrl(path, place), { cache: "no-store" });
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
-  const etag = res.headers.get("etag");
-  return { content: await res.text(), sha256: etag ? etag.replace(/^(W\/)?"|"$/g, "") : null };
+  return { content: await res.text(), sha256: etagHash(res) };
 }
 
 /**
  * Saves a file. With `createOnly` the server refuses to replace an existing
- * file (FileExistsError). With `workspace` it is saved there, even when the
- * page has moved to another workspace meanwhile (a delayed save).
+ * file (FileExistsError). With `replaces` (a version's sha256) it only writes
+ * over that version: FileChangedError when someone else saved, or deleted the
+ * file, meanwhile. With `workspace` it is saved there, even when the page has
+ * moved to another workspace meanwhile (a delayed save).
  */
 export async function putServerFile(
   file: Pick<WorkspaceFile, "path" | "mime" | "content">,
   place: PlaceId = null,
-  opts: { createOnly?: boolean; workspace?: string | null } = {},
+  opts: { createOnly?: boolean; replaces?: string; workspace?: string | null } = {},
 ): Promise<ServerFile> {
   await deleted(file.path, place);
   // Binary uploads arrive as data: URLs; send their bytes.
@@ -181,9 +182,14 @@ export async function putServerFile(
       : file.content;
   const headers: Record<string, string> = { "Content-Type": file.mime };
   if (opts.createOnly) headers["If-None-Match"] = "*";
+  if (opts.replaces) headers["If-Match"] = `"${opts.replaces}"`;
   if (opts.workspace) headers[WORKSPACE_HEADER] = opts.workspace;
   const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
-  if (res.status === 412) throw new FileExistsError(file.path);
+  if (res.status === 412) {
+    const refused = (await res.json().catch(() => ({}))) as { changed?: boolean; sha256?: string | null };
+    if (refused.changed) throw new FileChangedError(file.path, refused.sha256 ?? null);
+    throw new FileExistsError(file.path);
+  }
   if (res.status === 403) throw new Error(`You can't change files here (${file.path})`);
   if (!res.ok) throw new Error(`PUT ${file.path}: ${res.status}`);
   return parseFileInfo(await res.json());
@@ -460,15 +466,35 @@ async function proposalRequest<T>(method: string, path: string, body?: unknown):
   return data;
 }
 
-/** The proposed content as text. */
-export async function proposalText(id: string): Promise<string> {
-  const res = await apiFetch(`/api/proposals/${encodeURIComponent(id)}/content`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Couldn't load the proposed version (${res.status})`);
-  return res.text();
+/** The sha256 an ETag names (a file's or a proposal's content), or null without one. */
+function etagHash(res: Response): string | null {
+  const etag = res.headers.get("etag");
+  return etag ? etag.replace(/^(W\/)?"|"$/g, "") : null;
 }
 
-export const decideProposal = (id: string, decision: "accept" | "reject" | "withdraw") =>
-  proposalRequest<Proposal>("POST", `/${encodeURIComponent(id)}/${decision}`);
+/** The proposed content as text, and which content that is (its sha256). */
+export async function proposalText(id: string): Promise<{ content: string; sha256: string | null }> {
+  const res = await apiFetch(`/api/proposals/${encodeURIComponent(id)}/content`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Couldn't load the proposed version (${res.status})`);
+  return { content: await res.text(), sha256: etagHash(res) };
+}
+
+/**
+ * What a reviewer looked at when accepting: the proposed content, and the
+ * file it was compared with (null: there was none). The server refuses the
+ * accept when either is another version by then.
+ */
+export interface Reviewed {
+  sha256?: string;
+  base?: string | null;
+}
+
+export const decideProposal = (id: string, decision: "accept" | "reject" | "withdraw", reviewed?: Reviewed) =>
+  proposalRequest<Proposal>(
+    "POST",
+    `/${encodeURIComponent(id)}/${decision}`,
+    decision === "accept" && reviewed && Object.keys(reviewed).length ? reviewed : undefined,
+  );
 
 /** Proposes an experiment's changed files (all, or `paths`) to its node. */
 export const promoteExperiment = (experimentId: string, paths?: string[], note?: string) =>

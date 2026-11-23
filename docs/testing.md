@@ -57,6 +57,11 @@ checks for future Python-specific dependency markers. Review scheduled results
 in **Actions → Python dependency audit**; this workflow does not create issues.
 Optional extras are not exported unless selected through a workspace runtime dependency.
 
+JavaScript production dependencies get the same treatment from the **JavaScript dependency
+audit** workflow (`pnpm audit --prod`, weekly and on lockfile or `package.json` changes).
+Advisories without a compatible fix are listed, with the reason, in
+[Development](development.md#dependency-security).
+
 ## Disposable integration databases
 
 The storage suite **drops the public schema** of `TEST_DATABASE_URL`. Never point
@@ -173,7 +178,9 @@ successful checks before merging and for preview-step limits.
 
 - `quality.yml`: the `checks` job (locked install, lint/types/units,
   unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
-  suites of `packages/knowledge-py` and every `services/*` project.
+  suites of `packages/knowledge-py` and every `services/*` project. When the change can
+  affect storage it starts the compose file's PostgreSQL and S3 first, so api-py's
+  database tests run instead of skipping, and the coverage report includes them.
 - `storage.yml`: for storage-related changes, the storage API conformance suite against
   api-py and api-py's own tests on real PostgreSQL/pgvector/S3, including the cached
   real embedding-model test (`EMBEDDING_TEST=1`).
@@ -212,12 +219,18 @@ place stay visible through remote events/reconnect until a subsequent edit saves
 a successful save of a different file must not hide their error. Permission
 revocation changes the editor to read-only without replacing the unsaved content.
 These drafts are held in memory: this policy does not promise durability across
-reload or navigation after a failed save.
+reload or navigation after a failed save. A signed-in page whose storage fails at
+load must stay in loading with "Storage unreachable", offer no editor, keep asking,
+and show the server's files once it answers.
 
 `e2e/sync-storage.spec.ts` runs only in storage mode. Two pages in one browser
 context share a real workspace and receive its real stream. It checks both
 persisted bytes and the other tab's editor, then confirms remote deletion closes
 both tabs. Its fixture uses a dedicated note and removes it after testing.
+It also covers the two overwrites issue #293 closed: someone else saves a file while
+this page's own save is held back (the editor asks which version to keep, and both
+choices are followed to the stored bytes), and a proposal is revised after its diff
+loaded (the accept is refused, the diff reloads, and accepting again writes the revision).
 
 ## Chat history
 

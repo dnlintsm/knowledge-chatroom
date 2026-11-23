@@ -58,6 +58,10 @@ model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
 [README](../services/agent-py/README.md).
 
 Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
+Name people in these lists by login subject (`<issuer>|<subject>`) where you can. An
+email matches only when the login provider marked it verified; a provider that verifies
+emails but sends no `email_verified` claim needs `OIDC_ASSUME_EMAIL_VERIFIED=true` on the
+UI, or its users have no email here at all (the UI logs a line at each such sign-in).
 `PLATFORM_ADMINS` names the deployment admins who can inspect the
 [workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also from the
 workspace switcher) and recover an Owner
@@ -67,18 +71,46 @@ Expose the UI through HTTPS and keep both Python service ports private. For logi
 set `AUTH_MODE=oidc`, OIDC settings, `APP_URL`, and the same `AUTH_SECRET` on the UI
 and api-py. Give agent-py and outside MCP servers only api-py's public key from
 `GET /identity/public-key` as `KNOWLEDGE_PUBLIC_KEY`, never the signing secret.
-For a single-user deployment use `AUTH_MODE=local`. The UI's production build refuses an
-unset authentication mode without a secret. api-py does so only with `NODE_ENV=production`
-in its environment, which its image does not set, and agent-py and the MCP servers run
-without login whenever `KNOWLEDGE_PUBLIC_KEY` is empty
-([#283](https://github.com/dnlintsm/knowledge-chatroom/issues/283)): set `AUTH_MODE` on
-api-py and the key on the others explicitly, and after deploying check that api-py
-answers a request without an identity with 401.
+For a single-user deployment set `AUTH_MODE=local` on every service.
+
+No service guesses the mode from a missing setting. The UI's production build and api-py
+refuse to start with neither `AUTH_MODE` nor `AUTH_SECRET`. agent-py and the MCP servers
+refuse to start with neither `AUTH_MODE` nor `KNOWLEDGE_PUBLIC_KEY`; with `AUTH_MODE=oidc`
+and no key they start and refuse every call until the key is set. A mismatch is refused
+too: api-py without login answers 401 to a request the UI signed for a user, instead of
+treating it as the built-in owner, and so do agent-py and the MCP servers. After deploying
+with login, check that api-py answers a request without an identity with 401.
 
 The first person to sign in owns the default workspace. Owners see an **Admin** button next
 to Share: people who have signed in and when they were last active, workspace roles,
 groups and their members, and recent access changes. A removed role applies on the
 user's next request; their login session stays valid until it expires.
+
+## After deploying: settings that must agree
+
+Each process reads its own environment, so these are easy to set on one and miss on
+another. Check them after every deployment that changes configuration.
+
+| Setting | Must be the same on | If it isn't |
+| --- | --- | --- |
+| `AUTH_MODE` | the UI, api-py, agent-py, every MCP server | A service without login refuses the requests the UI signs (401), or the other way round |
+| `AUTH_SECRET` | the UI and api-py, and nowhere else | api-py refuses every request as not signed in |
+| `KNOWLEDGE_PUBLIC_KEY` | agent-py and every MCP server: api-py's key from `GET /identity/public-key` | They refuse every call. It changes whenever `AUTH_SECRET` does |
+| `MCP_SERVERS` | api-py and agent-py | The "+" menu offers tools the chat can't use, or the chat has tools the menu doesn't show |
+| `SKILL_SCRIPTS` | api-py and agent-py | Skill pages say scripts run when they don't, or the reverse |
+| `CLAUDE_MODEL`, `ANTHROPIC_*` | api-py and agent-py, unless you mean them to differ | Follow-up chips and memory use another model or key than the chat |
+| `STORAGE_TOKEN_SECONDS` | the UI and api-py | Tokens for outside tools expire sooner or later than intended |
+
+Addresses point one way: the UI's `LOCAL_AGENT_URL` and agent-py's `LOCAL_AGENT_URL` at
+api-py, the UI's `AGENT_URL` at agent-py, each MCP server's `KNOWLEDGE_STORAGE_URL` at
+api-py. `DATABASE_URL` and the `S3_*` settings belong to api-py only.
+
+Then check, with login on:
+
+1. `GET /health` on api-py answers 200, with `rowSecurity: "on"` if you rely on Postgres
+   enforcing access.
+2. A request to api-py with no identity (`GET /files`) answers 401.
+3. Signing in through the UI lists your files, and a chat message gets a reply.
 
 ## HTTPS
 
@@ -110,6 +142,11 @@ pick one:
 - **Signed links to the store**: keep the second block and set
   `S3_PUBLIC_URL=https://knowledge.example.com:8443` on api-py. Left at
   `http://localhost:8333`, previews break on an https page as mixed content.
+  The store's origin has none of the sandboxing the app puts on files it serves, so api-py
+  signs a link to open in place only for pictures (not SVG), PDF, audio and video; any other
+  binary file is a download, and text, HTML and SVG are served by the app. A store on its
+  own site (another registrable domain) is safer still than another port of the app's host:
+  a page there can't send the app's cookies.
 
 `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
 `AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,
@@ -126,13 +163,20 @@ Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
 downloads; signed links expire after five minutes. Without it, binary files are served
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
-50 MB) caps one upload.
+50 MB) caps one file. An experiment upload (`POST /experiments/upload`) is held in memory
+until it is written, so its files together may be at most four times that, and 2,000 in
+number. Other request bodies have fixed limits: 64 KiB for JSON, 32 MiB for a chat run.
 
 Migrations (`services/api-py/migrations`) apply when the Python API server starts
-(`MIGRATIONS=off` makes it wait for another process to apply them). Back up database metadata and blob contents
+(`MIGRATIONS=off` makes it wait for another process to apply them: run
+`uv run --locked python -m api_py.migrate` in `services/api-py` with `DATABASE_URL` as a
+deploy step, or `python -m api_py.migrate` in the api-py image). Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.
+When the database account can't create or use that role, access is checked by the app
+only, and `/health` says `rowSecurity: "off"`. Set `ROW_SECURITY=required` to make that
+a failed health check instead of a log line.
 If startup reports RLS is off, an administrator must create/grant that role as
 documented in [Architecture](architecture.md) and restart. Verify its enabled state
 for deployments that depend on database-enforced access.

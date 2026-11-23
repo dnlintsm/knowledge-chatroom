@@ -88,6 +88,7 @@ from .skills_routes import js_to_number
 from .storage_routes import (
     ALL_METHODS,
     _MalformedPath,
+    declares_json,
     decode_component,
     first_param,
     parse_json,
@@ -131,7 +132,7 @@ def send(status: int, body: Any) -> Response:
 async def read_json(request: Request, limit: int = MAX_JSON_BYTES) -> dict[str, Any] | None:
     """The JSON object in the body (at most `limit` bytes, empty: {}), or None, as json() in http.ts."""
     data = await read_body(request, limit)
-    if data is None:
+    if data is None or (data and not declares_json(request)):
         return None
     try:
         # Buffer.toString keeps a byte order mark, which JSON.parse refuses.
@@ -227,6 +228,10 @@ async def _agent(request: Request, storage: Any, grant: MemoryGrant) -> Response
         async with session.scoped() as conn:
             return await chats.chat_lines_of(conn, session.ws, user, chat_id)
 
+    async def chat_read_outside(chat_id: str) -> bool:
+        async with session.scoped() as conn:
+            return await chats.chat_read_outside_content(conn, session.ws, user, chat_id)
+
     given = memory_agent.AgentRequest(
         service=MemoryService(session.scoped, session.ws, user),
         shared_service=SharedMemoryService(session.scoped, storage.pool, session.ws, user),
@@ -236,6 +241,7 @@ async def _agent(request: Request, storage: Any, grant: MemoryGrant) -> Response
         recall=memory_agent.recall_for(storage.semantic),
         search_chats=search_chats,
         read_chat=read_chat,
+        chat_read_outside=chat_read_outside,
     )
     return await memory_agent.serve(request, raw_path(request), given, read_json)
 

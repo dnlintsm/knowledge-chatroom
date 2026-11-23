@@ -5,6 +5,8 @@ import {
   lineOffsets,
   numberLines,
   parseFileRef,
+  isLocalImage,
+  localImagesOnly,
   rootRelativeLinks,
   sourceLines,
   workspaceNoteImages,
@@ -144,4 +146,39 @@ test("preview blocks carry their source lines", () => {
   expect(list.children![0].properties).toEqual({ dataLine: 3, dataLineEnd: 3 });
   // Code blocks get a wrapper, as Streamdown drops their attributes.
   expect(wrapper).toEqual({ type: "element", tagName: "div", properties: { dataLine: 5, dataLineEnd: 7 }, children: [code] });
+});
+
+test("an image stays on this app or is not fetched on sight (issue #291)", () => {
+  for (const src of ["/api/files/uploads/a.png", "uploads/a.png", "./a.png", "../a.png?x=1", "data:image/png;base64,AAAA", " data:image/gif;base64,AA"]) {
+    expect(isLocalImage(src), src).toBe(true);
+  }
+  for (const src of [
+    "https://evil.example/p.png?d=secret",
+    "http://evil.example/p.png",
+    "//evil.example/p.png",
+    "/\\evil.example/p.png",
+    "\\\\evil.example/p.png",
+    "https:evil.example/p.png",
+    "javascript:alert(1)",
+    "data:text/html,<script>1</script>",
+    "blob:https://evil.example/1",
+    "ftp://evil.example/p.png",
+  ]) {
+    expect(isLocalImage(src), src).toBe(false);
+  }
+});
+
+test("images from other servers become links; local ones and their surroundings stay", () => {
+  const img = (src: string, alt?: string) => ({ type: "element", tagName: "img", properties: alt === undefined ? { src } : { src, alt }, children: [] as Node[] });
+  const local = img("/api/files/uploads/a.png", "chart");
+  const remote = img("https://evil.example/p.png?d=secret", "chart");
+  const unnamed = img("//evil.example/p.png");
+  const nested = img("https://evil.example/q.png", "");
+  const tree: Node = { type: "root", children: [local, remote, unnamed, element("p", 1, 1, [nested])] };
+  localImagesOnly()(tree);
+  expect(local).toMatchObject({ tagName: "img", properties: { src: "/api/files/uploads/a.png" } });
+  expect(remote).toEqual({ type: "element", tagName: "a", properties: { href: "https://evil.example/p.png?d=secret" }, children: [{ type: "text", value: "chart (image)" }] });
+  expect(unnamed).toMatchObject({ tagName: "a", children: [{ type: "text", value: "//evil.example/p.png" }] });
+  expect(nested).toMatchObject({ tagName: "a", properties: { href: "https://evil.example/q.png" } });
+  expect(JSON.stringify(tree)).not.toContain('"src":"https://evil');
 });

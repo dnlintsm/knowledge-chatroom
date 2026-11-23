@@ -208,7 +208,19 @@ function HomeLink() {
 
 /** Where files are saved, and whether the last save failed. */
 function StorageStatus() {
-  const { storageMode, syncError } = useWorkspace();
+  const { storageMode, syncError, storageDown } = useWorkspace();
+  if (storageMode === "loading" && storageDown) {
+    return (
+      <span
+        role="status"
+        title="The storage server isn't answering. This workspace's files load as soon as it does; nothing is kept in this browser meanwhile."
+        className="ml-2 flex items-center gap-1 text-xs text-red-500"
+      >
+        <CloudAlert className="size-3.5" />
+        <span className="max-sm:hidden">Storage unreachable</span>
+      </span>
+    );
+  }
   if (storageMode === "loading") {
     return (
       <span role="status" className="ml-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">

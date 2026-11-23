@@ -273,16 +273,17 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
 
-from knowledge_chatroom.identity import HEADER, public_key, verify  # packages/knowledge-py
+from knowledge_chatroom.identity import caller, login_from_env  # packages/knowledge-py
 
 PROPS = "knowledge_chatroom"
-# The API server's GET /identity/public-key; unset without login.
-KEY = public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
+# AUTH_MODE=local for no login; with login, KNOWLEDGE_PUBLIC_KEY is the API server's
+# GET /identity/public-key. With neither set this raises: a missing key is not "no login".
+LOGIN = login_from_env(os.environ)
 
 
 def require_user(request: Request):
     # With login on, only runs the Next.js app signed get through.
-    if KEY and not verify(request.headers.get(HEADER, ""), KEY, audience=None):
+    if caller(dict(request.headers), LOGIN, audience=None) is None:
         raise HTTPException(401, "Sign in first")
 
 

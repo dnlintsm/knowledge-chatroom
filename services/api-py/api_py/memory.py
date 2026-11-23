@@ -22,8 +22,8 @@ import io
 import re
 import time
 import zipfile
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -47,7 +47,7 @@ MAX_INBOX = 50
 INBOX_OPS = ("add", "update", "delete")
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-_ID = re.compile(r"[0-9a-fA-F-]{36}")
+_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _SPACES = re.compile(f"[{JS_SPACE}]+")
 _INBOX_COLUMNS = "id::text AS id, op, name, description, type, body, base_version, source, thread_id, reason, created_at"
 _COLUMNS = (
@@ -829,35 +829,46 @@ class MemoryService:
         Makes a proposed change, as Claude's (so it shows in the activity with
         Undo). Refused when the note changed since it was proposed.
         """
-        item = await self._decide(item_id, "accepted")
-        run = {"threadId": item["threadId"] or "", "runId": "inbox"}
-        try:
-            if item["op"] == "delete":
-                note = await self.get(item["name"])
-                if not note or note["archived"] or note["version"] != item["baseVersion"]:
-                    raise MemoryConflictError(f"{item['name']} changed since Claude proposed this")
-                return await self.archive(item["name"], True, run)
-            given = {"description": item["description"], "type": item["type"], "body": item["body"]}
-            return await self.save(
-                item["name"],
-                given,
-                "agent",
-                run=run,
-                create=item["op"] == "add",
-                if_version=item["baseVersion"] if item["op"] == "update" else None,
-            )
-        except Exception as err:
-            # Back to waiting, so the user can reject it or look again.
-            async with self.scoped() as conn:
-                await conn.execute(
-                    "UPDATE memory_inbox SET status = 'pending', decided_at = NULL WHERE id = %s",
-                    (item_id,),
+        # One transaction marks the item accepted and makes the change, so a
+        # failure (or a crash) between the two leaves it waiting, never
+        # accepted without its change (issue #295). The steps below open their
+        # own transactions: here those are savepoints of this one.
+        async with self.scoped() as conn:
+
+            @asynccontextmanager
+            async def joined() -> AsyncIterator[AsyncConnection]:
+                async with conn.transaction():
+                    yield conn
+
+            here = MemoryService(joined, self.ws, self.user)
+            item = await here._decide(item_id, "accepted")
+            run = {"threadId": item["threadId"] or "", "runId": "inbox"}
+            try:
+                if item["op"] == "delete":
+                    note = await here.get(item["name"])
+                    if not note or note["archived"] or note["version"] != item["baseVersion"]:
+                        raise MemoryConflictError(
+                            f"{item['name']} changed since Claude proposed this"
+                        )
+                    return await here.archive(item["name"], True, run)
+                given = {
+                    "description": item["description"],
+                    "type": item["type"],
+                    "body": item["body"],
+                }
+                return await here.save(
+                    item["name"],
+                    given,
+                    "agent",
+                    run=run,
+                    create=item["op"] == "add",
+                    if_version=item["baseVersion"] if item["op"] == "update" else None,
                 )
-            if isinstance(err, MemoryConflictError):
+            except MemoryConflictError as err:
+                # Rolled back with the rest: still waiting, so the user can reject it or look again.
                 raise MemoryConflictError(
                     f"{item['name']} changed since Claude proposed this; reject it, or edit the note yourself"
                 ) from err
-            raise
 
     async def reject(self, item_id: str) -> None:
         """Drops a proposed change."""
