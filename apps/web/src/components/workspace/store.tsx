@@ -68,6 +68,7 @@ import {
   type ServerFile,
 } from "./server-files";
 import {
+  FileChangedError,
   FileExistsError,
   isBuiltInTab,
   kindForPath,
@@ -290,7 +291,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     getMode: () => mode.current,
     getPlace: () => placeRef.current,
     getFile: (path) => files.current.find((file) => file.path === path),
-    put: (file, at, replaces) => putServerFile(file, at, { workspace: workspaceId, replaces }),
+    put: async (file, at, replaces) => {
+      // null: the file was deleted on the server, so this save may only create it.
+      const opts = { workspace: workspaceId, replaces: replaces ?? undefined, createOnly: replaces === null };
+      try {
+        return await putServerFile(file, at, opts);
+      } catch (err) {
+        if (replaces !== null || !(err instanceof FileExistsError)) throw err;
+        // Someone made the file again meanwhile: a conflict with that version.
+        const list = await listServerFiles(at).catch(() => null);
+        const now = Array.isArray(list) ? list.find((f) => f.path === file.path) : undefined;
+        throw new FileChangedError(file.path, now?.sha256 ?? null);
+      }
+    },
     onError: setSyncError,
     onConflict: setSaveConflicts,
   }));
@@ -882,7 +895,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           // first, and the accept replaces exactly that version.
           const at = placeRef.current;
           const path = proposals.find((p) => p.id === id)?.path;
+          const copy = () => files.current.find((f) => f.path === path)?.content;
+          const reviewed = copy();
           await settleSaves(at);
+          // While the save was on its way, someone else's change may have replaced
+          // the open copy (and its version): that isn't what the diff showed.
+          if (placeRef.current !== at || copy() !== reviewed) {
+            throw new Error(`${path ?? "The file"} changed while your edits were saved; look at the proposal again before accepting`);
+          }
           const version = path ? sync.hash(path, at) : undefined;
           if (version) seen.base = version;
         }

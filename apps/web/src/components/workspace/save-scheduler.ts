@@ -14,9 +14,10 @@ interface Options {
   /**
    * Sends the file. `replaces` is the version this browser last saw of it, when
    * it knows one: the server then refuses (FileChangedError) to write over a
-   * newer one someone else saved.
+   * newer one someone else saved. null: it knows the file was deleted there,
+   * so the save may only create it (FileChangedError if someone made it again).
    */
-  put: (file: WorkspaceFile, at: PlaceId, replaces?: string) => Promise<{ sha256: string }>;
+  put: (file: WorkspaceFile, at: PlaceId, replaces?: string | null) => Promise<{ sha256: string }>;
   onError: (error: string | null) => void;
   /** The files whose save was refused because someone else changed them, whenever that set changes. */
   onConflict?: (conflicts: SaveConflict[]) => void;
@@ -48,6 +49,8 @@ export class SaveScheduler {
   private readonly failed = new Set<string>();
   private readonly hashes = new Map<string, string>();
   private readonly conflicts = new Map<string, SaveConflict>();
+  // Files known to be deleted on the server (a conflict said so): their next save only creates.
+  private readonly absent = new Set<string>();
   private readonly clock: Clock;
   private readonly delay: number;
 
@@ -80,7 +83,9 @@ export class SaveScheduler {
   conflict = (path: string, at = this.options.getPlace()) => this.conflicts.get(this.key(path, at));
   hash = (path: string, at = this.options.getPlace()) => this.hashes.get(this.key(path, at));
   remember = (path: string, hash: string, at = this.options.getPlace()) => {
-    this.hashes.set(this.key(path, at), hash);
+    const key = this.key(path, at);
+    this.hashes.set(key, hash);
+    this.absent.delete(key);
   };
   beginWrite = (path: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
@@ -118,7 +123,7 @@ export class SaveScheduler {
     // The version to replace is read when it is this save's turn: the save before it sets it.
     const sent = previous.then(async () => {
       if (this.conflicts.has(key)) return null;
-      const info = await this.options.put(file, at, this.hashes.get(key));
+      const info = await this.options.put(file, at, this.absent.has(key) ? null : this.hashes.get(key));
       this.remember(path, info.sha256, at);
       return info;
     });
@@ -187,8 +192,13 @@ export class SaveScheduler {
     const conflict = this.conflicts.get(key);
     if (!conflict) return;
     this.conflicts.delete(key);
-    if (conflict.sha256) this.hashes.set(key, conflict.sha256);
-    else this.hashes.delete(key);
+    if (conflict.sha256) this.remember(path, conflict.sha256, at);
+    else {
+      // Deleted there: a known absence, not an unknown version, so someone
+      // making the file again before this save lands is a conflict too.
+      this.hashes.delete(key);
+      this.absent.add(key);
+    }
     this.reportConflicts();
     const waiting = this.pending.get(key);
     if (waiting) this.clock.clearTimeout(waiting.timer);
@@ -202,6 +212,7 @@ export class SaveScheduler {
   dropConflict = (path: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
     if (!this.conflicts.delete(key)) return;
+    this.absent.delete(key);
     const waiting = this.pending.get(key);
     if (waiting) this.clock.clearTimeout(waiting.timer);
     this.pending.delete(key);
@@ -215,6 +226,7 @@ export class SaveScheduler {
   leave = (at: PlaceId) => {
     const prefix = `${at ?? ""}\n`;
     const gone = [...this.conflicts.keys()].filter((key) => key.startsWith(prefix));
+    for (const key of [...this.absent]) if (key.startsWith(prefix)) this.absent.delete(key);
     for (const key of gone) {
       this.conflicts.delete(key);
       const waiting = this.pending.get(key);
@@ -239,6 +251,7 @@ export class SaveScheduler {
     this.pending.clear();
     this.failed.clear();
     this.conflicts.clear();
+    this.absent.clear();
     this.reportConflicts();
   };
 
@@ -265,9 +278,14 @@ export class SaveScheduler {
     if (pending) this.clock.clearTimeout(pending.timer);
     this.pending.delete(key);
     this.hashes.delete(key);
+    this.absent.delete(key);
     const failed = this.failed.delete(key);
     if (this.conflicts.delete(key)) this.reportConflicts();
     else if (failed) this.reportFailures();
   };
-  forget = (path: string, at = this.options.getPlace()) => this.hashes.delete(this.key(path, at));
+  forget = (path: string, at = this.options.getPlace()) => {
+    const key = this.key(path, at);
+    this.absent.delete(key);
+    return this.hashes.delete(key);
+  };
 }

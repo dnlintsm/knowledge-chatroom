@@ -16,7 +16,7 @@ function fixture() {
   const state = { mode: "server" as StorageMode, place: null as string | null, files: [file("first")] };
   const writes: { content: string; at: string | null }[] = [];
   // The version each save said it replaces (If-Match), in order.
-  const replaced: (string | undefined)[] = [];
+  const replaced: (string | null | undefined)[] = [];
   const errors: (string | null)[] = [];
   const conflicts: string[][] = [];
   // `theirs`: someone else's version on the server, which the next save is refused over.
@@ -30,7 +30,7 @@ function fixture() {
       replaced.push(replaces);
       await transport.beforeWrite(file);
       if (transport.fail) throw new Error("controlled failure");
-      if (transport.theirs !== undefined && replaces !== (transport.theirs ?? undefined)) {
+      if (transport.theirs !== undefined && replaces !== transport.theirs) {
         throw new FileChangedError(file.path, transport.theirs);
       }
       transport.theirs = undefined;
@@ -279,9 +279,31 @@ test("a conflict with a deleted file: keeping mine saves it as a new file", asyn
   sync.schedule("notes/a.md");
   await expect(sync.settle(null)).rejects.toThrow();
   expect(sync.conflict("notes/a.md")?.sha256).toBeNull();
+  // A known absence (null), not an unknown version: the save may only create the file.
   await sync.keepMine("notes/a.md");
-  expect(replaced).toEqual(["opened", undefined]);
+  expect(replaced).toEqual(["opened", null]);
   expect(sync.conflict("notes/a.md")).toBeUndefined();
+  expect(sync.hash("notes/a.md")).toBe("1");
+});
+
+test("keeping mine over a deleted file someone made again meanwhile is a conflict with their new file", async () => {
+  const { sync, state, replaced, transport } = fixture();
+  sync.remember("notes/a.md", "opened");
+  transport.theirs = null;
+  sync.schedule("notes/a.md");
+  await expect(sync.settle(null)).rejects.toThrow();
+  transport.theirs = "recreated"; // no change event reached this browser
+  await sync.keepMine("notes/a.md");
+  expect(replaced).toEqual(["opened", null]);
+  expect(sync.conflict("notes/a.md")?.sha256).toBe("recreated");
+  await sync.keepMine("notes/a.md");
+  expect(replaced.at(-1)).toBe("recreated");
+  expect(sync.conflict("notes/a.md")).toBeUndefined();
+  // Back to ordinary saves: the next one names the version this one made.
+  state.files = [file("later")];
+  sync.schedule("notes/a.md");
+  await sync.settle(null);
+  expect(replaced.at(-1)).toBe("1");
 });
 
 test("taking theirs, leaving the place, deleting or discarding ends a conflict without sending mine", async () => {
