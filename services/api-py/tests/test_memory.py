@@ -391,3 +391,45 @@ async def test_the_rest_of_memory_stays_with_typescript(memory_api, database):
         assert (await other.get("/memory/notes/x", headers=ALICE)).json() == {"from": "typescript"}
         assert support.forwarded == ["GET /memory/notes/x"]
         support.forwarded.clear()
+
+
+@needs_database
+async def test_accepting_an_inbox_change_is_one_transaction(memory_api, monkeypatch):
+    """Issue #295: marked accepted and applied together, so a failure between the two can't lose the change."""
+    from contextlib import asynccontextmanager
+
+    _api, app = memory_api
+    alice = await alice_memory(app)
+    opened = 0
+
+    @asynccontextmanager
+    async def counted():
+        nonlocal opened
+        opened += 1
+        async with alice.scoped() as conn:
+            yield conn
+
+    memory = MemoryService(counted, alice.ws, alice.user)
+    item = await alice.propose({"op": "add", "name": "habits", "input": NOTE}, "chat", "t1")
+
+    # The change fails after the item was marked: both are undone, and it is still waiting.
+    save = MemoryService.save
+
+    async def failing(self, *args, **kwargs):
+        await save(self, *args, **kwargs)
+        raise RuntimeError("the server stopped here")
+
+    monkeypatch.setattr(MemoryService, "save", failing)
+    with pytest.raises(RuntimeError, match="stopped here"):
+        await memory.accept(item["id"])
+    assert opened == 1
+    assert [i["id"] for i in await alice.inbox()] == [item["id"]]
+    assert await alice.get("habits") is None
+
+    monkeypatch.setattr(MemoryService, "save", save)
+    opened = 0
+    note, event = await memory.accept(item["id"])
+    assert opened == 1
+    assert (note["name"], note["body"], event["kind"]) == ("habits", NOTE["body"], "create")
+    assert await alice.inbox() == []
+    assert (await alice.get("habits"))["version"] == 1
