@@ -68,8 +68,10 @@ cd packages/knowledge-py && uv run --locked datamodel-codegen
 - **A test for the change.** A bug fix comes with the test that failed before it.
 - **UI changes** add a `shot()` step to `e2e/preview.spec.ts` (or the storage specs), so the
   preview comment on the pull request shows the change.
-- **Docs in the same pull request**: the guide under `docs/` that describes the behaviour,
-  and `.env.example` for a setting. The changelog is written at release time.
+- **Docs in the same pull request**: the guide under `docs/` that describes the behaviour.
+  A setting gets a row in [docs/settings.md](docs/settings.md), which `pnpm check:web`
+  compares with the code, and an entry in `.env.example` when people are meant to set it.
+  The changelog is written at release time.
 - **A setting that is removed or renamed** adds a row to `MIGRATIONS` in
   `scripts/env-upgrade-plan.mjs`, so `pnpm env:upgrade` can carry people over.
 

@@ -8,8 +8,7 @@
 // The first catches a new setting nobody documented; the second, a row left behind
 // after a setting was removed or renamed.
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 export const REFERENCE = "docs/settings.md";
 
@@ -130,7 +129,8 @@ export function problems(root, markdown = readFileSync(join(root, REFERENCE), "u
 }
 
 function main() {
-  const root = fileURLToPath(new URL("../", import.meta.url));
+  // The repository root, from this script's own path (no import.meta: see below).
+  const root = resolve(dirname(process.argv[1]), "..");
   const found = problems(root);
   if (!found.length) {
     console.log(`${REFERENCE} matches the settings the code reads.`);

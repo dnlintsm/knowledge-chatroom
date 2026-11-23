@@ -131,6 +131,7 @@ Start with the guide that matches what you want to do:
 | [Architecture](docs/architecture.md) | Runs, skills, actions/rules, file APIs, experiments, search, and access |
 | [Testing](docs/testing.md) | Fast checks, disposable integration services, E2E modes, and CI |
 | [Deployment](docs/deployment.md) | Production build, private agent routing, authentication, HTTPS, and storage |
+| [Settings](docs/settings.md) | Every environment variable each process reads, with its default |
 | [Remote agent backend](docs/remote-agent.md) | Using an agent from a separate backend (`AGENT_URL`): what it receives and must do |
 | [CI merge gates](docs/ci.md) | The checks required before a PR merges, and preview limits |
 | [Workspaces (design)](docs/workspaces.md) | The design behind workspaces, shipped in 0.3.0: membership roles, the operation matrix, and isolation |

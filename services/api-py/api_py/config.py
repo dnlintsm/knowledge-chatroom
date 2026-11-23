@@ -5,7 +5,7 @@ TS_AGENT_URL         an older release's TypeScript server to forward unknown
 API_PY_HOST / API_PY_PORT
                      where this server listens (default 127.0.0.1:8000, the
                      address the app and agent-py know as LOCAL_AGENT_URL)
-DATABASE_URL         Postgres, shared with agent-py; unset: no storage
+DATABASE_URL         Postgres (only this server connects to it); unset: no storage
 AUTH_MODE, AUTH_SECRET
                      login, with the rules of packages/contracts/src/auth-mode.ts
 MIGRATIONS_DIR       the SQL migrations to apply and expect in the database

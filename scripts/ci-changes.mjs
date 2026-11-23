@@ -15,6 +15,8 @@ export const SUITES = ["node", "python", "browser", "storage", "pyagent"];
 
 // [path pattern, suites]. Patterns: `dir/**` (anything below), or an exact path.
 export const RULES = [
+  // The settings reference is checked against the code (scripts/settings-check.mjs).
+  ["docs/settings.md", ["node"]],
   // Documentation outside the code. Markdown in services/api-py/skills is runtime content.
   ["docs/**", []],
   ["README.md", []],
