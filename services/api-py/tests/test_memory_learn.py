@@ -335,3 +335,70 @@ async def test_a_chat_that_read_outside_content_is_learned_from_as_ask_first(mem
     # A chat of the user's own words alone is learned from directly, as before.
     app.state.create_message = model([{**change, "name": "work-area"}])  # type: ignore[attr-defined]
     assert await learner.learn(due["c-plain"]) == {"made": 1, "proposed": 0}
+
+
+@needs_database
+async def test_a_failed_chat_is_tried_again_for_a_while_and_one_chat_has_one_learner(
+    memory_api, database
+):
+    """
+    Issue #295: one failure used to skip a chat for good, so a provider outage
+    lost every chat that went quiet during it; and nothing kept two processes
+    from learning the same chat at once.
+    """
+    import asyncio
+
+    api, app = memory_api
+    await say(api, "c-1", "I run the etch line.")
+    await quiet(database)
+    learner: MemoryLearner = app.state.learner  # type: ignore[attr-defined]
+    change = {"op": "add", "description": "x", "type": "profile", "body": "x", "reason": "x"}
+
+    async def set_tried(minutes_ago: int) -> None:
+        async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+            await conn.execute(
+                "UPDATE memory_learned_chats SET learned_at = now() - %s * interval '1 minute'",
+                (minutes_ago,),
+            )
+
+    # The model is down: recorded, and not tried again straight away.
+    app.state.create_message = model(RuntimeError("overloaded"))  # type: ignore[attr-defined]
+    (chat,) = await learner.due()
+    assert (await learner.learn(chat))["error"] == "overloaded"
+    assert await learner.due() == []
+    # After the wait it is due again, and this time the model answers.
+    await set_tried(31)
+    (chat,) = await learner.due()
+    app.state.create_message = model([{**change, "name": "work-area"}])  # type: ignore[attr-defined]
+    assert await learner.learn(chat) == {"made": 1, "proposed": 0}
+    assert await learner.due() == []
+    await set_tried(600)
+    assert await learner.due() == [], "learned from: nothing to retry"
+
+    # A chat that keeps failing is given up on once it has been quiet long enough.
+    await say(api, "c-2", "And the litho line.")
+    await quiet(database, "c-2")
+    app.state.create_message = model(RuntimeError("overloaded"))  # type: ignore[attr-defined]
+    (chat,) = await learner.due()
+    await learner.learn(chat)
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+        await conn.execute(
+            "UPDATE chats SET last_run_at = now() - interval '7 hours' WHERE id = 'c-2'"
+        )
+        await conn.execute(
+            "UPDATE memory_learned_chats SET through = now() - interval '7 hours',"
+            " learned_at = now() - interval '1 hour' WHERE chat_id = 'c-2'"
+        )
+    assert await learner.due() == []
+
+    # Two processes sweeping at once: the chat is one's, and the other leaves it.
+    await say(api, "c-3", "I prefer tables.")
+    await quiet(database, "c-3")
+    calls: list[dict] = []
+    app.state.create_message = model([{**change, "name": "likes-tables"}], calls)  # type: ignore[attr-defined]
+    (chat,) = await learner.due()
+    first, second = await asyncio.gather(learner.learn(chat), learner.learn(dict(chat)))
+    assert sorted([first.get("skipped", False), second.get("skipped", False)]) == [False, True]
+    assert len(calls) == 1, "one model call, not two"
+    notes = [n["name"] for n in (await api.get("/memory", headers=ALICE)).json()["notes"]]
+    assert notes.count("likes-tables") == 1
