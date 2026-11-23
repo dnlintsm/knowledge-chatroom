@@ -404,8 +404,10 @@ Code's memory files and `SKILL.md`.
   under "Recent changes by Claude") or go to the inbox in `ask` mode. A chat in which
   Claude read outside content is learned from as in `ask` mode, since its replies may
   repeat text from there.
-  `memory_learned_chats` records how far each chat was learned. `MEMORY_LEARN=off` turns
-  it off.
+  `memory_learned_chats` records how far each chat was learned. The same row is the
+  claim that keeps two API server processes off one chat, and it carries the error when a
+  try fails: a failed or abandoned try is retried every 30 minutes for 6 hours after the
+  chat went quiet, then given up. `MEMORY_LEARN=off` turns it off.
 - Shared memory (`020_shared_memory.sql`, `services/api-py/api_py/shared_memory.py`): notes for
   the workspace, a knowledge node (and everything below it) or a group (and its
   sub-groups). `shared_memory_rank` decides who reads and edits each place from the
