@@ -30,19 +30,25 @@ class EventHub:
     def __init__(self, conninfo: str, channel: str) -> None:
         self._conninfo = conninfo
         self._channel = channel
-        self._listeners: set[tuple[str, Listener]] = set()
+        self._listeners: set[tuple[str, Listener, Callable[[], None] | None]] = set()
         self._task: asyncio.Task[None] | None = None
         self._ready: asyncio.Future[None] | None = None
 
-    async def subscribe(self, workspace_id: str, listener: Listener) -> Callable[[], None]:
-        """Calls `listener` with each event of the workspace; returns the unsubscribe function."""
+    async def subscribe(
+        self, workspace_id: str, listener: Listener, lost: Callable[[], None] | None = None
+    ) -> Callable[[], None]:
+        """
+        Calls `listener` with each event of the workspace; returns the unsubscribe
+        function. `lost` is called when the connection the events come over broke:
+        changes made until it listens again are never delivered.
+        """
         if self._task is None or self._task.done():
             self._ready = asyncio.get_running_loop().create_future()
             self._task = asyncio.create_task(self._listen(self._ready))
         assert self._ready is not None
         # Fails here, so the request gets a normal error answer, when the first LISTEN can't be set up.
         await asyncio.shield(self._ready)
-        entry = (workspace_id, listener)
+        entry = (workspace_id, listener, lost)
         self._listeners.add(entry)
         return lambda: self._listeners.discard(entry)
 
@@ -62,6 +68,9 @@ class EventHub:
                     ready.set_exception(err)
                     return  # The next subscriber tries again.
                 logger.warning("lost the change events connection (%s); listening again", err)
+                for _, _, lost in list(self._listeners):
+                    if lost:
+                        lost()
             await asyncio.sleep(RETRY_SECONDS)
 
     def _deliver(self, payload: str) -> None:
@@ -72,7 +81,7 @@ class EventHub:
         if not isinstance(event, dict):
             return
         workspace_id = event.pop("workspaceId", None)
-        for ws, listener in list(self._listeners):
+        for ws, listener, _ in list(self._listeners):
             if ws == workspace_id:
                 listener(dict(event))
 

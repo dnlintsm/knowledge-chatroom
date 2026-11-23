@@ -20,12 +20,14 @@ import pytest
 from support import ALICE, BOB, Client, storage_token
 from test_files import S3_ENDPOINT, SECRET, URL, s3
 
+from api_py import search
 from api_py.config import ConfigError
 from api_py.search import any_words, snippet_for
 from api_py.semantic import (
     DEFAULT_EMBEDDING_MODEL,
     ApiEmbedder,
     LocalEmbedder,
+    ModelChangedError,
     SemanticIndex,
     default_min_similarity,
     embedding_settings,
@@ -246,7 +248,7 @@ async def has_pgvector(database: str) -> bool:
 
 
 @needs_services
-async def test_search_by_meaning(api, database):
+async def test_search_by_meaning(api, database, monkeypatch):
     if not await has_pgvector(database):
         pytest.skip("this Postgres has no pgvector")
     client, app = api
@@ -266,8 +268,20 @@ async def test_search_by_meaning(api, database):
     assert await semantic.embed_all() == 3
     assert await semantic.embed_all() == 0
 
+    # The query is embedded before a database connection is taken (issue #296):
+    # the model may be a slow remote API, and the pool has ten connections.
+    held: list[int] = []
+    embed_query = semantic.query_vector
+
+    async def watched(query: str) -> str:
+        stats = storage.pool.get_stats()
+        held.append(stats["pool_size"] - stats["pool_available"])
+        return await embed_query(query)
+
+    monkeypatch.setattr(semantic, "query_vector", watched)
     found = (await client.get("/search?q=chamber wall", headers=ALICE)).json()["results"]
     assert [(r["path"], r["match"]) for r in found] == [("notes/liner.md", "meaning")]
+    assert held == [0]
     assert found[0]["snippet"] == "Polymer deposition on the liner grows weekly."
     # Exact-word queries don't search by meaning.
     assert (await client.get('/search?q="chamber wall"', headers=ALICE)).json() == {"results": []}
@@ -277,6 +291,18 @@ async def test_search_by_meaning(api, database):
         ("notes/budget.md", "words"),
         ("notes/fab.md", "meaning"),
     ]
+    # A model that doesn't answer in time: the search matches words rather than wait for it.
+    monkeypatch.setattr(search, "QUERY_EMBED_SECONDS", 0.05)
+
+    async def stuck(query: str) -> str:
+        await asyncio.sleep(30)
+        return await embed_query(query)
+
+    monkeypatch.setattr(semantic, "query_vector", stuck)
+    async with asyncio.timeout(5):
+        words = (await client.get("/search?q=budget", headers=ALICE)).json()["results"]
+    assert [(r["path"], r["match"]) for r in words] == [("notes/budget.md", "words")]
+    monkeypatch.setattr(semantic, "query_vector", embed_query)
 
     # Another model (or size) starts the vectors over; the same one keeps them.
     async with storage.pool.connection() as conn:
@@ -291,6 +317,19 @@ async def test_search_by_meaning(api, database):
     async with storage.pool.connection() as conn:
         cur = await conn.execute("SELECT model, dims FROM search_embedding")
         assert await cur.fetchone() == ("topics-2", 6)
+
+    # A server still running the earlier model, after one with another model of
+    # the same size started the vectors over (a rolling change of EMBEDDING_MODEL):
+    # it writes none of its own among the new model's, and stops (issue #296).
+    newer = SemanticIndex(storage.pool, TopicEmbedder("topics-3", extra=2))
+    await newer.prepare()
+    with pytest.raises(ModelChangedError, match="now from topics-3, not topics-2"):
+        await other.embed_pending()
+    assert other.ready is False
+    async with storage.pool.connection() as conn:
+        cur = await conn.execute("SELECT count(*) FROM blob_chunks WHERE embedding IS NOT NULL")
+        assert await cur.fetchone() == (0,)
+    assert await newer.embed_all() == 3
 
 
 @pytest.mark.skipif(not os.environ.get("EMBEDDING_TEST"), reason="EMBEDDING_TEST not set")

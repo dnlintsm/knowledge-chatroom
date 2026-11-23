@@ -401,6 +401,124 @@ async def test_watch_tells_each_user_what_they_may_see(database):
         assert bob == [": watching"]
 
 
+async def watching(http: httpx.AsyncClient, lines: list[str]) -> asyncio.Task[None]:
+    """Reads Alice's watch stream into `lines` until the server ends it."""
+
+    async def read() -> None:
+        async with http.stream("GET", "/files?watch", headers=ALICE) as response:
+            await events(response, lines)
+
+    task = asyncio.create_task(read())
+    async with asyncio.timeout(10):
+        while not lines:
+            await asyncio.sleep(0.02)
+    return task
+
+
+async def test_a_watch_stream_ends_rather_than_skip_a_change(database, monkeypatch):
+    """
+    Issue #296: a change the stream can't check, can't hold, or may never have
+    been told of ends the stream, so the browser reconnects and lists again.
+    """
+    from api_py import storage_routes
+    from api_py.session import Session
+
+    async with Client(database, SECRET, s3=s3()) as (api, app), served(app) as base:
+        await api.get("/access", headers=ALICE)
+        async with httpx.AsyncClient(base_url=base, timeout=10) as http:
+            # 1. The check itself fails (as when no database connection comes in time).
+            lines: list[str] = []
+            stream = await watching(http, lines)
+            await api.put("/files/notes/one.md", headers=ALICE, content=b"1")
+            async with asyncio.timeout(10):
+                while len(lines) < 2:
+                    await asyncio.sleep(0.02)
+            can_see = Session.can_see
+
+            async def failing(self, event):
+                raise RuntimeError("couldn't get a connection after 30.00 sec")
+
+            monkeypatch.setattr(Session, "can_see", failing)
+            await api.put("/files/notes/two.md", headers=ALICE, content=b"2")
+            async with asyncio.timeout(10):
+                await stream
+            assert [line.startswith("data: ") for line in lines] == [False, True]
+
+            # 2. More changes waiting than a stream holds: it ends once it gets to them.
+            monkeypatch.setattr(storage_routes, "MAX_WATCH_BACKLOG", 2)
+            checking = asyncio.Event()
+            release = asyncio.Event()
+
+            async def slow(self, event):
+                checking.set()
+                await release.wait()
+                return await can_see(self, event)
+
+            monkeypatch.setattr(Session, "can_see", slow)
+            lines = []
+            stream = await watching(http, lines)
+            await api.put("/files/notes/b0.md", headers=ALICE, content=b"0")
+            async with asyncio.timeout(10):
+                await checking.wait()
+            for i in range(1, 5):
+                await api.put(f"/files/notes/b{i}.md", headers=ALICE, content=str(i).encode())
+            await asyncio.sleep(0.2)  # the notifications reach the stream's queue
+            release.set()
+            async with asyncio.timeout(10):
+                await stream
+            assert [json.loads(line[6:])["path"] for line in lines[1:]] == ["notes/b0.md"]
+            monkeypatch.setattr(Session, "can_see", can_see)
+
+            # 3. The server's own events connection breaks: what it missed can't be known.
+            lines = []
+            stream = await watching(http, lines)
+            async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
+                cur = await conn.execute(
+                    """
+                    SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                    WHERE datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE 'LISTEN %'"""
+                )
+                assert len(await cur.fetchall()) == 1
+            async with asyncio.timeout(10):
+                await stream
+            assert lines == [": watching"]
+
+
+async def test_the_object_store_is_reached_without_a_database_connection(database, monkeypatch):
+    """Issue #296: a slow object store must not keep one of the pool's connections waiting on it."""
+    from api_py.blobs import BlobStore
+
+    async with Client(database, SECRET, s3=s3()) as (api, app):
+        await api.get("/access", headers=ALICE)
+        pool = app.state.storage.pool
+        held: list[tuple[str, int]] = []
+
+        def spy(name: str):
+            real = getattr(BlobStore, name)
+
+            async def call(self, *args):
+                stats = pool.get_stats()
+                held.append((name, stats["pool_size"] - stats["pool_available"]))
+                return await real(self, *args)
+
+            return call
+
+        for name in ("get", "put"):
+            monkeypatch.setattr(BlobStore, name, spy(name))
+        saved = await api.put("/files/notes/s3.md", headers=ALICE, content=b"stored")
+        assert saved.status_code == 200, saved.text
+        assert (await api.get("/files/notes/s3.md", headers=ALICE)).content == b"stored"
+        proposal = await api.put("/files/notes/s3.md?propose", headers=ALICE, content=b"proposed")
+        assert proposal.status_code == 201, proposal.text
+        content = await api.get(f"/proposals/{proposal.json()['id']}/content", headers=ALICE)
+        assert content.content == b"proposed"
+        accepted = await api.post(f"/proposals/{proposal.json()['id']}/accept", headers=ALICE)
+        assert accepted.status_code == 200, accepted.text
+        assert (await api.get("/files/notes/s3.md", headers=ALICE)).content == b"proposed"
+    assert [name for name, _ in held] == ["put", "get", "put", "get", "get", "get"]
+    assert {connections for _, connections in held} == {0}
+
+
 async def test_a_save_names_the_version_it_replaces(files):
     """If-Match (issue #293): the second of two people who read the same version doesn't overwrite the first."""
     first = (await files.put("/files/notes/shared.md", headers=ALICE, content=b"v1")).json()

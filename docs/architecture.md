@@ -505,8 +505,12 @@ For local setup, see [Development](development.md).
   renames it within the same place (history kept; 412 when the name is taken),
   `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
-  LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
-  (412 if the file exists). `PUT`, `PATCH` and `DELETE` need write access to the place (403
+  LISTEN/NOTIFY, so it works across processes). A stream never skips a change: when it
+  can't check one against the user's access, falls 1000 changes behind, or the server's own
+  events connection breaks, it ends, and the browser reconnects and lists the files again.
+  A `PUT` with `If-None-Match: *` only creates
+  (412 if the file exists), and one with `If-Match: "<sha256>"` only replaces that version
+  (412 with the version it is now). `PUT`, `PATCH` and `DELETE` need write access to the place (403
   otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the API server's and chat agent's ports private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
@@ -564,6 +568,11 @@ For local setup, see [Development](development.md).
   `EMBEDDING_DIMENSIONS` asks for shorter vectors. pgvector indexes up to 2000 dimensions,
   so longer vectors are compared one by one (fine for small workspaces). Each model scores
   similarity differently, so tune `SEARCH_MIN_SIMILARITY` (default 0.5, 0.82 for E5).
+  A search embeds its query before it takes a database connection and waits at most 10
+  seconds for it, then matches words only, so a slow embeddings API can't use up the pool.
+  When servers with different models share a database (a rolling change of
+  `EMBEDDING_MODEL`), the one whose model is no longer the recorded one stops embedding
+  and searches by words until it is restarted with the same model.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted

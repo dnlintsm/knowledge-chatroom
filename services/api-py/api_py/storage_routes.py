@@ -90,6 +90,7 @@ stays inside its segment, as the TypeScript server reads them.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
@@ -1182,14 +1183,41 @@ async def handle_proposals(request: Request, session: Session) -> Response:
     return error(404, "Not found")
 
 
+# Changes a watch stream may have waiting before it counts as having fallen behind.
+MAX_WATCH_BACKLOG = 1000
+# Queued to wake a waiting stream; never sent.
+_WAKE: dict[str, Any] = {}
+
+
 async def watch(session: Session) -> Response:
     """
     The changes this principal may see in the session's workspace, as server-sent
     events, in order: each is checked before the next, membership first. Subscribes before answering, so a failure still
     gets a normal error answer.
+
+    A stream never skips a change it may show. When it can't tell whether this
+    principal may see one (the check failed: no database connection in time,
+    say), fell more than MAX_WATCH_BACKLOG changes behind, or the server lost
+    its own events connection, the stream ends instead: the browser connects
+    again and lists what it has missed (issue #296).
     """
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    unsubscribe = await session.storage.require_events().subscribe(session.ws, queue.put_nowait)
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=MAX_WATCH_BACKLOG)
+    # Set once a change could not be queued, or may never have arrived.
+    missed = asyncio.Event()
+
+    def deliver(event: dict[str, Any]) -> None:
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            missed.set()
+
+    def lost() -> None:
+        missed.set()
+        # Wake a stream that is waiting for the next change.
+        with contextlib.suppress(asyncio.QueueFull):
+            queue.put_nowait(_WAKE)
+
+    unsubscribe = await session.storage.require_events().subscribe(session.ws, deliver, lost)
 
     async def stream():
         loop = asyncio.get_running_loop()
@@ -1209,15 +1237,22 @@ async def watch(session: Session) -> Response:
                     next_ping += HEARTBEAT_SECONDS
                     continue
                 event, waiting = waiting.result(), None
+                if missed.is_set():
+                    logger.warning("[storage] a watch stream missed changes; closing it")
+                    return
                 try:
                     # Membership first: once it's gone, so is the stream (docs/workspaces.md).
                     if not await session.still_member():
                         return
-                    if await session.can_see(event):
-                        data = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
-                        yield f"data: {data}\n\n".encode()
+                    visible = await session.can_see(event)
                 except Exception:
-                    logger.exception("[storage] watch")
+                    logger.exception(
+                        "[storage] watch: could not check a change; closing the stream"
+                    )
+                    return
+                if visible:
+                    data = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+                    yield f"data: {data}\n\n".encode()
         finally:
             if waiting:
                 waiting.cancel()

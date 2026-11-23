@@ -140,13 +140,22 @@ class FileService:
         row = await cur.fetchone()
         return _to_info(row) if row else None
 
-    async def read(
-        self, conn: AsyncConnection, raw_path: str
-    ) -> tuple[dict[str, Any], bytes] | None:
-        info = await self.stat(conn, raw_path)
-        if not info:
-            return None
-        return info, await self.storage.require_blobs().get(info["sha256"])
+    async def content(self, info: dict[str, Any]) -> bytes:
+        """
+        The bytes of a file stat() found. It takes no database connection, so a
+        slow object store doesn't hold one of the pool's (issue #296); a version's
+        bytes never change, so reading them after the transaction is the same read.
+        """
+        return await self.storage.require_blobs().get(info["sha256"])
+
+    async def store(self, raw_path: str, data: bytes, mime: str | None = None) -> None:
+        """
+        Puts `data` in the blob store ahead of write(..., stored=True), without
+        a database connection (issue #296). Bytes go first anyway (see above):
+        a write that then fails leaves an unreferenced blob, never a dangling row.
+        """
+        path = normalize_path(raw_path)
+        await self.storage.require_blobs().put(sha256_hex(data), data, mime or mime_for_path(path))
 
     async def _lock_node(self, conn: AsyncConnection) -> None:
         """Holds the node or experiment until commit, so it can't be deleted under a write (NodeService.lockLive)."""
@@ -203,9 +212,11 @@ class FileService:
         in_tx: InTx | None = None,
         create_only: bool = False,
         if_match: Collection[str] | None = None,
+        stored: bool = False,
     ) -> dict[str, Any]:
         """
-        Creates the file when missing; identical bytes add no version. create_only
+        Creates the file when missing; identical bytes add no version. `stored`:
+        the bytes are in the blob store already (store(), or another file's). create_only
         refuses an existing file (FileExistsError_). if_match names the versions
         (sha256, or ANY_VERSION) the write may replace: FileChangedError when the
         file is another one now, or isn't there, and nothing is written.
@@ -213,7 +224,8 @@ class FileService:
         path = normalize_path(raw_path)
         mime = mime or mime_for_path(path)
         sha256 = sha256_hex(data)
-        await self.storage.require_blobs().put(sha256, data, mime)
+        if not stored:
+            await self.storage.require_blobs().put(sha256, data, mime)
 
         async with conn.transaction():
             await conn.execute(

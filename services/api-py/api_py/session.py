@@ -853,6 +853,8 @@ class Session:
                 "proposal.create", {"proposal": proposal_id, "node": node_id, "path": path}
             )(conn)
 
+        # The upload first, while no connection is held for it.
+        await proposals.store(self.storage, path, data, mime)
         async with self.scoped() as conn:
             proposal_id = await proposals.propose(
                 conn,
@@ -865,6 +867,7 @@ class Session:
                 author_id=principal.user_id,
                 note=note,
                 in_tx=in_tx,
+                stored=True,
             )
         return await self.proposal(proposal_id)
 
@@ -997,6 +1000,8 @@ class Session:
                     in_tx=in_tx,
                     create_only=base is None,
                     if_match=[base] if isinstance(base, str) else None,
+                    # The proposal's blob: read from the store just above.
+                    stored=True,
                 )
                 # The file already had these bytes, so no version was added.
                 if not decided:
@@ -1051,11 +1056,15 @@ class Session:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Files this principal may read that match, best first (see search.py)."""
+        search = self.storage.search
+        # Before the connection: the embedding model may be a slow remote API.
+        vector = await search.meaning(query)
         async with self.scoped() as conn:
-            return await self.storage.search.search(
+            return await search.search(
                 conn,
                 self.principal.user_id,
                 query,
+                vector=vector,
                 scope=scope,
                 near=near,
                 near_experiment=near_experiment,
@@ -1269,7 +1278,9 @@ class FilesSession:
 
     async def read(self, path: str) -> tuple[dict[str, Any], bytes] | None:
         async with self.session.scoped() as conn:
-            return await self.service.read(conn, path)
+            info = await self.service.stat(conn, path)
+        # The bytes after the connection went back to the pool (FileService.content).
+        return (info, await self.service.content(info)) if info else None
 
     async def history(self, path: str) -> builtins.list[dict[str, Any]] | None:
         async with self.session.scoped() as conn:
@@ -1286,12 +1297,15 @@ class FilesSession:
     ):
         self._need_editor()
         principal = self.session.principal
+        # The upload first, while no connection is held for it (FileService.store).
+        await self.service.store(path, data, mime)
         async with self.session.scoped() as conn:
             return await self.service.write(
                 conn,
                 path,
                 data,
                 mime=mime,
+                stored=True,
                 create_only=create_only,
                 if_match=if_match,
                 author=principal.actor,

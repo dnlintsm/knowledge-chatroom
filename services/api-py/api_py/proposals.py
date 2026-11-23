@@ -183,10 +183,12 @@ async def propose(
     experiment_id: str | None = None,
     note: str | None = None,
     in_tx: Callable[[AsyncConnection, str], Awaitable[Any]] | None = None,
+    stored: bool = False,
 ) -> str:
     """
-    Proposes new content for a file: bytes, or a blob already stored ({sha256,
-    size}, an experiment's file). The proposer's open proposal for the same
+    Proposes new content for a file: bytes (`stored`: put in the blob store
+    already, with store()), or a blob already stored ({sha256, size}, an
+    experiment's file). The proposer's open proposal for the same
     file, if any, is replaced, so Claude revising its edit leaves one to review.
     Returns its id; ProposalError when the file already has this content.
     """
@@ -198,7 +200,8 @@ async def propose(
     ws = storage.workspace_id
     if isinstance(content, bytes):
         sha256, size = sha256_hex(content), len(content)
-        await storage.require_blobs().put(sha256, content, mime)
+        if not stored:
+            await storage.require_blobs().put(sha256, content, mime)
     else:
         sha256, size = content["sha256"], content["size"]
 
@@ -288,6 +291,15 @@ async def propose(
             },
         )
         return proposal_id
+
+
+async def store(storage: Storage, path: str, content: bytes, mime: str | None = None) -> None:
+    """
+    Puts proposed bytes in the blob store ahead of propose(..., stored=True),
+    without a database connection (issue #296).
+    """
+    mime = mime or mime_for_path(normalize_path(path))
+    await storage.require_blobs().put(sha256_hex(content), content, mime)
 
 
 async def decide_in(
