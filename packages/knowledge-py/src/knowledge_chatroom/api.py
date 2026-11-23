@@ -56,6 +56,14 @@ class Error(BaseModel):
     """
     The path already has a file.
     """
+    changed: Literal[True] | None = None
+    """
+    What the request named as seen (If-Match, or an accept's sha256 and base) is another version now.
+    """
+    sha256: str | None = None
+    """
+    With `changed` on a file write, the file's version now; null when it is gone.
+    """
 
 
 class IdOnly(BaseModel):
@@ -1120,6 +1128,19 @@ class PromoteExperimentRequest(BaseModel):
 
 class ListPromotableResponse(BaseModel):
     files: list[Promotable]
+
+
+class DecideProposalRequest(BaseModel):
+    sha256: str | None = None
+    """
+    For accept, the proposed content reviewed (the proposal's `sha256`).
+    """
+    base: str | None = None
+    """
+    For accept, the sha256 of the file the proposal was compared with; null when
+    there was no file. Left out, the file is replaced whatever it holds.
+
+    """
 
 
 class ListChatsResponse(BaseModel):

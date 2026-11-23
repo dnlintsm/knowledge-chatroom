@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -22,10 +22,10 @@ from . import chats, experiments, nodes, proposals
 from .access import AccessService, ForbiddenError, Principal, Role, at_least, is_uuid, iso
 from .db import as_user
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, clean_input, same_json
-from .files import FileService
+from .files import FileChangedError, FileExistsError_, FileService
 from .nodes import NodeError, NodeNotFoundError
 from .paths import js_trim, normalize_path
-from .proposals import EVERYWHERE, ProposalError
+from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .run_report import REPORT_PATH, new_report, report_front_matter, with_front_matter
 from .storage import Storage
 
@@ -42,6 +42,8 @@ EMPTY_LEVEL_NAME = "None"
 _AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "inputs", "note"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
+# For decide: the reviewer didn't say which version of the file they compared with.
+NOT_SEEN = object()
 
 
 def _now() -> str:
@@ -929,15 +931,29 @@ class Session:
             ids.append(proposal_id)
         return [await self.proposal(proposal_id) for proposal_id in ids]
 
-    async def decide(self, proposal_id: str, decision: str) -> dict[str, Any]:
+    async def decide(
+        self,
+        proposal_id: str,
+        decision: str,
+        *,
+        seen: str | None = None,
+        base: str | None | object = NOT_SEEN,
+    ) -> dict[str, Any]:
         """
         Accepts (writes it as the file's next version, credited to its proposer),
         rejects, or withdraws a proposal. Accepting and rejecting need editor on
         its place; withdrawing is for its proposer.
+
+        An accept can say what its reviewer looked at: `seen`, the proposed
+        content's sha256, and `base`, the sha256 of the file it was compared with
+        (None: there was no file). ProposalChangedError when either is another
+        one by now, so nobody accepts content, or replaces a file, they haven't seen.
         """
         proposal = await self.proposal(proposal_id)
         if proposal["status"] != "open":
             raise ProposalError(f"This proposal was already {proposal['status']}")
+        if decision == "accept" and seen is not None and seen != proposal["sha256"]:
+            raise ProposalChangedError(proposals.REVISED)
         if decision == "withdraw":
             if not proposal["mine"]:
                 raise ForbiddenError("Only its proposer can withdraw a proposal")
@@ -957,25 +973,40 @@ class Session:
         data = await self.storage.blobs.get(proposal["sha256"])
         decided = False
 
+        # The bytes written are the ones read above: a revision since then is refused.
+        written = proposal["sha256"]
+
         async def in_tx(tx: AsyncConnection) -> None:
             nonlocal decided
-            await proposals.decide_in(tx, self.storage, proposal_id, "accept", user_id)
+            await proposals.decide_in(
+                tx, self.storage, proposal_id, "accept", user_id, sha256=written
+            )
             await audit(tx)
             decided = True
 
-        async with self.scoped() as conn:
-            await files.write(
-                conn,
-                proposal["path"],
-                data,
-                mime=proposal["mime"],
-                author=proposal["author"],
-                author_id=proposal["authorId"],
-                in_tx=in_tx,
-            )
-            # The file already had these bytes, so no version was added.
-            if not decided:
-                await proposals.decide(conn, self.storage, proposal_id, "accept", user_id, audit)
+        path = proposal["path"]
+        try:
+            async with self.scoped() as conn:
+                await files.write(
+                    conn,
+                    path,
+                    data,
+                    mime=proposal["mime"],
+                    author=proposal["author"],
+                    author_id=proposal["authorId"],
+                    in_tx=in_tx,
+                    create_only=base is None,
+                    if_match=[base] if isinstance(base, str) else None,
+                )
+                # The file already had these bytes, so no version was added.
+                if not decided:
+                    await proposals.decide(
+                        conn, self.storage, proposal_id, "accept", user_id, audit, sha256=written
+                    )
+        except (FileChangedError, FileExistsError_) as err:
+            raise ProposalChangedError(
+                f"{path} changed after you opened this proposal; look at it again before accepting"
+            ) from err
         return await self.proposal(proposal_id)
 
     # Chat history: the principal's own, whatever their role (chats.py)
@@ -1245,7 +1276,13 @@ class FilesSession:
             return await self.service.history(conn, path)
 
     async def write(
-        self, path: str, data: bytes, *, mime: str | None = None, create_only: bool = False
+        self,
+        path: str,
+        data: bytes,
+        *,
+        mime: str | None = None,
+        create_only: bool = False,
+        if_match: Collection[str] | None = None,
     ):
         self._need_editor()
         principal = self.session.principal
@@ -1256,6 +1293,7 @@ class FilesSession:
                 data,
                 mime=mime,
                 create_only=create_only,
+                if_match=if_match,
                 author=principal.actor,
                 author_id=principal.user_id,
                 in_tx=self._audit("file.write", {"path": path, "size": len(data)}),

@@ -169,6 +169,10 @@ paths:
         proposal for an editor to accept (see /proposals) and the answer is 201; a viewer may
         propose too. An experiment's files can't be proposed this way (400): promote the
         experiment instead. Bodies over MAX_UPLOAD_BYTES answer 413.
+
+        To save over what you read and nothing newer, send `If-Match` with the ETag of your read:
+        when someone else has saved since (or deleted the file), the answer is 412 with `changed`
+        and the file's `sha256` now, and nothing is written.
       parameters:
         - name: propose
           in: query
@@ -182,6 +186,13 @@ paths:
           in: header
           description: "`*` only creates: 412 when the file exists."
           schema: { type: string, enum: ["*"] }
+        - name: If-Match
+          in: header
+          description: |
+            The version the write may replace: the file's ETag (its sha256, quoted or bare), several
+            separated by commas, or `*` for any version of a file that exists. 412 when the file is
+            another version now, or isn't there.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -202,7 +213,7 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "412": { $ref: "#/components/responses/Exists" }
+        "412": { $ref: "#/components/responses/ExistsOrChanged" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
@@ -893,6 +904,10 @@ paths:
       responses:
         "200":
           description: The bytes.
+          headers:
+            ETag:
+              description: The proposed content's sha256 in quotes; what an accept sends as `sha256`.
+              schema: { type: string }
           content:
             "*/*":
               schema: { type: string, format: binary }
@@ -914,7 +929,26 @@ paths:
       tags: [proposals]
       operationId: decideProposal
       summary: Accept, reject or withdraw a proposal
-      description: Accepting writes it as the file's next version, credited to its proposer.
+      description: |
+        Accepting writes it as the file's next version, credited to its proposer. The proposer can
+        revise an open proposal, and the file can change, while someone reviews it, so an accept
+        can say what its reviewer looked at: with `sha256` or `base` in the body, the answer is 409
+        (and nothing is written) when that isn't what would be accepted, or replaced, any more.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sha256:
+                  type: string
+                  description: For accept, the proposed content reviewed (the proposal's `sha256`).
+                base:
+                  type: [string, "null"]
+                  description: |
+                    For accept, the sha256 of the file the proposal was compared with; null when
+                    there was no file. Left out, the file is replaced whatever it holds.
       responses:
         "200":
           description: The proposal, decided.
@@ -925,6 +959,7 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/ProposalChanged" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -3581,6 +3616,21 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ExistsOrChanged:
+      description: |
+        A create-only write to a path that already has a file (`exists` is true), or an If-Match
+        write to a file that is another version now (`changed` is true, with its `sha256` now:
+        null when the file is gone).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ProposalChanged:
+      description: |
+        The accept named what its reviewer saw, and the proposal was revised or its file changed
+        since (`changed` is true). Nothing was written; read both again.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     ExperimentExists:
       description: An experiment already has this id, even a deleted one (`exists` is true).
       content:
@@ -3749,6 +3799,13 @@ components:
       properties:
         error: { type: string }
         exists: { type: boolean, const: true, description: The path already has a file. }
+        changed:
+          type: boolean
+          const: true
+          description: What the request named as seen (If-Match, or an accept's sha256 and base) is another version now.
+        sha256:
+          type: [string, "null"]
+          description: With `changed` on a file write, the file's version now; null when it is gone.
 
     IdOnly:
       type: object

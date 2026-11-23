@@ -307,6 +307,11 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     const read = await call("GET", `/files/notes/a.md${q}`, { headers: alice, expect: 200 });
     assert.equal(read.text, "# A\nhello conformance");
     await call("GET", `/files/notes/a.md${q}`, { headers: { ...alice, "If-None-Match": read.res.headers.get("etag")! }, expect: 304 });
+    // A save names the version it replaces: the same bytes again, then a version that isn't the file's.
+    await call("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "Content-Type": "text/markdown", "If-Match": read.res.headers.get("etag")! }, body: "# A\nhello conformance", expect: 200 });
+    const stale = await call<Schema["Error"]>("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "If-Match": '"0000"' }, body: "lost update", expect: 412 });
+    assert.equal(stale.data.changed, true);
+    assert.equal(`"${stale.data.sha256}"`, read.res.headers.get("etag"));
     // 200 with the bytes, or 302 to the object store when S3_PUBLIC_URL is set.
     await call("GET", `/files/uploads/pic.bin${q}`, { headers: alice });
     await call("GET", `/files/notes/a.md${q}&versions`, { headers: alice, expect: 200 });
@@ -339,7 +344,11 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/proposals/${p1.id}`, { headers: alice, expect: 200 });
     await call("GET", `/proposals/${p1.id}/content`, { headers: alice, expect: 200 });
     await call("POST", `/proposals/${p1.id}/accept`, { headers: bob, expect: 403 });
-    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, expect: 200 });
+    // An accept of something other than what the reviewer saw: revised content, then a changed file.
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: "0000" }, expect: 409 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: p1.sha256, base: null }, expect: 409 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: 1 }, expect: 400 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: p1.sha256 }, expect: 200 });
     await call("POST", `/proposals/${p2.id}/reject`, { headers: alice, expect: 200 });
     await call("POST", `/proposals/${p3.id}/withdraw`, { headers: bob, expect: 200 });
   });

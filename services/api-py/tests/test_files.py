@@ -399,3 +399,64 @@ async def test_watch_tells_each_user_what_they_may_see(database):
         ]
         # Bob has no access to the workspace's root, so he hears of neither.
         assert bob == [": watching"]
+
+
+async def test_a_save_names_the_version_it_replaces(files):
+    """If-Match (issue #293): the second of two people who read the same version doesn't overwrite the first."""
+    first = (await files.put("/files/notes/shared.md", headers=ALICE, content=b"v1")).json()
+    etag = (await files.get("/files/notes/shared.md", headers=ALICE)).headers["etag"]
+    assert etag == f'"{first["sha256"]}"'
+
+    # Bob saves over the version both read; Alice's save of the same version is refused.
+    bob = await files.put(
+        "/files/notes/shared.md", headers={**ALICE, "If-Match": etag}, content=b"bob's"
+    )
+    assert bob.status_code == 200, bob.text
+    alice = await files.put(
+        "/files/notes/shared.md", headers={**ALICE, "If-Match": etag}, content=b"alice's"
+    )
+    assert (alice.status_code, alice.json()) == (
+        412,
+        {
+            "error": "notes/shared.md changed since you read it",
+            "changed": True,
+            "sha256": bob.json()["sha256"],
+        },
+    )
+    assert (await files.get("/files/notes/shared.md", headers=ALICE)).content == b"bob's"
+    versions = (await files.get("/files/notes/shared.md?versions", headers=ALICE)).json()
+    assert len(versions["versions"]) == 2
+
+    # The version now, bare or quoted, in a list, or any version at all.
+    for name in (bob.json()["sha256"], f'"other", "{bob.json()["sha256"]}"', "*"):
+        again = await files.put(
+            "/files/notes/shared.md", headers={**ALICE, "If-Match": name}, content=b"bob's"
+        )
+        assert again.status_code == 200, (name, again.text)
+
+    # A file that is gone (or never was) isn't brought back by a save of an old version.
+    await files.delete("/files/notes/shared.md", headers=ALICE)
+    for name in (etag, "*"):
+        gone = await files.put(
+            "/files/notes/shared.md", headers={**ALICE, "If-Match": name}, content=b"back"
+        )
+        assert (gone.status_code, gone.json()) == (
+            412,
+            {"error": "notes/shared.md isn't there any more", "changed": True, "sha256": None},
+        )
+    assert (await files.get("/files/notes/shared.md", headers=ALICE)).status_code == 404
+    assert (await files.get("/files", headers=ALICE)).json()["files"] == []
+
+
+async def test_two_saves_of_one_version_at_once_let_one_through(files):
+    first = (await files.put("/files/race.md", headers=ALICE, content=b"v1")).json()
+    headers = {**ALICE, "If-Match": f'"{first["sha256"]}"'}
+    answers = await asyncio.gather(
+        *(
+            files.put("/files/race.md", headers=headers, content=f"v2-{i}".encode())
+            for i in range(4)
+        )
+    )
+    assert sorted(a.status_code for a in answers) == [200, 412, 412, 412]
+    won = next(a for a in answers if a.status_code == 200).json()
+    assert {a.json()["sha256"] for a in answers if a.status_code == 412} == {won["sha256"]}

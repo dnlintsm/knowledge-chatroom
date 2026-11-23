@@ -155,6 +155,116 @@ async def test_accepting_what_the_file_already_has(api):
     assert len((await api.get("/files/a.md?versions", headers=ALICE)).json()["versions"]) == 1
 
 
+async def test_accept_names_what_its_reviewer_saw(api):
+    """Issue #293: an accept doesn't write content, or replace a file, the reviewer hasn't seen."""
+    q = f"node={await node_bob_views(api)}"
+    file = (await api.put(f"/files/a.md?{q}", headers=ALICE, content=b"v1")).json()
+    first = (await api.put(f"/files/a.md?{q}&propose", headers=BOB, content=b"v1 + bob")).json()
+    seen = await api.get(f"/proposals/{first['id']}/content", headers=ALICE)
+    assert seen.headers["etag"] == f'"{first["sha256"]}"'
+
+    # Bob revises it while Alice still looks at the first version.
+    revised = (await api.put(f"/files/a.md?{q}&propose", headers=BOB, content=b"v1 + BOB")).json()
+    assert revised["id"] == first["id"]
+    stale = await api.post(
+        f"/proposals/{first['id']}/accept",
+        headers=ALICE,
+        json={"sha256": first["sha256"], "base": file["sha256"]},
+    )
+    assert (stale.status_code, stale.json()) == (
+        409,
+        {
+            "error": "This proposal was revised after you opened it; look at it again before accepting",
+            "changed": True,
+        },
+    )
+
+    # The file moves on after Alice opened the revised diff.
+    moved = (await api.put(f"/files/a.md?{q}", headers=ALICE, content=b"v2")).json()
+    behind = await api.post(
+        f"/proposals/{first['id']}/accept",
+        headers=ALICE,
+        json={"sha256": revised["sha256"], "base": file["sha256"]},
+    )
+    assert (behind.status_code, behind.json()) == (
+        409,
+        {
+            "error": "a.md changed after you opened this proposal; look at it again before accepting",
+            "changed": True,
+        },
+    )
+    assert (await api.get(f"/files/a.md?{q}", headers=ALICE)).content == b"v2"
+    assert (await api.get(f"/proposals/{first['id']}", headers=ALICE)).json()["status"] == "open"
+    assert [action for action, _ in await audit(api)] == ["proposal.create", "proposal.create"]
+
+    for body in ({"sha256": 1}, {"base": 1}, {"base": []}, [], "x"):
+        bad = await api.post(f"/proposals/{first['id']}/accept", headers=ALICE, json=body)
+        assert (bad.status_code, bad.json()) == (
+            400,
+            {"error": "Expected no body, or {sha256?: string, base?: string|null}"},
+        ), body
+    unreadable = await api.post(
+        f"/proposals/{first['id']}/accept",
+        headers={**ALICE, "Content-Type": "application/json"},
+        content=b'{"sha256": ',
+    )
+    assert unreadable.status_code == 400
+
+    done = await api.post(
+        f"/proposals/{first['id']}/accept",
+        headers=ALICE,
+        json={"sha256": revised["sha256"], "base": moved["sha256"]},
+    )
+    assert (done.status_code, done.json()["status"]) == (200, "accepted")
+    assert (await api.get(f"/files/a.md?{q}", headers=ALICE)).content == b"v1 + BOB"
+
+
+async def test_accepting_a_new_file_someone_else_made_meanwhile(api):
+    q = f"node={await node_bob_views(api)}"
+    proposal = (await api.put(f"/files/new.md?{q}&propose", headers=BOB, content=b"bob's")).json()
+    assert proposal["isNew"] is True
+    await api.put(f"/files/new.md?{q}", headers=ALICE, content=b"alice's")
+    body = {"sha256": proposal["sha256"], "base": None}
+    taken = await api.post(f"/proposals/{proposal['id']}/accept", headers=ALICE, json=body)
+    assert (taken.status_code, taken.json()["changed"]) == (409, True)
+    assert (await api.get(f"/files/new.md?{q}", headers=ALICE)).content == b"alice's"
+
+    # Deleted again: it is the new file its reviewer saw.
+    await api.delete(f"/files/new.md?{q}", headers=ALICE)
+    accepted = await api.post(f"/proposals/{proposal['id']}/accept", headers=ALICE, json=body)
+    assert (accepted.status_code, accepted.json()["status"]) == (200, "accepted")
+    assert (await api.get(f"/files/new.md?{q}", headers=ALICE)).content == b"bob's"
+
+
+async def test_a_revision_during_the_accept_is_not_marked_accepted(api, monkeypatch):
+    """The bytes written are the ones read before the transaction; the proposal must still hold them."""
+    from api_py.blobs import BlobStore
+
+    q = f"node={await node_bob_views(api)}"
+    await api.put(f"/files/a.md?{q}", headers=ALICE, content=b"v1")
+    proposal = (await api.put(f"/files/a.md?{q}&propose", headers=BOB, content=b"first")).json()
+    read = BlobStore.get
+    revised = False
+
+    async def get_then_revise(self, sha256):
+        nonlocal revised
+        data = await read(self, sha256)
+        if sha256 == proposal["sha256"] and not revised:
+            revised = True
+            again = await api.put(f"/files/a.md?{q}&propose", headers=BOB, content=b"second")
+            assert again.status_code == 201, again.text
+        return data
+
+    monkeypatch.setattr(BlobStore, "get", get_then_revise)
+    late = await api.post(f"/proposals/{proposal['id']}/accept", headers=ALICE)
+    assert (late.status_code, late.json()["changed"]) == (409, True)
+    assert revised
+    # Nothing was written, and the revised proposal is still open.
+    assert (await api.get(f"/files/a.md?{q}", headers=ALICE)).content == b"v1"
+    now = (await api.get(f"/proposals/{proposal['id']}", headers=ALICE)).json()
+    assert (now["status"], now["size"]) == ("open", 6)
+
+
 async def test_proposals_routes_answer_bad_requests(api):
     missing = str(uuid.uuid4())
     for path in (f"/proposals/{missing}", "/proposals/nope", f"/proposals/{missing}/content"):

@@ -35,6 +35,13 @@ class ProposalError(Exception):
     """The request can't be done as asked: nothing changed, already decided, ... (400)."""
 
 
+class ProposalChangedError(Exception):
+    """An accept of something its reviewer hasn't seen: the proposal was revised, or its file changed (409)."""
+
+
+REVISED = "This proposal was revised after you opened it; look at it again before accepting"
+
+
 # The live file at a proposal's path, as a join condition on f for proposal p.
 _TARGET_FILE = """
     f.workspace_id = p.workspace_id AND f.node_id IS NOT DISTINCT FROM p.node_id
@@ -289,11 +296,14 @@ async def decide_in(
     proposal_id: str,
     decision: str,
     user_id: str,
+    *,
+    sha256: str | None = None,
 ) -> None:
     """
     Inside a transaction, marks an open proposal decided. For an accept, call it
-    after writing the file, so it records the version that made. ProposalError
-    if it was already decided.
+    after writing the file, so it records the version that made, and with the
+    `sha256` that was written: ProposalChangedError if the proposal holds other
+    content by now. ProposalError if it was already decided.
     """
     status = DECIDED[decision]
     cur = await conn.execute(
@@ -303,16 +313,24 @@ async def decide_in(
             version_id = CASE WHEN %(status)s = 'accepted' THEN (
               SELECT f.current_version_id FROM files f WHERE {_TARGET_FILE}) END
         WHERE p.id = %(id)s AND p.workspace_id = %(ws)s AND p.status = 'open'
+          AND (%(sha256)s::text IS NULL OR p.blob_sha256 = %(sha256)s)
         RETURNING p.node_id, p.path, p.author_type, p.author_id""",
         {
             "status": status,
             "user": user_id,
             "id": proposal_id,
             "ws": storage.workspace_id,
+            "sha256": sha256,
         },
     )
     row = await cur.fetchone()
     if not row:
+        cur = await conn.execute(
+            "SELECT 1 FROM proposals WHERE id = %s AND workspace_id = %s AND status = 'open'",
+            (proposal_id, storage.workspace_id),
+        )
+        if sha256 is not None and await cur.fetchone():
+            raise ProposalChangedError(REVISED)
         raise ProposalError("This proposal was already accepted, rejected or withdrawn")
     node, path, author, author_id = row
     await storage.notify(
@@ -336,10 +354,12 @@ async def decide(
     decision: str,
     user_id: str,
     in_tx: InTx | None = None,
+    *,
+    sha256: str | None = None,
 ) -> None:
     """Marks an open proposal decided in a transaction of its own."""
     async with conn.transaction():
-        await decide_in(conn, storage, proposal_id, decision, user_id)
+        await decide_in(conn, storage, proposal_id, decision, user_id, sha256=sha256)
         if in_tx:
             await in_tx(conn)
 

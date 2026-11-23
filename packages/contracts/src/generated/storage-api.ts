@@ -57,6 +57,10 @@ export interface paths {
          *     proposal for an editor to accept (see /proposals) and the answer is 201; a viewer may
          *     propose too. An experiment's files can't be proposed this way (400): promote the
          *     experiment instead. Bodies over MAX_UPLOAD_BYTES answer 413.
+         *
+         *     To save over what you read and nothing newer, send `If-Match` with the ETag of your read:
+         *     when someone else has saved since (or deleted the file), the answer is 412 with `changed`
+         *     and the file's `sha256` now, and nothing is written.
          */
         put: operations["writeFile"];
         post?: never;
@@ -419,7 +423,10 @@ export interface paths {
         put?: never;
         /**
          * Accept, reject or withdraw a proposal
-         * @description Accepting writes it as the file's next version, credited to its proposer.
+         * @description Accepting writes it as the file's next version, credited to its proposer. The proposer can
+         *     revise an open proposal, and the file can change, while someone reviews it, so an accept
+         *     can say what its reviewer looked at: with `sha256` or `base` in the body, the answer is 409
+         *     (and nothing is written) when that isn't what would be accepted, or replaced, any more.
          */
         post: operations["decideProposal"];
         delete?: never;
@@ -1884,6 +1891,13 @@ export interface components {
              * @constant
              */
             exists?: true;
+            /**
+             * @description What the request named as seen (If-Match, or an accept's sha256 and base) is another version now.
+             * @constant
+             */
+            changed?: true;
+            /** @description With `changed` on a file write, the file's version now; null when it is gone. */
+            sha256?: string | null;
         };
         IdOnly: {
             id: string;
@@ -2750,6 +2764,31 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /**
+         * @description A create-only write to a path that already has a file (`exists` is true), or an If-Match
+         *     write to a file that is another version now (`changed` is true, with its `sha256` now:
+         *     null when the file is gone).
+         */
+        ExistsOrChanged: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description The accept named what its reviewer saw, and the proposal was revised or its file changed
+         *     since (`changed` is true). Nothing was written; read both again.
+         */
+        ProposalChanged: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description An experiment already has this id, even a deleted one (`exists` is true). */
         ExperimentExists: {
             headers: {
@@ -2949,6 +2988,12 @@ export interface operations {
             header?: {
                 /** @description `*` only creates: 412 when the file exists. */
                 "If-None-Match"?: "*";
+                /**
+                 * @description The version the write may replace: the file's ETag (its sha256, quoted or bare), several
+                 *     separated by commas, or `*` for any version of a file that exists. 412 when the file is
+                 *     another version now, or isn't there.
+                 */
+                "If-Match"?: string;
             };
             path: {
                 /** @description The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept. */
@@ -2984,7 +3029,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            412: components["responses"]["Exists"];
+            412: components["responses"]["ExistsOrChanged"];
             413: components["responses"]["TooLarge"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
@@ -3781,6 +3826,8 @@ export interface operations {
             /** @description The bytes. */
             200: {
                 headers: {
+                    /** @description The proposed content's sha256 in quotes; what an accept sends as `sha256`. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3805,7 +3852,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description For accept, the proposed content reviewed (the proposal's `sha256`). */
+                    sha256?: string;
+                    /**
+                     * @description For accept, the sha256 of the file the proposal was compared with; null when
+                     *     there was no file. Left out, the file is replaced whatever it holds.
+                     */
+                    base?: string | null;
+                };
+            };
+        };
         responses: {
             /** @description The proposal, decided. */
             200: {
@@ -3820,6 +3879,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["ProposalChanged"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

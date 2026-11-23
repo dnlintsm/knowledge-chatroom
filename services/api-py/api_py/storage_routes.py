@@ -26,7 +26,8 @@
     GET    /files?watch             change events (server-sent), those this user may see
     GET    /files/<path>?node=      the content (a signed store link for binary files
                                     when S3_PUBLIC_URL is set); ?versions: its history
-    PUT    /files/<path>?node=      write it (If-None-Match: * only creates); ?propose
+    PUT    /files/<path>?node=      write it (If-None-Match: * only creates; If-Match:
+                                    "<sha256>" only replaces that version); ?propose
                                     (&note=): propose it instead (201)
     PATCH  /files/<path>?node=      {path} -> rename
     DELETE /files/<path>?node=      soft delete
@@ -105,7 +106,7 @@ from . import uploads
 from .access import ROLES, AccessError, ForbiddenError
 from .chats import ChatError, ChatTakenError
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError
-from .files import FileExistsError_
+from .files import ANY_VERSION, FileChangedError, FileExistsError_
 from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
 from .paths import (
@@ -117,11 +118,11 @@ from .paths import (
     normalize_path,
     utf16_len,
 )
-from .proposals import EVERYWHERE, ProposalError
+from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .proxy import forward
 from .run_report import js_json, js_number
 from .search import SearchError
-from .session import Session
+from .session import NOT_SEEN, Session
 from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
@@ -162,6 +163,17 @@ def json_response(status: int, body: Any) -> JSONResponse:
 
 def error(status: int, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status)
+
+
+def versions_named(header: str | None) -> list[str] | None:
+    """
+    The versions an If-Match header names: each a file's sha256 (its ETag, with
+    or without the quotes) or `*` for any. None without the header.
+    """
+    if header is None:
+        return None
+    names = [js_trim(part).removeprefix("W/").strip('"') for part in header.split(",")]
+    return [ANY_VERSION if name == "*" else name for name in names if name]
 
 
 def raw_path(request: Request) -> str:
@@ -254,7 +266,11 @@ async def read_json(request: Request) -> dict[str, Any] | None:
     The JSON object in the body (at most 64 KiB), or None: also when the body
     isn't sent as application/json (declares_json).
     """
-    body = await read_body(request, MAX_JSON_BYTES)
+    return json_object(request, await read_body(request, MAX_JSON_BYTES))
+
+
+def json_object(request: Request, body: bytes | None) -> dict[str, Any] | None:
+    """read_json, for a body already read."""
     if body is None or (body and not declares_json(request)):
         return None
     try:
@@ -368,6 +384,10 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(409, str(err), exists=True)
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
+    except FileChangedError as err:
+        return error(412, str(err), changed=True, sha256=err.sha256)
+    except ProposalChangedError as err:
+        return error(409, str(err), changed=True)
     except (
         NodeError,
         AccessError,
@@ -743,7 +763,14 @@ async def handle_files(request: Request, session: Session) -> Response:
             )
         create_only = js_trim(request.headers.get("if-none-match", "")) == "*"
         return json_response(
-            200, await files.write(path, content, mime=mime, create_only=create_only)
+            200,
+            await files.write(
+                path,
+                content,
+                mime=mime,
+                create_only=create_only,
+                if_match=versions_named(request.headers.get("if-match")),
+            ),
         )
 
     if method == "PATCH":
@@ -1071,6 +1098,8 @@ async def handle_experiments(request: Request, session: Session) -> Response:
 
 PROPOSAL_STATUSES = ("open", "accepted", "rejected", "withdrawn", "all")
 DECISIONS = ("accept", "reject", "withdraw")
+# What the reviewer looked at, for an accept (Session.decide).
+DECISION_EXPECTED = "Expected no body, or {sha256?: string, base?: string|null}"
 
 
 async def handle_proposals(request: Request, session: Session) -> Response:
@@ -1130,13 +1159,26 @@ async def handle_proposals(request: Request, session: Session) -> Response:
             headers={
                 "Content-Type": proposal["mime"],
                 "Cache-Control": "no-cache",
+                # Which content this is: what an accept names as `sha256`.
+                "ETag": f'"{proposal["sha256"]}"',
                 **STORED_CONTENT_HEADERS,
             },
         )
     if action in DECISIONS:
         if method != "POST":
             return error(405, "Method not allowed")
-        return json_response(200, await session.decide(proposal_id, action))
+        # No body decides as before; one that can't be read is refused rather than
+        # taken as "nothing to check".
+        raw = await read_body(request, MAX_JSON_BYTES)
+        body = {} if raw == b"" else json_object(request, raw)
+        if body is None:
+            return error(400, DECISION_EXPECTED)
+        seen, base = body.get("sha256"), body.get("base", NOT_SEEN)
+        if not (seen is None or isinstance(seen, str)) or not (
+            base is None or base is NOT_SEEN or isinstance(base, str)
+        ):
+            return error(400, DECISION_EXPECTED)
+        return json_response(200, await session.decide(proposal_id, action, seen=seen, base=base))
     return error(404, "Not found")
 
 

@@ -9,7 +9,7 @@ place: an experiment's files change on their own, apart from its node's.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from typing import Any
 
 from psycopg import AsyncConnection, errors
@@ -32,6 +32,21 @@ class FileExistsError_(Exception):
         super().__init__(f"{path} already exists")
         self.path = path
 
+
+class FileChangedError(Exception):
+    """A write that names the version it replaces (If-Match), when the file is another one now, or gone."""
+
+    def __init__(self, path: str, sha256: str | None) -> None:
+        super().__init__(
+            f"{path} changed since you read it" if sha256 else f"{path} isn't there any more"
+        )
+        self.path = path
+        # The version the file is now; None when there is no file.
+        self.sha256 = sha256
+
+
+# In `if_match`: any version, as long as the file exists.
+ANY_VERSION = "*"
 
 _INFO = """
     SELECT f.path, f.kind, f.mime, v.size, v.blob_sha256, f.updated_at, v.author_type
@@ -147,6 +162,35 @@ class FileService:
         if not await cur.fetchone():
             raise NodeNotFoundError("Node not found")
 
+    async def _lock_file(self, conn: AsyncConnection, path: str) -> Any | None:
+        """Holds the file at `path` until commit, so writers to one path take turns; its id, or None."""
+        here, args = self._here()
+        cur = await conn.execute(
+            f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL FOR UPDATE OF f",  # pyrefly: ignore[bad-argument-type]
+            (*args, path),
+        )
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    async def _current(conn: AsyncConnection, file_id: Any) -> tuple[str | None, str]:
+        """
+        A locked file's content hash (None before its first version) and mime.
+        Its own statement, after the lock: one that waited for another writer
+        still sees the versions from before that writer committed, so read
+        together with the lock it would miss the version just written.
+        """
+        cur = await conn.execute(
+            """
+            SELECT v.blob_sha256, f.mime
+            FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
+            WHERE f.id = %s""",
+            (file_id,),
+        )
+        row = await cur.fetchone()
+        assert row is not None
+        return row[0], row[1]
+
     async def write(
         self,
         conn: AsyncConnection,
@@ -158,14 +202,19 @@ class FileService:
         author_id: str | None = None,
         in_tx: InTx | None = None,
         create_only: bool = False,
+        if_match: Collection[str] | None = None,
     ) -> dict[str, Any]:
-        """Creates the file when missing; identical bytes add no version. create_only refuses an existing file."""
+        """
+        Creates the file when missing; identical bytes add no version. create_only
+        refuses an existing file (FileExistsError_). if_match names the versions
+        (sha256, or ANY_VERSION) the write may replace: FileChangedError when the
+        file is another one now, or isn't there, and nothing is written.
+        """
         path = normalize_path(raw_path)
         mime = mime or mime_for_path(path)
         sha256 = sha256_hex(data)
         await self.storage.require_blobs().put(sha256, data, mime)
 
-        here, args = self._here()
         async with conn.transaction():
             await conn.execute(
                 "INSERT INTO blobs (sha256, size) VALUES (%s, %s) ON CONFLICT (sha256) DO NOTHING",
@@ -181,17 +230,17 @@ class FileService:
                 ON CONFLICT (workspace_id, node_id, experiment_id, path) WHERE deleted_at IS NULL DO NOTHING""",
                 (self.ws, self.node_id, self.experiment_id, path, kind_for_path(path), mime),
             )
-            cur = await conn.execute(
-                f"""
-                SELECT f.id, v.blob_sha256, f.mime
-                FROM files f LEFT JOIN file_versions v ON v.id = f.current_version_id
-                WHERE {here} AND f.path = %s AND f.deleted_at IS NULL
-                FOR UPDATE OF f""",  # pyrefly: ignore[bad-argument-type]
-                (*args, path),
-            )
-            file_id, current_sha, current_mime = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+            file_id = await self._lock_file(conn, path)
+            assert file_id is not None
+            current_sha, current_mime = await self._current(conn, file_id)
             if created.rowcount == 0 and create_only:
                 raise FileExistsError_(path)
+            if if_match is not None:
+                # Decided under the row lock, so two savers who read the same version can't both win.
+                if created.rowcount:
+                    raise FileChangedError(path, None)
+                if ANY_VERSION not in if_match and current_sha not in if_match:
+                    raise FileChangedError(path, current_sha)
             if current_sha != sha256 or current_mime != mime:
                 cur = await conn.execute(
                     """
@@ -219,16 +268,11 @@ class FileService:
     async def remove(self, conn: AsyncConnection, raw_path: str, in_tx: InTx | None = None) -> bool:
         """Soft delete: history stays, and the path is free for a new file."""
         path = normalize_path(raw_path)
-        here, args = self._here()
         async with conn.transaction():
-            cur = await conn.execute(
-                f"SELECT f.id FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL FOR UPDATE OF f",  # pyrefly: ignore[bad-argument-type]
-                (*args, path),
-            )
-            row = await cur.fetchone()
-            if not row:
+            file_id = await self._lock_file(conn, path)
+            if file_id is None:
                 return False
-            await conn.execute("UPDATE files SET deleted_at = now() WHERE id = %s", (row[0],))
+            await conn.execute("UPDATE files SET deleted_at = now() WHERE id = %s", (file_id,))
             if in_tx:
                 await in_tx(conn)
             await self.storage.notify(conn, {"op": "delete", **self.place, "path": path})
@@ -254,18 +298,10 @@ class FileService:
         try:
             async with conn.transaction():
                 await self._lock_node(conn)
-                cur = await conn.execute(
-                    f"""
-                    SELECT f.id, f.mime, v.blob_sha256
-                    FROM files f JOIN file_versions v ON v.id = f.current_version_id
-                    WHERE {here} AND f.path = %s AND f.deleted_at IS NULL
-                    FOR UPDATE OF f""",  # pyrefly: ignore[bad-argument-type]
-                    (*args, source),
-                )
-                row = await cur.fetchone()
-                if not row:
+                file_id = await self._lock_file(conn, source)
+                if file_id is None:
                     return None
-                file_id, mime, sha256 = row
+                sha256, mime = await self._current(conn, file_id)
                 if source != target:
                     cur = await conn.execute(
                         f"SELECT 1 FROM files f WHERE {here} AND f.path = %s AND f.deleted_at IS NULL",  # pyrefly: ignore[bad-argument-type]
