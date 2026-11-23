@@ -76,3 +76,12 @@ def test_the_blob_store_reads_the_typescript_settings():
     for bad in ("lots", "0", "-5"):
         with pytest.raises(ConfigError):
             settings_from_env({"AUTH_MODE": "local", "MAX_UPLOAD_BYTES": bad})
+
+
+def test_row_security_is_optional_unless_required():
+    base = {"AUTH_MODE": "local"}
+    assert settings_from_env(base).row_security_required is False
+    assert settings_from_env({**base, "ROW_SECURITY": "optional"}).row_security_required is False
+    assert settings_from_env({**base, "ROW_SECURITY": " Required "}).row_security_required is True
+    with pytest.raises(ConfigError, match="ROW_SECURITY must be required or optional"):
+        settings_from_env({**base, "ROW_SECURITY": "on"})

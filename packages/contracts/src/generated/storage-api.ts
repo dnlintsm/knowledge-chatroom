@@ -4898,6 +4898,13 @@ export interface operations {
                     "application/json": {
                         /** @constant */
                         status: "ok";
+                        /**
+                         * @description Once storage is open: whether Postgres enforces access too (row-level
+                         *     security). `off` means only the app's own checks apply; the database user
+                         *     can't use the restricted role. Absent before storage opens and without a database.
+                         * @enum {string}
+                         */
+                        rowSecurity?: "on" | "off";
                     };
                 };
             };

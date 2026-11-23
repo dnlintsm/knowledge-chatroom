@@ -10,8 +10,13 @@ AUTH_MODE, AUTH_SECRET
                      login, with the rules of packages/contracts/src/auth-mode.ts
 MIGRATIONS_DIR       the SQL migrations to apply and expect in the database
                      (default services/api-py/migrations in this repository)
-MIGRATIONS           off: don't apply them, only wait for another process to;
+MIGRATIONS           off: don't apply them, only wait for another process to
+                     (another server, or `python -m api_py.migrate`);
                      otherwise this server does
+ROW_SECURITY         required: don't serve storage unless Postgres enforces
+                     access too (row-level security, storage.py); otherwise
+                     a database user who can't use the restricted role only
+                     gets a log line, and /health says rowSecurity: off
 S3_*                 the blob store (blobs.py)
 MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
@@ -96,6 +101,16 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
     )
 
 
+def row_security_required(env: Mapping[str, str]) -> bool:
+    """ROW_SECURITY: unset or `optional` (the default), or `required`."""
+    value = (env.get("ROW_SECURITY") or "").strip().lower()
+    if value in ("", "optional"):
+        return False
+    if value == "required":
+        return True
+    raise ConfigError(f"ROW_SECURITY must be required or optional, not {value!r}")
+
+
 @dataclass(frozen=True)
 class Settings:
     ts_agent_url: str | None
@@ -105,6 +120,8 @@ class Settings:
     host: str = "127.0.0.1"
     # Whether this server applies the migrations (MIGRATIONS not off), or waits for another process to.
     migrations: bool = True
+    # ROW_SECURITY=required: storage isn't served while row-level security is off.
+    row_security_required: bool = False
     port: int = 8000
     # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
     s3: S3Settings | None = None
@@ -143,6 +160,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         auth_secret=auth_secret(env),
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),
         migrations=env.get("MIGRATIONS") != "off",
+        row_security_required=row_security_required(env),
         host=env.get("API_PY_HOST") or "127.0.0.1",
         port=int(port),
         s3=S3Settings.from_env(env),
