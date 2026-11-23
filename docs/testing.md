@@ -173,7 +173,9 @@ successful checks before merging and for preview-step limits.
 
 - `quality.yml`: the `checks` job (locked install, lint/types/units,
   unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
-  suites of `packages/knowledge-py` and every `services/*` project.
+  suites of `packages/knowledge-py` and every `services/*` project. When the change can
+  affect storage it starts the compose file's PostgreSQL and S3 first, so api-py's
+  database tests run instead of skipping, and the coverage report includes them.
 - `storage.yml`: for storage-related changes, the storage API conformance suite against
   api-py and api-py's own tests on real PostgreSQL/pgvector/S3, including the cached
   real embedding-model test (`EMBEDDING_TEST=1`).

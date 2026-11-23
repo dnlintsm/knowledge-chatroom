@@ -23,10 +23,10 @@ NOTE = {"description": "How alice likes answers", "type": "preference", "body": 
 
 def test_memory_setting_reads_like_the_agent():
     for on in ("on", " ON ", "1", "true", "Yes"):
-        assert settings_from_env({"MEMORY": on}).memory, on
+        assert settings_from_env({"AUTH_MODE": "local", "MEMORY": on}).memory, on
     for off in ("", "off", "0", "enabled"):
-        assert not settings_from_env({"MEMORY": off}).memory, off
-    assert not settings_from_env({}).memory
+        assert not settings_from_env({"AUTH_MODE": "local", "MEMORY": off}).memory, off
+    assert not settings_from_env({"AUTH_MODE": "local"}).memory
 
 
 def test_input_is_cleaned_like_check_input():

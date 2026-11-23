@@ -1587,10 +1587,14 @@ paths:
     get:
       tags: [access]
       operationId: listUsers
-      summary: Everyone who has signed in
+      summary: The workspace's members, to pick from when sharing
+      description: >-
+        Names for every member. An Owner or Admin of the workspace also gets each
+        member's email. Login subjects are never listed: `GET /access` gives a
+        user their own, and `GET /access/people` is for Owners and Admins.
       responses:
         "200":
-          description: The users.
+          description: The members.
           content:
             application/json:
               schema:
@@ -1599,7 +1603,7 @@ paths:
                 properties:
                   users:
                     type: array
-                    items: { $ref: "#/components/schemas/User" }
+                    items: { $ref: "#/components/schemas/UserSummary" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/StorageError" }
@@ -4131,6 +4135,17 @@ components:
         subject: { type: string }
         email: { type: [string, "null"] }
         name: { type: [string, "null"] }
+
+    UserSummary:
+      description: A member as others in the workspace see them.
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+        email:
+          description: Only in answers to the workspace's Owners and Admins.
+          type: [string, "null"]
 
     Person:
       allOf:

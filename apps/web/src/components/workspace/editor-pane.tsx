@@ -14,7 +14,7 @@ import { MemoryEditor } from "./memory";
 import { readOnlyReason } from "./read-only";
 import { ReviewPanel } from "./review-panel";
 import { hasRole } from "./roles";
-import { blocksForLines, lineOffsets, sourceLines, type LineRange } from "./file-refs";
+import { blocksForLines, lineOffsets, localImagesOnly, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
 import {
   EXPERIMENT_TAB,
@@ -40,7 +40,10 @@ const BUILT_IN_TABS = {
 
 type Mode = "preview" | "edit";
 
-const PREVIEW_REHYPE_PLUGINS = [...Object.values(defaultRehypePlugins), sourceLines];
+// Streamdown's defaults, with images from other servers turned into links before its
+// harden step, the last of them (issue #291).
+const { harden, ...beforeHarden } = defaultRehypePlugins;
+const PREVIEW_REHYPE_PLUGINS = [...Object.values(beforeHarden), localImagesOnly, harden, sourceLines];
 
 // Text files with a rendered view besides the editor.
 const RENDERED = new Set(["markdown", "table", "html", "code"]);

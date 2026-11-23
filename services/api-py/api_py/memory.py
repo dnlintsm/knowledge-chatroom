@@ -47,7 +47,7 @@ MAX_INBOX = 50
 INBOX_OPS = ("add", "update", "delete")
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-_ID = re.compile(r"[0-9a-fA-F-]{36}")
+_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _SPACES = re.compile(f"[{JS_SPACE}]+")
 _INBOX_COLUMNS = "id::text AS id, op, name, description, type, body, base_version, source, thread_id, reason, created_at"
 _COLUMNS = (

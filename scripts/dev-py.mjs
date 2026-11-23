@@ -31,6 +31,10 @@ if (existsSync(file)) {
   }
 }
 
+// The Python services refuse to start until AUTH_MODE says whether people sign
+// in (issue #283). In development, a .env that sets no login at all means none.
+if (!env.AUTH_MODE && !env.AUTH_SECRET && !env.KNOWLEDGE_PUBLIC_KEY) env.AUTH_MODE = "local";
+
 const child = spawn("uv", ["run", "python", "-m", SERVICES[name]], {
   cwd: fileURLToPath(new URL(`services/${name}/`, root)),
   env,

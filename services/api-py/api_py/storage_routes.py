@@ -1,7 +1,7 @@
 """The storage API's routes that have moved to Python (#190), as apps/agent/src/storage/http.ts serves them.
 
     GET    /access                  {me, rootRole}
-    GET    /access/users            everyone who has signed in
+    GET    /access/users            the workspace's members: names, and emails for Owners and Admins
     GET    /access/people           the same, with sign-up and last-active times,
                                     workspace role and groups (workspace owners only)
     GET    /access/groups           the org tree, with direct members
@@ -110,6 +110,7 @@ from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
 from .paths import (
     InvalidPathError,
+    clean_mime,
     is_text_file,
     js_trim,
     kind_for_path,
@@ -223,10 +224,38 @@ def parse_json(text: str) -> Any:
     return json.loads(text, parse_constant=_refuse, parse_int=_js_int, parse_float=_js_float)
 
 
+# Above this, a body is parsed in a worker thread: parsing megabytes of JSON
+# takes seconds, and on the event loop that would stall every other request.
+PARSE_INLINE_BYTES = 256 * 1024
+
+
+async def parse_body(data: bytes) -> Any:
+    """`data` as JSON (parse_json's rules); raises ValueError when it isn't."""
+    # As TextDecoder reads it: a leading byte order mark dropped.
+    text = data.decode("utf-8", errors="replace").removeprefix("\ufeff")
+    if len(data) <= PARSE_INLINE_BYTES:
+        return parse_json(text)
+    return await asyncio.to_thread(parse_json, text)
+
+
+def declares_json(request: Request) -> bool:
+    """
+    Whether the body says it is JSON. A page on another site can post a form
+    or plain text here with the user's cookie and no preflight, but not
+    application/json: the browser asks first, and the app's proxy doesn't
+    answer for other origins. So a JSON route reads nothing else (issue #286).
+    """
+    media = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    return media == "application/json" or media.endswith("+json")
+
+
 async def read_json(request: Request) -> dict[str, Any] | None:
-    """The JSON object in the body (at most 64 KiB), or None, as readJson() in http.ts."""
+    """
+    The JSON object in the body (at most 64 KiB), or None: also when the body
+    isn't sent as application/json (declares_json).
+    """
     body = await read_body(request, MAX_JSON_BYTES)
-    if body is None:
+    if body is None or (body and not declares_json(request)):
         return None
     try:
         # As TextDecoder reads it: a leading byte order mark dropped.
@@ -328,6 +357,9 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         if isinstance(session, Response):
             return session
         return await handler(request, session)
+    except _MalformedPath:
+        # A percent-escape that isn't one (%zz, a lone %), wherever a handler decodes an id.
+        return error(400, "Malformed path encoding")
     except NodeNotFoundError as err:
         return error(404, str(err))
     except (ForbiddenError, ChatTakenError) as err:
@@ -428,9 +460,8 @@ async def read_run(request: Request) -> dict[str, Any] | Response:
     if data is None:
         return error(413, f"A run may be at most {MAX_RUN_BYTES} bytes")
     try:
-        # As TextDecoder reads it: a leading byte order mark dropped.
-        body = parse_json(data.decode("utf-8", errors="replace").removeprefix("\ufeff"))
-    except ValueError:
+        body = await parse_body(data)
+    except (ValueError, RecursionError):
         body = None
     if (
         not isinstance(body, dict)
@@ -558,8 +589,7 @@ async def handle_access(request: Request, session: Session) -> Response:
     if not section:
         if method != "GET":
             return error(405, "Method not allowed")
-        me = next((u for u in await session.users() if u["id"] == session.principal.user_id), None)
-        return json_response(200, {"me": me, "rootRole": await session.role(None)})
+        return json_response(200, {"me": await session.me(), "rootRole": await session.role(None)})
 
     if section == "users" and not ident and method == "GET":
         return json_response(200, {"users": await session.users()})
@@ -700,8 +730,8 @@ async def handle_files(request: Request, session: Session) -> Response:
         content = await read_body(request, limit)
         if content is None:
             return error(413, f"File exceeds {limit} bytes")
-        header = js_trim(request.headers.get("content-type", "").split(";")[0])
-        mime = header if header and header != "application/octet-stream" else None
+        # Lowercase type/subtype only; anything else and the path decides (paths.clean_mime).
+        mime = clean_mime(request.headers.get("content-type"))
         if "propose" in request.query_params:
             if experiment:
                 return error(

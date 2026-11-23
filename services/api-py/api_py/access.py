@@ -28,6 +28,8 @@ logger = logging.getLogger("api_py")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 # How often a user's last_seen_at is refreshed, at most.
 SEEN_EVERY_SECONDS = 5 * 60
+# No app token seen for this subject yet in this process, so its email isn't known to match.
+_UNSYNCED = object()
 
 InTx = Callable[[AsyncConnection], Awaitable[Any]]
 
@@ -106,7 +108,8 @@ class AccessService:
         self.pool = pool
         self.workspace_id = workspace_id
         self._local_user: str | None = None
-        self._subjects: dict[str, tuple[str, float]] = {}
+        # subject -> (user id, when last seen, the email the app last gave; _UNSYNCED before it has).
+        self._subjects: dict[str, tuple[str, float, object]] = {}
 
     def in_workspace(self, workspace_id: str) -> AccessService:
         """The same service for another workspace, sharing the users it knows already."""
@@ -126,20 +129,31 @@ class AccessService:
         return self._local_user
 
     async def user_for_subject(
-        self, subject: str, email: str | None = None, name: str | None = None
+        self,
+        subject: str,
+        email: str | None = None,
+        name: str | None = None,
+        *,
+        from_app: bool = False,
     ) -> str:
         """
         The user for a login identity, created on first sight. Name and email
         follow the provider. The first user to sign in to the default workspace
         before any signed-in owner becomes its owner, once, so a new deployment
         can be set up; signing in never joins another workspace.
+
+        `from_app`: the claims are the app's own X-Knowledge-User, made from the
+        login session. The app keeps an email only when the provider vouches for
+        it (issue #284), so an email it leaves out is cleared here too: admin
+        lists and adding people match on the stored one. Other tokens may simply
+        not carry an email, and leave it as it is.
         """
         cached = self._subjects.get(subject)
-        if cached:
-            user_id, seen = cached
+        if cached and not (from_app and cached[2] != email):
+            user_id, seen, app_email = cached
             now = time.monotonic()
             if now - seen >= SEEN_EVERY_SECONDS:
-                self._subjects[subject] = (user_id, now)
+                self._subjects[subject] = (user_id, now, app_email)
                 async with self.pool.connection() as conn:
                     await conn.execute(
                         "UPDATE users SET last_seen_at = now() WHERE id = %s", (user_id,)
@@ -151,18 +165,20 @@ class AccessService:
                 INSERT INTO users (subject, email, name, last_seen_at)
                 VALUES (%s, %s, %s, now())
                 ON CONFLICT (subject) DO UPDATE
-                  SET email = coalesce(EXCLUDED.email, users.email),
+                  SET email = CASE WHEN %s THEN EXCLUDED.email
+                                   ELSE coalesce(EXCLUDED.email, users.email) END,
                       name = coalesce(EXCLUDED.name, users.name),
                       last_seen_at = now()
                 RETURNING id""",
-                (subject, email, name),
+                (subject, email, name, from_app),
             )
             (user_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             user_id = str(user_id)
             # The one-time owner bootstrap and the default workspace's open
             # membership (023_workspace_members.sql), as userForSubject in access.ts.
             await conn.execute("SELECT sign_in_memberships(%s)", (user_id,))
-        self._subjects[subject] = (user_id, time.monotonic())
+        app_email = email if from_app else cached[2] if cached else _UNSYNCED
+        self._subjects[subject] = (user_id, time.monotonic(), app_email)
         return user_id
 
     async def role(self, user_id: str, node_id: str | None) -> Role | None:
@@ -254,18 +270,34 @@ class AccessService:
             row = await cur.fetchone()
         return {**row, "id": str(row["id"])} if row else None
 
-    async def users(self) -> list[dict[str, Any]]:
-        """The workspace's members (workspace_members), not everyone who has signed in."""
+    async def users(self, private: bool = False) -> list[dict[str, Any]]:
+        """
+        The workspace's members (workspace_members), not everyone who has signed in:
+        {id, name}, and the email only when `private` (for Owners and Admins).
+        Never the login subject (issue #287), as WorkspacesService.members().
+        """
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             await cur.execute(
                 """
-                SELECT u.id, u.subject, u.email, u.name
+                SELECT u.id, u.name, u.email
                 FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = %s
                 ORDER BY coalesce(u.name, u.email, u.subject)""",
                 (self.workspace_id,),
             )
-            return [{**row, "id": str(row["id"])} for row in await cur.fetchall()]
+            rows = await cur.fetchall()
+        return [
+            {"id": str(r["id"]), "name": r["name"]} | ({"email": r["email"]} if private else {})
+            for r in rows
+        ]
+
+    async def is_member(self, user_id: str) -> bool:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
+                (self.workspace_id, user_id),
+            )
+            return await cur.fetchone() is not None
 
     async def people(self) -> list[dict[str, Any]]:
         """The workspace's members, with their root role and groups; not the built-in local user."""

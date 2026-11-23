@@ -58,6 +58,10 @@ model's settings (`ANTHROPIC_*`, `CLAUDE_MODEL`); see its
 [README](../services/agent-py/README.md).
 
 Set `WORKSPACE_CREATORS` on api-py to limit who may create workspaces.
+Name people in these lists by login subject (`<issuer>|<subject>`) where you can. An
+email matches only when the login provider marked it verified; a provider that verifies
+emails but sends no `email_verified` claim needs `OIDC_ASSUME_EMAIL_VERIFIED=true` on the
+UI, or its users have no email here at all (the UI logs a line at each such sign-in).
 `PLATFORM_ADMINS` names the deployment admins who can inspect the
 [workspace inventory](workspaces.md#workspace-inventory) at `/platform` (also from the
 workspace switcher) and recover an Owner
@@ -67,13 +71,15 @@ Expose the UI through HTTPS and keep both Python service ports private. For logi
 set `AUTH_MODE=oidc`, OIDC settings, `APP_URL`, and the same `AUTH_SECRET` on the UI
 and api-py. Give agent-py and outside MCP servers only api-py's public key from
 `GET /identity/public-key` as `KNOWLEDGE_PUBLIC_KEY`, never the signing secret.
-For a single-user deployment use `AUTH_MODE=local`. The UI's production build refuses an
-unset authentication mode without a secret. api-py does so only with `NODE_ENV=production`
-in its environment, which its image does not set, and agent-py and the MCP servers run
-without login whenever `KNOWLEDGE_PUBLIC_KEY` is empty
-([#283](https://github.com/dnlintsm/knowledge-chatroom/issues/283)): set `AUTH_MODE` on
-api-py and the key on the others explicitly, and after deploying check that api-py
-answers a request without an identity with 401.
+For a single-user deployment set `AUTH_MODE=local` on every service.
+
+No service guesses the mode from a missing setting. The UI's production build and api-py
+refuse to start with neither `AUTH_MODE` nor `AUTH_SECRET`. agent-py and the MCP servers
+refuse to start with neither `AUTH_MODE` nor `KNOWLEDGE_PUBLIC_KEY`; with `AUTH_MODE=oidc`
+and no key they start and refuse every call until the key is set. A mismatch is refused
+too: api-py without login answers 401 to a request the UI signed for a user, instead of
+treating it as the built-in owner, and so do agent-py and the MCP servers. After deploying
+with login, check that api-py answers a request without an identity with 401.
 
 The first person to sign in owns the default workspace. Owners see an **Admin** button next
 to Share: people who have signed in and when they were last active, workspace roles,
@@ -110,6 +116,11 @@ pick one:
 - **Signed links to the store**: keep the second block and set
   `S3_PUBLIC_URL=https://knowledge.example.com:8443` on api-py. Left at
   `http://localhost:8333`, previews break on an https page as mixed content.
+  The store's origin has none of the sandboxing the app puts on files it serves, so api-py
+  signs a link to open in place only for pictures (not SVG), PDF, audio and video; any other
+  binary file is a download, and text, HTML and SVG are served by the app. A store on its
+  own site (another registrable domain) is safer still than another port of the app's host:
+  a page there can't send the app's cookies.
 
 `LOCAL_AGENT_URL` (and `AGENT_URL`, if set) stay on the private network and
 `AUTH_ALLOW_HTTP` stays unset. Stop publishing 3000 and 8333 directly. With nginx,
@@ -126,7 +137,9 @@ Replace compose's local credentials before using shared infrastructure. Set
 `S3_PUBLIC_URL` to the address reachable by browsers when using signed binary
 downloads; signed links expire after five minutes. Without it, binary files are served
 through the app like text (see [HTTPS](#https)). `MAX_UPLOAD_BYTES` (default 52428800,
-50 MB) caps one upload.
+50 MB) caps one file. An experiment upload (`POST /experiments/upload`) is held in memory
+until it is written, so its files together may be at most four times that, and 2,000 in
+number. Other request bodies have fixed limits: 64 KiB for JSON, 32 MiB for a chat run.
 
 Migrations (`services/api-py/migrations`) apply when the Python API server starts
 (`MIGRATIONS=off` makes it wait for another process to apply them). Back up database metadata and blob contents

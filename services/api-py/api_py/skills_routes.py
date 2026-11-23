@@ -63,6 +63,7 @@ from .storage_routes import (
     ALL_METHODS,
     MAX_JSON_BYTES,
     _MalformedPath,
+    declares_json,
     decode_component,
     first_param,
     parse_json,
@@ -110,7 +111,7 @@ async def read_json(request: Request) -> Any:
     an object, and anything else (too big, not JSON, a byte order mark) is None.
     """
     body = await read_body(request, MAX_JSON_BYTES)
-    if body is None:
+    if body is None or (body and not declares_json(request)):
         return None
     try:
         value = parse_json(body.decode("utf-8", errors="replace") or "{}")

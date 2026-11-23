@@ -748,7 +748,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Everyone who has signed in */
+        /**
+         * The workspace's members, to pick from when sharing
+         * @description Names for every member. An Owner or Admin of the workspace also gets each member's email. Login subjects are never listed: `GET /access` gives a user their own, and `GET /access/people` is for Owners and Admins.
+         */
         get: operations["listUsers"];
         put?: never;
         post?: never;
@@ -2169,6 +2172,13 @@ export interface components {
             subject: string;
             email: string | null;
             name: string | null;
+        };
+        /** @description A member as others in the workspace see them. */
+        UserSummary: {
+            id: string;
+            name: string | null;
+            /** @description Only in answers to the workspace's Owners and Admins. */
+            email?: string | null;
         };
         Person: components["schemas"]["User"] & {
             createdAt: components["schemas"]["Timestamp"];
@@ -4511,14 +4521,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The users. */
+            /** @description The members. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        users: components["schemas"]["User"][];
+                        users: components["schemas"]["UserSummary"][];
                     };
                 };
             };

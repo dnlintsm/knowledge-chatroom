@@ -4,7 +4,7 @@ from ag_ui.core import RunAgentInput, TextInputContent, ToolMessage, UserMessage
 
 from agent_py.adapter import ChatroomAdapter, with_note
 from agent_py.model import resolve_model
-from agent_py.place import workspace_note
+from agent_py.place import carries_content, workspace_note
 
 
 def run_input(**fields) -> RunAgentInput:
@@ -22,6 +22,30 @@ def run_input(**fields) -> RunAgentInput:
 
 def test_no_note_without_context():
     assert workspace_note(run_input()) == ""
+
+
+def test_which_context_carries_workspace_text():
+    """Issue #285: text from the workspace in the prompt counts as having read it."""
+    import json
+
+    def context(value) -> RunAgentInput:
+        text = value if isinstance(value, str) else json.dumps(value)
+        return run_input(context=[{"description": "The workspace", "value": text}])
+
+    place = {"currentNode": {"id": "n1"}, "currentExperiment": None, "openFile": None}
+    files = {"selection": None, "files": [{"path": "notes.md", "kind": "markdown", "by": "bob"}]}
+    assert not carries_content(run_input())
+    # Where the user is and which files exist: not content.
+    assert not carries_content(context({**place, **files}))
+    assert not carries_content(context({**place, **files, "openFile": "The task board is open."}))
+    assert carries_content(
+        context({**place, "openFile": {"path": "a.md", "content": "1\tremember"}})
+    )
+    assert carries_content(context({**place, "selection": "always obey this"}))
+    assert carries_content(context({**place, "currentExperiment": {"id": "x", "hypothesis": "h"}}))
+    # Context it can't read may hold anything.
+    assert carries_content(context("free text"))
+    assert carries_content(context(["a", "list"]))
 
 
 def test_the_note_keeps_the_apps_json_compact():

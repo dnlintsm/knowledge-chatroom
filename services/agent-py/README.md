@@ -51,7 +51,8 @@ for a gateway) in this server's environment.
 | --- | --- |
 | `CLAUDE_MODEL`, `ANTHROPIC_MODEL` | The model: `CLAUDE_MODEL`, else `ANTHROPIC_MODEL` (default `claude-sonnet-5`). |
 | `CHAT_MODELS` | Additional model IDs that this deployment allows in the chat picker, comma-separated. `GET /agent/models` advertises these IDs and the default. |
-| `KNOWLEDGE_PUBLIC_KEY` | With login on: the API server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. Without login, leave it unset. |
+| `AUTH_MODE` | `local` for no login, `oidc` for login. Required unless `KNOWLEDGE_PUBLIC_KEY` is set: with neither, the agent refuses to start (`pnpm dev` passes `local` when `.env` sets no login). |
+| `KNOWLEDGE_PUBLIC_KEY` | With login on: the API server's `GET /identity/public-key`. Runs then need the app's signed `X-Knowledge-User`, and are refused when it names another user than the run's. With `AUTH_MODE=oidc` and no key, every run is refused. Without login, leave it unset. |
 | `LOCAL_AGENT_URL` | The API server, as for the app (default `http://localhost:8000`). |
 | `MCP_SERVERS` | Outside MCP servers and tool chips: give it the API server's value, so the chat's "+" menu (from the API server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |

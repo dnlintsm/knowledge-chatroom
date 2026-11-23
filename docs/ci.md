@@ -11,16 +11,20 @@ requires three checks from **GitHub Actions** (app ID `15368`), with branches up
 before merging:
 
 - `checks` (Quality: lint, typechecks and service-free units)
-- `python` (Quality: Python lint, types, model check and tests on 3.12 and 3.14)
+- `python` (Quality: Python lint, types, model check and tests on 3.12 and 3.14, with
+  api-py's database tests on real PostgreSQL and S3 when the change can affect storage)
 - `preview` (UI preview: production build plus browser, storage, login and Python agent E2E)
 
 The rule also keeps the PR, deletion and non-fast-forward rules. All three checks report
 on every PR, including documentation changes: they are gate jobs (see below). Do not
 require the
 Storage workflow's `test` context unconditionally: it is path-filtered and would
-leave unrelated PRs waiting for a check that never starts. Storage/login E2E remain
-covered by the always-running `preview` check; storage-related changes additionally
-run the larger integration suite.
+leave unrelated PRs waiting for a check that never starts. What it protects is covered by
+the gates: `python` runs api-py's database tests (access, row security, workspaces,
+memory, proposals) whenever `scripts/ci-changes.mjs` marks the storage suite as affected,
+and `preview` runs the storage and login E2E. The Storage workflow adds the API
+conformance suite and the real embedding model; its result is reported but does not gate
+a merge.
 
 Verify the saved setting with an account that can read repository rules:
 

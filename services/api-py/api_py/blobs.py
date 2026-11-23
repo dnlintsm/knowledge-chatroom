@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
+from .paths import shown_inline
+
 # How long a download link works. Access is checked when the link is made.
 DOWNLOAD_LINK_SECONDS = 300
 # encodeURIComponent leaves these as they are.
@@ -165,7 +167,9 @@ class BlobStore:
             "Bucket": self.bucket,
             "Key": self.key(sha256),
             "ResponseContentType": mime,
-            "ResponseContentDisposition": f"inline; filename*=UTF-8''{quote(filename, safe=_URI_COMPONENT_SAFE)}",
+            # Shown in place only for types that can't act as a page (paths.shown_inline).
+            "ResponseContentDisposition": f"{'inline' if shown_inline(mime) else 'attachment'}; "
+            f"filename*=UTF-8''{quote(filename, safe=_URI_COMPONENT_SAFE)}",
         }
         # Signing is local (no request), so it needn't leave the event loop.
         return public.generate_presigned_url(
