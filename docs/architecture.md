@@ -495,7 +495,8 @@ For local setup, see [Development](development.md).
 - **Postgres** (15 or newer) holds the file tree, every version of every file, and who
   wrote it (`services/api-py/migrations`). Migrations run when the Python API
   server starts, under an advisory lock; with `MIGRATIONS=off` it waits for another
-  process to apply them instead.
+  process to apply them instead: another server, or `python -m api_py.migrate` as a deploy
+  step. Until then `/health` answers 503 with `database: "behind"`.
 - **Object store** holds the bytes, keyed by their sha256, so identical content is
   stored once and old versions stay readable. Any S3-compatible store works:
   SeaweedFS or Garage self-hosted, or AWS S3, Cloudflare R2, Backblaze B2.
@@ -605,9 +606,11 @@ For local setup, see [Development](development.md).
   experiments and `006_search.sql` for indexed text) that apply the same grants. If a
   check in the app were ever missed, Postgres would still refuse. The migration creates the
   role when the database user may (`CREATEROLE` or superuser, as with `docker compose`);
-  otherwise the agent logs that row-level security is off, and an admin can enable it with
+  otherwise the API server logs that row-level security is off, `/health` answers
+  `rowSecurity: "off"`, and an admin can enable it with
   `CREATE ROLE knowledge_user NOLOGIN; GRANT knowledge_user TO <app user>;` before the next
-  start.
+  start. With `ROW_SECURITY=required` the server doesn't serve storage in that state: `/health`
+  answers 503 until the role is granted (it checks again every few seconds).
 - **Download links**: set `S3_PUBLIC_URL` to the object store's address as browsers reach it
   (e.g. `http://localhost:8333` with `docker compose`, or `https://s3.<region>.amazonaws.com`)
   and images and other binary files download straight from the store. After the access
@@ -642,7 +645,10 @@ For local setup, see [Development](development.md).
   the tree (with the Experiments view beside it); clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
-  are used instead.
+  are used instead. That fallback is only for a page with no server behind it: when the
+  user is signed in, or the server named the workspace, the page keeps loading, says
+  "Storage unreachable" and asks again every few seconds, so edits are never made to a
+  browser copy that would not be uploaded.
 - **Tests**: `pnpm test:conformance` and the api-py tests require `TEST_DATABASE_URL` and
   `S3_ENDPOINT`; they reset a disposable test database. See [Testing](testing.md).
 

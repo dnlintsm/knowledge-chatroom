@@ -136,14 +136,33 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
         return True
 
 
-async def open_storage(pool: AsyncConnectionPool, s3: S3Settings | None = None) -> Storage:
-    """The storage of the default workspace; the database must be migrated. Without `s3`, no file routes."""
+class RowSecurityOffError(RuntimeError):
+    """ROW_SECURITY=required, and this database user can't use the restricted role."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"row-level security is off: this database user can't use role {APP_ROLE} "
+            f"(see 004_row_security.sql), and ROW_SECURITY=required. An admin can run "
+            f"CREATE ROLE {APP_ROLE} NOLOGIN; GRANT {APP_ROLE} TO <this user>;"
+        )
+
+
+async def open_storage(
+    pool: AsyncConnectionPool, s3: S3Settings | None = None, *, require_row_security: bool = False
+) -> Storage:
+    """
+    The storage of the default workspace; the database must be migrated. Without
+    `s3`, no file routes. RowSecurityOffError when `require_row_security` and
+    Postgres can't enforce access for this database user.
+    """
     async with pool.connection() as conn:
         row_security = await prepare_row_security(conn)
         cur = await conn.execute("SELECT id FROM workspaces WHERE slug = 'default'")
         row = await cur.fetchone()
     if not row:
         raise RuntimeError("Workspace default not found")
+    if not row_security and require_row_security:
+        raise RowSecurityOffError
     if not row_security:
         logger.warning(
             "row-level security is off: this database user can't use role %s (see 004_row_security.sql). "

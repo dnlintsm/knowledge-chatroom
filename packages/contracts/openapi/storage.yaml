@@ -1903,6 +1903,13 @@ paths:
                 required: [status]
                 properties:
                   status: { type: string, const: ok }
+                  rowSecurity:
+                    type: string
+                    enum: ["on", "off"]
+                    description: |
+                      Once storage is open: whether Postgres enforces access too (row-level
+                      security). `off` means only the app's own checks apply; the database user
+                      can't use the restricted role. Absent before storage opens and without a database.
 
   /identity/public-key:
     get:

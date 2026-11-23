@@ -142,10 +142,15 @@ until it is written, so its files together may be at most four times that, and 2
 number. Other request bodies have fixed limits: 64 KiB for JSON, 32 MiB for a chat run.
 
 Migrations (`services/api-py/migrations`) apply when the Python API server starts
-(`MIGRATIONS=off` makes it wait for another process to apply them). Back up database metadata and blob contents
+(`MIGRATIONS=off` makes it wait for another process to apply them: run
+`uv run --locked python -m api_py.migrate` in `services/api-py` with `DATABASE_URL` as a
+deploy step, or `python -m api_py.migrate` in the api-py image). Back up database metadata and blob contents
 before a migration or service upgrade. The database account needs migration
 privileges. `004_row_security.sql` establishes the restricted `knowledge_user`
 role when permitted; `005_experiments.sql` extends those policies to experiments.
+When the database account can't create or use that role, access is checked by the app
+only, and `/health` says `rowSecurity: "off"`. Set `ROW_SECURITY=required` to make that
+a failed health check instead of a log line.
 If startup reports RLS is off, an administrator must create/grant that role as
 documented in [Architecture](architecture.md) and restart. Verify its enabled state
 for deployments that depend on database-enforced access.

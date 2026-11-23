@@ -18,7 +18,7 @@ import { ChatDraftContext, ChatSendButton, ChatSuggestions } from "./chat-compos
 import { HubBrowser, SkillActions, SkillsToolbar, TrustBadges, type Notice } from "./skill-hub";
 import { useWorkspace } from "./store";
 import { ToolChipRow, toolsMenuItems, useToolMenu } from "./tool-menu";
-import { workspaceFetch } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
 import { useWorkbench } from "./workbench";
 
 /**
@@ -139,7 +139,7 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async () => {
     try {
       const query = threadId ? `?thread=${encodeURIComponent(threadId)}` : "";
-      const res = await workspaceFetch(`/api/skills${query}`, { cache: "no-store" });
+      const res = await apiFetch(`/api/skills${query}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const list = (await res.json()) as {
         skills: SkillInfo[];
@@ -176,7 +176,7 @@ export function SkillsProvider({ children }: { children: ReactNode }) {
         }),
       );
       try {
-        const res = await workspaceFetch(`/api/skills/${encodeURIComponent(name)}`, {
+        const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode, scope, ...(scope === "chat" ? { thread: threadId } : {}) }),

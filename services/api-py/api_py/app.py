@@ -31,12 +31,14 @@ from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
 from .semantic import SemanticIndex
-from .storage import Storage, open_storage
+from .storage import RowSecurityOffError, Storage, open_storage
 from .workspaces import Workspaces
 
 logger = logging.getLogger("api_py")
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 SCHEMA_POLL_SECONDS = 2.0
+# With MIGRATIONS=off, how many polls between reminders that something else must apply them.
+WAITING_REMINDER_POLLS = 30
 
 
 async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
@@ -70,10 +72,22 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
         if found.state is not db.SchemaState.READY:
             return False
         try:
-            storage = await open_storage(pool, settings.s3)
+            storage = await open_storage(
+                pool, settings.s3, require_row_security=settings.row_security_required
+            )
+        except RowSecurityOffError as err:
+            # Not served until an admin grants the role; said once, checked again each poll.
+            if not app.state.row_security_refused:
+                logger.error("not serving storage: %s", err)
+            app.state.row_security = "off"
+            # Refused, not merely not ready: a legacy upstream doesn't get the requests either (proxy.forward).
+            app.state.row_security_refused = True
+            return False
         except Exception as err:  # Try again while the database may still be settling.
             logger.warning("can't open storage yet: %s", err)
             return False
+        app.state.row_security = "on" if storage.row_security else "off"
+        app.state.row_security_refused = False
         _start_search(app, storage, settings)
         _start_learner(app, settings)
         app.state.storage = storage
@@ -138,6 +152,7 @@ async def _serve_storage_when_ready(
     app: FastAPI, pool: AsyncConnectionPool, settings: Settings
 ) -> None:
     """Follows the database until the storage routes can be served (or it turns out newer than this server)."""
+    polls = 0
     while not await _try_storage(app, pool, settings):
         found = app.state.schema
         if found and found.state is db.SchemaState.AHEAD:
@@ -146,6 +161,19 @@ async def _serve_storage_when_ready(
                 ", ".join(found.unknown),
             )
             return
+        polls += 1
+        if (
+            found
+            and found.state is db.SchemaState.BEHIND
+            and not settings.migrations
+            and polls % WAITING_REMINDER_POLLS == 0
+        ):
+            # Nothing here will ever apply them: say what would, now and then.
+            logger.warning(
+                "still waiting for another process to apply %s (MIGRATIONS=off): "
+                "run `python -m api_py.migrate`, or start a server without MIGRATIONS=off",
+                ", ".join(found.missing),
+            )
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
 
 
@@ -158,6 +186,10 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.state.create_message = llm.message_creator()
         app.state.pool = None
         app.state.schema = None
+        # "on" or "off" once storage was opened (or refused for it, ROW_SECURITY=required).
+        app.state.row_security = None
+        # ROW_SECURITY=required and it is off: storage requests are refused (503), also with a legacy upstream.
+        app.state.row_security_refused = False
         # The ported storage routes; None while they pass through (no database, or not ready yet).
         app.state.storage = None
         app.state.storage_lock = asyncio.Lock()
@@ -204,7 +236,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 logger.info(
                     "applying %s"
                     if settings.migrations
-                    else "waiting for the TypeScript server to apply %s",
+                    else "waiting for another process to apply %s (MIGRATIONS=off): "
+                    "`python -m api_py.migrate`, or a server without MIGRATIONS=off",
                     ", ".join(found.missing),
                 )
             watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
@@ -252,12 +285,16 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         storage_ready = (
             not settings.database_url or request.app.state.storage is not None or upstream == "ok"
         )
-        if upstream != "down" and database_ready and storage_ready:
-            return JSONResponse(
-                {"status": "ok"}
-            )  # the spec's answer (getHealth), as the TypeScript server gives it
+        # Whether Postgres enforces access too, once storage was opened (or refused over it).
+        row_security: str | None = request.app.state.row_security
+        extra = {"rowSecurity": row_security} if row_security else {}
+        # Required and off: not healthy, whatever a legacy upstream answers.
+        refused = request.app.state.row_security_refused
+        if upstream != "down" and database_ready and storage_ready and not refused:
+            return JSONResponse({"status": "ok", **extra})  # the spec's answer (getHealth)
         return JSONResponse(
-            {"status": "degraded", "upstream": upstream, "database": database}, status_code=503
+            {"status": "degraded", "upstream": upstream, "database": database, **extra},
+            status_code=503,
         )
 
     if not settings.auth_secret:

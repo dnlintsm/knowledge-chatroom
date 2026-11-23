@@ -109,6 +109,8 @@ import {
 /** How long to wait for storage that is still starting before using the browser. */
 const STARTUP_RETRY_MS = 2_000;
 const STARTUP_RETRIES = 30;
+// How often a workspace that lives on the server asks again while storage doesn't answer.
+const STORAGE_DOWN_RETRY_MS = 3_000;
 
 export type { StorageMode } from "./save-scheduler";
 
@@ -167,6 +169,13 @@ interface WorkspaceValue {
   storageMode: StorageMode;
   /** A failed save, retained until all failed files have saved successfully. */
   syncError: string | null;
+  /**
+   * Storage isn't answering for a workspace that lives on the server (signed
+   * in, or one the server named): the page stays in "loading" and keeps
+   * asking, rather than turn into a browser-only workspace whose edits would
+   * never be uploaded (issue #297).
+   */
+  storageDown: boolean;
   /**
    * Files in this place whose save the server refused because someone else
    * changed them meanwhile (issue #293). Their edits stay in this browser,
@@ -276,6 +285,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [storageMode, setStorageMode] = useState<StorageMode>("loading");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [saveConflicts, setSaveConflicts] = useState<SaveConflict[]>([]);
+  const [storageDown, setStorageDown] = useState(false);
   const mode = useRef<StorageMode>("loading");
   const files = useRef(state.files);
   files.current = state.files;
@@ -474,6 +484,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setState((s) => (s.files.some((f) => f.unloaded) ? { ...s, files: s.files.filter((f) => !f.unloaded) } : s));
     };
 
+    // Whether this workspace's files are the server's: one the server named, or
+    // (known below) any workspace of a signed-in user. Such a workspace waits for
+    // storage; only one with no server behind it is kept in this browser.
+    let onServer = workspaceId !== null;
+
     (async () => {
       // Open the run a link names (?experiment=), else return to the place
       // this browser was last in, if it still exists. Its files are asked for
@@ -494,9 +509,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const who = await getAccount();
       if (cancelled) return;
       setAccount(who);
+      onServer ||= who.login;
       let list = await firstList;
       if (cancelled) return;
-      if (!Array.isArray(list)) return activateLocalStorage();
+      if (!Array.isArray(list)) {
+        if (!onServer) return activateLocalStorage();
+        // Still loading, and saying why, until storage answers.
+        setStorageDown(true);
+        while (!Array.isArray(list)) {
+          await new Promise((r) => setTimeout(r, STORAGE_DOWN_RETRY_MS));
+          if (cancelled) return;
+          list = await listServerFiles();
+        }
+        if (cancelled) return;
+        setStorageDown(false);
+      }
 
       // First visit to an empty server: bring over this browser's files (or
       // the samples), so nothing made before storage existed is lost. Uploads
@@ -568,7 +595,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
     })().catch((err) => {
       console.error("[workspace] server storage failed to load:", err);
-      activateLocalStorage();
+      if (onServer) setStorageDown(true);
+      else activateLocalStorage();
     });
 
     return () => {
@@ -996,6 +1024,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSelection,
       storageMode,
       syncError,
+      storageDown,
       conflicts,
       resolveConflict,
       theirVersion,
@@ -1027,7 +1056,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [
     state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
-    syncError, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
+    syncError, storageDown, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
     updateExperiment, changeExperimentPeople, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);
