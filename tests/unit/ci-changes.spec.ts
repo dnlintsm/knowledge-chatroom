@@ -5,6 +5,13 @@ const none = { node: false, python: false, browser: false, storage: false, pyage
 
 test("documentation-only changes skip every suite", () => {
   expect(affectedSuites(["docs/ci.md", "README.md", "CHANGELOG.md"])).toEqual(none);
+  // The project's own guides and templates, outside docs/.
+  expect(affectedSuites([
+    "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md",
+    ".github/pull_request_template.md", ".github/ISSUE_TEMPLATE/bug_report.md",
+  ])).toEqual(none);
+  // A workflow is not documentation: it still runs everything.
+  expect(affectedSuites([".github/workflows/quality.yml"])).toEqual(allSuites());
 });
 
 test("Python services run only the E2E suites that start them", () => {

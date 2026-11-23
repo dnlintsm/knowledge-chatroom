@@ -86,6 +86,32 @@ to Share: people who have signed in and when they were last active, workspace ro
 groups and their members, and recent access changes. A removed role applies on the
 user's next request; their login session stays valid until it expires.
 
+## After deploying: settings that must agree
+
+Each process reads its own environment, so these are easy to set on one and miss on
+another. Check them after every deployment that changes configuration.
+
+| Setting | Must be the same on | If it isn't |
+| --- | --- | --- |
+| `AUTH_MODE` | the UI, api-py, agent-py, every MCP server | A service without login refuses the requests the UI signs (401), or the other way round |
+| `AUTH_SECRET` | the UI and api-py, and nowhere else | api-py refuses every request as not signed in |
+| `KNOWLEDGE_PUBLIC_KEY` | agent-py and every MCP server: api-py's key from `GET /identity/public-key` | They refuse every call. It changes whenever `AUTH_SECRET` does |
+| `MCP_SERVERS` | api-py and agent-py | The "+" menu offers tools the chat can't use, or the chat has tools the menu doesn't show |
+| `SKILL_SCRIPTS` | api-py and agent-py | Skill pages say scripts run when they don't, or the reverse |
+| `CLAUDE_MODEL`, `ANTHROPIC_*` | api-py and agent-py, unless you mean them to differ | Follow-up chips and memory use another model or key than the chat |
+| `STORAGE_TOKEN_SECONDS` | the UI and api-py | Tokens for outside tools expire sooner or later than intended |
+
+Addresses point one way: the UI's `LOCAL_AGENT_URL` and agent-py's `LOCAL_AGENT_URL` at
+api-py, the UI's `AGENT_URL` at agent-py, each MCP server's `KNOWLEDGE_STORAGE_URL` at
+api-py. `DATABASE_URL` and the `S3_*` settings belong to api-py only.
+
+Then check, with login on:
+
+1. `GET /health` on api-py answers 200, with `rowSecurity: "on"` if you rely on Postgres
+   enforcing access.
+2. A request to api-py with no identity (`GET /files`) answers 401.
+3. Signing in through the UI lists your files, and a chat message gets a reply.
+
 ## HTTPS
 
 The app has no built-in TLS: the UI (3000) and the object store (8333) speak plain

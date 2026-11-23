@@ -20,6 +20,12 @@ export const RULES = [
   ["README.md", []],
   ["CHANGELOG.md", []],
   ["LICENSE", []],
+  ["SECURITY.md", []],
+  ["CONTRIBUTING.md", []],
+  ["AGENTS.md", []],
+  ["CLAUDE.md", []],
+  [".github/ISSUE_TEMPLATE/**", []],
+  [".github/pull_request_template.md", []],
   // Python services the E2E suites never start (the mock agent stands in for them).
   ["services/lab-tools/**", ["python"]],
   ["services/papers-mcp/**", ["python"]],
