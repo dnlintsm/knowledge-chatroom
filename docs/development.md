@@ -270,7 +270,7 @@ same version as the UI's `@ag-ui/client`:
 
 | Where | What |
 | --- | --- |
-| `pnpm-workspace.yaml` `overrides` | `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
+| `pnpm-workspace.yaml` `overrides` | `@hono/node-server`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
 | Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
 
 When updating these dependencies, recheck the overrides and run the build and tests
@@ -284,6 +284,17 @@ upgrade; forcing Zod 4 across that dependency tree can break the app. On shared
 deployments, configure request-size limits at the reverse proxy according to the
 files and requests the deployment needs. This reduces exposure to oversized
 inputs but is not a substitute for upgrading the affected dependency.
+
+`@hono/node-server` comes in through CopilotKit's MCP packages. The override takes it to
+1.19.18, the last 1.x fix; [GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)
+is fixed only in 2.x, which those packages don't accept yet. It concerns `serveStatic`,
+which this app doesn't use.
+
+Those two advisories are listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`,
+so `pnpm audit --prod` passes while they are the only ones. The **JavaScript dependency
+audit** workflow runs it weekly and on pull requests that change a `package.json` or the
+lockfile, and fails on any advisory not listed there. When an upgrade fixes one, remove
+it from the list in the same PR.
 
 ## Troubleshooting
 

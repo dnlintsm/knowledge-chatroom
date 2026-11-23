@@ -11,6 +11,23 @@ import { ChatStoreError, ChatTakenError, type ChatStore, type ChatSummary, type 
  *
  * `path` is the part after the runtime's base path, e.g. "/threads/<id>".
  */
+/**
+ * The thread a request asks to stop, or null when it isn't a stop request.
+ * The runtime routes `…/agent/<id>/stop/<thread>` by the end of the path,
+ * whatever comes before it, so this looks at the end too: anchored at the
+ * start, a path with something in front skipped the owner check (issue #297).
+ */
+export function stopThreadId(path: string): string | null {
+  const stop = path.match(/(?:^|\/)agent\/[^/]+\/stop\/([^/]+)\/?$/);
+  if (!stop) return null;
+  try {
+    return decodeURIComponent(stop[1]);
+  } catch {
+    // The runtime answers a malformed id itself.
+    return stop[1];
+  }
+}
+
 export async function handleChatRoute(
   req: Request,
   path: string,

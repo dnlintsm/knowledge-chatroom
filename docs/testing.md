@@ -57,6 +57,11 @@ checks for future Python-specific dependency markers. Review scheduled results
 in **Actions → Python dependency audit**; this workflow does not create issues.
 Optional extras are not exported unless selected through a workspace runtime dependency.
 
+JavaScript production dependencies get the same treatment from the **JavaScript dependency
+audit** workflow (`pnpm audit --prod`, weekly and on lockfile or `package.json` changes).
+Advisories without a compatible fix are listed, with the reason, in
+[Development](development.md#dependency-security).
+
 ## Disposable integration databases
 
 The storage suite **drops the public schema** of `TEST_DATABASE_URL`. Never point

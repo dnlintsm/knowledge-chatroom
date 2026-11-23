@@ -256,6 +256,18 @@ class Workspaces:
         (keeps,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
         return keeps
 
+    async def _role_now(self, conn: AsyncConnection, workspace_id: str, by: str) -> str:
+        """
+        The caller's own role, read under the workspace's lock. The route read
+        it before the lock to decide whether to ask at all, and an Owner or
+        Admin demoted or removed in between must not get one more change
+        through (issue #297). Gone from the workspace: it isn't theirs to see.
+        """
+        role = await self._member_role(conn, workspace_id, by)
+        if role is None:
+            raise WorkspaceError(404, NOT_FOUND)
+        return role
+
     async def change_role(
         self, workspace_id: str, by: str, by_role: str, user_id: str, role: str
     ) -> str:
@@ -266,6 +278,7 @@ class Workspaces:
         """
         async with self.pool.connection() as conn, conn.transaction():
             await self._lock(conn, workspace_id)
+            by_role = await self._role_now(conn, workspace_id, by)
             current = await self._member_role(conn, workspace_id, user_id)
             if current is None:
                 raise WorkspaceError(404, NOT_A_MEMBER)
@@ -307,6 +320,7 @@ class Workspaces:
         leaving = user_id == by
         async with self.pool.connection() as conn, conn.transaction():
             await self._lock(conn, workspace_id)
+            by_role = await self._role_now(conn, workspace_id, by)
             current = await self._member_role(conn, workspace_id, user_id, lock=True)
             if current is None:
                 raise WorkspaceError(404, NOT_A_MEMBER)

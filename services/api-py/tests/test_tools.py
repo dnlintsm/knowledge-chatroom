@@ -291,6 +291,29 @@ async def test_a_call_carries_the_users_tokens():
     assert storage and storage["sub"] == "kc|alice" and storage["via"] == "mcp:lab"
     assert 590 <= storage["exp"] - identity["exp"] + 3600 <= 600
     assert tokens.MEMORY_HEADER not in headers
+    assert "ws" not in storage  # no workspace named: the default one, as before
+
+
+async def test_a_calls_storage_token_is_bound_to_the_pages_workspace():
+    """Issue #297: a tool's writes landed in the default workspace, wherever the user was."""
+    recorder = Recorder(ToolAnswer({}, "{}", False))
+    lab = "11111111-2222-4333-8444-555555555555"
+    async with api(lab_tools(), call=recorder) as client:
+        for named in (lab.upper(), "not-an-id", "my-lab"):
+            answer = await client.post(
+                "/tools/lab/save",
+                headers={**ALICE, "X-Knowledge-Workspace": named},
+                json={"arguments": {}},
+            )
+            assert answer.status_code == 200
+    bound = [
+        tokens.verify(call[3][tokens.STORAGE_HEADER], SECRET, tokens.STORAGE_AUDIENCE)
+        for call in recorder.calls
+    ]
+    assert [b.get("ws") for b in bound if b] == [lab, None, None]
+    # The identity token names who is calling, not where.
+    identity = tokens.verify(recorder.calls[0][3][tokens.IDENTITY_HEADER], SECRET, "mcp:lab")
+    assert identity and "ws" not in identity
 
 
 async def test_without_login_no_tokens_are_sent():

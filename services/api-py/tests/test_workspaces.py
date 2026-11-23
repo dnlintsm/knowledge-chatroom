@@ -470,7 +470,8 @@ async def test_two_owners_removing_each_other_at_once_keep_one(database):
             api.delete(f"/workspaces/{lab['id']}/members/{bob_id}", headers=alice),
             api.delete(f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob),
         )
-        assert sorted(a.status_code for a in answers) == [200, 409]
+        # The one who lost the race has been removed by then: the workspace isn't theirs to see.
+        assert sorted(a.status_code for a in answers) == [200, 404]
         stays = alice if answers[0].status_code == 200 else bob
         members = (await api.get(f"/workspaces/{lab['id']}/members", headers=stays)).json()
         assert [m["role"] for m in members["members"]] == ["owner"]
@@ -533,7 +534,8 @@ async def test_two_owners_demoting_each_other_at_once_keep_one(database):
                 f"/workspaces/{lab['id']}/members/{alice_id}", headers=bob, json={"role": "admin"}
             ),
         )
-        assert sorted(a.status_code for a in answers) == [200, 409]
+        # The one who lost the race is a Member by then, and Members change no roles.
+        assert sorted(a.status_code for a in answers) == [200, 403]
         members = (await api.get(f"/workspaces/{lab['id']}/members", headers=alice)).json()
         assert sorted(m["role"] for m in members["members"]) == ["admin", "owner"]
 
@@ -752,3 +754,41 @@ async def test_a_collaborator_write_after_a_removal_finds_no_member(database, mo
             await adding
         monkeypatch.setattr(workspaces_module, "_audit", audit)
         await _no_place_once_added_back(app, api, alice, lab, alice_id, bob_id, exp)
+
+
+async def test_a_role_the_caller_no_longer_holds_changes_nothing(database):
+    """
+    Issue #297: the route reads the caller's role before the workspace is locked.
+    A change that then gets the lock must go by the role the caller holds now,
+    not the one they held when they asked.
+    """
+    from api_py.workspaces import WorkspaceError
+
+    async with Client(database, SECRET) as (api, app):
+        alice, bob = user("test|alice", "Alice"), user("test|bob", "Bob")
+        lab, alice_id, bob_id, _group = await _lab_with_a_privileged_group(api, alice, bob)
+        workspaces = app.state.workspaces
+
+        async def role_of(user_id: str) -> str:
+            members = (await api.get(f"/workspaces/{lab}/members", headers=alice)).json()["members"]
+            return next(m["role"] for m in members if m["id"] == user_id)
+
+        assert await role_of(bob_id) == "member"
+        # Bob "was an Owner" when the request was routed; under the lock he is a Member.
+        with pytest.raises(WorkspaceError) as refused:
+            await workspaces.change_role(lab, bob_id, "owner", alice_id, "member")
+        assert refused.value.status == 403
+        with pytest.raises(WorkspaceError) as refused:
+            await workspaces.remove_member(lab, bob_id, "owner", alice_id)
+        assert refused.value.status == 403
+        assert await role_of(alice_id) == "owner"
+
+        # Someone who is no longer in the workspace at all changes nothing either.
+        stranger = "00000000-0000-4000-8000-000000000000"
+        with pytest.raises(WorkspaceError) as refused:
+            await workspaces.change_role(lab, stranger, "owner", bob_id, "admin")
+        assert refused.value.status == 404
+        assert await role_of(bob_id) == "member"
+
+        # What the caller may do now still works, whatever stale role came with the call.
+        assert await workspaces.change_role(lab, alice_id, "member", bob_id, "admin") == "admin"

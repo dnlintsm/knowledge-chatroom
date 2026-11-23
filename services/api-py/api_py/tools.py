@@ -31,6 +31,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from . import tokens
+from .access import is_uuid
 from .paths import JS_SPACE, js_trim, utf16_len
 from .proxy import forward
 from .run_report import js_json
@@ -267,18 +268,35 @@ class ToolsSettings:
 Signer = Callable[[str, str], str | None]
 
 
-def signer(claims: dict[str, Any] | None, secret: str | None, storage_seconds: int) -> Signer:
-    """The signed-in user, signed for one server (identityForTools in server.ts, without memory)."""
+def signer(
+    claims: dict[str, Any] | None,
+    secret: str | None,
+    storage_seconds: int,
+    workspace: str | None = None,
+) -> Signer:
+    """
+    The signed-in user, signed for one server (identityForTools in server.ts, without memory).
+    `workspace` is the one the page is in: the storage token is bound to it
+    (`ws`), as a chat run's is, so the server's writes land where the user is
+    and not in the default workspace (issue #297).
+    """
     if not secret or claims is None:
         return lambda _server, _kind: None
     user = {k: claims[k] for k in ("sub", "email", "name") if k in claims}
+    bound = {"ws": workspace} if workspace else {}
     now = int(time.time())
 
     def sign(server: str, kind: str) -> str | None:
         via = f"mcp:{server}"
         if kind == "storage":
             return tokens.sign(
-                {**user, "aud": tokens.STORAGE_AUDIENCE, "via": via, "exp": now + storage_seconds},
+                {
+                    **user,
+                    **bound,
+                    "aud": tokens.STORAGE_AUDIENCE,
+                    "via": via,
+                    "exp": now + storage_seconds,
+                },
                 secret,
             )
         if kind == "identity":
@@ -434,7 +452,11 @@ async def tools_route(request: Request) -> Response:
     )
     if not isinstance(args, dict):
         return _send(400, {"error": "Expected {arguments: {...}}"})
-    sign = signer(claims, secret, tools_settings.storage_token_seconds)
+    # The workspace the app's page is in (it names it on every request), by id.
+    named = request.headers.get("x-knowledge-workspace", "").strip().lower()
+    sign = signer(
+        claims, secret, tools_settings.storage_token_seconds, named if is_uuid(named) else None
+    )
     call: CallTool = getattr(state, "call_tool", None) or mcp_call
     try:
         answer = await call(
