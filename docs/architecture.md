@@ -505,8 +505,12 @@ For local setup, see [Development](development.md).
   renames it within the same place (history kept; 412 when the name is taken),
   `?versions` returns its history, and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
-  LISTEN/NOTIFY, so it works across processes). A `PUT` with `If-None-Match: *` only creates
-  (412 if the file exists). `PUT`, `PATCH` and `DELETE` need write access to the place (403
+  LISTEN/NOTIFY, so it works across processes). A stream never skips a change: when it
+  can't check one against the user's access, falls 1000 changes behind, or the server's own
+  events connection breaks, it ends, and the browser reconnects and lists the files again.
+  A `PUT` with `If-None-Match: *` only creates
+  (412 if the file exists), and one with `If-Match: "<sha256>"` only replaces that version
+  (412 with the version it is now). `PUT`, `PATCH` and `DELETE` need write access to the place (403
   otherwise); files have no permissions of their own beyond that. Login is optional (see below); keep the API server's and chat agent's ports private in either mode.
 - **Knowledge tree**: files live at the workspace root or in a node of a tree whose levels
   are data (`node_types`, seeded as tech › module › loop › process). Nodes are stored with
@@ -535,7 +539,10 @@ For local setup, see [Development](development.md).
   Anyone who can view a node may propose; editors there accept or reject in the Proposed
   changes tab, which shows each one as a diff against the file as it is now, and accepting
   writes it as the file's next version, credited to whoever proposed it. Proposing again
-  revises your open proposal. `GET /api/proposals` lists open ones (`?node=`,
+  revises your open proposal. So that nobody accepts something they haven't seen, an accept
+  names what its reviewer looked at (`{sha256, base}`: the proposed content, and the file it
+  was compared with): if the proposal was revised or the file changed meanwhile, the answer is
+  409, nothing is written, and the tab loads the diff again. `GET /api/proposals` lists open ones (`?node=`,
   `?experiment=`, `?status=`), `PUT /api/files/<path>?node=<id>&propose` proposes, `POST
   /api/proposals {experimentId, paths?, note?}` promotes an experiment, and `POST
   /api/proposals/<id>/accept|reject|withdraw` decides.
@@ -561,6 +568,11 @@ For local setup, see [Development](development.md).
   `EMBEDDING_DIMENSIONS` asks for shorter vectors. pgvector indexes up to 2000 dimensions,
   so longer vectors are compared one by one (fine for small workspaces). Each model scores
   similarity differently, so tune `SEARCH_MIN_SIMILARITY` (default 0.5, 0.82 for E5).
+  A search embeds its query before it takes a database connection and waits at most 10
+  seconds for it, then matches words only, so a slow embeddings API can't use up the pool.
+  When servers with different models share a database (a rolling change of
+  `EMBEDDING_MODEL`), the one whose model is no longer the recorded one stops embedding
+  and searches by words until it is restarted with the same model.
 - **Access**: users belong to groups in an org tree (company › dept › team), and a grant
   gives a user or group a role on a node and everything below it, or on the whole
   workspace. Roles are additive: viewer reads; editor also writes and deletes files (a deleted
@@ -621,6 +633,11 @@ For local setup, see [Development](development.md).
   server, edits save there (debounced), and the change stream brings in Claude's writes and
   edits from other tabs. Without login, the first visit to an empty server uploads this
   browser's files.
+  A save names the version it replaces (`If-Match` with the sha256 last seen), so two people
+  editing one file don't overwrite each other: the second save answers 412, the editor keeps
+  the edits unsaved and asks which version to keep (Compare shows both), and the other one
+  stays in the file's history. A write without `If-Match` (an upload, Claude's writes, an
+  API client that doesn't send it) replaces the file as before.
   The place switcher at the top of the Files view opens the Knowledge view, which shows
   the tree (with the Experiments view beside it); clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
@@ -679,7 +696,9 @@ Valid existing v1 files/tabs remain compatible, including the read-only flag old
 (now ignored).
 
 `workspace/save-scheduler.ts` owns debounce timers, ordered per-place/path write
-chains, in-flight/failed protection and observed server hashes. The provider injects
+chains, in-flight/failed protection, observed server hashes (each save names the one it
+replaces) and save conflicts: a file whose save was refused is protected like a failed
+draft, and nothing more is sent for it, until the user keeps their copy or takes the server's. The provider injects
 its current mode/place/files and the PUT transport; the scheduler has no React or
 HTTP imports. Pure tests use a controlled clock and delayed/failing writes. The
 provider retains storage bootstrap, SSE routing and reconciliation, which depend

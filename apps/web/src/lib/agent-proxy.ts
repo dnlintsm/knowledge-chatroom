@@ -15,7 +15,8 @@ const LOCAL_AGENT_URL = localAgentUrl();
 
 // x-knowledge-workspace: the workspace the page is in (src/lib/workspace-request.ts),
 // which the API server checks the user belongs to (issue #226).
-const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-knowledge-workspace"];
+// if-match: a save names the version it replaces, so it can't overwrite someone else's (issue #293).
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "if-match", "x-knowledge-workspace"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",

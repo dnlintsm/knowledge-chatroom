@@ -24,7 +24,7 @@ import { useCurrentWorkspace } from "./current-workspace";
 import { useWorkspaceCatalog } from "./use-workspace-catalog";
 import { lineageOf, resolvePlaceContext } from "./workspace-context";
 export { lineageOf } from "./workspace-context";
-import { SaveScheduler, type StorageMode } from "./save-scheduler";
+import { SaveScheduler, type SaveConflict, type StorageMode } from "./save-scheduler";
 import { DEFAULT_OPEN, SEED_FILES } from "./seed";
 import { reduceWorkspace, type PersistedWorkspace as Persisted } from "./workspace-state";
 import { NODE_KEY, SERVER_SEEDED_KEY, readPlaceUi, restoreWorkspace, persistWorkspace, savedState } from "./local-persistence";
@@ -50,6 +50,7 @@ import {
   putServerFile,
   renameServerFile,
   renameServerNode,
+  serverFileExists,
   updateServerExperiment,
   WATCH_URL,
   type Account,
@@ -61,11 +62,13 @@ import {
   type NodeType,
   type PlaceId,
   type Proposal,
+  type Reviewed,
   type Role,
   type ServerEvent,
   type ServerFile,
 } from "./server-files";
 import {
+  FileChangedError,
   FileExistsError,
   isBuiltInTab,
   kindForPath,
@@ -165,6 +168,16 @@ interface WorkspaceValue {
   /** A failed save, retained until all failed files have saved successfully. */
   syncError: string | null;
   /**
+   * Files in this place whose save the server refused because someone else
+   * changed them meanwhile (issue #293). Their edits stay in this browser,
+   * unsaved, until resolveConflict: "mine" saves them over the other version
+   * (which stays in the file's history), "theirs" loads that version instead.
+   * theirVersion is the other version's text, or null when the file was deleted.
+   */
+  conflicts: string[];
+  resolveConflict: (path: string, keep: "mine" | "theirs") => Promise<void>;
+  theirVersion: (path: string) => Promise<string | null>;
+  /**
    * Leaving the workspace (docs/workspaces.md, "Switching with unsaved
    * edits"): whether an edit hasn't saved yet; saving them all (throws with a
    * message when one can't); or dropping those still waiting.
@@ -218,7 +231,16 @@ interface WorkspaceValue {
   /** Open proposals you can see, anywhere, newest first. */
   proposals: Proposal[];
   /** Accept, reject or withdraw a proposal; throws with a message. */
-  decideProposal: (id: string, decision: "accept" | "reject" | "withdraw") => Promise<Proposal>;
+  /**
+   * `reviewed`, for an accept: what the reviewer compared (server-files.ts,
+   * Reviewed). With `openCopy` the diff was against the file open here, so its
+   * edits are saved first and that version is the base.
+   */
+  decideProposal: (
+    id: string,
+    decision: "accept" | "reject" | "withdraw",
+    reviewed?: Reviewed & { openCopy?: boolean },
+  ) => Promise<Proposal>;
   /** Proposes an experiment's changed files (all, or `paths`) to its node; throws with a message. */
   promote: (experimentId: string, paths?: string[], note?: string) => Promise<Proposal[]>;
   /** These throw with a message for the user, e.g. a duplicate name. */
@@ -253,6 +275,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const [storageMode, setStorageMode] = useState<StorageMode>("loading");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [saveConflicts, setSaveConflicts] = useState<SaveConflict[]>([]);
   const mode = useRef<StorageMode>("loading");
   const files = useRef(state.files);
   files.current = state.files;
@@ -268,9 +291,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     getMode: () => mode.current,
     getPlace: () => placeRef.current,
     getFile: (path) => files.current.find((file) => file.path === path),
-    put: (file, at) => putServerFile(file, at, { workspace: workspaceId }),
+    put: async (file, at, replaces) => {
+      // null: the file was deleted on the server, so this save may only create it.
+      const opts = { workspace: workspaceId, replaces: replaces ?? undefined, createOnly: replaces === null };
+      try {
+        return await putServerFile(file, at, opts);
+      } catch (err) {
+        if (replaces !== null || !(err instanceof FileExistsError)) throw err;
+        // Someone made the file again meanwhile: a conflict with that version.
+        const list = await listServerFiles(at).catch(() => null);
+        const now = Array.isArray(list) ? list.find((f) => f.path === file.path) : undefined;
+        throw new FileChangedError(file.path, now?.sha256 ?? null);
+      }
+    },
     onError: setSyncError,
+    onConflict: setSaveConflicts,
   }));
+  // Moving to another place saves what is waiting; edits a conflict was holding go with the files.
+  const leavePlace = useCallback(() => {
+    sync.flush();
+    sync.leave(placeRef.current);
+  }, [sync]);
   const { busy, schedule: scheduleSave, flush: flushSaves, settle: settleSaves } = sync;
   const [edits] = useState(() => ({ unsaved: sync.unsaved, save: sync.settleAll, discard: sync.discard }));
 
@@ -339,7 +380,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const { place, setPlace, enterNode, enterExperiment } = usePlaceNavigation({
-    mode, placeRef, files, setState, flushSaves, resync, resetFocus,
+    mode, placeRef, files, setState, flushSaves: leavePlace, resync, resetFocus,
   });
 
   useEffect(() => {
@@ -403,7 +444,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
-      if (busy(path)) return;
+      if (busy(path)) {
+        // In conflict: "keep mine" then replaces the version the server has now.
+        if (event.op === "delete") sync.theirs(path, null);
+        else if (event.sha256) sync.theirs(path, event.sha256);
+        return;
+      }
       if (event.op === "delete") {
         sync.forget(path);
         removeLocal(path);
@@ -840,14 +886,73 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [experiments, enterNode, refreshExperiments],
   );
 
-  const decideProposal = useCallback(
-    async (id: string, decision: "accept" | "reject" | "withdraw") => {
-      const decided = await decideServerProposal(id, decision);
-      setProposals((list) => list.filter((p) => p.id !== id));
-      void refreshProposals();
-      return decided;
+  const decideProposal = useCallback<WorkspaceValue["decideProposal"]>(
+    async (id, decision, reviewed) => {
+      const { openCopy, ...seen } = reviewed ?? {};
+      try {
+        if (decision === "accept" && openCopy) {
+          // The diff was against the copy open here: the server gets its edits
+          // first, and the accept replaces exactly that version.
+          const at = placeRef.current;
+          const path = proposals.find((p) => p.id === id)?.path;
+          const copy = () => files.current.find((f) => f.path === path)?.content;
+          const reviewed = copy();
+          await settleSaves(at);
+          // While the save was on its way, someone else's change may have replaced
+          // the open copy (and its version): that isn't what the diff showed.
+          if (placeRef.current !== at || copy() !== reviewed) {
+            throw new Error(`${path ?? "The file"} changed while your edits were saved; look at the proposal again before accepting`);
+          }
+          const version = path ? sync.hash(path, at) : undefined;
+          if (version) seen.base = version;
+        }
+        const decided = await decideServerProposal(id, decision, seen);
+        setProposals((list) => list.filter((p) => p.id !== id));
+        return decided;
+      } finally {
+        // Also after a refusal: the proposal may have been revised or decided meanwhile.
+        void refreshProposals();
+      }
     },
-    [refreshProposals, setProposals],
+    [sync, proposals, settleSaves, refreshProposals, setProposals],
+  );
+
+  const resolveConflict = useCallback<WorkspaceValue["resolveConflict"]>(
+    async (rawPath, keep) => {
+      const path = normalizePath(rawPath);
+      const at = placeRef.current;
+      if (keep === "mine") return sync.keepMine(path, at);
+      const list = await listServerFiles(at);
+      if (!Array.isArray(list)) throw new Error("Couldn't reach storage to load the other version.");
+      const info = list.find((f) => f.path === path);
+      const file = info ? await loadServerFile(info, at) : null;
+      if (placeRef.current !== at) return;
+      sync.dropConflict(path, at);
+      if (!file || !info) {
+        // Deleted there: taking their version removes it here too.
+        sync.forget(path, at);
+        files.current = files.current.filter((f) => f.path !== path);
+        removeLocal(path);
+        return;
+      }
+      sync.remember(path, info.sha256, at);
+      files.current = files.current.map((f) => (f.path === path ? file : f));
+      upsert(file);
+    },
+    [sync, upsert, removeLocal],
+  );
+  const theirVersion = useCallback<WorkspaceValue["theirVersion"]>(
+    async (rawPath) => {
+      const path = normalizePath(rawPath);
+      const at = placeRef.current;
+      if (!(await serverFileExists(path, at))) return null;
+      return (await loadServerText(path, at)).content;
+    },
+    [],
+  );
+  const conflicts = useMemo(
+    () => saveConflicts.filter((c) => c.at === place).map((c) => c.path),
+    [saveConflicts, place],
   );
   const promote = useCallback(
     async (experimentId: string, paths?: string[], note?: string) => {
@@ -891,6 +996,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSelection,
       storageMode,
       syncError,
+      conflicts,
+      resolveConflict,
+      theirVersion,
       edits,
       node,
       experiment,
@@ -919,7 +1027,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [
     state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
-    syncError, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
+    syncError, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
     updateExperiment, changeExperimentPeople, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
   ]);

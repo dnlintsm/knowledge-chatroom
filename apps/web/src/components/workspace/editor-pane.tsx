@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, X } from "lucide-react";
+import { Bot, Brain, Code, Eye, FileDiff, FlaskConical, ListTodo, Lock, Pencil, Table2, TriangleAlert, X } from "lucide-react";
 import { defaultRehypePlugins, Streamdown } from "streamdown";
 import { ExampleCanvas } from "@/components/example-canvas";
 import { Spinner } from "@/components/ui/spinner";
@@ -12,7 +12,7 @@ import { FileIcon } from "./file-icon";
 import { Centered, CodePreview, HtmlPreview, MediaPreview, NoPreview } from "./file-previews";
 import { MemoryEditor } from "./memory";
 import { readOnlyReason } from "./read-only";
-import { ReviewPanel } from "./review-panel";
+import { Diff, ReviewPanel } from "./review-panel";
 import { hasRole } from "./roles";
 import { blocksForLines, lineOffsets, localImagesOnly, sourceLines, type LineRange } from "./file-refs";
 import { useWorkspace } from "./store";
@@ -192,6 +192,10 @@ export function EditorPane() {
         </div>
       )}
 
+      {activeFile && ws.conflicts.includes(activeFile.path) && (
+        <SaveConflict key={activeFile.path} file={activeFile} />
+      )}
+
       <div className="min-h-0 flex-1 overflow-auto">
         {active === TASKS_TAB ? (
           <ExampleCanvas />
@@ -214,6 +218,101 @@ export function EditorPane() {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Shown over a file whose save the server refused because someone else saved
+ * (or deleted) it while it was being edited here (issue #293). Nothing more
+ * is sent for the file until the user picks a version; both stay in its history.
+ */
+function SaveConflict({ file }: { file: WorkspaceFile }) {
+  const { resolveConflict, theirVersion } = useWorkspace();
+  // undefined: not asked for (or still loading); null: the file was deleted there.
+  const [theirs, setTheirs] = useState<string | null | undefined>(undefined);
+  const [comparing, setComparing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const attempt = async (work: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await work();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const compare = () => {
+    if (comparing) return setComparing(false);
+    setComparing(true);
+    setTheirs(undefined);
+    void attempt(async () => setTheirs(await theirVersion(file.path)));
+  };
+  const button =
+    "flex h-7 items-center rounded-md border px-2 cursor-pointer disabled:cursor-default disabled:opacity-50";
+
+  return (
+    <div
+      role="alert"
+      data-testid="save-conflict"
+      className="shrink-0 border-b border-amber-500/40 bg-amber-500/10 text-xs"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2">
+        <TriangleAlert className="size-3.5 shrink-0 text-amber-700 dark:text-amber-400" />
+        <span className="min-w-0 flex-1 basis-64">
+          Someone else changed this file while you were editing it. Your edits aren&apos;t saved yet: choose which
+          version to keep. The other one stays in the file&apos;s history.
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            aria-pressed={comparing}
+            onClick={compare}
+            className={cn(button, "border-[var(--border)] bg-[var(--background)] hover:bg-[var(--secondary)]")}
+          >
+            {comparing ? "Hide comparison" : "Compare"}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void attempt(() => resolveConflict(file.path, "theirs"))}
+            className={cn(button, "border-[var(--border)] bg-[var(--background)] hover:bg-[var(--secondary)]")}
+          >
+            Use theirs
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void attempt(() => resolveConflict(file.path, "mine"))}
+            className={cn(button, "border-transparent bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90")}
+          >
+            Keep mine
+          </button>
+        </span>
+      </div>
+      {error && <p className="px-4 pb-2 text-red-500">{error}</p>}
+      {comparing && !error && (
+        <div data-testid="save-conflict-diff" className="max-h-64 overflow-auto border-t border-amber-500/40 bg-[var(--background)]">
+          {theirs === undefined ? (
+            <p className="px-4 py-2 text-[var(--muted-foreground)]">Loading their version…</p>
+          ) : theirs === null ? (
+            <p className="px-4 py-2 text-[var(--muted-foreground)]">
+              The file was deleted. &ldquo;Keep mine&rdquo; saves yours as a new file; &ldquo;Use theirs&rdquo; removes it here too.
+            </p>
+          ) : (
+            <>
+              <p className="px-4 pt-2 text-[var(--muted-foreground)]">
+                From their version to yours: red lines are only in theirs, green lines only in yours.
+              </p>
+              <Diff before={theirs} after={file.content} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
