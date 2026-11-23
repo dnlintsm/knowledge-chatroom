@@ -105,6 +105,11 @@ jobs:
         if: matrix.python == '3.12'
         working-directory: packages/knowledge-py
         run: uv run --locked datamodel-codegen --check
+      # A setting added or removed in a Python service is in docs/settings.md. The node
+      # checks run the same comparison, but not for a change to Python files alone.
+      - name: The settings reference matches the code
+        if: matrix.python == '3.12'
+        run: node scripts/settings-check.mjs
       # Most of api-py's tests need Postgres and S3 and skip without TEST_DATABASE_URL:
       # access, row security, workspaces, memory, proposals. They run here, in the
       # required check, whenever the change can affect storage (issue #303). The
