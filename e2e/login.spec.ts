@@ -111,7 +111,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
     ["Bob", bob, false],
     ["Alice", alice, true],
   ] as const) {
-    await page.goto(`/?experiment=${run.id}`);
+    await page.goto(`/?experiment_id=${run.id}`);
     await expect(page.getByRole("navigation", { name: "Location" }), who).toContainText("r1");
     await expect(page.getByTestId("file-preview"), who).toContainText("Overlay run.");
     await showFiles(page);
@@ -242,7 +242,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
     await alice.request.post("/api/experiments", { headers: inLab, data: { nodeId: null, title: "Lab finding" } })
   ).json()) as { id: string };
   expect((await alice.request.patch(`/api/experiments/${finding.id}`, { headers: inLab, data: { status: "shared" } })).ok()).toBe(true);
-  const findingUrl = `${labUrl}?experiment=${finding.id}`;
+  const findingUrl = `${labUrl}?experiment_id=${finding.id}`;
   await alice.goto(findingUrl);
   await expect(alice.getByRole("navigation", { name: "Location" })).toContainText("Lab finding");
   // In the default workspace there is no such experiment.

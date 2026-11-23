@@ -122,8 +122,8 @@ test.describe("the page's workspace", () => {
 
   test("URLs without one go to the default workspace, keeping their query", () => {
     expect(defaultWorkspacePath()).toBe("/w/default");
-    expect(defaultWorkspacePath("experiment=e1&list=all")).toBe("/w/default?experiment=e1&list=all");
-    expect(defaultWorkspacePath("?experiment=e1")).toBe("/w/default?experiment=e1");
+    expect(defaultWorkspacePath("experiment_id=e1&list=all")).toBe("/w/default?experiment_id=e1&list=all");
+    expect(defaultWorkspacePath("?experiment_id=e1")).toBe("/w/default?experiment_id=e1");
   });
 
   test("/ goes to the default workspace when the user is in it, otherwise to their first", async () => {

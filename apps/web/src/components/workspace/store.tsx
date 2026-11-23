@@ -490,7 +490,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let onServer = workspaceId !== null;
 
     (async () => {
-      // Open the run a link names (?experiment=), else return to the place
+      // Open the run a link names (?experiment_id=), else return to the place
       // this browser was last in, if it still exists. Its files are asked for
       // alongside the root's and the account, rather than one after another.
       const linked = experimentFromSearch(window.location.search);
