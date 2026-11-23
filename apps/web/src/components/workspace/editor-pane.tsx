@@ -208,7 +208,7 @@ export function EditorPane() {
         ) : active === MEMORY_TAB ? (
           <MemoryEditor />
         ) : storageMode === "loading" ? (
-          <FileLoading />
+          <FileLoading label={ws.storageDown ? "Waiting for the storage server…" : undefined} />
         ) : activeFile?.unloaded ? (
           <UnloadedFile key={activeFile.path} path={activeFile.path} />
         ) : activeFile ? (

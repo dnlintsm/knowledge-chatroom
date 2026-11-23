@@ -11,7 +11,8 @@ import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
 import { useWorkspace } from "./store";
 import { MEMORY_TAB } from "./types";
 import { useWorkbench } from "./workbench";
-import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
+import { workspaceUrl } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
 
 /**
  * Personalized memory (issue #93): notes Claude keeps about you across chats,
@@ -259,7 +260,8 @@ export function useMemory(): Memory {
 
 /** The answer's JSON, or an Error with the server's message. */
 export async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await workspaceFetch(url, { cache: "no-store", ...init });
+  // apiFetch: a session that ended sends the browser to sign in (issue #297).
+  const res = await apiFetch(url, { cache: "no-store", ...init });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body as T;

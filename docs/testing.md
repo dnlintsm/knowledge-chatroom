@@ -219,7 +219,9 @@ place stay visible through remote events/reconnect until a subsequent edit saves
 a successful save of a different file must not hide their error. Permission
 revocation changes the editor to read-only without replacing the unsaved content.
 These drafts are held in memory: this policy does not promise durability across
-reload or navigation after a failed save.
+reload or navigation after a failed save. A signed-in page whose storage fails at
+load must stay in loading with "Storage unreachable", offer no editor, keep asking,
+and show the server's files once it answers.
 
 `e2e/sync-storage.spec.ts` runs only in storage mode. Two pages in one browser
 context share a real workspace and receive its real stream. It checks both

@@ -645,7 +645,10 @@ For local setup, see [Development](development.md).
   the tree (with the Experiments view beside it); clicking a node moves the workspace
   there (the title bar shows where you are), and each node keeps its own open tabs.
   If it doesn't answer, everything stays in localStorage and the browser-side file tools
-  are used instead.
+  are used instead. That fallback is only for a page with no server behind it: when the
+  user is signed in, or the server named the workspace, the page keeps loading, says
+  "Storage unreachable" and asks again every few seconds, so edits are never made to a
+  browser copy that would not be uploaded.
 - **Tests**: `pnpm test:conformance` and the api-py tests require `TEST_DATABASE_URL` and
   `S3_ENDPOINT`; they reset a disposable test database. See [Testing](testing.md).
 
