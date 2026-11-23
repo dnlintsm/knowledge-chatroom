@@ -16,7 +16,7 @@ import {
   storageHeader,
 } from "@/lib/auth";
 import { remoteAgentUrl } from "@/lib/agent-target";
-import { handleChatRoute } from "@/lib/chat-routes";
+import { handleChatRoute, stopThreadId } from "@/lib/chat-routes";
 import { ChatRunner, runOwner } from "@/lib/chat-runner";
 import { AutoChatStore } from "@/lib/chat-store";
 import { workspaceFromHeaders } from "@/lib/workspace-request";
@@ -120,14 +120,8 @@ async function withUser(req: NextRequest) {
       chatRunner.discard(id, user, ws),
     );
     if (answered) return answered;
-    const stop = path.match(/^\/agent\/[^/]+\/stop\/([^/]+)\/?$/);
-    if (stop) {
-      let threadId = stop[1];
-      try {
-        threadId = decodeURIComponent(threadId);
-      } catch {
-        // the runtime answers malformed ids itself
-      }
+    const threadId = stopThreadId(path);
+    if (threadId !== null) {
       const owner = chatRunner.liveOwner(threadId);
       if (owner && owner !== runOwner(user, ws)) {
         return Response.json({ error: "Thread not found" }, { status: 404 });
