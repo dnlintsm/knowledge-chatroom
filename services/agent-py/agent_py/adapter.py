@@ -39,8 +39,10 @@ the thread's first run. Three things change that for this app:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections import OrderedDict
+import time
+from collections import Counter, OrderedDict
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field
@@ -72,6 +74,7 @@ from .skills import (
     Trigger,
     fetch_skills,
     materialize,
+    run_folder,
     skill_options,
     slash_command,
 )
@@ -81,6 +84,8 @@ from .workdir import (
     Summary,
     clear_workdir,
     confine_hook,
+    mark_used,
+    remove_idle,
     sync_workdir,
     workdir_prompt,
 )
@@ -106,6 +111,15 @@ class Run:
     pending: list[tuple[str, Any]] = field(default_factory=list)
 
 
+# How often, at most, a starting run looks for idle run folders to remove.
+SWEEP_EVERY_SECONDS = 3600.0
+
+
+def _folder_name(user: str, workspace: str | None) -> str:
+    """What a run folder is named after: one per user and workspace, since skills and the copy differ by workspace."""
+    return f"{user}@{workspace}" if workspace else user
+
+
 class ChatroomAdapter(ClaudeAgentAdapter):
     def __init__(
         self,
@@ -118,6 +132,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         mcp_servers: Mapping[str, McpServer] | None = None,
         scripts: Scripts | None = None,
         workdir: Limits | None = None,
+        idle_seconds: float | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -137,6 +152,11 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._key_lock = asyncio.Lock()
         # The working folder's size limits; None: AGENT_WORKDIR=off (workdir.py).
         self._workdir = workdir
+        # Run folders unused this long are removed (None: never), looked for at
+        # most once every SWEEP_EVERY_SECONDS, never one a run is in.
+        self._idle_seconds = idle_seconds
+        self._in_use: Counter[Path] = Counter()
+        self._swept_at: float | None = None
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
         # Usage records on their way to the agent server.
@@ -287,13 +307,112 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         workspace: str | None,
         model: str | None,
     ) -> AsyncGenerator[BaseEvent, None]:
+        """The run, with its run folder held for as long as it lasts (it is not removed as idle meanwhile)."""
+        cwd = (
+            run_folder(self._skills_root, _folder_name(user, workspace))
+            if self._skills_root is not None
+            else None
+        )
+        if cwd is not None:
+            self._in_use[cwd] += 1
+        try:
+            await self._remove_idle_folders()
+            async with aclosing(
+                self._run_in_folder(input_data, storage_token, user, memory_token, workspace, model)
+            ) as stream:
+                async for event in stream:
+                    yield event
+        finally:
+            if cwd is not None:
+                self._in_use[cwd] -= 1
+                if self._in_use[cwd] <= 0:
+                    del self._in_use[cwd]
+                    # Idle is counted from the end of the last run in the folder, not
+                    # from its start: a long run must not leave it due for removal the
+                    # moment it finishes, while its Claude Code session is still kept.
+                    with contextlib.suppress(OSError):
+                        mark_used(cwd)
+
+    async def _remove_idle_folders(self) -> None:
+        if self._skills_root is None or self._idle_seconds is None:
+            return
+        now = time.monotonic()
+        if self._swept_at is not None and now - self._swept_at < SWEEP_EVERY_SECONDS:
+            return
+        self._swept_at = now
+        try:
+            removed = await remove_idle(self._skills_root, self._idle_seconds, set(self._in_use))
+        except Exception:  # never a reason to fail a run
+            logger.exception("[workdir] couldn't look for idle run folders")
+            return
+        if removed:
+            logger.info("[workdir] removed %d idle run folder(s)", removed)
+
+    async def _run_in_folder(
+        self,
+        input_data: RunAgentInput,
+        storage_token: str | None,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> AsyncGenerator[BaseEvent, None]:
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
         remember(self._workspaces, thread_id, workspace, self._max_workers)
+        try:
+            run = await self._prepare(input_data, user, memory_token, workspace, model)
+        except Exception:
+            # What each step expects to go wrong it handles itself, and the run goes
+            # on without that part. Anything else used to break the stream with no
+            # answer at all; the chat gets an error it can show instead.
+            logger.exception("couldn't get the run ready")
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't start the run. Please try again.",
+            )
+            return
+        remember(self._runs, thread_id, run, self._max_workers)
+        try:
+            if model and len(self._models) > 1:
+                await self._switch_cached_model(input_data, model)
+        except Exception as error:
+            logger.warning("couldn't switch chat model: %s", error)
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't switch the chat model. Please try again.",
+            )
+            return
+        prepared, slash = self.prepare(input_data, run.skills)
+        if slash:
+            self._used(thread_id, slash.name, "slash")
+        started = False
+        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
+            async for event in stream:
+                yield event
+                started = started or event.type == EventType.RUN_STARTED
+                while started and run.pending:
+                    name, value = run.pending.pop(0)
+                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+
+    async def _prepare(
+        self,
+        input_data: RunAgentInput,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> Run:
+        """What the run needs before the model is asked: its skills, working folder, memory and MCP servers."""
+        thread_id = input_data.thread_id
         run = Run(model=model)
         if self._skills_root is not None:
-            # A folder per user and workspace (issue #226): skills and the copy differ by workspace.
-            folder = f"{user}@{workspace}" if workspace else user
+            folder = _folder_name(user, workspace)
+            mark_used(run_folder(self._skills_root, folder))
             run.skills = await self._skills_for(thread_id)
             try:
                 run.cwd = materialize(self._skills_root, folder, run.skills)
@@ -342,30 +461,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 else {}
             )
             run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
-        remember(self._runs, thread_id, run, self._max_workers)
-        try:
-            if model and len(self._models) > 1:
-                await self._switch_cached_model(input_data, model)
-        except Exception as error:
-            logger.warning("couldn't switch chat model: %s", error)
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                thread_id=thread_id,
-                run_id=input_data.run_id,
-                message="Couldn't switch the chat model. Please try again.",
-            )
-            return
-        prepared, slash = self.prepare(input_data, run.skills)
-        if slash:
-            self._used(thread_id, slash.name, "slash")
-        started = False
-        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
-            async for event in stream:
-                yield event
-                started = started or event.type == EventType.RUN_STARTED
-                while started and run.pending:
-                    name, value = run.pending.pop(0)
-                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+        return run
 
     async def _switch_cached_model(self, input_data: RunAgentInput, model: str) -> None:
         # The pinned adapter rebuilds the worker for recovery and frontend tools.

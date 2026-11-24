@@ -75,9 +75,14 @@ async def fetch_skills(storage: Storage, thread: str) -> list[RunSkill]:
     return skills
 
 
+def run_folder(root: Path, user: str) -> Path:
+    """The run folder under `root` for `user` (their id, with the workspace when there is one)."""
+    return root / hashlib.sha256(user.encode()).hexdigest()[:16]
+
+
 def materialize(root: Path, user: str, skills: Sequence[RunSkill]) -> Path:
     """Writes the user's skills to their run folder under `root` (if they changed) and returns it."""
-    cwd = root / hashlib.sha256(user.encode()).hexdigest()[:16]
+    cwd = run_folder(root, user)
     claude = cwd / ".claude"
     target = claude / "skills"
     digest = hashlib.sha256()

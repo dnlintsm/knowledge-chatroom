@@ -109,6 +109,7 @@ The chat agent (`services/agent-py`).
 | `AGENT_PY_WORKDIR` | a new empty temp folder (prefix agent-py-) made at each start | Folder holding each user's working folder, with their skills and workspace copy. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | `1800` | Seconds after which a run is stopped; `0` means never. |
 | `AGENT_WORKDIR` | unset | `off` removes the workspace copy and the Read, Glob and Grep tools from runs; any other value keeps them. |
+| `AGENT_WORKDIR_IDLE_HOURS` | `24` | Hours a user's run folder may go without a run before it is removed, at least 1; `0` or `off` keeps folders for good. |
 | `AGENT_WORKDIR_MAX_FILE_MB` | `25` | Largest single file, in MB, copied into the working folder; a value that is not above zero falls back to 25. |
 | `AGENT_WORKDIR_MAX_MB` | `500` | Most MB the workspace copy may hold; a value that is not above zero falls back to 500. |
 | `ANTHROPIC_API_KEY` | unset | Real key the key proxy adds to script runs' requests; otherwise only Claude Code reads it. |

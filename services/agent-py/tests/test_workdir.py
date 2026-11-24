@@ -358,3 +358,62 @@ def test_each_workspace_has_its_own_folder(api, claude, tmp_path: Path):
     default = Path(run_once(api, env, claude).cwd)
     other = Path(run_once(api, env, claude, {"X-Knowledge-Workspace": "w2"}).cwd)
     assert default != other and default.parent == other.parent == tmp_path
+
+
+def test_run_folders_nobody_used_for_a_while_are_removed(tmp_path):
+    """A run folder holds a copy of what its user could read; it used to stay on disk for good."""
+    import os
+
+    from agent_py.skills import run_folder
+    from agent_py.workdir import LAST_USED, mark_used, remove_idle
+
+    day = 24 * 3600.0
+    now = 1_800_000_000.0
+
+    def folder(user: str, used_ago: float | None) -> Path:
+        cwd = run_folder(tmp_path, user)
+        mark_used(cwd)
+        (cwd / "workspace").mkdir()
+        (cwd / "workspace" / "notes.md").write_text("what they could read")
+        if used_ago is None:
+            (cwd / LAST_USED).unlink()
+        else:
+            os.utime(cwd / LAST_USED, (now - used_ago, now - used_ago))
+        return cwd
+
+    idle = folder("alice", 2 * day)
+    recent = folder("bob", 3600)
+    busy = folder("carol", 9 * day)  # idle by the clock, but a run is in it
+    unmarked = folder("dave", None)  # from before folders were marked
+    (tmp_path / "notes.txt").write_text("not a run folder")
+    (tmp_path / "other").mkdir()
+    leftover = tmp_path / ".removing-abc"
+    (leftover / "workspace").mkdir(parents=True)
+
+    assert asyncio.run(remove_idle(tmp_path, day, {busy}, now=now)) == 1
+    assert not idle.exists() and not leftover.exists()
+    assert (recent / "workspace" / "notes.md").exists()
+    assert (busy / "workspace" / "notes.md").exists()
+    # Kept this time and marked: it goes after the same wait as any other.
+    assert (unmarked / LAST_USED).exists()
+    assert (tmp_path / "notes.txt").exists() and (tmp_path / "other").is_dir()
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(".removing-")) == []
+
+    os.utime(unmarked / LAST_USED, (now - 2 * day, now - 2 * day))
+    assert asyncio.run(remove_idle(tmp_path, day, set(), now=now)) == 2  # dave's and carol's
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([recent.name, "notes.txt", "other"])
+    # A root that is gone is nothing to remove, not an error.
+    assert asyncio.run(remove_idle(tmp_path / "missing", day, set(), now=now)) == 0
+
+
+def test_the_idle_setting_has_a_floor_and_can_be_turned_off():
+    from agent_py.workdir import idle_seconds_from_env
+
+    assert idle_seconds_from_env({}) == 24 * 3600
+    assert idle_seconds_from_env({"AGENT_WORKDIR_IDLE_HOURS": "72"}) == 72 * 3600
+    # Never sooner than a Claude Code session idles out.
+    assert idle_seconds_from_env({"AGENT_WORKDIR_IDLE_HOURS": "0.1"}) == 3600
+    for off in ("0", "off", " OFF "):
+        assert idle_seconds_from_env({"AGENT_WORKDIR_IDLE_HOURS": off}) is None
+    for bad in ("soon", "-3", "nan"):
+        assert idle_seconds_from_env({"AGENT_WORKDIR_IDLE_HOURS": bad}) == 24 * 3600

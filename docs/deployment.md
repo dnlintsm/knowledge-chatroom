@@ -192,7 +192,8 @@ application behavior without promising provider availability.
 
 The chat agent keeps a copy of each user's readable files in their run folder
 (agent-py's `AGENT_PY_WORKDIR`; default a temp folder) for Claude's Read/Glob/Grep: give that folder disk for up to `AGENT_WORKDIR_MAX_MB`
-(default 500) per active user and workspace, or set `AGENT_WORKDIR=off` on it. agent-py fetches
+(default 500) per active user and workspace, or set `AGENT_WORKDIR=off` on it. A folder
+nobody has used for `AGENT_WORKDIR_IDLE_HOURS` (default 24) is removed as other runs start. agent-py fetches
 the copy through api-py; binary files api-py serves as store links (`S3_PUBLIC_URL`) come from
 that link, so make it reachable from agent-py too, or they are left out. See
 [Working folder](architecture.md#working-folder).

@@ -111,6 +111,9 @@ the workspace like on a local project:
   them, since the run's own folder then holds them.
   `AGENT_WORKDIR_MAX_MB` (default 500) caps the copy, smallest files first, and
   `AGENT_WORKDIR_MAX_FILE_MB` (default 25) leaves out larger files.
+  A run folder that no run has used for `AGENT_WORKDIR_IDLE_HOURS` (default 24) is removed
+  when another run starts, so a copy doesn't stay on disk long after its user stopped
+  chatting, or lost access. The next run makes a fresh one.
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.
