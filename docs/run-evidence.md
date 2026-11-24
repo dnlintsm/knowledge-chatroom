@@ -1,6 +1,6 @@
 # Run evidence and recovery (design)
 
-Status: **being built**, tracked in
+Status: **built**, tracked in
 [#267](https://github.com/dnlintsm/knowledge-chatroom/issues/267) (batch A), the
 execution-traceability follow-ups of
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
@@ -142,9 +142,12 @@ view on the Experiment's node, as for every Experiment.
 - **A departed maintainer.** If the maintainer is no longer a member, an Owner or Admin who
   restores it becomes its maintainer, as a handover would make them, audited with both
   people. The author doesn't change.
-- **The UI:** deleting from the run panel shows "Deleted · Undo" for a few seconds; Undo
-  calls restore. The Experiments view ends with a "Recently deleted" link, shown only when
-  the list isn't empty, that lists them with **Restore**.
+- **The UI:** deleting from the run panel asks nothing; a notice names the Experiment with
+  Undo for eight seconds, and Undo calls restore and goes back into it. The Experiments view
+  ends with a "Recently deleted" link, shown only when the list isn't empty, that lists them
+  (when, where, who deleted it, how many files come back) with **Restore**. One whose node was
+  deleted says "Its place was deleted" instead, and a departed maintainer's says that
+  restoring makes it yours.
 - **Agent tokens** can't list or restore deleted Experiments, as Claude never deletes them.
 
 ## Contract changes
@@ -187,7 +190,7 @@ view on the Experiment's node, as for every Experiment.
    follows the versions the browser knows of the run's files (the store's `serverHash`), so
    drift shows as soon as a save lands, and Claude's `currentExperiment` lists the inputs with
    their state and, for a changed one, the copy's `recordedVersion`.
-5. Screens: Undo after delete, and Recently deleted.
+5. Screens: Undo after delete, and Recently deleted. Done.
 
 ## Open points for review
 

@@ -47,6 +47,7 @@ import type { SidebarView } from "./layout";
 import { placeName, StateBadge, StatusBadge } from "./experiment-panel";
 import { useListScope } from "./list-scope";
 import { ALL_EXPERIMENTS, experimentsIn, shownScope, type ListScope } from "./runs";
+import { RecentlyDeleted } from "./recently-deleted";
 import { SearchPanel } from "./search-panel";
 import { MemoryPanel, useMemory } from "./memory";
 import { SkillsPanel } from "./skills";
@@ -1049,6 +1050,7 @@ function RunList() {
           </p>
         )
       )}
+      <RecentlyDeleted />
     </div>
   );
 }

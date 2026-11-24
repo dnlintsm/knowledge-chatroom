@@ -4,7 +4,7 @@
  * `?experiment_id=<id>`, so links open a run and back/forward move between runs.
  */
 
-import type { Experiment, KnowledgeNode } from "./server-files";
+import type { DeletedExperiment, Experiment, KnowledgeNode } from "./server-files";
 
 /** Where a run's report is, relative to the experiment. */
 export const RUN_REPORT = "report.md";
@@ -106,4 +106,22 @@ export function experimentsIn(experiments: Experiment[], nodes: KnowledgeNode[],
 /** The scope as shown: a node that isn't there (any more) means all. */
 export function shownScope(scope: ListScope, nodes: KnowledgeNode[]): ListScope {
   return scope.node !== null && !nodes.some((n) => n.id === scope.node) ? ALL_EXPERIMENTS : scope;
+}
+
+/**
+ * What Recently deleted says under a deleted experiment: where it was, who
+ * deleted it and what comes back with it; `note` says why it can't be restored,
+ * or that a restore makes it yours.
+ */
+export function deletedDetail(e: DeletedExperiment, place: string): { detail: string; note: string | null } {
+  const by = e.deletedBy ? (e.mine ? "deleted by you" : `deleted by ${e.deletedBy.name ?? "a former member"}`) : null;
+  const files = e.fileCount === 1 ? "1 file" : `${e.fileCount} files`;
+  const note = !e.restorable
+    ? "Its place was deleted"
+    : !e.maintainerIsMember
+      ? `${e.maintainerName ?? "Its maintainer"} left; restoring makes it yours`
+      : null;
+  // A deleted node isn't in the tree any more, so the note names it instead.
+  const where = e.restorable ? `in ${place}` : null;
+  return { detail: [where, by, files].filter(Boolean).join(" · "), note };
 }

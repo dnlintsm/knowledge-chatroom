@@ -341,6 +341,27 @@ export const deleteServerExperiment = (id: string) =>
   experimentRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
 /**
+ * A deleted experiment you may restore (docs/run-evidence.md, "Recovering a
+ * deleted Experiment"): an Experiment with when and by whom it was deleted,
+ * and whether it can come back (not when its node was deleted too).
+ */
+export type DeletedExperiment = Experiment & Required<Pick<Experiment, "deletedAt" | "restorable">>;
+
+/** The deleted experiments you may restore, newest deletion first; null when they can't be read. */
+export async function listDeletedExperiments(): Promise<DeletedExperiment[] | null> {
+  try {
+    const res = await apiFetch("/api/experiments?deleted=1", { cache: "no-store" });
+    return res.ok ? ((await res.json()) as { experiments: DeletedExperiment[] }).experiments : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Brings a deleted experiment back with the files deleted with it; throws with the server's reason. */
+export const restoreServerExperiment = (id: string) =>
+  experimentRequest("POST", `/${encodeURIComponent(id)}/restore`);
+
+/**
  * A change to who works on an experiment (docs/workspaces.md, "Experiment
  * handover"): hand it over to another member, keeping you on as a
  * collaborator or not, or add or remove a collaborator (your own id: stop
