@@ -22,6 +22,7 @@ import json
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -95,29 +96,63 @@ def login_from_env(env: Mapping[str, str]) -> Login:
     )
 
 
+def claims(
+    token: str | None, key: Ed25519PublicKey, now: float | None = None
+) -> dict[str, Any] | None:
+    """The claims of a token `key` signed; None when it is malformed, forged or expired.
+
+    The one place a token's signature and expiry are checked: verify() below
+    and api-py (api_py/tokens.py) both go through it. It says nothing about who
+    the token is for: callers check `sub` and `aud`.
+    """
+    parts = (token or "").split(".")
+    if len(parts) != 3 or parts[0] != "v2":
+        return None
+    try:
+        signature = _b64decode(parts[2])
+        if len(signature) != 64:
+            return None
+        key.verify(signature, f"v2.{parts[1]}".encode())
+        found = json.loads(_b64decode(parts[1]))
+    except (InvalidSignature, ValueError):
+        return None
+    if not isinstance(found, dict):
+        return None
+    exp = found.get("exp")
+    if (
+        not isinstance(exp, int | float)
+        or isinstance(exp, bool)
+        or exp < (time.time() if now is None else now)
+    ):
+        return None
+    return found
+
+
+def signed_in(found: dict[str, Any] | None, audience: str | None) -> dict[str, Any] | None:
+    """`found` when it names a signed-in user for `audience` (None: no `aud` claim at all)."""
+    if not found:
+        return None
+    sub = found.get("sub")
+    # Nobody signs in as "local": that is the user of a deployment without login.
+    if not isinstance(sub, str) or not sub or sub == LOCAL_USER.sub:
+        return None
+    if found.get("aud") != audience:
+        return None
+    return found
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 def verify(
     token: str, key: Ed25519PublicKey, audience: str | None, now: float | None = None
 ) -> User | None:
     """The user in a token signed for `audience`; None if it is forged, expired or for someone else."""
-    parts = token.split(".")
-    if len(parts) != 3 or parts[0] != "v2":
+    found = signed_in(claims(token, key, now), audience)
+    if found is None:
         return None
-    try:
-        key.verify(_b64decode(parts[2]), f"v2.{parts[1]}".encode())
-        payload = json.loads(_b64decode(parts[1]))
-    except (InvalidSignature, ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    sub = payload.get("sub")
-    exp = payload.get("exp")
-    if not isinstance(sub, str) or not sub or sub == "local":
-        return None
-    if not isinstance(exp, (int, float)) or exp < (time.time() if now is None else now):
-        return None
-    if payload.get("aud") != audience:
-        return None
-    return User(sub=sub, email=payload.get("email"), name=payload.get("name"))
+    return User(sub=found["sub"], email=_text(found.get("email")), name=_text(found.get("name")))
 
 
 def caller(

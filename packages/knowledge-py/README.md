@@ -4,7 +4,7 @@ What every Python service next to the chatroom needs, written once (issue #164):
 
 | Module | What it does |
 | --- | --- |
-| `knowledge_chatroom.identity` | Whether login is on (`login_from_env`: `AUTH_MODE` and `KNOWLEDGE_PUBLIC_KEY`, never guessed from a missing key), and checks the agent's signed `X-Knowledge-User` header with the public key; Python twin of `packages/contracts/src/identity-token.ts` |
+| `knowledge_chatroom.identity` | Whether login is on (`login_from_env`: `AUTH_MODE` and `KNOWLEDGE_PUBLIC_KEY`, never guessed from a missing key), and checks the agent's signed `X-Knowledge-User` header with the public key (`claims()` is the one signature and expiry check, which api-py uses too); Python twin of `packages/contracts/src/identity-token.ts` |
 | `knowledge_chatroom.storage` | Reads and writes workspace files through the agent's storage API with the run's `X-Knowledge-Storage` token |
 | `knowledge_chatroom.memory` | Runs the `memory_*` tools for the calling chat with its `X-Knowledge-Memory` token |
 | `knowledge_chatroom.api` | Pydantic models of every request and answer of api-py's API, generated from `packages/contracts/openapi/storage.yaml` (needs the `api` extra) |
