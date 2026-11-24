@@ -16,6 +16,8 @@ from decimal import Decimal
 from typing import Any
 
 REPORT_PATH = "report.md"
+# A run's generated Rules, whose reads by an agent are recorded while it runs.
+RULES_PATH = "models/general_rules.md"
 
 _FRONT_MATTER = re.compile(r"^---\r?\n[\s\S]*?\r?\n---\r?\n?")
 # Integers past this lose precision in JavaScript, so they are written as its doubles are.
@@ -121,6 +123,23 @@ def _inputs(found: Any) -> list[dict[str, Any]] | None:
     return out
 
 
+def _rules_read(p: dict[str, Any]) -> list[str] | None:
+    """
+    The hash of each Rules version an agent read while the run ran, once it
+    finished with Rules (or reads of them); None before that, or with no Rules.
+    """
+    reads = p.get("reads")
+    files = p.get("files")
+    if not isinstance(reads, list) or not isinstance(files, dict):
+        return None
+    hashes = [
+        r["sha256"]
+        for r in reads
+        if isinstance(r, dict) and r.get("path") == RULES_PATH and isinstance(r.get("sha256"), str)
+    ]
+    return hashes if hashes or files.get(RULES_PATH) else None
+
+
 def report_front_matter(run: dict[str, Any]) -> str:
     p = run["provenance"]
     rerun_of = p.get("rerunOf")
@@ -137,6 +156,7 @@ def report_front_matter(run: dict[str, Any]) -> str:
         ("skill", p.get("skill")),
         ("tools", p.get("tools")),
         ("inputs", _inputs(p.get("inputs"))),
+        ("rules_read", _rules_read(p)),
         ("params", run["params"] or None),
         ("results", run["results"] or None),
     ]

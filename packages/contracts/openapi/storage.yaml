@@ -114,11 +114,18 @@ paths:
         Without `versions`: the file's bytes, typed by its mime, served with
         `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`. A binary file
         answers 302 to a short-lived store link when S3_PUBLIC_URL is set. With `versions`: the
-        version history, newest first.
+        version history, newest first. With `version`: that version's bytes, the same way, when it
+        is one of this live file's own versions (any other id is a 404, as a missing file).
+        `versions` and `version` together are a 400. A maintainer's or collaborator's agent reading
+        a running run's models/general_rules.md (storage token) is recorded as one of its reads.
       parameters:
         - name: versions
           in: query
           description: Present (any value) for the version history.
+          schema: { type: string }
+        - name: version
+          in: query
+          description: A version id from the history, to read that version.
           schema: { type: string }
         - name: If-None-Match
           in: header
@@ -575,8 +582,8 @@ paths:
                   type: object
                   additionalProperties: true
                   description: >-
-                    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are
-                    the server's and are dropped; other keys are kept as given.
+                    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files
+                    and reads are the server's and are dropped; other keys are kept as given.
                   properties:
                     chat: { type: [string, "null"] }
                     model: { type: [string, "null"] }
@@ -633,6 +640,35 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Experiment" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}/reads:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [experiments]
+      operationId: listRunReads
+      summary: The Rules versions a run's agents read while it ran
+      description: >-
+        Each version of the run's models/general_rules.md that an agent or tool of its maintainer or
+        a collaborator read through a storage token while the run was running, first read first; one
+        entry per version. For whoever can see the run.
+      responses:
+        "200":
+          description: The reads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reads]
+                properties:
+                  reads:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunRead" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -4020,7 +4056,10 @@ components:
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
         fileCount: { type: integer, minimum: 0 }
         provenance:
-          description: Where a run came from; {} when nobody recorded it.
+          description: >-
+            Where a run came from; {} when nobody recorded it. Once a run finishes, `files` has the
+            version of its models/general_rules.md at the end (null when there was none) and `reads`
+            the reads recorded while it ran (RunRead, without `by`).
           type: object
           additionalProperties: true
         access:
@@ -4037,6 +4076,21 @@ components:
           type: array
           description: Members its maintainer added to work on it.
           items: { $ref: "#/components/schemas/Collaborator" }
+
+    RunRead:
+      type: object
+      required: [path, version, sha256, via, readAt, by]
+      properties:
+        path: { type: string }
+        version: { type: string, description: "The file version read: one of the file's own." }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        via: { type: string, description: 'Who read it: "remote" for Claude in the chat, "mcp:<name>" for a tool server.' }
+        readAt: { $ref: "#/components/schemas/Timestamp", description: When it was first read. }
+        by:
+          description: The user the agent acted for; null once they are gone.
+          oneOf:
+            - { $ref: "#/components/schemas/Collaborator" }
+            - type: "null"
 
     Collaborator:
       type: object

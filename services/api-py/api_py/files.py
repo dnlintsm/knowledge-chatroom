@@ -140,6 +140,27 @@ class FileService:
         row = await cur.fetchone()
         return _to_info(row) if row else None
 
+    async def stat_version(
+        self, conn: AsyncConnection, raw_path: str, version_id: str
+    ) -> dict[str, Any] | None:
+        """
+        One of the live file's own versions, as stat() describes the file: None
+        unless `version_id` is a version of the file at that path in this place.
+        """
+        if not is_uuid(version_id):
+            return None
+        path = normalize_path(raw_path)
+        here, args = self._here()
+        cur = await conn.execute(
+            f"""
+            SELECT f.path, f.kind, v.mime, v.size, v.blob_sha256, v.created_at, v.author_type
+            FROM files f JOIN file_versions v ON v.file_id = f.id
+            WHERE {here} AND f.path = %s AND f.deleted_at IS NULL AND v.id = %s""",  # pyrefly: ignore[bad-argument-type]
+            (*args, path, version_id),
+        )
+        row = await cur.fetchone()
+        return _to_info(row) if row else None
+
     async def content(self, info: dict[str, Any]) -> bytes:
         """
         The bytes of a file stat() found. It takes no database connection, so a

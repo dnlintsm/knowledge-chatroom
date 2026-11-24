@@ -169,8 +169,8 @@ async function call<T = Json>(method: string, path: string, opts: CallOptions = 
         for (const extra of extras) problems.push(`${label} (${op.operationId}): field not in the spec: ${extra}`);
         if (!extras.length) sample({ operationId: op.operationId, status: res.status, response: result.data });
       }
-      // A file read with ?versions is the history, not just any JSON.
-      if (op.operationId === "readFile" && url.searchParams.has("versions")) validates("VersionList", result.data, label);
+      // A file read with ?versions is the history, not just any JSON (a refusal is an Error).
+      if (op.operationId === "readFile" && res.ok && url.searchParams.has("versions")) validates("VersionList", result.data, label);
     }
   } else if (response.content && !response.content[type] && !response.content["*/*"]) {
     problems.push(`${label}: content-type ${type || "(none)"} not in the spec`);
@@ -314,7 +314,12 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     assert.equal(`"${stale.data.sha256}"`, read.res.headers.get("etag"));
     // 200 with the bytes, or 302 to the object store when S3_PUBLIC_URL is set.
     await call("GET", `/files/uploads/pic.bin${q}`, { headers: alice });
-    await call("GET", `/files/notes/a.md${q}&versions`, { headers: alice, expect: 200 });
+    const history = (await call<Schema["VersionList"]>("GET", `/files/notes/a.md${q}&versions`, { headers: alice, expect: 200 })).data;
+    // One of the file's own versions reads as it was; any other id is a missing file.
+    const past = await call("GET", `/files/notes/a.md${q}&version=${history.versions.at(-1)!.id}`, { headers: alice, expect: 200 });
+    assert.equal(past.text, "# A\nhello conformance");
+    await call("GET", `/files/notes/a.md${q}&version=00000000-0000-4000-8000-000000000000`, { headers: alice, expect: 404 });
+    await call("GET", `/files/notes/a.md${q}&versions&version=${history.versions[0].id}`, { headers: alice, expect: 400 });
     await call("PUT", `/files/notes/data.json${q}`, { headers: { ...alice, "Content-Type": "application/json" }, body: '{"temperature":60}', expect: 200 });
     await call("GET", `/files/notes/data.json${q}`, { headers: alice, expect: 200 });
     await call("GET", `/files/notes/data.json${q}&versions`, { headers: alice, expect: 200 });
@@ -424,9 +429,17 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     for (const bad of [{ model: { name: "x" } }, { skill: { sha256: 123 } }, { skill: "analysis" }, { tools: { a: 1 } }]) {
       await call("POST", "/experiments/runs", { headers: alice, json: { nodeId: mod.id, title: "x", provenance: bad }, expect: 400 });
     }
+    // The agent reading the run's Rules while it runs is one of its reads.
+    const rules = `/files/models/general_rules.md?experiment=${run.id}`;
+    await call("PUT", rules, { headers: alice, body: "| R1 |", expect: 200 });
+    await call("GET", rules, { headers: token, expect: 200 });
+    const reads = (await call<{ reads: Schema["RunRead"][] }>("GET", `/experiments/${run.id}/reads`, { headers: alice, expect: 200 })).data.reads;
+    assert.deepEqual(reads.map((r) => [r.path, r.via]), [["models/general_rules.md", "mcp:conformance"]]);
+    await call("GET", "/experiments/00000000-0000-4000-8000-000000000000/reads", { headers: alice, expect: 404 });
     await call("POST", `/experiments/${run.id}/finish`, { headers: alice, json: { results: "x" }, expect: 400 });
     const done = (await call<Schema["Experiment"]>("POST", `/experiments/${run.id}/finish`, { headers: token, json: { results: { ok: 1 } }, expect: 200 })).data;
     assert.equal(done.state, "done");
+    assert.deepEqual((done.provenance.files as Record<string, { sha256: string } | null>)["models/general_rules.md"]?.sha256, reads[0].sha256);
     await call("POST", `/experiments/${run.id}/finish`, { headers: alice, json: { results: { ok: 2 }, state: "failed" }, expect: 400 });
     const again = (await call<Schema["Experiment"]>("POST", "/experiments/runs", { headers: token, json: { rerunOf: run.id }, expect: 201 })).data;
     assert.equal(again.title, "Run it (rerun)");

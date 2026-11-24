@@ -1062,7 +1062,7 @@ class Skill(BaseModel):
 
 class Provenance(BaseModel):
     """
-    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
     """
 
     model_config = ConfigDict(
@@ -1095,7 +1095,7 @@ class StartRunRequest(BaseModel):
     """
     provenance: Provenance | None = None
     """
-    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given.
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
     """
 
 
@@ -1773,7 +1773,7 @@ class Experiment(BaseModel):
     fileCount: Annotated[int, Field(ge=0)]
     provenance: dict[str, Any]
     """
-    Where a run came from; {} when nobody recorded it.
+    Where a run came from; {} when nobody recorded it. Once a run finishes, `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`).
     """
     access: Literal["writer", "reader"]
     """
@@ -1795,6 +1795,27 @@ class Experiment(BaseModel):
     collaborators: list[Collaborator]
     """
     Members its maintainer added to work on it.
+    """
+
+
+class RunRead(BaseModel):
+    path: str
+    version: str
+    """
+    The file version read: one of the file's own.
+    """
+    sha256: Annotated[str, Field(pattern="^[a-f0-9]{64}$")]
+    via: str
+    """
+    Who read it: "remote" for Claude in the chat, "mcp:<name>" for a tool server.
+    """
+    readAt: Timestamp
+    """
+    When it was first read.
+    """
+    by: Collaborator | None
+    """
+    The user the agent acted for; null once they are gone.
     """
 
 
@@ -1831,6 +1852,10 @@ class RunSkill(BaseModel):
 
 class ListExperimentsResponse(BaseModel):
     experiments: list[Experiment]
+
+
+class ListRunReadsResponse(BaseModel):
+    reads: list[RunRead]
 
 
 class HandOverExperimentResponse(BaseModel):

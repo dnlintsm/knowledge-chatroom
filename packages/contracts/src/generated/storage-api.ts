@@ -47,7 +47,10 @@ export interface paths {
          * @description Without `versions`: the file's bytes, typed by its mime, served with
          *     `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`. A binary file
          *     answers 302 to a short-lived store link when S3_PUBLIC_URL is set. With `versions`: the
-         *     version history, newest first.
+         *     version history, newest first. With `version`: that version's bytes, the same way, when it
+         *     is one of this live file's own versions (any other id is a 404, as a missing file).
+         *     `versions` and `version` together are a 400. A maintainer's or collaborator's agent reading
+         *     a running run's models/general_rules.md (storage token) is recorded as one of its reads.
          */
         get: operations["readFile"];
         /**
@@ -229,6 +232,28 @@ export interface paths {
          * @description Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
          */
         post: operations["finishRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/experiments/{id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The Rules versions a run's agents read while it ran
+         * @description Each version of the run's models/general_rules.md that an agent or tool of its maintainer or a collaborator read through a storage token while the run was running, first read first; one entry per version. For whoever can see the run.
+         */
+        get: operations["listRunReads"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2048,7 +2073,7 @@ export interface components {
             forkedAt: components["schemas"]["Timestamp"];
             updatedAt: components["schemas"]["Timestamp"];
             fileCount: number;
-            /** @description Where a run came from; {} when nobody recorded it. */
+            /** @description Where a run came from; {} when nobody recorded it. Once a run finishes, `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`). */
             provenance: {
                 [key: string]: unknown;
             };
@@ -2066,6 +2091,18 @@ export interface components {
             maintainerIsMember: boolean;
             /** @description Members its maintainer added to work on it. */
             collaborators: components["schemas"]["Collaborator"][];
+        };
+        RunRead: {
+            path: string;
+            /** @description The file version read: one of the file's own. */
+            version: string;
+            sha256: string;
+            /** @description Who read it: "remote" for Claude in the chat, "mcp:<name>" for a tool server. */
+            via: string;
+            /** @description When it was first read. */
+            readAt: components["schemas"]["Timestamp"];
+            /** @description The user the agent acted for; null once they are gone. */
+            by: components["schemas"]["Collaborator"] | null;
         };
         Collaborator: {
             id: string;
@@ -2923,6 +2960,8 @@ export interface operations {
                 experiment?: components["parameters"]["Experiment"];
                 /** @description Present (any value) for the version history. */
                 versions?: string;
+                /** @description A version id from the history, to read that version. */
+                version?: string;
             };
             header?: {
                 /** @description The ETag from an earlier read; a match answers 304. */
@@ -3470,7 +3509,7 @@ export interface operations {
                     inputs?: components["schemas"]["RunInputSource"][];
                     /** @description The run to run again. */
                     rerunOf?: string;
-                    /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs and rerunOf are the server's and are dropped; other keys are kept as given. */
+                    /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given. */
                     provenance?: {
                         chat?: string | null;
                         model?: string | null;
@@ -3542,6 +3581,35 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listRunReads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reads. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        reads: components["schemas"]["RunRead"][];
+                    };
+                };
+            };
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

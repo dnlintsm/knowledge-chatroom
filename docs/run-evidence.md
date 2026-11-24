@@ -1,6 +1,6 @@
 # Run evidence and recovery (design)
 
-Status: **being specified**, tracked in
+Status: **being built**, tracked in
 [#267](https://github.com/dnlintsm/knowledge-chatroom/issues/267) (batch A), the
 execution-traceability follow-ups of
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479).
@@ -16,7 +16,7 @@ come from the conditions agreed in
 
 | | Today | Gap |
 | --- | --- | --- |
-| Inputs | A run's provenance records each input's original place, version id and `sha256`. The copy under `inputs/` is a new file version with the same bytes (`linkInputs`, `_resolve_inputs`). Reruns read the recorded content (#187). | The copy is an ordinary file. If someone edits it, nothing in the UI says so. |
+| Inputs | A run's provenance records each input's original place, version id and `sha256`. The copy under `inputs/` is a new file version with the same bytes (`Session._resolve_inputs`, `experiments.create`). Reruns read the recorded content (#187). | The copy is an ordinary file. If someone edits it, nothing in the UI says so. |
 | Past versions | `GET /files/{path}?versions` lists a live file's versions (id, `sha256`, size, author, time). | No route reads a past version's bytes, so "view the recorded input" can't exist yet. |
 | Rules | Generate Rules writes `models/general_rules.md` into the run after it starts. It's an ordinary file since #175. | Nothing records which version of it Claude or a tool read, so nobody can tell which Rules a run followed. |
 | Delete | `DELETE /experiments/{id}` sets `deleted_at` on the Experiment, and a trigger sets the same time on its live files (`experiments_drop_files`). History stays. | Nothing reads a deleted Experiment back. There is no undo. |
@@ -35,9 +35,8 @@ come from the conditions agreed in
    and never "the rules this run used" unless a read is recorded.
 5. **Delete stays a soft delete, and becomes undoable.** Permanent deletion and a retention
    period stay out of scope, as #178 asks (a separate policy). Nothing is purged in this batch.
-6. **This is api-py only.** The TypeScript agent server is being retired (#264). Its
-   in-process tools read files without going through api-py, so a read by the TypeScript chat
-   path isn't recorded. That path is legacy, and the gap closes with #264.
+6. **This is api-py only.** Since the TypeScript server was removed (#264), every agent and
+   tool reads files through api-py, so recording reads there sees all of them.
 
 ## Input drift
 
@@ -85,18 +84,22 @@ the store for binary files when `S3_PUBLIC_URL` is set).
 
 While a run's state is `running`, api-py records each distinct version of the run's
 `models/general_rules.md` that an agent or tool reads through a storage token
-(`Principal.actor == "agent"`).
+(`Principal.actor == "agent"`), when it acts for the run's maintainer or a collaborator.
+Another viewer's Claude reading a shared run's Rules isn't the run reading them.
 
 - **Stored** in a new table `run_reads` (`workspace_id, experiment_id, path, version_id,
-  sha256, actor_user_id, via, first_read_at`), one row per run, path and version, with RLS
-  like `experiments`. It's a table rather than an append to `provenance`, so concurrent reads
+  sha256, user_id, via, first_read_at`; `026_run_reads.sql`), one row per run, path and
+  version, with RLS like `experiments`. It's a table rather than an append to `provenance`, so concurrent reads
   can't lose each other and provenance stays written only when the run starts and finishes.
 - **Which files:** only `models/general_rules.md` for now, kept in one constant
   (`RECORDED_READS`) so other files can join later without a schema change.
 - **Not recorded:** reads by a person in the browser (viewing isn't executing), reads after the
-  run finished, and reads of other files.
+  run finished, and reads of other files. A deployment without login has no storage tokens,
+  so nothing is recorded there.
 - **At finish**, `finish_run` adds `files: {"models/general_rules.md": {version, sha256} | null}`
-  to provenance: the version present at completion, or null when there was none.
+  to provenance (the version present at completion, or null when there was none) and copies
+  the recorded reads into `reads`, so the record and the report keep them. Callers can't set
+  either key.
 - **What the run panel shows** under Provenance, in a Rules row, from the file's own history
   and `run_reads`:
   - written: each version written during the run, with who wrote it and when;
@@ -105,8 +108,8 @@ While a run's state is `running`, api-py records each distinct version of the ru
   Each version is a short `sha256` and links to **View** through the past-version read while the
   file is live. When nothing was read, the row says "Not read during the run" and claims no
   more.
-- The `report.md` front matter gains `rules_read: [<sha256>, …]` when the run finishes, so the
-  report says the same thing as the panel.
+- The `report.md` front matter gains `rules_read: [<sha256>, …]` when the run finishes with
+  Rules (or reads of them), so the report says the same thing as the panel.
 
 ## Recovering a deleted Experiment
 
@@ -170,7 +173,7 @@ view on the Experiment's node, as for every Experiment.
 
 1. This spec (docs only).
 2. Backend: the past-version read, `run_reads` and the Rules record at finish, `version` on
-   the Python agent's `read_file` (api-py, agent-py, contract).
+   the Python agent's `read_file` (api-py, agent-py, contract). Done.
 3. Backend: Recently deleted and restore (migration, api-py, contract).
 4. Screens: input drift, View recorded, and the Rules row in Provenance.
 5. Screens: Undo after delete, and Recently deleted.

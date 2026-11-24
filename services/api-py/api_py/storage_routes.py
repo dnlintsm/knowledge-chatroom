@@ -25,7 +25,8 @@
                                     an experiment's)
     GET    /files?watch             change events (server-sent), those this user may see
     GET    /files/<path>?node=      the content (a signed store link for binary files
-                                    when S3_PUBLIC_URL is set); ?versions: its history
+                                    when S3_PUBLIC_URL is set); ?versions: its history;
+                                    ?version=<id>: one of its versions' content
     PUT    /files/<path>?node=      write it (If-None-Match: * only creates; If-Match:
                                     "<sha256>" only replaces that version); ?propose
                                     (&note=): propose it instead (201)
@@ -43,6 +44,7 @@
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
     POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
     POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
+    GET    /experiments/<id>/reads  {reads}: the Rules versions its agents read while it ran
     PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?} -> {experiment|null}
     PUT    /experiments/<id>/collaborators/<user>  add one -> {experiment}
     DELETE /experiments/<id>/collaborators/<user>  remove one (or yourself) -> {experiment|null}
@@ -706,7 +708,10 @@ async def handle_files(request: Request, session: Session) -> Response:
         return json_response(200, {"files": await files.list()})
 
     if method == "GET":
+        version = first_param(request, "version") if "version" in request.query_params else None
         if "versions" in request.query_params:
+            if version is not None:
+                return error(400, "Ask for ?versions or for one ?version, not both")
             versions = await files.history(path)
             return (
                 error(404, "Not found")
@@ -716,7 +721,9 @@ async def handle_files(request: Request, session: Session) -> Response:
         # Binary files come straight from the object store when it is reachable
         # from browsers: a short-lived link, made after the access check above.
         # Text stays here, since the UI fetches it from this origin.
-        info = await files.stat(path)
+        # ?version= reads one of the file's own past versions the same way; any
+        # other id is a missing file.
+        info = await (files.stat(path) if version is None else files.stat_version(path, version))
         if info and not is_text_file(info["path"], info["mime"]):
             link = await session.storage.require_blobs().download_url(
                 info["sha256"], info["mime"], info["path"].split("/")[-1]
@@ -725,7 +732,7 @@ async def handle_files(request: Request, session: Session) -> Response:
                 return Response(
                     status_code=302, headers={"Location": link, "Cache-Control": "no-store"}
                 )
-        found = await files.read(path) if info else None
+        found = await files.read(path, version) if info else None
         if not found:
             return error(404, "Not found")
         info, content = found
@@ -809,7 +816,7 @@ RUN_EXPECTED = (
     "skill?: {name, source?, version?: number, sha256?}, tools?: {[name]: version}, ...}}"
 )
 # Provenance only the server writes: who started it and when, its inputs, its source run, when it finished.
-SERVER_PROVENANCE = ("startedBy", "startedAt", "finishedAt", "inputs", "rerunOf")
+SERVER_PROVENANCE = ("startedBy", "startedAt", "finishedAt", "inputs", "rerunOf", "files", "reads")
 # A run request with no nodeId: rerun in the earlier run's place.
 _NOT_GIVEN = object()
 
@@ -1048,6 +1055,12 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         if not isinstance(results, dict) or state not in ("done", "failed"):
             return error(400, "Expected {results: object, state?: done|failed}")
         return json_response(200, await session.finish_run(finish_of.group(1), results, state))
+
+    reads_of = re.fullmatch(r"([^/]+)/reads", experiment_id)
+    if reads_of:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(200, {"reads": await session.run_reads(reads_of.group(1))})
 
     maintainer_of = re.fullmatch(r"([^/]+)/maintainer", experiment_id)
     if maintainer_of:
