@@ -574,18 +574,20 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]}
         )
+        # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
-                conn,
-                self.storage,
-                experiment_id,
-                {"results": results, "state": state},
-                audit,
-                {"finishedAt": _now()},
+                conn, self.storage, experiment_id, {"results": results, "state": state}, audit
             )
         run = await self.experiment(experiment_id)
         await self._refresh_report(run, create=True)
         return run
+
+    async def run_reads(self, experiment_id: str) -> list[dict[str, Any]]:
+        """What agents read of the run's recorded files while it ran; for whoever can see it."""
+        await self.experiment(experiment_id)
+        async with self.scoped() as conn:
+            return await experiments.reads(conn, self.ws, experiment_id)
 
     async def _refresh_report(self, run: dict[str, Any], create: bool = False) -> None:
         """
@@ -1276,11 +1278,54 @@ class FilesSession:
         async with self.session.scoped() as conn:
             return await self.service.stat(conn, path)
 
-    async def read(self, path: str) -> tuple[dict[str, Any], bytes] | None:
+    async def stat_version(self, path: str, version_id: str) -> dict[str, Any] | None:
+        """One of the file's own versions; None for any other id (FileService.stat_version)."""
         async with self.session.scoped() as conn:
-            info = await self.service.stat(conn, path)
+            return await self.service.stat_version(conn, path, version_id)
+
+    async def read(
+        self, path: str, version_id: str | None = None
+    ) -> tuple[dict[str, Any], bytes] | None:
+        """The file now, or with `version_id` that version of it, and its bytes."""
+        async with self.session.scoped() as conn:
+            info = (
+                await self.service.stat(conn, path)
+                if version_id is None
+                else await self.service.stat_version(conn, path, version_id)
+            )
+        if not info:
+            return None
         # The bytes after the connection went back to the pool (FileService.content).
-        return (info, await self.service.content(info)) if info else None
+        content = await self.service.content(info)
+        await self._record_read(info, version_id)
+        return info, content
+
+    async def _record_read(self, info: dict[str, Any], version_id: str | None) -> None:
+        """
+        A run's agent reading one of its recorded files (its Rules) while it runs
+        leaves a record of the version it read (experiments.record_read). Only
+        the agent of someone who works on the run counts: viewing isn't running.
+        """
+        principal = self.session.principal
+        if (
+            principal.actor != "agent"
+            or not principal.via
+            or self.experiment_id is None
+            or info["path"] not in experiments.RECORDED_READS
+            or not at_least(self.role, "editor")
+        ):
+            return
+        async with self.session.scoped() as conn:
+            await experiments.record_read(
+                conn,
+                self.session.ws,
+                self.experiment_id,
+                info["path"],
+                info["sha256"],
+                principal.user_id,
+                principal.via,
+                version_id,
+            )
 
     async def history(self, path: str) -> builtins.list[dict[str, Any]] | None:
         async with self.session.scoped() as conn:

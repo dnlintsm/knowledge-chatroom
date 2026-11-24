@@ -200,7 +200,11 @@ is no separate run folder or mode (issue #82):
   SHA-256 (`experiments.provenance`, migration `016_run_provenance.sql`; set by the agent
   only, never by the API). The run's `report.md` carries the same record in its front
   matter, refreshed when the results are set (`services/api-py/api_py/run_report.py`), and the
-  run panel shows it under **Provenance**, with the inputs to open.
+  run panel shows it under **Provenance**, with the inputs to open. While it runs, each
+  version of its `models/general_rules.md` that its agent or a tool reads is recorded
+  (`GET /experiments/<id>/reads`), and at the end the record keeps those reads and the
+  version present then, so it says which Rules were read (see
+  [run-evidence.md](run-evidence.md)).
 - **Reruns** (`create_experiment` with `rerunOf`, `Session.rerun`): a new run in the same
   place with the old run's parameters and hypothesis, and its inputs read from its `inputs/`
   at the content (SHA-256) its provenance records, even if they were edited since (#187),
@@ -511,7 +515,8 @@ For local setup, see [Development](development.md).
   `GET /api/files` lists files, `GET|PUT|DELETE /api/files/<path>` reads, writes
   (request body = bytes) and deletes one, `PATCH /api/files/<path>` with `{"path": ...}`
   renames it within the same place (history kept; 412 when the name is taken),
-  `?versions` returns its history, and
+  `?versions` returns its history, `?version=<id>` reads one of that file's own versions
+  (any other id is a 404), and
   `GET /api/files?watch` streams every change as server-sent events (Postgres
   LISTEN/NOTIFY, so it works across processes). A stream never skips a change: when it
   can't check one against the user's access, falls 1000 changes behind, or the server's own

@@ -33,10 +33,8 @@ logger = logging.getLogger("api_py")
 EVENTS_CHANNEL = "workspace_files"
 
 # What prepare_row_security() grants APP_ROLE.
-_READ = "workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals"
-_WRITE = (
-    "blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals"
-)
+_READ = "workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals, run_reads"
+_WRITE = "blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals, run_reads"
 _MEMORY = (
     "memories, memory_versions, memory_events, memory_settings, memory_incognito_chats, memory_inbox, "
     "memory_learned_chats, shared_memories, shared_memory_versions, shared_memory_proposals, shared_memory_settings"

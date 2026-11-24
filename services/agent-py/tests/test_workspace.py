@@ -159,6 +159,15 @@ def test_read_file_numbers_lines_and_pages(api):
     assert out == "notes/a.md (lines 2-2 of 3; continue with offset 3)\n2\ttwo"
 
 
+def test_read_file_reads_a_past_version_when_given_one(api):
+    api.files["inputs/a.csv"] = (b"now", "text/csv")
+    call(api, "read_file", path="inputs/a.csv", experiment="r1", version="v1")
+    call(api, "read_file", path="inputs/a.csv", experiment="r1")
+    named, plain = api.requests[-2:]
+    assert dict(named.url.params) == {"experiment": "r1", "version": "v1"}
+    assert dict(plain.url.params) == {"experiment": "r1"}
+
+
 def test_read_file_names_missing_and_binary_files(api):
     assert call(api, "read_file", path="nope.md") == ("No file at nope.md", True)
     api.files["img/a.png"] = (b"", "image/png")

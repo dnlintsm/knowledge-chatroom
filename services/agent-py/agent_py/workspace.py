@@ -421,7 +421,8 @@ def file_tools(
         "line number and a tab, for citing lines; the numbers are not part of the file. A read returns at most "
         f"{MAX_READ_CHARS} characters; when a file is longer, the first line says which lines you got and the "
         "offset to continue from. Use offset and limit to read part of a file, e.g. the lines around a passage "
-        "search_files found.",
+        "search_files found. With version (an id from the file's history, such as a run's recorded input), "
+        "it reads that past version instead of the file as it is now.",
         schema(
             {
                 "path": {"type": "string", "description": "Workspace path, e.g. notes/welcome.md"},
@@ -441,6 +442,10 @@ def file_tools(
                     "minimum": 1,
                     "description": "Most lines to return. Defaults to as many as fit in one read.",
                 },
+                "version": {
+                    "type": "string",
+                    "description": "A version id of this file, to read that past version.",
+                },
                 "node": NODE,
                 "experiment": EXPERIMENT,
             },
@@ -450,8 +455,10 @@ def file_tools(
     @guarded
     async def read_file(s: Storage, args: dict[str, Any]) -> ToolResult:
         path = args["path"].strip().lstrip("/")
+        version = args.get("version") or None
+        place = {**_place(args), **({"version": version} if version else {})}
         try:
-            response = await read(s, path, _place(args))
+            response = await read(s, path, place)
         except WorkspaceError as err:
             return error(f"No file at {path}" if err.status == 404 else str(err))
         mime = (response.headers.get("content-type", "") if response else "").split(";")[0].strip()
