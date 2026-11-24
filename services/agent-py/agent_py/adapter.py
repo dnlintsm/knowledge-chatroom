@@ -89,7 +89,14 @@ from .workdir import (
     sync_workdir,
     workdir_prompt,
 )
-from .workspace import Storage, WorkspaceError, file_tools, server, tool_names
+from .workspace import (
+    STORAGE_TIMEOUT,
+    Storage,
+    WorkspaceError,
+    file_tools,
+    server,
+    tool_names,
+)
 
 logger = logging.getLogger("agent_py")
 
@@ -144,6 +151,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._servers = dict(mcp_servers or {})
         self._storage_url = storage_url
         self._transport = transport  # for tests
+        self._http: httpx.AsyncClient | None = None
         # Each user's run folder (with their skills) is a folder in here.
         self._skills_root = skills_root
         # SKILL_SCRIPTS=on (scripts.py), and the key proxy its runs share, once started.
@@ -507,6 +515,17 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         if self._key_proxy:
             await self._key_proxy.close()
             self._key_proxy = None
+        if self._http:
+            await self._http.aclose()
+            self._http = None
+
+    def _client(self) -> httpx.AsyncClient | None:
+        """The one HTTP client for the storage API, made on first use and kept until shutdown."""
+        if self._http is None and self._storage_url:
+            self._http = httpx.AsyncClient(
+                base_url=self._storage_url, timeout=STORAGE_TIMEOUT, transport=self._transport
+            )
+        return self._http
 
     def _storage(self, thread_id: str) -> Storage:
         """The storage API with the thread's latest token and workspace: tools read them when called, not when the chat began."""
@@ -515,6 +534,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             self._tokens.get(thread_id),
             self._transport,
             self._workspaces.get(thread_id),
+            self._client(),
         )
 
     def _memory(self, thread_id: str) -> RunMemory | None:

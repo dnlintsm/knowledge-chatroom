@@ -78,6 +78,10 @@ class WorkspaceError(Exception):
         self.status = status
 
 
+# Seconds one call to the storage API may take.
+STORAGE_TIMEOUT = 60
+
+
 @dataclass
 class Storage:
     """The storage API for one run: its base URL, the run's token and its workspace (None: the default one)."""
@@ -86,6 +90,9 @@ class Storage:
     token: str | None
     transport: httpx.AsyncBaseTransport | None = None
     workspace: str | None = None
+    # The server's one HTTP client (its base URL is `base_url`), so calls reuse
+    # connections: a run makes several per tool call. None opens one per call.
+    client: httpx.AsyncClient | None = None
 
     async def call(
         self,
@@ -110,12 +117,22 @@ class Storage:
             headers["Content-Type"] = "application/octet-stream"
         query = {k: v for k, v in (params or {}).items() if v is not None}
         try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url, timeout=60, transport=self.transport
-            ) as client:
-                response = await client.request(
+            if self.client is not None:
+                response = await self.client.request(
                     method, route, params=query, json=json_body, content=content, headers=headers
                 )
+            else:
+                async with httpx.AsyncClient(
+                    base_url=self.base_url, timeout=STORAGE_TIMEOUT, transport=self.transport
+                ) as client:
+                    response = await client.request(
+                        method,
+                        route,
+                        params=query,
+                        json=json_body,
+                        content=content,
+                        headers=headers,
+                    )
         except httpx.HTTPError as err:
             raise WorkspaceError(f"Workspace storage is unavailable right now ({err}).") from err
         if response.status_code >= 400:
