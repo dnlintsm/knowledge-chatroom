@@ -386,6 +386,13 @@ paths:
           in: query
           description: A node id for that node's, `root` for those at the workspace root; leave it out for all.
           schema: { type: string }
+        - name: deleted
+          in: query
+          description: >-
+            `1` lists instead the deleted experiments you may restore, newest deletion first, each
+            with `deletedAt`, `deletedBy` and `restorable`: your own, and as an Owner or Admin the
+            shared and archived ones too. Not with `node`; storage tokens can't ask (403).
+          schema: { type: string, enum: ["1", "true", ""] }
       responses:
         "200":
           description: The experiments.
@@ -398,6 +405,7 @@ paths:
                   experiments:
                     type: array
                     items: { $ref: "#/components/schemas/Experiment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -643,6 +651,35 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [experiments]
+      operationId: restoreExperiment
+      summary: Undo an experiment's delete
+      description: >-
+        Brings back a deleted experiment and the files deleted with it (files deleted before it
+        stay deleted), with its status and state. Its maintainer can, and an Owner or Admin for one
+        that isn't a draft; one you may not restore is not found. If its maintainer has left the
+        workspace, the Owner or Admin restoring it becomes its maintainer. Storage tokens can't.
+      responses:
+        "200":
+          description: The experiment, restored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experiment" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Its node was deleted too, so it can't be restored on its own.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -3943,7 +3980,7 @@ components:
       required: [op, change, id, node]
       properties:
         op: { type: string, const: experiment }
-        change: { type: string, enum: [create, update, status, delete] }
+        change: { type: string, enum: [create, update, status, delete, restore] }
         id: { type: string }
         node: { type: [string, "null"], description: null for an experiment at the workspace root. }
         left:
@@ -4077,6 +4114,17 @@ components:
           type: array
           description: Members its maintainer added to work on it.
           items: { $ref: "#/components/schemas/Collaborator" }
+        deletedAt:
+          $ref: "#/components/schemas/Timestamp"
+          description: Only in the ?deleted list, when it was deleted.
+        deletedBy:
+          description: Only in the ?deleted list, who deleted it; null when unknown (deleted with its node) or gone.
+          oneOf:
+            - { $ref: "#/components/schemas/Collaborator" }
+            - type: "null"
+        restorable:
+          type: boolean
+          description: Only in the ?deleted list, false when its node was deleted too (restore answers 409).
 
     RunRead:
       type: object

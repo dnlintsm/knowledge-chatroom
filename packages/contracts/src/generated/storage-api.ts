@@ -238,6 +238,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/experiments/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo an experiment's delete
+         * @description Brings back a deleted experiment and the files deleted with it (files deleted before it stay deleted), with its status and state. Its maintainer can, and an Owner or Admin for one that isn't a draft; one you may not restore is not found. If its maintainer has left the workspace, the Owner or Admin restoring it becomes its maintainer. Storage tokens can't.
+         */
+        post: operations["restoreExperiment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/experiments/{id}/reads": {
         parameters: {
             query?: never;
@@ -1986,7 +2008,7 @@ export interface components {
             /** @constant */
             op: "experiment";
             /** @enum {string} */
-            change: "create" | "update" | "status" | "delete";
+            change: "create" | "update" | "status" | "delete" | "restore";
             id: string;
             /** @description null for an experiment at the workspace root. */
             node: string | null;
@@ -2091,6 +2113,12 @@ export interface components {
             maintainerIsMember: boolean;
             /** @description Members its maintainer added to work on it. */
             collaborators: components["schemas"]["Collaborator"][];
+            /** @description Only in the ?deleted list, when it was deleted. */
+            deletedAt?: components["schemas"]["Timestamp"];
+            /** @description Only in the ?deleted list, who deleted it; null when unknown (deleted with its node) or gone. */
+            deletedBy?: components["schemas"]["Collaborator"] | null;
+            /** @description Only in the ?deleted list, false when its node was deleted too (restore answers 409). */
+            restorable?: boolean;
         };
         RunRead: {
             path: string;
@@ -3299,6 +3327,8 @@ export interface operations {
             query?: {
                 /** @description A node id for that node's, `root` for those at the workspace root; leave it out for all. */
                 node?: string;
+                /** @description `1` lists instead the deleted experiments you may restore, newest deletion first, each with `deletedAt`, `deletedBy` and `restorable`: your own, and as an Owner or Admin the shared and archived ones too. Not with `node`; storage tokens can't ask (403). */
+                deleted?: "1" | "true" | "";
             };
             header?: never;
             path?: never;
@@ -3317,6 +3347,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -3584,6 +3615,42 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    restoreExperiment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The experiment, restored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Experiment"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Its node was deleted too, so it can't be restored on its own. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

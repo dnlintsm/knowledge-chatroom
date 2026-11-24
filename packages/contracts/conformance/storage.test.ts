@@ -801,7 +801,17 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
 
   step("deletes", async () => {
     await call("DELETE", `/experiments/${exp.id}`, { headers: alice, expect: 200 });
+    // A delete is undoable: the maintainer finds it in the deleted list and restores it.
+    const gone = (await call<{ experiments: Schema["Experiment"][] }>("GET", "/experiments?deleted=1", { headers: alice, expect: 200 })).data.experiments;
+    assert.equal(gone.find((e) => e.id === exp.id)?.restorable, true);
+    await call("GET", "/experiments?deleted=1&node=root", { headers: alice, expect: 400 });
+    await call("GET", "/experiments?deleted=1", { headers: storageToken("conformance|alice"), expect: 403 });
+    await call("POST", `/experiments/${exp.id}/restore`, { headers: storageToken("conformance|alice"), expect: 403 });
+    await call<Schema["Experiment"]>("POST", `/experiments/${exp.id}/restore`, { headers: alice, expect: 200 });
+    await call("POST", `/experiments/${exp.id}/restore`, { headers: alice, expect: 404 });
+    // Deleted with its node, it can't come back on its own.
     await call("DELETE", `/nodes/${tech.id}`, { headers: alice, expect: 200 });
+    await call("POST", `/experiments/${exp.id}/restore`, { headers: alice, expect: 409 });
   });
 
   test("every operation in the spec was called", () => {

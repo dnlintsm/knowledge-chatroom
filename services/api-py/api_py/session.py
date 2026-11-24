@@ -640,7 +640,45 @@ class Session:
                 self.storage,
                 experiment_id,
                 self._audit("experiment.delete", {"experiment": experiment_id}),
+                self.principal.user_id,
             )
+
+    def _need_person(self, what: str) -> None:
+        """Claude never deletes experiments, so it doesn't list or restore deleted ones either."""
+        if self.principal.actor == "agent":
+            raise ForbiddenError(f"Claude doesn't {what} deleted experiments")
+
+    async def deleted_experiments(self) -> list[dict[str, Any]]:
+        """
+        The deleted experiments you may restore (docs/run-evidence.md): your own,
+        and as an Owner or Admin the shared and archived ones too.
+        """
+        self._need_person("list")
+        async with self.scoped() as conn:
+            return await experiments.list_deleted(conn, self.ws, self.principal.user_id)
+
+    async def restore_experiment(self, experiment_id: str) -> dict[str, Any]:
+        """
+        Undoes a delete, with the files deleted with it, keeping its status and
+        state. One you may not restore is reported as not found; one whose node
+        was deleted can't be restored (409). A departed maintainer's goes to the
+        Owner or Admin restoring it, and the audit names both.
+        """
+        self._need_person("restore")
+
+        async def audit(conn: AsyncConnection, handed_from: str | None) -> None:
+            target = {"experiment": experiment_id}
+            if handed_from:
+                target |= {"from": handed_from, "user": self.principal.user_id}
+            await self._audit("experiment.restore", target)(conn)
+
+        async with self.scoped() as conn:
+            restored = await experiments.restore(
+                conn, self.storage, self.principal.user_id, experiment_id, audit
+            )
+        if not restored:
+            raise NodeNotFoundError("Experiment not found")
+        return await self.experiment(experiment_id)
 
     def _works_on(self, experiment: dict[str, Any]) -> bool:
         """Whether the principal is its maintainer or a collaborator."""

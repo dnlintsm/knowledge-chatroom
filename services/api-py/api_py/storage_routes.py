@@ -40,6 +40,9 @@
     GET    /experiments/<id>        one experiment
     PATCH  /experiments/<id>        {title?, hypothesis?, params?, results?, status?, state?}
     DELETE /experiments/<id>        soft delete, with its files
+    GET    /experiments?deleted=1   {experiments} deleted ones you may restore, with
+                                    deletedAt, deletedBy and restorable
+    POST   /experiments/<id>/restore undo a delete, with the files deleted with it
     POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?, inputs?,
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
     POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
@@ -108,7 +111,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from . import uploads
 from .access import ROLES, AccessError, ForbiddenError
 from .chats import ChatError, ChatTakenError
-from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError
+from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, ExperimentPlaceGoneError
 from .files import ANY_VERSION, FileChangedError, FileExistsError_
 from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
@@ -291,6 +294,10 @@ def optional_id(value: Any) -> str | None | bool:
     return value if isinstance(value, str) else False
 
 
+# Claude never deletes experiments, so it doesn't see or undo deletes either.
+DELETED_REFUSED = "Claude doesn't list or restore deleted experiments"
+
+
 def agent_refusal(request: Request) -> str | None:
     """Why Claude, through a storage token, may not make this request."""
     method = request.method
@@ -298,6 +305,8 @@ def agent_refusal(request: Request) -> str | None:
     sub = "/".join(rest)
     if section == "chats":
         return "Chat history stays with its user: storage tokens can't reach it"
+    if section == "experiments" and sub == "" and "deleted" in request.query_params:
+        return DELETED_REFUSED
     if method in ("GET", "HEAD"):
         return "Claude doesn't manage access" if section == "access" and sub != "" else None
     if section == "files":
@@ -328,6 +337,8 @@ def agent_refusal(request: Request) -> str | None:
             return None
         if re.fullmatch(r"[^/]+/(maintainer|collaborators/[^/]+)", sub):
             return "Claude doesn't hand experiments over or choose who works on them"
+        if re.fullmatch(r"[^/]+/restore", sub):
+            return DELETED_REFUSED
         return "Claude doesn't delete experiments or move folders into them"
     if section == "proposals":
         return (
@@ -385,6 +396,8 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(403, str(err))
     except ExperimentExistsError as err:
         return error(409, str(err), exists=True)
+    except ExperimentPlaceGoneError as err:
+        return error(409, str(err))
     except FileExistsError_ as err:
         return error(412, str(err), exists=True)
     except FileChangedError as err:
@@ -989,6 +1002,12 @@ async def handle_experiments(request: Request, session: Session) -> Response:
     if not experiment_id:
         if method == "GET":
             node = first_param(request, "node")
+            if "deleted" in request.query_params:
+                if first_param(request, "deleted") not in ("", "1", "true"):
+                    return error(400, "deleted is 1 (or true), or leave it out")
+                if node is not None:
+                    return error(400, "Ask for ?deleted or for one ?node, not both")
+                return json_response(200, {"experiments": await session.deleted_experiments()})
             where = None if node == "root" else node or ANYWHERE
             return json_response(200, {"experiments": await session.experiments(where)})
         if method == "POST":
@@ -1061,6 +1080,12 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         if method != "GET":
             return error(405, "Method not allowed")
         return json_response(200, {"reads": await session.run_reads(reads_of.group(1))})
+
+    restore_of = re.fullmatch(r"([^/]+)/restore", experiment_id)
+    if restore_of:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.restore_experiment(restore_of.group(1)))
 
     maintainer_of = re.fullmatch(r"([^/]+)/maintainer", experiment_id)
     if maintainer_of:

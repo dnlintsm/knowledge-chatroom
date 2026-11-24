@@ -63,7 +63,8 @@ statements is a vulnerability; a consequence of one is not.
   deletes (history is kept), and accepts or rejects proposals. **An owner** of a node also
   deletes it and manages who it is shared with.
 - **A workspace Owner or Admin** manages members, roles and groups, and sees members'
-  emails and the audit log.
+  emails and the audit log. They also hand over and restore deleted experiments that were
+  shared or archived, never drafts, on nodes they can view.
 - **A hub admin** (`HUB_ADMINS`) verifies and yanks skills published to the hub. Skills are
   instructions Claude follows, and with `SKILL_SCRIPTS=on` they include scripts that run in
   the agent's sandbox, so publishing and installing a skill is a trusted act.
@@ -75,8 +76,8 @@ statements is a vulnerability; a consequence of one is not.
 ### Claude and outside tools
 
 - **Claude acts with the rights of the person chatting**, never more. In a knowledge node
-  its edits are proposals that an editor accepts. It cannot accept proposals, share or
-  archive experiments, change roles, or delete files.
+  its edits are proposals that an editor accepts. It cannot accept proposals, share,
+  archive, delete or restore experiments, change roles, or delete files.
 - **An outside MCP server** (`MCP_SERVERS`) receives the user's identity token and a
   short-lived storage token for the workspace the chat is in. With it, the server can read
   and propose what that user could. Only connect servers you would trust with that.

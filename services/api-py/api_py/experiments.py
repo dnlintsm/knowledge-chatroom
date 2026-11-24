@@ -37,6 +37,10 @@ class ExperimentError(Exception):
     """The request can't be done as asked: no title, params not an object, ... (400)."""
 
 
+class ExperimentPlaceGoneError(Exception):
+    """A deleted experiment whose node was deleted too: it can't be restored on its own (409)."""
+
+
 class ExperimentExistsError(Exception):
     """A new experiment was given an id that is already taken, even by a deleted one (409)."""
 
@@ -478,18 +482,22 @@ async def update(
 
 
 async def remove(
-    conn: AsyncConnection, storage: Storage, experiment_id: str, in_tx: InTx | None = None
+    conn: AsyncConnection,
+    storage: Storage,
+    experiment_id: str,
+    in_tx: InTx | None = None,
+    user_id: str | None = None,
 ) -> bool:
-    """Soft-deletes the experiment and its files; history stays."""
+    """Soft-deletes the experiment and its files, by `user_id`; history stays, and `restore` undoes it."""
     if not is_uuid(experiment_id):
         return False
     async with conn.transaction():
         cur = await conn.execute(
             """
-            UPDATE experiments SET deleted_at = now()
+            UPDATE experiments SET deleted_at = now(), deleted_by = %s
             WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL
             RETURNING node_id""",
-            (experiment_id, storage.workspace_id),
+            (user_id, experiment_id, storage.workspace_id),
         )
         gone = await cur.fetchone()
         if not gone:
@@ -500,6 +508,87 @@ async def remove(
         node_id = str(gone[0]) if gone[0] else None
         await storage.notify(
             conn, {"op": "experiment", "change": "delete", "id": experiment_id, "node": node_id}
+        )
+        return True
+
+
+async def list_deleted(
+    conn: AsyncConnection, workspace_id: str, user_id: str
+) -> list[dict[str, Any]]:
+    """
+    The deleted experiments `user_id` may restore (027_experiment_restore.sql),
+    newest deletion first, each as an experiment's answer with `deletedAt` and
+    `deletedBy`. `fileCount` is what a restore brings back, and `access` what
+    they would have once it is restored.
+    """
+    cur = await conn.execute(
+        """
+        SELECT d.id, d.node_id, d.author_id, u.name, d.title, d.hypothesis, d.params, d.results,
+               d.status, d.state, d.forked_at, d.updated_at, d.provenance, d.file_count,
+               CASE WHEN (d.maintainer_id = %(user)s OR d.collaborators @> jsonb_build_array(
+                            jsonb_build_object('id', %(user)s::uuid)))
+                         AND d.status <> 'archived' THEN 'writer' ELSE 'reader' END,
+               d.maintainer_id = %(user)s, d.maintainer_id, mu.name, d.maintainer_is_member,
+               d.collaborators, d.deleted_at, d.deleted_by, du.name, du.email, d.node_live
+        FROM deleted_experiments(%(ws)s, %(user)s) d
+        LEFT JOIN users u ON u.id = d.author_id
+        LEFT JOIN users mu ON mu.id = d.maintainer_id
+        LEFT JOIN users du ON du.id = d.deleted_by
+        ORDER BY d.deleted_at DESC, d.id""",
+        {"ws": workspace_id, "user": user_id},
+    )
+    found = []
+    for row in await cur.fetchall():
+        deleted_at, deleted_by, name, email, node_live = row[20:]
+        found.append(
+            {
+                **_to_experiment(row[:20]),
+                "deletedAt": iso(deleted_at),
+                "deletedBy": None
+                if deleted_by is None
+                else {"id": str(deleted_by), "name": name if name is not None else email},
+                "restorable": bool(node_live),
+            }
+        )
+    return found
+
+
+async def restore(
+    conn: AsyncConnection,
+    storage: Storage,
+    user_id: str,
+    experiment_id: str,
+    in_tx: Callable[[AsyncConnection, str | None], Awaitable[Any]] | None = None,
+) -> bool:
+    """
+    Brings a deleted experiment back with the files deleted with it, for
+    someone who may (027_experiment_restore.sql); False when it isn't there
+    for them. A departed maintainer's goes to the Owner or Admin restoring it,
+    and `in_tx` gets that departed maintainer when it did (else None).
+    """
+    if not is_uuid(experiment_id):
+        return False
+    async with conn.transaction():
+        cur = await conn.execute(
+            "SELECT outcome, handed_from, node_id FROM restore_experiment(%s, %s, %s)",
+            (storage.workspace_id, user_id, experiment_id),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return False
+        outcome, handed_from, node = row
+        if outcome == "node_deleted":
+            raise ExperimentPlaceGoneError("Its place was deleted, so it can't be restored")
+        if in_tx:
+            await in_tx(conn, str(handed_from) if handed_from else None)
+        await storage.notify(
+            conn,
+            {
+                "op": "experiment",
+                "change": "restore",
+                "id": experiment_id,
+                "node": str(node) if node else None,
+            },
         )
         return True
 

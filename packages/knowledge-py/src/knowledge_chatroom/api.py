@@ -136,7 +136,7 @@ class NodeEvent(BaseModel):
 
 class ExperimentEvent(BaseModel):
     op: Literal["experiment"]
-    change: Literal["create", "update", "status", "delete"]
+    change: Literal["create", "update", "status", "delete", "restore"]
     id: str
     node: str | None
     """
@@ -1795,6 +1795,18 @@ class Experiment(BaseModel):
     collaborators: list[Collaborator]
     """
     Members its maintainer added to work on it.
+    """
+    deletedAt: Timestamp | None = None
+    """
+    Only in the ?deleted list, when it was deleted.
+    """
+    deletedBy: Collaborator | None = None
+    """
+    Only in the ?deleted list, who deleted it; null when unknown (deleted with its node) or gone.
+    """
+    restorable: bool | None = None
+    """
+    Only in the ?deleted list, false when its node was deleted too (restore answers 409).
     """
 
 
