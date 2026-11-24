@@ -342,3 +342,32 @@ def test_a_run_marks_its_folder_and_idle_ones_are_removed_as_runs_start(claude, 
         assert not stale.exists()
         # Held only while the run lasts.
         assert not adapter._in_use
+
+
+def test_a_folders_idle_time_counts_from_the_end_of_its_last_run(claude, tmp_path, monkeypatch):
+    """A run longer than the idle wait must not leave its folder due for removal as it finishes."""
+    from agent_py.skills import run_folder
+    from agent_py.workdir import LAST_USED
+
+    mark = run_folder(tmp_path, LOCAL["id"]) / LAST_USED
+    long_ago = time.time() - 3 * 24 * 3600
+    answer = claude.query
+
+    async def after_days(self, prompt, session_id="default"):
+        # As if the run had started three days ago.
+        os.utime(mark, (long_ago, long_ago))
+        await answer(self, prompt, session_id)
+
+    monkeypatch.setattr(claude, "query", after_days)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        evts = events(c.post("/agent/report", json=run_input(user=LOCAL)))
+        assert types(evts)[-1] == "RUN_FINISHED"
+        assert time.time() - mark.stat().st_mtime < 60
+        # Another chat's run, starting right after, leaves the folder alone.
+        adapter._swept_at = None
+        other = run_input(user=LOCAL)
+        other["threadId"] = "t2"
+        events(c.post("/agent/report", json=other))
+        assert mark.exists()

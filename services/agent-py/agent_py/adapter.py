@@ -39,6 +39,7 @@ the thread's first run. Three things change that for this app:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import Counter, OrderedDict
@@ -326,6 +327,11 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 self._in_use[cwd] -= 1
                 if self._in_use[cwd] <= 0:
                     del self._in_use[cwd]
+                    # Idle is counted from the end of the last run in the folder, not
+                    # from its start: a long run must not leave it due for removal the
+                    # moment it finishes, while its Claude Code session is still kept.
+                    with contextlib.suppress(OSError):
+                        mark_used(cwd)
 
     async def _remove_idle_folders(self) -> None:
         if self._skills_root is None or self._idle_seconds is None:
