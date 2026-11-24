@@ -1,4 +1,4 @@
-"""What one principal may do with the knowledge tree and access, as Session in apps/agent/src/storage/session.ts.
+"""What one principal may do with the knowledge tree and access.
 
 Every route goes through here, so access is checked and audited in one place.
 A node the principal can't see at all is reported as not found, so its
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -22,10 +22,10 @@ from . import chats, experiments, nodes, proposals
 from .access import AccessService, ForbiddenError, Principal, Role, at_least, is_uuid, iso
 from .db import as_user
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, clean_input, same_json
-from .files import FileService
+from .files import FileChangedError, FileExistsError_, FileService
 from .nodes import NodeError, NodeNotFoundError
 from .paths import js_trim, normalize_path
-from .proposals import EVERYWHERE, ProposalError
+from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .run_report import REPORT_PATH, new_report, report_front_matter, with_front_matter
 from .storage import Storage
 
@@ -42,6 +42,8 @@ EMPTY_LEVEL_NAME = "None"
 _AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "inputs", "note"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
+# For decide: the reviewer didn't say which version of the file they compared with.
+NOT_SEEN = object()
 
 
 def _now() -> str:
@@ -367,7 +369,7 @@ class Session:
         provenance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Starts a run for you (issue #82): a new draft experiment like
+        Starts a run for you: a new draft experiment like
         create_experiment's, in state running unless `given` says otherwise,
         with each input file linked in read only under inputs/, and a report.md
         whose front matter holds the run's record. You need to be able to read
@@ -467,7 +469,7 @@ class Session:
         self, experiment_id: str, inputs: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """
-        Adds input files to an existing run or experiment (issue #114): each is
+        Adds input files to an existing run or experiment: each is
         linked in read only under inputs/ at its current version and appended to
         the inputs its provenance records, so a rerun reads them too. Only its
         maintainer and collaborators can, while it isn't archived; a finished
@@ -507,9 +509,9 @@ class Session:
         provenance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Runs an experiment again as a new run (issue #82): same place, parameters,
+        Runs an experiment again as a new run: same place, parameters,
         hypothesis and inputs unless told otherwise. The inputs are read from
-        the old run's inputs/ at the content its record names (#187), even if
+        the old run's inputs/ at the content its record names, even if
         someone edited them since; `inputs` instead reads those files at their
         current versions. The old run stays as it is; the new one's provenance
         names it. You need to be able to see the old run.
@@ -851,6 +853,8 @@ class Session:
                 "proposal.create", {"proposal": proposal_id, "node": node_id, "path": path}
             )(conn)
 
+        # The upload first, while no connection is held for it.
+        await proposals.store(self.storage, path, data, mime)
         async with self.scoped() as conn:
             proposal_id = await proposals.propose(
                 conn,
@@ -863,6 +867,7 @@ class Session:
                 author_id=principal.user_id,
                 note=note,
                 in_tx=in_tx,
+                stored=True,
             )
         return await self.proposal(proposal_id)
 
@@ -929,15 +934,29 @@ class Session:
             ids.append(proposal_id)
         return [await self.proposal(proposal_id) for proposal_id in ids]
 
-    async def decide(self, proposal_id: str, decision: str) -> dict[str, Any]:
+    async def decide(
+        self,
+        proposal_id: str,
+        decision: str,
+        *,
+        seen: str | None = None,
+        base: str | None | object = NOT_SEEN,
+    ) -> dict[str, Any]:
         """
         Accepts (writes it as the file's next version, credited to its proposer),
         rejects, or withdraws a proposal. Accepting and rejecting need editor on
         its place; withdrawing is for its proposer.
+
+        An accept can say what its reviewer looked at: `seen`, the proposed
+        content's sha256, and `base`, the sha256 of the file it was compared with
+        (None: there was no file). ProposalChangedError when either is another
+        one by now, so nobody accepts content, or replaces a file, they haven't seen.
         """
         proposal = await self.proposal(proposal_id)
         if proposal["status"] != "open":
             raise ProposalError(f"This proposal was already {proposal['status']}")
+        if decision == "accept" and seen is not None and seen != proposal["sha256"]:
+            raise ProposalChangedError(proposals.REVISED)
         if decision == "withdraw":
             if not proposal["mine"]:
                 raise ForbiddenError("Only its proposer can withdraw a proposal")
@@ -957,25 +976,42 @@ class Session:
         data = await self.storage.blobs.get(proposal["sha256"])
         decided = False
 
+        # The bytes written are the ones read above: a revision since then is refused.
+        written = proposal["sha256"]
+
         async def in_tx(tx: AsyncConnection) -> None:
             nonlocal decided
-            await proposals.decide_in(tx, self.storage, proposal_id, "accept", user_id)
+            await proposals.decide_in(
+                tx, self.storage, proposal_id, "accept", user_id, sha256=written
+            )
             await audit(tx)
             decided = True
 
-        async with self.scoped() as conn:
-            await files.write(
-                conn,
-                proposal["path"],
-                data,
-                mime=proposal["mime"],
-                author=proposal["author"],
-                author_id=proposal["authorId"],
-                in_tx=in_tx,
-            )
-            # The file already had these bytes, so no version was added.
-            if not decided:
-                await proposals.decide(conn, self.storage, proposal_id, "accept", user_id, audit)
+        path = proposal["path"]
+        try:
+            async with self.scoped() as conn:
+                await files.write(
+                    conn,
+                    path,
+                    data,
+                    mime=proposal["mime"],
+                    author=proposal["author"],
+                    author_id=proposal["authorId"],
+                    in_tx=in_tx,
+                    create_only=base is None,
+                    if_match=[base] if isinstance(base, str) else None,
+                    # The proposal's blob: read from the store just above.
+                    stored=True,
+                )
+                # The file already had these bytes, so no version was added.
+                if not decided:
+                    await proposals.decide(
+                        conn, self.storage, proposal_id, "accept", user_id, audit, sha256=written
+                    )
+        except (FileChangedError, FileExistsError_) as err:
+            raise ProposalChangedError(
+                f"{path} changed after you opened this proposal; look at it again before accepting"
+            ) from err
         return await self.proposal(proposal_id)
 
     # Chat history: the principal's own, whatever their role (chats.py)
@@ -1020,11 +1056,15 @@ class Session:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Files this principal may read that match, best first (see search.py)."""
+        search = self.storage.search
+        # Before the connection: the embedding model may be a slow remote API.
+        vector = await search.meaning(query)
         async with self.scoped() as conn:
-            return await self.storage.search.search(
+            return await search.search(
                 conn,
                 self.principal.user_id,
                 query,
+                vector=vector,
                 scope=scope,
                 near=near,
                 near_experiment=near_experiment,
@@ -1042,7 +1082,7 @@ class Session:
         if op == "node":
             return await self.access.sees_node(user_id, str(event.get("id")))
         if op == "experiment":
-            # Who just stopped working on it hears that too, to close it (issue #255).
+            # Who just stopped working on it hears that too, to close it.
             if user_id in (event.get("left") or []):
                 return True
             return await self.access.hears_experiment(
@@ -1061,8 +1101,16 @@ class Session:
     # The org tree and grants
 
     async def users(self) -> list[dict[str, Any]]:
-        """The workspace's members, not everyone who has signed in."""
-        return await self.access.users()
+        """
+        The workspace's members, not everyone who has signed in: names for a
+        Member, and emails too for an Owner or Admin.
+        """
+        return await self.access.users(private=self.membership in ("owner", "admin"))
+
+    async def me(self) -> dict[str, Any] | None:
+        """The caller's own id, subject, email and name, while they are a member here."""
+        user_id = self.principal.user_id
+        return await self.access.user(user_id) if await self.access.is_member(user_id) else None
 
     async def people(self) -> list[dict[str, Any]]:
         """The workspace's members, with roles and groups: for its Owners and Admins."""
@@ -1189,7 +1237,7 @@ class Session:
 
 class FilesSession:
     """
-    One place's files, as one principal (FilesSession in session.ts). Reads need
+    One place's files, as one principal. Reads need
     viewer; writes and deletes need editor, like in a shared folder (a deleted
     file keeps its history, so nothing is lost).
     """
@@ -1230,24 +1278,36 @@ class FilesSession:
 
     async def read(self, path: str) -> tuple[dict[str, Any], bytes] | None:
         async with self.session.scoped() as conn:
-            return await self.service.read(conn, path)
+            info = await self.service.stat(conn, path)
+        # The bytes after the connection went back to the pool (FileService.content).
+        return (info, await self.service.content(info)) if info else None
 
     async def history(self, path: str) -> builtins.list[dict[str, Any]] | None:
         async with self.session.scoped() as conn:
             return await self.service.history(conn, path)
 
     async def write(
-        self, path: str, data: bytes, *, mime: str | None = None, create_only: bool = False
+        self,
+        path: str,
+        data: bytes,
+        *,
+        mime: str | None = None,
+        create_only: bool = False,
+        if_match: Collection[str] | None = None,
     ):
         self._need_editor()
         principal = self.session.principal
+        # The upload first, while no connection is held for it (FileService.store).
+        await self.service.store(path, data, mime)
         async with self.session.scoped() as conn:
             return await self.service.write(
                 conn,
                 path,
                 data,
                 mime=mime,
+                stored=True,
                 create_only=create_only,
+                if_match=if_match,
                 author=principal.actor,
                 author_id=principal.user_id,
                 in_tx=self._audit("file.write", {"path": path, "size": len(data)}),

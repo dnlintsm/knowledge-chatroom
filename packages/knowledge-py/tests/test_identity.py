@@ -3,6 +3,7 @@
 import base64
 import json
 
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from knowledge_chatroom import identity
@@ -60,9 +61,81 @@ def test_identity_refuses_expired_tampered_and_local_tokens():
     assert identity.verify("garbage", PUBLIC_KEY, "mcp:lab") is None
 
 
+def test_claims_checks_the_signature_and_the_expiry_and_nothing_else():
+    key = TEST_KEY.public_key()
+    # No subject or audience needed: callers check who the token is for.
+    assert identity.claims(sign({"exp": 4102444800}), key) == {"exp": 4102444800}
+    assert identity.claims(sign({"sub": "a", "exp": 100}), key, now=99) == {"sub": "a", "exp": 100}
+    assert identity.claims(sign({"sub": "a", "exp": 100}), key, now=101) is None
+    assert identity.claims(sign({"sub": "a", "exp": 100}), PUBLIC_KEY, now=99) is None
+    # An expiry has to be a number: true is not "in one second".
+    for exp in (True, "4102444800", None):
+        assert identity.claims(sign({"sub": "a", "exp": exp}), key, now=0) is None
+    assert identity.claims(sign({"sub": "a"}), key) is None
+    # Claims are an object, and a signature is 64 bytes.
+    body = "v2." + _b64(b"[1]")
+    assert identity.claims(body + "." + _b64(TEST_KEY.sign(body.encode())), key) is None
+    head, payload, signature = sign({"sub": "a", "exp": 4102444800}).split(".")
+    for bad in (
+        None,
+        "",
+        "v2.only-two",
+        f"{head}.{payload}.{signature[:-4]}",
+        f"{head}.{payload}.!",
+    ):
+        assert identity.claims(bad, key) is None
+
+
+def test_a_name_or_email_that_is_not_text_is_left_out():
+    token = sign({"sub": "a", "exp": 4102444800, "aud": "mcp:lab", "email": ["x"], "name": 7})
+    assert identity.verify(token, TEST_KEY.public_key(), "mcp:lab") == identity.User(sub="a")
+
+
 def test_caller_without_login_is_the_local_user():
     assert identity.caller(None, None, "mcp:lab") == identity.LOCAL_USER
     assert identity.caller({}, PUBLIC_KEY, "mcp:lab") is None
     assert identity.caller({identity.HEADER: FOR_LAB}, PUBLIC_KEY, "mcp:lab").sub == "test|alice"
     # Login is on but this server has no key: refused, not the local user.
     assert identity.caller({identity.HEADER: FOR_LAB}, None, "mcp:lab") is None
+
+
+def test_login_comes_from_auth_mode_and_the_key_never_from_a_missing_setting():
+    """No key used to mean "no login", so a forgotten key turned login off."""
+    key = "Z1iN8KqPV0u2Dk95GsXXFlHQE05RT15l2-1TzD3XDI8"
+    assert identity.login_from_env({"AUTH_MODE": "local"}) == identity.Login(required=False)
+    assert identity.login_from_env({"AUTH_MODE": " Local ", "KNOWLEDGE_PUBLIC_KEY": " "}) == (
+        identity.Login(required=False)
+    )
+    for env in ({"KNOWLEDGE_PUBLIC_KEY": key}, {"AUTH_MODE": "oidc", "KNOWLEDGE_PUBLIC_KEY": key}):
+        login = identity.login_from_env(env)
+        assert login.required and login.key is not None
+    # Login without the key yet: on, and nobody passes.
+    for env in ({"AUTH_MODE": "oidc"}, {"AUTH_SECRET": "0123456789abcdef0123456789abcdef"}):
+        assert identity.login_from_env(env) == identity.Login(required=True, key=None)
+    for env, message in (
+        ({}, "Login is not configured"),
+        ({"KNOWLEDGE_PUBLIC_KEY": ""}, "Login is not configured"),
+        ({"AUTH_MODE": "local", "KNOWLEDGE_PUBLIC_KEY": key}, "must not be set"),
+        ({"AUTH_MODE": "maybe"}, "must be"),
+    ):
+        with pytest.raises(identity.LoginConfigError, match=message):
+            identity.login_from_env(env)
+
+
+def test_caller_follows_the_login_setting():
+    signed = {identity.HEADER: FOR_LAB}
+    on = identity.Login(required=True, key=PUBLIC_KEY)
+    assert identity.caller(signed, on, "mcp:lab").sub == "test|alice"
+    assert identity.caller({}, on, "mcp:lab") is None
+    assert identity.caller(signed, on, "mcp:other") is None
+    # Login on, key missing: refused with or without a token.
+    missing = identity.Login(required=True)
+    assert identity.caller(signed, missing, "mcp:lab") is None
+    assert identity.caller({}, missing, "mcp:lab") is None
+    # No login: the local user, and a signed call is refused rather than ignored.
+    off = identity.Login(required=False)
+    assert identity.caller(None, off, "mcp:lab") == identity.LOCAL_USER
+    assert identity.caller(signed, off, "mcp:lab") is None
+    # A bare key or None, as servers written before login_from_env() pass.
+    assert identity.caller(signed, PUBLIC_KEY, "mcp:lab").sub == "test|alice"
+    assert identity.caller({}, None, "mcp:lab") == identity.LOCAL_USER

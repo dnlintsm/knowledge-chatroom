@@ -51,10 +51,17 @@ docker compose --profile demo --profile papers up --build
 | --- | --- |
 | `PAPERS_HOST`, `PAPERS_PORT` | Where it listens (default `127.0.0.1:9200`). |
 | `PAPERS_NAME` | Its name in `MCP_SERVERS` (default `papers`). Forwarded users are signed for that name. |
-| `KNOWLEDGE_PUBLIC_KEY` | The chatroom's public key, from the agent's `GET /identity/public-key`, when login is on. Never give this server `AUTH_SECRET`. Unset = no login: every call is the local user. |
-| `KNOWLEDGE_STORAGE_URL` | The chatroom's agent server, where `save_paper` writes (default `http://127.0.0.1:8000`). |
+| `AUTH_MODE` | `local`: no login, every call is the local user. `oidc`: login, with the key below. Required unless the key is set; with neither the server refuses to start. |
+| `KNOWLEDGE_PUBLIC_KEY` | The chatroom's public key, from the API server's `GET /identity/public-key`, when login is on. Never give this server `AUTH_SECRET`. |
+| `KNOWLEDGE_STORAGE_URL` | The chatroom's API server (`services/api-py`), where `save_paper` writes (default `http://127.0.0.1:8000`). |
 | `OPENALEX_API_KEY`, `OPENALEX_MAILTO` | Optional. A key raises OpenAlex's daily budget; an email joins its "polite pool". |
 | `PAPERS_MAX_PDF_BYTES` | Largest PDF `read_paper` and `save_paper` download (default 30 MB). |
+| `PAPERS_MAX_PDF_PAGES` | How many pages of a PDF `read_paper` reads (default 500). |
+
+A paper's PDF link comes from the source's answer, so it is fetched only over https and only
+from a public address, checked again on each redirect; links into the network (private,
+loopback, link-local or metadata addresses) are refused. Behind an `HTTPS_PROXY` the proxy
+resolves names, so keeping it off internal addresses is the proxy's job.
 
 ## The tools
 

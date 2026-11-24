@@ -1,23 +1,27 @@
-"""Settings from the environment, read as the TypeScript agent server reads them.
+"""Settings from the environment.
 
-TS_AGENT_URL         optional legacy TypeScript server; unset disables forwarding
+TS_AGENT_URL         an older release's TypeScript server to forward unknown
+                     routes to; unset (the default) disables forwarding
 API_PY_HOST / API_PY_PORT
                      where this server listens (default 127.0.0.1:8000, the
                      address the app and agent-py know as LOCAL_AGENT_URL)
-DATABASE_URL         the same Postgres as the TypeScript server; unset: no storage
+DATABASE_URL         Postgres (only this server connects to it); unset: no storage
 AUTH_MODE, AUTH_SECRET
                      login, with the rules of packages/contracts/src/auth-mode.ts
 MIGRATIONS_DIR       the SQL migrations to apply and expect in the database
-                     (default apps/agent/src/storage/migrations in this repository)
-MIGRATIONS           off: don't apply them, only wait for them (the TypeScript
-                     server then applies them); otherwise this server does, and
-                     the TypeScript server behind it runs with MIGRATIONS=off
-S3_*                 the blob store, as the TypeScript server reads them (blobs.py)
+                     (default services/api-py/migrations in this repository)
+MIGRATIONS           off: don't apply them, only wait for another process to
+                     (another server, or `python -m api_py.migrate`);
+                     otherwise this server does
+ROW_SECURITY         required: don't serve storage unless Postgres enforces
+                     access too (row-level security, storage.py); otherwise
+                     a database user who can't use the restricted role only
+                     gets a log line, and /health says rowSecurity: off
+S3_*                 the blob store (blobs.py)
 MAX_UPLOAD_BYTES     the largest file one upload may add (default 52428800, 50 MB)
 EMBEDDING_MODEL, EMBEDDING_CACHE_DIR, EMBEDDING_BASE_URL, EMBEDDING_API_KEY,
 EMBEDDING_DIMENSIONS, SEARCH_MIN_SIMILARITY
-                     search by meaning, as the TypeScript server reads them
-                     (semantic.py); this server runs the indexer
+                     search by meaning (semantic.py); this server runs the indexer
 HUB_ADMINS           who moderates the skill hub: emails or login subjects
 WORKSPACE_CREATORS   who may create workspaces: emails or login subjects
                      (unset: every signed-in user; the local user always may)
@@ -26,17 +30,15 @@ PLATFORM_ADMINS      who sees the workspace inventory and may add an Owner to a
                      nobody; the local user always may)
 RECOVERY_IDLE_DAYS   how recently a member must have signed in to count as
                      holding Full access in the inventory (default 90)
-SKILL_SCRIPTS        on: skills' scripts run (on the TypeScript server, which
+SKILL_SCRIPTS        on: skills' scripts run (on the chat agent, agent-py, which
                      runs chats; /skills here says so)
-BUILTIN_SKILLS_DIR   the built-in skills (default apps/agent/skills in this repository)
-MEMORY               on: each user's memory (as on the TypeScript server); this
-                     server serves the notes, settings, inbox and activity
+BUILTIN_SKILLS_DIR   the built-in skills (default services/api-py/skills in this repository)
+MEMORY               on: each user's memory; this server serves the notes, settings, inbox and activity
 MEMORY_LEARN, MEMORY_IDLE_MINUTES
                      with memory, learning from chats once they are quiet
-                     (memory_learn.py; MEMORY_LEARN=off on the TypeScript server)
+                     (memory_learn.py)
 MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
-                     the "+" menu's tool servers and their calls (tools.py); with
-                     MCP_SERVERS unset, /tools stays with the TypeScript server
+                     the "+" menu's tool servers and their calls (tools.py)
 """
 
 from __future__ import annotations
@@ -57,8 +59,8 @@ if TYPE_CHECKING:
 
 # services/api-py/api_py/config.py -> the repository root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MIGRATIONS_DIR = REPO_ROOT / "apps" / "agent" / "src" / "storage" / "migrations"
-DEFAULT_BUILTIN_SKILLS_DIR = REPO_ROOT / "apps" / "agent" / "skills"
+DEFAULT_MIGRATIONS_DIR = REPO_ROOT / "services" / "api-py" / "migrations"
+DEFAULT_BUILTIN_SKILLS_DIR = REPO_ROOT / "services" / "api-py" / "skills"
 DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SECRET_HINT = "(at least 32 characters, e.g. openssl rand -hex 32)"
 
@@ -68,7 +70,11 @@ class ConfigError(ValueError):
 
 
 def auth_secret(env: Mapping[str, str]) -> str | None:
-    """AUTH_SECRET when login is on, None without login; refuses what auth-mode.ts refuses."""
+    """AUTH_SECRET when login is on, None without login (AUTH_MODE=local, said outright).
+
+    Refuses what auth-mode.ts refuses, and also the case it allows in
+    development: neither AUTH_MODE nor AUTH_SECRET.
+    """
     requested = (env.get("AUTH_MODE") or "").strip().lower() or None
     secret = env.get("AUTH_SECRET") or None
     if requested and requested not in ("oidc", "local"):
@@ -85,12 +91,24 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
         return secret
     if requested == "oidc":
         raise ConfigError(f"AUTH_MODE=oidc needs AUTH_SECRET {_SECRET_HINT}")
-    if env.get("NODE_ENV") == "production":
-        raise ConfigError(
-            "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET and OIDC_* for sign-in, "
-            "or AUTH_MODE=local to run without login (everyone is one user)"
-        )
-    return None
+    # Neither set. The app (auth-mode.ts) lets this through in development and
+    # refuses it in a production build; this server has no such build, so it
+    # always refuses: a secret left out must not quietly turn login off.
+    # `pnpm dev` passes AUTH_MODE=local for it (scripts/dev-py.mjs).
+    raise ConfigError(
+        "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET (the app's) for sign-in, "
+        "or AUTH_MODE=local to run without login (everyone is one user)"
+    )
+
+
+def row_security_required(env: Mapping[str, str]) -> bool:
+    """ROW_SECURITY: unset or `optional` (the default), or `required`."""
+    value = (env.get("ROW_SECURITY") or "").strip().lower()
+    if value in ("", "optional"):
+        return False
+    if value == "required":
+        return True
+    raise ConfigError(f"ROW_SECURITY must be required or optional, not {value!r}")
 
 
 @dataclass(frozen=True)
@@ -100,8 +118,10 @@ class Settings:
     auth_secret: str | None
     migrations_dir: Path
     host: str = "127.0.0.1"
-    # Whether this server applies the migrations (MIGRATIONS not off), or waits for the TypeScript one to.
+    # Whether this server applies the migrations (MIGRATIONS not off), or waits for another process to.
     migrations: bool = True
+    # ROW_SECURITY=required: storage isn't served while row-level security is off.
+    row_security_required: bool = False
     port: int = 8000
     # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
     s3: S3Settings | None = None
@@ -122,7 +142,7 @@ class Settings:
     # With memory, learning from quiet chats (MEMORY_LEARN not off), and after how long (memory_learn.py).
     memory_learn: bool = True
     memory_idle_minutes: float = 10.0
-    # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to the TypeScript server.
+    # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to TS_AGENT_URL's server.
     tools: ToolsSettings | None = None
 
 
@@ -140,6 +160,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         auth_secret=auth_secret(env),
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),
         migrations=env.get("MIGRATIONS") != "off",
+        row_security_required=row_security_required(env),
         host=env.get("API_PY_HOST") or "127.0.0.1",
         port=int(port),
         s3=S3Settings.from_env(env),
@@ -165,7 +186,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
 
 
 def idle_minutes(value: str | None) -> float:
-    """MEMORY_IDLE_MINUTES as learn.ts reads it: Number(value), finite and >= 0, else 10."""
+    """MEMORY_IDLE_MINUTES: a finite number >= 0 (read as JavaScript's Number(value) reads it), else 10."""
     if value is None:
         return 10.0
     text = value.strip()
@@ -188,7 +209,7 @@ def _tools(env: Mapping[str, str]) -> ToolsSettings | None:
 
 
 def max_upload_bytes(env: Mapping[str, str]) -> int:
-    """MAX_UPLOAD_BYTES as config.ts reads it: a positive whole number of bytes."""
+    """MAX_UPLOAD_BYTES: a positive whole number of bytes."""
     raw = env.get("MAX_UPLOAD_BYTES") or str(DEFAULT_MAX_UPLOAD_BYTES)
     match = re.match(rf"[{JS_SPACE}]*([+-]?\d+)", raw)  # Number.parseInt
     if not match or int(match.group(1)) <= 0:

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Role, ServerEvent, ServerFile } from "../apps/web/src/components/workspace/server-files";
+import { showPlaces } from "./places";
 
 /** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
 async function showFiles(page: Page) {
@@ -116,7 +117,7 @@ test("overlapping saves remain ordered when leaving a place", async ({ page }) =
     await page.getByTestId("file-editor").fill("# First");
     await expect.poll(() => backend.writes).toEqual(["# First"]);
     await page.getByTestId("file-editor").fill("# Latest");
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     first.release();
@@ -177,7 +178,7 @@ test("a remote response from the previous place cannot replace the current file"
     await event(page, { op: "write", node: null, path: PATH, sha256: info.sha256 });
     await expect.poll(() => loading).toBe(true);
     backend.transport.beforeRead = async () => {};
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     await showFiles(page);
@@ -195,7 +196,7 @@ test("a file still loading when you leave and come back loads on return", async 
   let loading = false;
   try {
     const enterOther = async () => {
-      await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+      await showPlaces(page);
       await page.getByTestId("knowledge-node").filter({ hasText: "Other" }).click();
       await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Other");
     };
@@ -307,4 +308,44 @@ test("deleting a failed draft clears its error and allows the same path to sync 
   await event(page, { op: "write", node: null, path: PATH, sha256: info.sha256 });
   await row.click();
   await expect(page.getByTestId("file-editor")).toHaveValue("# Recreated remotely");
+});
+
+test("a signed-in workspace waits for storage instead of becoming a browser-only one", async ({ page }) => {
+  // With storage down at page load, edits went to this browser and were never uploaded.
+  let up = false;
+  let asked = 0;
+  const info: ServerFile = {
+    path: PATH, kind: "note", mime: "text/markdown", size: 8,
+    sha256: "1".padStart(64, "0"), updatedAt: new Date().toISOString(), author: "user",
+  };
+  await page.route(/\/api\/(files|nodes|experiments|proposals|auth\/me)([/?]|$)/, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/auth/me") {
+      return route.fulfill({ json: { login: true, user: { sub: "kc|alice", name: "Alice" } } });
+    }
+    if (url.searchParams.has("watch")) return route.abort();
+    if (url.pathname === "/api/experiments") return route.fulfill({ json: { experiments: [] } });
+    if (url.pathname === "/api/proposals") return route.fulfill({ json: { proposals: [] } });
+    if (url.pathname === "/api/nodes") return route.fulfill({ json: { types: [], rootRole: "owner", nodes: [] } });
+    if (url.pathname === "/api/files") {
+      asked++;
+      return up ? route.fulfill({ json: { files: [info] } }) : route.fulfill({ status: 500, json: { error: "Storage failed" } });
+    }
+    return route.fulfill({ body: "# Stored", contentType: "text/markdown" });
+  });
+  await page.goto("/");
+  const status = page.getByRole("status");
+  await expect(status.filter({ hasText: "Storage unreachable" })).toBeVisible();
+  // Not this browser's workspace: nothing can be typed into a copy that would never be uploaded.
+  await expect(status.filter({ hasText: "This browser" })).toHaveCount(0);
+  await expect(page.getByTestId("file-editor")).toHaveCount(0);
+  const before = asked;
+  await expect.poll(() => asked, { timeout: 15_000 }).toBeGreaterThan(before);
+  await expect(status.filter({ hasText: "Storage unreachable" })).toBeVisible();
+
+  up = true;
+  await expect(status.filter({ hasText: "Saved" })).toBeVisible({ timeout: 15_000 });
+  await showFiles(page);
+  await page.getByRole("treeitem", { name: /sync\.md/ }).click();
+  await expect(page.getByTestId("file-preview")).toContainText("Stored");
 });

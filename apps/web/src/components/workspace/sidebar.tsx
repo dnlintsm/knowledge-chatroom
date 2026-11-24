@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -13,9 +14,7 @@ import {
   FlaskConical,
   ListFilter,
   ListTodo,
-  LocateFixed,
   Network,
-  Package,
   Pencil,
   Plus,
   RefreshCw,
@@ -26,6 +25,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
@@ -39,6 +39,7 @@ import {
   newFilePath,
   type Folder,
 } from "./file-tree";
+import { useCurrentWorkspace } from "./current-workspace";
 import { KnowledgeTree } from "./knowledge-tree";
 import { persistCollapsedFolders, readCollapsedFolders, savedState } from "./local-persistence";
 import { experimentPlace, type PlaceId } from "./server-files";
@@ -67,13 +68,19 @@ export type { SidebarView };
 const VIEWS: { id: SidebarView; label: string; icon: typeof Files }[] = [
   { id: "files", label: "Files", icon: Files },
   { id: "search", label: "Search", icon: Search },
-  { id: "runs", label: "Experiments", icon: FlaskConical },
-  { id: "knowledge", label: "Knowledge", icon: Network },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "memory", label: "Memory", icon: Brain },
-  { id: "uploads", label: "Uploads", icon: Upload },
-  { id: "artifacts", label: "Artifacts", icon: Package },
 ];
+
+/**
+ * Where you are in the workspace: the knowledge tree and its experiments.
+ * They open from the place switcher at the top of the Files view, not the rail.
+ */
+const PLACE_VIEWS: { id: SidebarView; label: string }[] = [
+  { id: "knowledge", label: "Knowledge" },
+  { id: "runs", label: "Experiments" },
+];
+const isPlaceView = (view: SidebarView) => PLACE_VIEWS.some((v) => v.id === view);
 
 /** VS Code-style icon rail. Clicking the active view collapses the panel. */
 export function ActivityBar({
@@ -150,8 +157,9 @@ export function SidePanel({ view }: { view: SidebarView }) {
     void upload(e.dataTransfer.files);
   };
 
-  const label = VIEWS.find((v) => v.id === view)?.label ?? "";
+  const label = [...VIEWS, ...PLACE_VIEWS].find((v) => v.id === view)?.label ?? "";
   const title = label;
+  const placeView = isPlaceView(view);
   const fileTools = view === "files" && !loading;
   // Viewers see the files but get no controls that change them.
   const actions: ReactNode = (
@@ -161,7 +169,7 @@ export function SidePanel({ view }: { view: SidebarView }) {
           <FilePlus className="size-4" />
         </IconButton>
       )}
-      {canEdit && (view === "files" || view === "uploads") && (
+      {canEdit && view === "files" && (
         <IconButton label="Upload files" onClick={() => inputRef.current?.click()}>
           <Upload className="size-4" />
         </IconButton>
@@ -191,12 +199,17 @@ export function SidePanel({ view }: { view: SidebarView }) {
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
-      <header className="flex h-10 shrink-0 items-center justify-between gap-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-        <span className="min-w-0 truncate">{title}</span>
-        <div role="toolbar" aria-label={`${title} actions`} className="flex shrink-0 items-center normal-case">
-          {actions}
-        </div>
-      </header>
+      {placeView ? (
+        <PlaceViewsHeader view={view} />
+      ) : (
+        <header className="flex h-10 shrink-0 items-center justify-between gap-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+          <span className="min-w-0 truncate">{title}</span>
+          <div role="toolbar" aria-label={`${title} actions`} className="flex shrink-0 items-center normal-case">
+            {actions}
+          </div>
+        </header>
+      )}
+      {view === "files" && !loading && <PlaceSwitcher />}
       <input
         ref={inputRef}
         type="file"
@@ -229,18 +242,6 @@ export function SidePanel({ view }: { view: SidebarView }) {
               />
             )}
             {view === "memory" && <MemoryPanel />}
-            {view === "uploads" && (
-              <FlatList
-                files={files.filter((f) => f.kind === "upload")}
-                empty={canEdit ? "Drop files here or use the upload button." : "No uploads here."}
-              />
-            )}
-            {view === "artifacts" && (
-              <FlatList
-                files={files.filter((f) => f.kind === "artifact")}
-                empty="Files Claude creates show up here."
-              />
-            )}
           </>
         )}
       </div>
@@ -255,6 +256,66 @@ export function SidePanel({ view }: { view: SidebarView }) {
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * The top of the Files view: where you are (the knowledge-tree path, or the
+ * workspace at its root). It opens the knowledge tree and its experiments,
+ * which replace the file tree until you go back. Needs server storage.
+ */
+function PlaceSwitcher() {
+  const { storageMode, lineage } = useWorkspace();
+  const workspace = useCurrentWorkspace();
+  const { sidebar } = useWorkbench();
+  if (storageMode !== "server") return null;
+  const steps = lineage.length ? lineage.map((n) => n.name) : [workspace?.name ?? "Workspace"];
+  return (
+    <div className="shrink-0 px-2 pb-1.5">
+      <button
+        type="button"
+        data-testid="place-switcher"
+        aria-label={`Place: ${steps.join(" › ")}`}
+        title="Knowledge tree and experiments"
+        onClick={() => sidebar.show("knowledge")}
+        className="flex h-7.5 w-full cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-start text-label text-[var(--muted-foreground)] hover:border-brand pointer-coarse:h-10"
+      >
+        <Network aria-hidden="true" className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {steps.map((name, i) => (
+            <span key={i}>
+              {i > 0 && <span className="mx-1 opacity-60">›</span>}
+              {i === steps.length - 1 ? <b className="font-semibold text-[var(--foreground)]">{name}</b> : name}
+            </span>
+          ))}
+        </span>
+        <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+/** The knowledge tree and experiments: a way back to Files and a switch between the two. */
+function PlaceViewsHeader({ view }: { view: SidebarView }) {
+  const { sidebar } = useWorkbench();
+  return (
+    <header className="shrink-0 px-2 pt-1.5">
+      <button
+        type="button"
+        onClick={() => sidebar.show("files")}
+        className="flex h-7 cursor-pointer items-center gap-1 rounded px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)]"
+      >
+        <ChevronLeft aria-hidden="true" className="size-3.5" /> Back to files
+      </button>
+      <SegmentedControl aria-label="Place views" className="mt-1 mb-2">
+        {PLACE_VIEWS.map(({ id, label }) => (
+          <SegmentedControlItem key={id} selected={view === id} onClick={() => sidebar.show(id)}>
+            {id === "knowledge" ? <Network /> : <FlaskConical />}
+            {label}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
+    </header>
   );
 }
 
@@ -532,10 +593,10 @@ type CollapsedFolders = ReturnType<typeof useCollapsedFolders>;
 
 /**
  * State behind the Files view's toolbar: folders, the name filter, the
- * new-file box, and requests to scroll the open file into view.
+ * new-file box, and requests to scroll a new file into view.
  */
 function useExplorer() {
-  const { files, activeFile, refresh, storageMode } = useWorkspace();
+  const { files, refresh, storageMode } = useWorkspace();
   const { notify } = useWorkbench();
   const folders = useCollapsedFolders();
   const tree = useMemo(() => buildTree(files), [files]);
@@ -565,7 +626,6 @@ function useExplorer() {
     revealed,
     hasFolders: allFolders.length > 0,
     canRefresh: storageMode === "server",
-    activeFile,
     toggleAll() {
       folders.set(allCollapsed ? new Set() : new Set(allFolders));
     },
@@ -576,17 +636,6 @@ function useExplorer() {
     closeFilter() {
       setQuery("");
       setFilterOpen(false);
-    },
-    /** Opens the folders down to the open file and scrolls to it. */
-    revealActive() {
-      if (!activeFile) return;
-      // Keep the filter only while it still shows the file.
-      if (filtering && !filterFiles([activeFile], query).length) {
-        setQuery("");
-        setFilterOpen(false);
-      }
-      folders.expand(ancestorFolders(activeFile.path));
-      setReveal({ path: activeFile.path, at: Date.now() });
     },
     /** Opens the new-file box in `folder` ("a/b/"), or notes/ by default. */
     startNewFile(folder = "notes/") {
@@ -633,13 +682,6 @@ function ExplorerTools({ explorer }: { explorer: Explorer }) {
         onClick={explorer.toggleFilter}
       >
         <ListFilter className="size-4" />
-      </IconButton>
-      <IconButton
-        label="Reveal open file"
-        disabled={!explorer.activeFile}
-        onClick={explorer.revealActive}
-      >
-        <LocateFixed className="size-4" />
       </IconButton>
       {explorer.canRefresh && (
         <IconButton
@@ -933,7 +975,7 @@ function RunList() {
       </p>
     );
   }
-  // The list shows its own scope (#186), not where the user is: opening an
+  // The list shows its own scope, not where the user is: opening an
   // experiment from it leaves it as it was. New ones still start where you are.
   const scope = shownScope(listScope, ws.nodes);
   const runs = experimentsIn(ws.experiments, ws.nodes, scope);

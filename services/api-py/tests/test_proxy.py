@@ -52,9 +52,9 @@ def as_network(handler):
 
 
 @asynccontextmanager
-async def through(handler) -> AsyncIterator[httpx.AsyncClient]:
+async def through(handler, **overrides) -> AsyncIterator[httpx.AsyncClient]:
     """A client for api-py, with `handler` playing the TypeScript server."""
-    app = create_app(settings(), transport=httpx.MockTransport(as_network(handler)))
+    app = create_app(settings(**overrides), transport=httpx.MockTransport(as_network(handler)))
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://api") as api:
@@ -75,7 +75,8 @@ async def echo(request: httpx.Request) -> httpx.Response:
 
 
 async def test_passes_method_path_query_headers_and_body():
-    async with through(echo) as api:
+    # With login on: without it a signed request is refused (the test below).
+    async with through(echo, auth_secret="0123456789abcdef0123456789abcdef") as api:
         answer = await api.post(
             "/files/a%2Fb%20c?watch=1&x=%2F",
             content=b'{"hello":"world"}',
@@ -88,6 +89,23 @@ async def test_passes_method_path_query_headers_and_body():
     assert seen["headers"]["x-knowledge-user"] == "v2.token"
     assert seen["headers"]["content-type"] == "application/json"
     assert seen["body"] == '{"hello":"world"}'
+
+
+async def test_without_login_a_signed_request_is_refused_not_made_the_local_user():
+    """Login on in the app and no secret here must not make everyone the owner."""
+    async with through(echo) as api:
+        for header in ("x-knowledge-user", "X-Knowledge-Storage"):
+            answer = await api.get("/files", headers={header: "v2.token.sig"})
+            assert answer.status_code == 401, header
+            assert "AUTH_MODE=oidc" in answer.json()["error"]
+        # Unsigned requests, and the unsigned local memory token, are the local user's.
+        assert (await api.get("/files")).status_code == 200
+        local = await api.get("/files", headers={"x-knowledge-memory": "local.e30"})
+        assert local.status_code == 200
+    # With login on the header is this server's to check, as before.
+    async with through(echo, auth_secret="0123456789abcdef0123456789abcdef") as api:
+        answer = await api.get("/files", headers={"x-knowledge-user": "v2.token.sig"})
+        assert answer.status_code == 200
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"])
@@ -194,7 +212,9 @@ async def test_standalone_api_never_contacts_the_retired_server():
     async def forbidden(request: httpx.Request) -> httpx.Response:
         pytest.fail(f"Standalone API contacted the TypeScript server: {request.url}")
 
-    app = create_app(settings_from_env({}), transport=httpx.MockTransport(forbidden))
+    app = create_app(
+        settings_from_env({"AUTH_MODE": "local"}), transport=httpx.MockTransport(forbidden)
+    )
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,

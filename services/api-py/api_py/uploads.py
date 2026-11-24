@@ -1,4 +1,4 @@
-"""Reading a POST /experiments/upload body, as readParts() in apps/agent/src/storage/http.ts reads it with busboy.
+"""Reading a POST /experiments/upload body, with the limits and rules of the busboy parser it replaced.
 
 The body is multipart/form-data: a "meta" part with the experiment's fields as
 JSON, and one part per file, named by its path in the experiment. It is read
@@ -21,9 +21,15 @@ from typing import Any
 from python_multipart.exceptions import MultipartParseError
 from python_multipart.multipart import MultipartParser
 
+from .paths import clean_mime
+
 # The "meta" part is small JSON: a title, a hypothesis (at most 20000
 # characters) and params and results (at most 64 KiB of JSON each), with room to spare.
 MAX_META_BYTES = 256 * 1024
+# How many files one upload may hold, and its size in all as a multiple of the
+# per-file limit (MAX_UPLOAD_BYTES).
+MAX_FILES = 2000
+TOTAL_FACTOR = 4
 UNREADABLE = "The multipart body could not be read"
 # busboy's limits on a part's headers.
 _MAX_HEADER_PAIRS = 2000
@@ -153,8 +159,12 @@ class Upload:
 
 
 class _Reader:
-    def __init__(self, boundary: str, max_file_bytes: int) -> None:
+    def __init__(self, boundary: str, max_file_bytes: int, max_total_bytes: int) -> None:
         self.max_file_bytes = max_file_bytes
+        # Every part is held in memory until the upload is checked and written,
+        # so the parts together are capped too, and how many there are.
+        self.max_total_bytes = max_total_bytes
+        self.total = 0
         self.meta: str | None = None
         self.files: list[dict[str, Any]] = []
         self.ended = False
@@ -243,6 +253,13 @@ class _Reader:
                 raise UploadError(400, "Name each file part by its path in the experiment")
             if part.size > (MAX_META_BYTES if part.name == "meta" else self.max_file_bytes):
                 raise self._too_large(part.name)
+            if part.name != "meta":
+                # The files together; "meta" has its own limit.
+                self.total += end - start
+                if self.total > self.max_total_bytes:
+                    raise UploadError(
+                        413, f"The upload's files exceed {self.max_total_bytes} bytes in all"
+                    )
         elif part.size > MAX_META_BYTES:
             # Refused now, with the answer its end would get, so a large field is never held.
             self._check_field(part)
@@ -271,8 +288,12 @@ class _Reader:
                 self._set_meta(content.decode("utf-8-sig", errors="replace"))
                 return
             upload: dict[str, Any] = {"path": part.name, "bytes": content}
-            if part.mime and part.mime != "application/octet-stream":
-                upload["mime"] = part.mime
+            # Stored as PUT /files stores it: lowercase type/subtype, or left to the path.
+            mime = clean_mime(part.mime)
+            if mime:
+                upload["mime"] = mime
+            if len(self.files) >= MAX_FILES:
+                raise UploadError(413, f"An upload may hold at most {MAX_FILES} files")
             self.files.append(upload)
 
     def _finish(self) -> None:
@@ -285,13 +306,23 @@ class _Reader:
             raise UploadError(400, UNREADABLE) from err
 
 
-async def read_parts(content_type: str, body: AsyncIterator[bytes], max_file_bytes: int) -> Upload:
-    """The "meta" part's text (None if there is none) and the files of a multipart body."""
+async def read_parts(
+    content_type: str,
+    body: AsyncIterator[bytes],
+    max_file_bytes: int,
+    max_total_bytes: int | None = None,
+) -> Upload:
+    """
+    The "meta" part's text (None if there is none) and the files of a multipart
+    body: each at most `max_file_bytes`, and `max_total_bytes` together
+    (TOTAL_FACTOR files' worth unless given).
+    """
     parsed = parse_content_type(content_type)
     boundary = parsed[1].get("boundary") if parsed else None
     if not boundary:
         raise UploadError(400, UNREADABLE)
-    reader = _Reader(boundary, max_file_bytes)
+    total = max_file_bytes * TOTAL_FACTOR if max_total_bytes is None else max_total_bytes
+    reader = _Reader(boundary, max_file_bytes, total)
     # Text before the first boundary (a preamble) is skipped, as busboy skips it:
     # the body starts at "--boundary" at its very start or after a line break.
     start = b"--" + boundary.encode("latin-1")

@@ -23,6 +23,7 @@ import { AdminButton } from "./admin";
 import { useWorkspaceAgent } from "./agent-bridge";
 import { useChatSuggestions } from "./use-chat-suggestions";
 import { ChatPane } from "./chat-pane";
+import { ChatModelProvider } from "./chat-model";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
@@ -56,7 +57,7 @@ export function Workspace() {
         <SkillsProvider>
           <MemoryProvider>
             <ToolMenuProvider>
-              <WorkspaceLayout />
+              <ChatModelProvider><WorkspaceLayout /></ChatModelProvider>
             </ToolMenuProvider>
           </MemoryProvider>
         </SkillsProvider>
@@ -105,21 +106,17 @@ function WorkspaceLayout() {
           <EditorPane />
         </div>
 
-        {/* Kept mounted when hidden so the conversation and its tools survive toggling. */}
-        {layout.chatOpen && (
-          <Splitter
-            label="Resize chat"
-            onDragStart={() => (dragStart.current = layout.chatWidth)}
-            onDrag={(dx) => panes.resize("chat", dragStart.current - dx)}
-            onReset={() => panes.resetSize("chat")}
-          />
-        )}
+        <Splitter
+          label="Resize chat"
+          onDragStart={() => (dragStart.current = layout.chatWidth)}
+          onDrag={(dx) => panes.resize("chat", dragStart.current - dx)}
+          onReset={() => panes.resetSize("chat")}
+        />
         <div
           data-pane="chat"
           style={{ width: layout.chatWidth }}
           className={cn(
             "min-w-0 shrink-0",
-            !layout.chatOpen && "lg:hidden",
             mobilePane === "chat" ? "max-lg:!w-auto max-lg:flex-1" : "max-lg:hidden",
           )}
         >
@@ -131,16 +128,19 @@ function WorkspaceLayout() {
   );
 }
 
+const INSPECTOR_SHOWN = process.env.NODE_ENV === "development";
+
 function TitleBar() {
   const { setTheme } = useTheme();
-  const { panes, chat } = useWorkbench();
+  const { panes } = useWorkbench();
   const sideOpen = panes.isOpen("explorer");
-  const chatOpen = panes.isOpen("chat");
   const button =
     "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer";
   return (
-    // Right padding leaves room for the CopilotKit inspector button pinned top-right.
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4 pr-24">
+    // In development, right padding leaves room for the CopilotKit inspector
+    // button pinned top-right; CopilotKit shows it only there (on localhost), so
+    // elsewhere the title bar's buttons sit at the right edge.
+    <header className={cn("flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] pl-4", INSPECTOR_SHOWN ? "pr-24" : "pr-2")}>
       <HomeLink />
       <StorageStatus />
       <PlaceBreadcrumb />
@@ -148,16 +148,6 @@ function TitleBar() {
         <ShareButton />
         <AdminButton />
         <AccountMenu />
-        <button
-          type="button"
-          aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}
-          title={sideOpen ? "Hide sidebar" : "Show sidebar"}
-          aria-pressed={sideOpen}
-          onClick={() => panes.toggle("explorer")}
-          className={cn(button, "max-lg:hidden")}
-        >
-          <PanelLeft className="size-4" />
-        </button>
         <button
           type="button"
           aria-label="Toggle theme"
@@ -170,21 +160,16 @@ function TitleBar() {
           <Sun className="size-4 dark:hidden" />
           <Moon className="hidden size-4 dark:block" />
         </button>
-        {/* Last, at the top-right corner, where people look for the chat. */}
+        {/* The chat has no toggle: it stays open beside the editor. */}
         <button
           type="button"
-          aria-label={chatOpen ? "Hide chat" : "Show chat"}
-          title={chatOpen ? "Hide chat" : "Chat with Claude"}
-          aria-pressed={chatOpen}
-          onClick={() => (chatOpen ? panes.hide("chat") : chat.focus())}
-          // Phones switch to the chat with the bottom pane switcher instead.
-          className={cn(
-            button,
-            "ml-1 border border-[var(--border)] max-lg:hidden",
-            chatOpen && "bg-[var(--secondary)] text-[var(--foreground)]",
-          )}
+          aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}
+          title={sideOpen ? "Hide sidebar" : "Show sidebar"}
+          aria-pressed={sideOpen}
+          onClick={() => panes.toggle("explorer")}
+          className={cn(button, "max-lg:hidden")}
         >
-          <MessagesSquare className="size-4" />
+          <PanelLeft className="size-4" />
         </button>
       </div>
     </header>
@@ -223,7 +208,19 @@ function HomeLink() {
 
 /** Where files are saved, and whether the last save failed. */
 function StorageStatus() {
-  const { storageMode, syncError } = useWorkspace();
+  const { storageMode, syncError, storageDown } = useWorkspace();
+  if (storageMode === "loading" && storageDown) {
+    return (
+      <span
+        role="status"
+        title="The storage server isn't answering. This workspace's files load as soon as it does; nothing is kept in this browser meanwhile."
+        className="ml-2 flex items-center gap-1 text-xs text-red-500"
+      >
+        <CloudAlert className="size-3.5" />
+        <span className="max-sm:hidden">Storage unreachable</span>
+      </span>
+    );
+  }
   if (storageMode === "loading") {
     return (
       <span role="status" className="ml-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
@@ -262,7 +259,7 @@ function PlaceBreadcrumb() {
   const { editor } = useWorkbench();
   const [listScope, setListScope] = useListScope();
   if (storageMode !== "server") return null;
-  // A step back to a node also points the experiment list there (#186).
+  // A step back to a node also points the experiment list there.
   const goTo = (id: string | null) => {
     setListScope(id === null ? ALL_EXPERIMENTS : { node: id, descendants: listScope.descendants });
     void enterNode(id);

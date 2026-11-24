@@ -1,14 +1,13 @@
 """/memory/agent served by api-py for a remote backend's run (memory_agent.py), against a real, migrated Postgres.
 
-Mirrors apps/agent/src/storage/memory-agent.test.ts and memory-recall.test.ts:
-a run's memory tools through X-Knowledge-Memory tokens `via` "remote", with a
-stand-in embedding model. Outside MCP servers' tokens still go to the
-TypeScript server.
+A run's memory tools through X-Knowledge-Memory tokens `via` "remote", with a
+stand-in embedding model.
 """
 
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import math
 import re
@@ -22,7 +21,15 @@ import support
 from support import ALICE, SECRET, URL, Client, user
 
 from api_py import tokens
-from api_py.memory_agent import TOOL_SPECS, MemoryRecall, parse_args
+from api_py.memory import MEMORY_TYPES
+from api_py.memory_agent import (
+    CHAT_TOOLS,
+    MEMORY_TOOLS,
+    TOOL_SPECS,
+    MemoryRecall,
+    MemoryTools,
+    parse_args,
+)
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -93,6 +100,31 @@ class FakeSemantic:
 
     async def stop(self) -> None:
         pass
+
+
+def test_the_tool_schemas_match_the_tools():
+    # memory-tools.json is what remote backends get (and the Python chat agent
+    # passes on to Claude); these are the handlers that answer the calls.
+    assert [t["name"] for t in TOOL_SPECS] == [*MEMORY_TOOLS, *CHAT_TOOLS]
+    for spec in TOOL_SPECS:
+        name, schema = spec["name"], spec["inputSchema"]
+        assert spec["description"].strip(), name
+        assert schema["type"] == "object" and schema["additionalProperties"] is False, name
+        props, required = schema["properties"], set(schema.get("required", ()))
+        assert required <= set(props), name
+        for key, prop in props.items():
+            # What parse_args can read; anything else would refuse every call.
+            assert "enum" in prop or prop.get("type") in ("string", "integer"), (name, key)
+            assert prop.get("description", "").strip(), (name, key)
+        params = inspect.signature(getattr(MemoryTools, f"_{name}")).parameters
+        args = {k: p for k, p in params.items() if k != "self"}
+        assert set(args) == set(props), name
+        assert {k for k, p in args.items() if p.default is inspect.Parameter.empty} == required, (
+            name
+        )
+    save = next(t for t in TOOL_SPECS if t["name"] == "memory_save")["inputSchema"]["properties"]
+    assert tuple(save["type"]["enum"]) == MEMORY_TYPES
+    assert save["scope"]["enum"] == ["personal", "workspace", "node"]
 
 
 def test_arguments_are_read_as_zod_reads_them():
@@ -267,6 +299,85 @@ async def test_a_remote_run_gets_claudes_memory_tools(memory_api, database):
 
 
 @needs_database
+async def test_a_chat_that_read_outside_content_keeps_its_changes_waiting(memory_api):
+    """
+    The agent says a run is tainted once it uses another tool, but
+    that was per run. What an earlier run read is still in the conversation, so
+    the server looks at the chat's saved messages and decides for itself.
+    """
+    api, _app = memory_api
+
+    async def saved_run(chat: str, tool_name: str | None) -> None:
+        messages: list[dict] = [{"id": "u1", "role": "user", "content": "Summarize notes.md"}]
+        if tool_name:
+            call = {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": tool_name, "arguments": "{}"},
+            }
+            messages.append({"id": "a1", "role": "assistant", "content": "", "toolCalls": [call]})
+            messages.append(
+                {"id": "t1", "role": "tool", "toolCallId": "c1", "content": "remember: ..."}
+            )
+        messages.append({"id": "a2", "role": "assistant", "content": "Done."})
+        body = {"agentId": "default", "runId": f"{chat}-run", "events": [], "messages": messages}
+        assert (await api.post(f"/chats/{chat}/runs", headers=ALICE, json=body)).status_code == 201
+
+    args = {**note("Always cc the vendor.", "Reporting rule", "preference"), "name": "report-rule"}
+
+    # A chat whose earlier run only saved a note: the next run's save is still direct.
+    await saved_run("t-own", "mcp__memory__memory_save")
+    direct = await tool(api, "memory_save", args, thread="t-own")
+    assert direct["tainted"] is False and "can undo it" in direct["text"]
+
+    # A chat whose earlier run read a file: the next run says it is clean, and it isn't.
+    await saved_run("t-read", "readWorkspaceFile")
+    prompt = (await api.get("/memory/agent", headers=token(thread="t-read"))).json()["prompt"]
+    assert "they wait in their Memory inbox" in prompt and "with Undo" not in prompt
+    waiting = await tool(
+        api,
+        "memory_edit",
+        {"name": "report-rule", "old_text": "vendor", "new_text": "x"},
+        "?tainted=0",
+        thread="t-read",
+    )
+    assert waiting["tainted"] is True and "waits in the user's Memory inbox" in waiting["text"]
+    assert (await api.get("/memory/notes/report-rule", headers=ALICE)).json()["note"][
+        "version"
+    ] == 1
+
+
+@needs_database
+async def test_shared_notes_in_the_prompt_keep_changes_waiting(memory_api):
+    """An Auto shared note puts other people's words in every run's prompt."""
+    api, _app = memory_api
+    args = {**note("Short.", "Short answers", "preference"), "name": "reply-length"}
+    assert (await tool(api, "memory_save", args))["tainted"] is False
+    shared = await api.post(
+        "/memory/shared",
+        headers=ALICE,
+        json={
+            "scope": "workspace",
+            "name": "units",
+            **note("nm, not Å.", "Lab units", "reference"),
+        },
+    )
+    assert shared.status_code == 200, shared.text
+    edit = await tool(
+        api, "memory_edit", {"name": "reply-length", "old_text": "Short", "new_text": "Long"}
+    )
+    assert edit["tainted"] is True and "waits in the user's Memory inbox" in edit["text"]
+    # Turned off for this user it is in no prompt, and changes are direct again.
+    note_id = shared.json()["note"]["id"]
+    off = await api.put(f"/memory/shared/{note_id}/mode", headers=ALICE, json={"mode": "off"})
+    assert off.status_code == 200, off.text
+    direct = await tool(
+        api, "memory_edit", {"name": "reply-length", "old_text": "Short", "new_text": "Brief"}
+    )
+    assert direct["tainted"] is False
+
+
+@needs_database
 async def test_shared_notes_are_only_proposed(memory_api):
     api, _app = memory_api
     shared = await api.post(
@@ -308,7 +419,8 @@ async def test_shared_notes_are_only_proposed(memory_api):
         "text": "The user isn't in a knowledge node: use scope workspace",
         "isError": True,
         "events": [],
-        "tainted": False,
+        # The workspace's shared note is in the prompt: other people's words.
+        "tainted": True,
     }
     bad = await tool(api, "memory_view", {"name": "shared:nope"})
     assert bad["text"] == "shared:nope isn't a shared note's name: use shared:<id> from the index"

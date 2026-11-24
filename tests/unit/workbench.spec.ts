@@ -18,10 +18,10 @@ import {
 const run = (...commands: LayoutCommand[]) => commands.reduce(reduceLayout, DEFAULT_LAYOUT);
 
 test("shows, hides and toggles panes", () => {
-  const hidden = run({ type: "hide", pane: "chat" });
-  expect(isPaneOpen(hidden, "chat")).toBe(false);
-  expect(isPaneOpen(run({ type: "toggle", pane: "chat" }), "chat")).toBe(false);
-  expect(isPaneOpen(run({ type: "hide", pane: "chat" }, { type: "toggle", pane: "chat" }), "chat")).toBe(true);
+  // The chat stays open beside the editor; hiding it only matters on a phone.
+  expect(isPaneOpen(run({ type: "hide", pane: "chat" }), "chat")).toBe(true);
+  expect(isPaneOpen(run({ type: "toggle", pane: "chat" }), "chat")).toBe(true);
+  expect(run({ type: "hide", pane: "chat" })).toEqual(DEFAULT_LAYOUT);
   expect(isPaneOpen(run({ type: "toggle", pane: "explorer" }), "explorer")).toBe(false);
   // The editor is the main pane and can't be hidden.
   expect(run({ type: "hide", pane: "editor" })).toEqual(DEFAULT_LAYOUT);
@@ -90,13 +90,16 @@ test("setView switches the view without opening anything", () => {
   const collapsed = run({ type: "hide", pane: "explorer" });
   expect(reduceLayout(collapsed, { type: "setView", view: "runs" })).toEqual({ ...collapsed, view: "runs" });
   const open = run({ type: "show", pane: "explorer" });
-  expect(reduceLayout(open, { type: "setView", view: "artifacts" })).toEqual({ ...open, view: "artifacts" });
+  expect(reduceLayout(open, { type: "setView", view: "skills" })).toEqual({ ...open, view: "skills" });
 });
 
 test("restores only well-formed saved values", () => {
-  const saved = persistedLayout({ ...DEFAULT_LAYOUT, chatOpen: false, sideWidth: 300 });
-  expect(saved).toEqual({ sideOpen: true, chatOpen: false, sideWidth: 300, chatWidth: 420 });
-  expect(run({ type: "restore", saved })).toMatchObject({ chatOpen: false, sideWidth: 300 });
+  const saved = persistedLayout({ ...DEFAULT_LAYOUT, sideOpen: false, sideWidth: 300 });
+  expect(saved).toEqual({ sideOpen: false, sideWidth: 300, chatWidth: 420 });
+  expect(run({ type: "restore", saved })).toMatchObject({ sideOpen: false, sideWidth: 300 });
+  // A chat hidden before the chat toggle was removed comes back open.
+  expect(isPaneOpen(run({ type: "restore", saved: { chatOpen: false } }), "chat")).toBe(true);
+  expect(run({ type: "restore", saved: { chatOpen: false } })).toEqual(DEFAULT_LAYOUT);
 
   // Junk and edge cases in restore
   const junk: Layout = run({
@@ -131,7 +134,6 @@ test("restores only well-formed saved values", () => {
     saved: { sideOpen: false },
   });
   expect(partial.sideOpen).toBe(false);
-  expect(partial.chatOpen).toBe(DEFAULT_LAYOUT.chatOpen);
   expect(partial.sideWidth).toBe(DEFAULT_LAYOUT.sideWidth);
   expect(partial.chatWidth).toBe(DEFAULT_LAYOUT.chatWidth);
 });
@@ -151,7 +153,6 @@ test("reduces complex sequences of layout commands deterministically", () => {
 
   expect(complexLayout).toEqual({
     sideOpen: true,
-    chatOpen: true,
     sideWidth: DEFAULT_LAYOUT.sideWidth,
     chatWidth: 600,
     view: "knowledge",
@@ -162,16 +163,14 @@ test("reduces complex sequences of layout commands deterministically", () => {
 test("persistedLayout extracts only the persisted keys", () => {
   const customLayout: Layout = {
     sideOpen: false,
-    chatOpen: true,
     sideWidth: 220,
     chatWidth: 500,
-    view: "uploads",
+    view: "memory",
     mobilePane: "chat",
   };
   const persisted = persistedLayout(customLayout);
   expect(persisted).toEqual({
     sideOpen: false,
-    chatOpen: true,
     sideWidth: 220,
     chatWidth: 500,
   });

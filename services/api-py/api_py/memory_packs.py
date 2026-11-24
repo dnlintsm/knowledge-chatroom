@@ -1,4 +1,4 @@
-"""Memory packs, as MemoryPackHub in apps/agent/src/storage/memory-packs.ts (issue #93, step 4; migration 021).
+"""Memory packs (migration 021).
 
 A place's shared notes published to the hub as immutable, numbered versions,
 for any workspace on the deployment to install, the way skills are.
@@ -14,7 +14,7 @@ for any workspace on the deployment to install, the way skills are.
 - Hub admins (HUB_ADMINS, or the local user without login) verify versions;
   the publisher or an admin yanks one, after which it can't be newly installed.
 
-These run as the server (not as the user), as on the TypeScript server:
+These run as the server (not as the user):
 shared_memory_rank decides who may do what.
 """
 
@@ -76,7 +76,7 @@ def scan_notes(notes: list[dict[str, Any]]) -> Rows:
 
 
 def fingerprint(about: str, notes: list[dict[str, Any]]) -> str:
-    """sha256 of JSON.stringify([about, notes]), as the TypeScript server computes it."""
+    """sha256 of [about, notes] written as JSON.stringify writes it, so versions published before keep theirs."""
     return hashlib.sha256(
         js_json([about, notes]).encode("utf-8", errors="surrogatepass")
     ).hexdigest()

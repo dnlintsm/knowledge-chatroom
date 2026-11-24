@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { expectStoredNote } from "./storage-assertions";
+import { showPlaces } from "./places";
 
 /** Shows the Files view; clicking it while it is already shown would fold the sidebar away. */
 async function showFiles(page: Page) {
@@ -37,7 +38,7 @@ test("knowledge tree", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(page);
   const tree = page.getByRole("tree", { name: "Knowledge tree" });
   await expect(tree).toBeVisible();
   const node = (name: string) => tree.getByTestId("knowledge-node").filter({ hasText: name });
@@ -60,12 +61,15 @@ test("knowledge tree", async ({ page }) => {
 
   // A note written in the module is saved there, not at the workspace root.
   await showFiles(page);
+  // The Files view says where you are; it opens the tree again.
+  await expect(page.getByTestId("place-switcher")).toHaveAccessibleName(new RegExp(`^Place: .*${MODULE}$`));
+  await shot(page, "14a-place-switcher");
   await page.getByRole("button", { name: "New file", exact: true }).click();
   await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill(`# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expectStoredNote(page, MODULE, `# ${MODULE} notes\n\nRecipe changes for this module go here.`);
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(page);
   await expect(tree.getByRole("treeitem", { name: /untitled-1\.md/ })).toBeVisible();
   await shot(page, "15-knowledge-node-files");
 
@@ -89,7 +93,7 @@ test("knowledge tree", async ({ page }) => {
 test("experiments", async ({ page, request }) => {
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(page);
   const tree = page.getByRole("tree", { name: "Knowledge tree" });
   const node = (name: string) => tree.getByTestId("knowledge-node").filter({ hasText: name });
   const location = page.getByRole("navigation", { name: "Location" });
@@ -118,7 +122,7 @@ test("experiments", async ({ page, request }) => {
   const panel = page.getByTestId("experiment-panel");
   const startExperiment = async (title: string) => {
     // Clicking the open view's button would close the sidebar.
-    if (!(await tree.isVisible())) await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await node("Main etch").hover();
     await node("Main etch").getByRole("button", { name: "New experiment on Main etch" }).click();
     await page.getByPlaceholder("New experiment title").fill(title);
@@ -245,7 +249,7 @@ test("proposed changes", async ({ page, request }) => {
   // The experiment's author proposes its change to the process.
   await page.goto("/");
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await showPlaces(page);
   const tree = page.getByRole("tree", { name: "Knowledge tree" });
   await tree.getByTestId("experiment-node").filter({ hasText: "Higher RF power" }).click();
   const promote = page.getByTestId("promote");
@@ -417,7 +421,7 @@ test.describe("on a touch screen", () => {
     await page.goto("/");
     expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(false);
     await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
-    await page.getByRole("button", { name: "Knowledge", exact: true }).tap();
+    await showPlaces(page, "Knowledge", { tap: true });
     const tree = page.getByRole("tree", { name: "Knowledge tree" });
     // Exact, since "Main etch" also contains "Etch".
     const node = (name: string) =>

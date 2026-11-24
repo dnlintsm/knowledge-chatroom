@@ -1,10 +1,9 @@
-"""The user's memory in the chat (issue #176, step 4).
+"""The user's memory in the chat.
 
-The Python twin of apps/agent/src/memory/run.ts, over HTTP. For each run of a
-remote backend the app signs an X-Knowledge-Memory token for that chat (`via`
-"remote"). With it the agent server's /memory/agent gives this agent what the
-TypeScript agent's runs get: the prompt's memory section (with the index of
-the user's notes) and the memory_* and chats_* tools, which run there.
+For each run the app signs an X-Knowledge-Memory token for that chat (`via`
+"remote"). With it api-py's /memory/agent gives this agent the prompt's
+memory section (with the index of the user's notes) and the memory_* and
+chats_* tools, which run there.
 
 - Nothing when memory is off on the server (404), off for the user or the
   chat is incognito (403), or there's no token: the run goes on without it.
@@ -14,10 +13,12 @@ the user's notes) and the memory_* and chats_* tools, which run there.
   user's inbox once the run has used any other tool (`tainted`): the server
   says when a call itself taints the run (a shared note, a past chat), this
   agent's PreToolUse hook marks every other tool, and a run that continues
-  after a browser tool (its result last) starts marked.
+  after a browser tool (its result last) starts marked. So does a run whose
+  context holds workspace text (place.carries_content). The server also marks
+  a chat whose earlier runs read outside content, and one with shared notes
+  in its prompt, whatever this agent says.
 - Each note a call reads or changes comes back as an event, which goes to the
-  chat as a `memory` event for its "Used / Updated" line, as the TypeScript
-  agent sends it.
+  chat as a `memory` event for its "Used / Updated" line.
 """
 
 from __future__ import annotations
@@ -77,7 +78,7 @@ def memory_tools(
     storage: Callable[[], Storage],
     on_event: Callable[[dict[str, Any]], None],
 ) -> list[SdkMcpTool[Any]]:
-    """The tools `spec` lists, each run on the agent server with the thread's latest run's memory (`current`)."""
+    """The tools `spec` lists, each run on api-py with the thread's latest run's memory (`current`)."""
 
     def make(name: str):
         async def handler(args: dict[str, Any]) -> ToolResult:

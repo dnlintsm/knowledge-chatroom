@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * The app in a chosen workspace (issue #226, docs/workspaces.md, rollout step
+ * The app in a chosen workspace (docs/workspaces.md, rollout step
  * 5): pages at /w/<slug>, every request naming the page's workspace, and
  * saved state kept per workspace. Storage mode, with the API server (api-py).
  */
@@ -59,6 +59,7 @@ test("each workspace has its own page, files and saved state", async ({ page, re
     await loaded(page);
     await expect(page.getByRole("treeitem", { name: /only-in-default\.md/ })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /only-in-research\.md/ })).toHaveCount(0);
+    await expect.poll(() => from("default").find((r) => r.path === "/api/chat/models")?.ws).toBe(home.id);
     expect(from("default").length).toBeGreaterThan(0);
     expect(from("default").filter((r) => r.ws !== home.id)).toEqual([]);
 
@@ -67,6 +68,7 @@ test("each workspace has its own page, files and saved state", async ({ page, re
     await expect(page.getByRole("treeitem", { name: /only-in-research\.md/ })).toBeVisible();
     await expect(page.getByRole("treeitem", { name: /only-in-default\.md/ })).toHaveCount(0);
     expect(from(other.slug).some((r) => r.path === "/api/files")).toBe(true);
+    await expect.poll(() => from(other.slug).find((r) => r.path === "/api/chat/models")?.ws).toBe(other.id);
     expect(from(other.slug).filter((r) => r.ws !== other.id)).toEqual([]);
     expect(named.filter((r) => r.page !== "/w/default" && r.page !== `/w/${other.slug}`)).toEqual([]);
 

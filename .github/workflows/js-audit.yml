@@ -1,0 +1,37 @@
+name: JavaScript dependency audit
+
+# The pnpm side of python-audit.yml (issue #304): fails on an advisory against a
+# locked production dependency unless pnpm-workspace.yaml lists it as reviewed
+# (auditConfig.ignoreGhsas, each explained in docs/development.md).
+
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "apps/web/package.json"
+      - "packages/contracts/package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/js-audit.yml"
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      # pnpm at the version in package.json "packageManager".
+      - name: Enable pnpm
+        run: npm install --global pnpm@12.18.0
+      # Reads pnpm-lock.yaml; nothing is installed.
+      - name: Audit production dependencies
+        run: pnpm audit --prod

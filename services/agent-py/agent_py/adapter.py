@@ -11,15 +11,21 @@ the thread's first run. Three things change that for this app:
   user message, so its note goes after that tool's result.
 - `forwardedProps` come from the browser. The adapter turns whitelisted keys
   (`model`, `resume`, `max_budget_usd`, ...) into SDK options, so a browser
-  could pick the model or resume another chat's session. They are dropped; the
-  app's own `knowledge_chatroom` is read by place.py.
+  could pass arbitrary SDK settings. They are dropped. The app reads the
+  namespaced model choice separately and checks it against the deployment's models.
 - No built-in Claude Code tools (Bash, Read, Write, ...): the model works on
   the workspace through the browser's tools and this agent's workspace tools
   (workspace.py), which call the storage API with the run's storage token.
-- Skills (skills.py): each run asks the agent server for the user's skills in
+- Skills (skills.py): each run asks api-py for the user's skills in
   this chat, starts in the user's own folder holding them, and only /name for
   one of them stays a command. Each skill used goes to the chat as a
-  `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
+  `skill_used` event after RUN_STARTED.
+  With SKILL_SCRIPTS=on, a run with a skill that ships scripts also gets Bash,
+  sandboxed, with a stand-in API key (scripts.py, keyproxy.py).
+- Working folder (workdir.py): the user's folder holds a read-only copy of the
+  workspace files they can read, synced at the start of each run, which Claude
+  searches with Read, Glob and Grep (confined to the folder); save_file stores
+  a file from the folder in the workspace. AGENT_WORKDIR=off turns it off.
 - Memory (memory.py): with the run's memory token, the system prompt gets the
   memory section and Claude the memory_* and chats_* tools, run by the agent
   server's /memory/agent. Each note they read or change goes to the chat as a
@@ -33,12 +39,16 @@ the thread's first run. Three things change that for this app:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections import OrderedDict
-from collections.abc import AsyncIterator, Mapping, Sequence
+import time
+from collections import Counter, OrderedDict
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from weakref import WeakValueDictionary
 
 import httpx
 from ag_ui.core import (
@@ -46,25 +56,47 @@ from ag_ui.core import (
     CustomEvent,
     EventType,
     RunAgentInput,
+    RunErrorEvent,
     TextInputContent,
     ToolMessage,
     UserMessage,
 )
 from ag_ui_claude_sdk import ClaudeAgentAdapter
 
+from .keyproxy import KeyProxy, KeyRoute
 from .mcp import McpServer, RunServers, chips_from, run_servers, trade_tokens
 from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
-from .place import workspace_note
+from .place import carries_content, chatroom_props, workspace_note
 from .revocation import membership_hooks
+from .scripts import Scripts, needs_scripts, script_options
 from .skills import (
     RunSkill,
     Trigger,
     fetch_skills,
     materialize,
+    run_folder,
     skill_options,
     slash_command,
 )
-from .workspace import Storage, WorkspaceError, file_tools, server, tool_names
+from .workdir import (
+    CONFINED_TOOLS,
+    Limits,
+    Summary,
+    clear_workdir,
+    confine_hook,
+    mark_used,
+    remove_idle,
+    sync_workdir,
+    workdir_prompt,
+)
+from .workspace import (
+    STORAGE_TIMEOUT,
+    Storage,
+    WorkspaceError,
+    file_tools,
+    server,
+    tool_names,
+)
 
 logger = logging.getLogger("agent_py")
 
@@ -74,11 +106,25 @@ class Run:
     """What a thread's latest run has: its folder, skills and memory, and events not yet sent."""
 
     cwd: Path | None = None
+    model: str | None = None
     skills: Sequence[RunSkill] = ()
     memory: RunMemory | None = None
     servers: RunServers | None = None
+    # How a run with scripts reaches Anthropic (keyproxy.py); None: no scripts.
+    keys: KeyRoute | None = None
+    # The workspace copy in `cwd` (workdir.py); None: the run has none.
+    workdir: Summary | None = None
     # (name, value) of CUSTOM events for the chat: skill_used, memory.
     pending: list[tuple[str, Any]] = field(default_factory=list)
+
+
+# How often, at most, a starting run looks for idle run folders to remove.
+SWEEP_EVERY_SECONDS = 3600.0
+
+
+def _folder_name(user: str, workspace: str | None) -> str:
+    """What a run folder is named after: one per user and workspace, since skills and the copy differ by workspace."""
+    return f"{user}@{workspace}" if workspace else user
 
 
 class ChatroomAdapter(ClaudeAgentAdapter):
@@ -86,29 +132,48 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self,
         *args: Any,
         system_prompt: str = "",
+        models: tuple[str, ...] = (),
         storage_url: str | None = None,
         skills_root: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         mcp_servers: Mapping[str, McpServer] | None = None,
+        scripts: Scripts | None = None,
+        workdir: Limits | None = None,
+        idle_seconds: float | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._system_prompt = system_prompt
+        self._models = models
+        # Serialize preparation with the SDK query so a model change can't race a run on this thread.
+        self._admissions: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
         # The outside MCP servers in MCP_SERVERS (mcp.py).
         self._servers = dict(mcp_servers or {})
         self._storage_url = storage_url
         self._transport = transport  # for tests
+        self._http: httpx.AsyncClient | None = None
         # Each user's run folder (with their skills) is a folder in here.
         self._skills_root = skills_root
+        # SKILL_SCRIPTS=on (scripts.py), and the key proxy its runs share, once started.
+        self._scripts = scripts
+        self._key_proxy: KeyProxy | None = None
+        self._key_lock = asyncio.Lock()
+        # The working folder's size limits; None: AGENT_WORKDIR=off (workdir.py).
+        self._workdir = workdir
+        # Run folders unused this long are removed (None: never), looked for at
+        # most once every SWEEP_EVERY_SECONDS, never one a run is in.
+        self._idle_seconds = idle_seconds
+        self._in_use: Counter[Path] = Counter()
+        self._swept_at: float | None = None
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
-        # Usage records on their way to the agent server.
+        # Usage records on their way to api-py.
         self._recording: set[asyncio.Task[Any]] = set()
         # thread_id -> the last <workspace> note the thread's session was given.
         self._notes: OrderedDict[str, str] = OrderedDict()
         # thread_id -> the storage token of the thread's latest run.
         self._tokens: OrderedDict[str, str | None] = OrderedDict()
-        # Each thread's workspace, as the app named it with the latest run (issue #226).
+        # Each thread's workspace, as the app named it with the latest run.
         self._workspaces: OrderedDict[str, str | None] = OrderedDict()
 
     def build_options(
@@ -120,11 +185,25 @@ class ChatroomAdapter(ClaudeAgentAdapter):
     ):
         options = super().build_options(input_data, thread_id, *args, **kwargs)
         run = self._runs.get(thread_id or "")
+        if run and run.model:
+            options.model = run.model
         memory = run.memory if run else None
         servers = run.servers if run else None
+        scripts = (
+            script_options(self._scripts, run.cwd, run.skills, run.keys, self._skills_root)
+            if run and self._skills_root is not None
+            else None
+        )
+        workdir = run.cwd if run and run.cwd and run.workdir else None
+        folder = workdir_prompt(run.workdir, bool(scripts)) if run and run.workdir else None
         options.system_prompt = "\n".join(
             part
-            for part in (self._system_prompt, memory and memory.prompt, servers and servers.prompt)
+            for part in (
+                self._system_prompt,
+                folder,
+                memory and memory.prompt,
+                servers and servers.prompt,
+            )
             if part
         )
         if servers and servers.configs:
@@ -137,6 +216,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             tools = file_tools(
                 lambda: self._storage(thread_id or ""),
                 {"chat": thread_id, "model": options.model},
+                workdir,
             )
             if memory:
                 tools += memory_tools(
@@ -149,7 +229,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
             # Removed from the workspace, or it was archived, mid-run: no further
             # tool call of any kind, and no further turn, also after a call that
-            # was already running (issue #255). Ahead of every other hook.
+            # was already running. Ahead of every other hook.
             revoked = membership_hooks(lambda: self._storage(thread_id or ""))
             ordered: dict[str, list[Any]] = dict(cast(Any, options.hooks) or {})
             for event, matcher in revoked.items():
@@ -175,6 +255,18 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             hooks = dict(options.hooks or {})
             hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), hook]
             options.hooks = hooks
+        if workdir:
+            # Read, Glob and Grep run outside the sandbox: confined to the run folder.
+            options.tools = [*(options.tools or []), *CONFINED_TOOLS]
+            options.allowed_tools = [*(options.allowed_tools or []), *CONFINED_TOOLS]
+            hooks = dict(options.hooks or {})
+            hooks["PreToolUse"] = [*hooks.get("PreToolUse", []), confine_hook(workdir)]
+            options.hooks = hooks
+        if scripts:
+            options.tools = [*(options.tools or []), "Bash"]
+            options.allowed_tools = [*(options.allowed_tools or []), "Bash"]
+            options.env = {**(options.env or {}), **scripts["env"]}
+            options.sandbox = scripts["sandbox"]
         return options
 
     async def run(
@@ -190,18 +282,166 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         `storage_token` is its X-Knowledge-Storage header (with login), `memory_token` its
         X-Knowledge-Memory, `workspace` its X-Knowledge-Workspace (None: the default workspace).
         """
+        requested = chatroom_props(input_data).get("model")
+        if (
+            self._models
+            and requested is not None
+            and (not isinstance(requested, str) or requested not in self._models)
+        ):
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+                message="The selected chat model isn't available in this deployment.",
+            )
+            return
+        model = (requested or self._models[0]) if self._models else None
+        lock = self._admissions.setdefault(input_data.thread_id, asyncio.Lock())
+        async with (
+            lock,
+            aclosing(
+                self._run(input_data, storage_token, user, memory_token, workspace, model)
+            ) as stream,
+        ):
+            async for event in stream:
+                yield event
+
+    async def _run(
+        self,
+        input_data: RunAgentInput,
+        storage_token: str | None,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """The run, with its run folder held for as long as it lasts (it is not removed as idle meanwhile)."""
+        cwd = (
+            run_folder(self._skills_root, _folder_name(user, workspace))
+            if self._skills_root is not None
+            else None
+        )
+        if cwd is not None:
+            self._in_use[cwd] += 1
+        try:
+            await self._remove_idle_folders()
+            async with aclosing(
+                self._run_in_folder(input_data, storage_token, user, memory_token, workspace, model)
+            ) as stream:
+                async for event in stream:
+                    yield event
+        finally:
+            if cwd is not None:
+                self._in_use[cwd] -= 1
+                if self._in_use[cwd] <= 0:
+                    del self._in_use[cwd]
+                    # Idle is counted from the end of the last run in the folder, not
+                    # from its start: a long run must not leave it due for removal the
+                    # moment it finishes, while its Claude Code session is still kept.
+                    with contextlib.suppress(OSError):
+                        mark_used(cwd)
+
+    async def _remove_idle_folders(self) -> None:
+        if self._skills_root is None or self._idle_seconds is None:
+            return
+        now = time.monotonic()
+        if self._swept_at is not None and now - self._swept_at < SWEEP_EVERY_SECONDS:
+            return
+        self._swept_at = now
+        try:
+            removed = await remove_idle(self._skills_root, self._idle_seconds, set(self._in_use))
+        except Exception:  # never a reason to fail a run
+            logger.exception("[workdir] couldn't look for idle run folders")
+            return
+        if removed:
+            logger.info("[workdir] removed %d idle run folder(s)", removed)
+
+    async def _run_in_folder(
+        self,
+        input_data: RunAgentInput,
+        storage_token: str | None,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> AsyncGenerator[BaseEvent, None]:
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
         remember(self._workspaces, thread_id, workspace, self._max_workers)
-        run = Run()
+        try:
+            run = await self._prepare(input_data, user, memory_token, workspace, model)
+        except Exception:
+            # What each step expects to go wrong it handles itself, and the run goes
+            # on without that part. Anything else used to break the stream with no
+            # answer at all; the chat gets an error it can show instead.
+            logger.exception("couldn't get the run ready")
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't start the run. Please try again.",
+            )
+            return
+        remember(self._runs, thread_id, run, self._max_workers)
+        try:
+            if model and len(self._models) > 1:
+                await self._switch_cached_model(input_data, model)
+        except Exception as error:
+            logger.warning("couldn't switch chat model: %s", error)
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't switch the chat model. Please try again.",
+            )
+            return
+        prepared, slash = self.prepare(input_data, run.skills)
+        if slash:
+            self._used(thread_id, slash.name, "slash")
+        started = False
+        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
+            async for event in stream:
+                yield event
+                started = started or event.type == EventType.RUN_STARTED
+                while started and run.pending:
+                    name, value = run.pending.pop(0)
+                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+
+    async def _prepare(
+        self,
+        input_data: RunAgentInput,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> Run:
+        """What the run needs before the model is asked: its skills, working folder, memory and MCP servers."""
+        thread_id = input_data.thread_id
+        run = Run(model=model)
         if self._skills_root is not None:
+            folder = _folder_name(user, workspace)
+            mark_used(run_folder(self._skills_root, folder))
             run.skills = await self._skills_for(thread_id)
             try:
-                run.cwd = materialize(self._skills_root, user, run.skills)
+                run.cwd = materialize(self._skills_root, folder, run.skills)
             except OSError as err:
                 logger.warning("couldn't write the run's skills; running without them: %s", err)
                 run.skills = ()
-                run.cwd = materialize(self._skills_root, user, ())
+                run.cwd = materialize(self._skills_root, folder, ())
+            if self._scripts and needs_scripts(run.skills):
+                run.keys = await self._keys()
+            if self._workdir and self._storage_url:
+                try:
+                    run.workdir = await sync_workdir(
+                        self._storage(thread_id), run.cwd, self._workdir
+                    )
+                except (WorkspaceError, OSError, KeyError, ValueError) as err:
+                    logger.warning(
+                        "[workdir] couldn't copy the workspace; running without it: %s", err
+                    )
+            # Without a fresh copy, no old one either: scripts can read the run folder.
+            if not run.workdir:
+                await clear_workdir(run.cwd)
         if memory_token and self._storage_url:
             try:
                 run.memory = await fetch_memory(
@@ -211,14 +451,16 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 logger.warning("couldn't load memory; running without it: %s", err)
             # After a browser tool (its result is the last message) the turn has
             # used another tool already: changes wait in the inbox from the start.
-            if (
-                run.memory
-                and input_data.messages
-                and isinstance(input_data.messages[-1], ToolMessage)
+            # The same when the run's context already holds workspace text (the
+            # open file, a selection, an experiment's report). What earlier runs
+            # of the chat read is the API server's to check (/memory/agent).
+            if run.memory and (
+                (input_data.messages and isinstance(input_data.messages[-1], ToolMessage))
+                or carries_content(input_data)
             ):
                 run.memory.tainted = True
         if self._servers:
-            # Memory tokens only for runs with memory, as the TypeScript agent sends them.
+            # Memory tokens only for runs with memory.
             tokens = (
                 await trade_tokens(
                     self._storage(thread_id), memory_token if run.memory else None, self._servers
@@ -227,17 +469,63 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 else {}
             )
             run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
-        remember(self._runs, thread_id, run, self._max_workers)
-        prepared, slash = self.prepare(input_data, run.skills)
-        if slash:
-            self._used(thread_id, slash.name, "slash")
-        started = False
-        async for event in super().run(prepared):
-            yield event
-            started = started or event.type == EventType.RUN_STARTED
-            while started and run.pending:
-                name, value = run.pending.pop(0)
-                yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+        return run
+
+    async def _switch_cached_model(self, input_data: RunAgentInput, model: str) -> None:
+        # The pinned adapter rebuilds the worker for recovery and frontend tools.
+        # A plain chat can reuse a worker; its SDK client switches in place.
+        thread = input_data.thread_id
+        entry = self._workers.get(thread)
+        if (
+            not entry
+            or input_data.tools
+            or thread in self._memory_bindings
+            or self._session_binding_store is not None
+            or self._defer_tools
+            or getattr(input_data, "resume", None)
+            or (input_data.messages and isinstance(input_data.messages[-1], ToolMessage))
+        ):
+            return
+        worker = entry["worker"]
+        client = worker._client
+        if (
+            worker.is_alive()
+            and client
+            and entry.get("chatroom_model", worker._options.model) != model
+        ):
+            await client.set_model(model)
+            entry["chatroom_model"] = model
+
+    async def _keys(self) -> KeyRoute | None:
+        """The key proxy for runs with scripts, started on first use; None if it can't start."""
+        async with self._key_lock:
+            if self._key_proxy is None:
+                proxy = KeyProxy()
+                try:
+                    await proxy.start()
+                except OSError as err:
+                    logger.error("key proxy didn't start; scripts are off for this run: %s", err)
+                    await proxy.close()
+                    return None
+                self._key_proxy = proxy
+            return self._key_proxy.route
+
+    async def shutdown(self) -> None:
+        await super().shutdown()
+        if self._key_proxy:
+            await self._key_proxy.close()
+            self._key_proxy = None
+        if self._http:
+            await self._http.aclose()
+            self._http = None
+
+    def _client(self) -> httpx.AsyncClient | None:
+        """The one HTTP client for the storage API, made on first use and kept until shutdown."""
+        if self._http is None and self._storage_url:
+            self._http = httpx.AsyncClient(
+                base_url=self._storage_url, timeout=STORAGE_TIMEOUT, transport=self._transport
+            )
+        return self._http
 
     def _storage(self, thread_id: str) -> Storage:
         """The storage API with the thread's latest token and workspace: tools read them when called, not when the chat began."""
@@ -246,6 +534,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             self._tokens.get(thread_id),
             self._transport,
             self._workspaces.get(thread_id),
+            self._client(),
         )
 
     def _memory(self, thread_id: str) -> RunMemory | None:

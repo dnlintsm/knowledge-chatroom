@@ -1,44 +1,55 @@
 "use client";
 
-import { useMemo, useEffect, useState, type ComponentProps, type ReactNode } from "react";
-import { FileText, FlaskConical, History, MessageSquarePlus, TextSelect } from "lucide-react";
+import { useMemo, useEffect, useState } from "react";
+import { History, MessageSquarePlus, MessagesSquare } from "lucide-react";
 import {
   CopilotChat,
+  CopilotChatUserMessage,
+  useAgent,
   useCopilotChatConfiguration,
+  UseAgentUpdate,
   type CopilotChatAssistantMessage,
   type CopilotChatAssistantMessageProps,
   type CopilotChatInput,
   type CopilotChatReasoningMessage,
+  type CopilotChatUserMessageProps,
   type Message,
 } from "@copilotkit/react-core/v2";
-import { defaultRehypePlugins } from "streamdown";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { ChatStepsProvider, ReasoningStep, StepAssistantMessage, StepsModeButton, stepRows, useChatSteps } from "./agent-steps-view";
+import { AnswerSources, BrandMark, useAnswerReferences } from "./chat-answer";
 import { ChatHistory } from "./chat-history";
-import { FileIcon } from "./file-icon";
-import { parseFileRef, rootRelativeLinks, type FileRef } from "./file-refs";
+import { useMemory } from "./memory";
 import { SkillChatInput } from "./skills";
-import { useWorkspace } from "./store";
-import { fileName } from "./types";
 import { useWorkbench } from "./workbench";
-
-// Streamdown's harden step drops bare relative links such as notes/welcome.md#L12,
-// so rootRelativeLinks rewrites them into a form it keeps, just before it runs.
-const { harden, ...beforeHarden } = defaultRehypePlugins;
-
-/** Defined once: CopilotKit memoizes chat slots by identity. */
-const MARKDOWN = {
-  components: { a: AnswerLink },
-  rehypePlugins: [...Object.values(beforeHarden), rootRelativeLinks, harden],
-};
 
 /** Answers, and narration inside a steps block (agent-steps-view.tsx). */
 function AssistantMessage(props: CopilotChatAssistantMessageProps) {
-  return <StepAssistantMessage markdownRenderer={MARKDOWN} {...props} />;
+  const content = typeof props.message.content === "string" ? props.message.content : "";
+  const { sources, markdownRenderer } = useAnswerReferences(content, Boolean(props.isRunning && props.isLatest));
+  return <AnswerSources value={sources}><StepAssistantMessage {...props} markdownRenderer={markdownRenderer} /></AnswerSources>;
+}
+
+// The toolbar (copy, edit) shows on hover or focus, and always on touch screens,
+// which have no hover. It is CopilotKit's, so it is found by its test ID.
+// `!` wins over CopilotKit's classes on the same element.
+const userRow = [
+  "items-end! pt-4.5!",
+  "[&_[data-testid=copilot-user-toolbar]]:visible! [&_[data-testid=copilot-user-toolbar]]:pointer-events-none! [&_[data-testid=copilot-user-toolbar]]:opacity-0!",
+  "hover:[&_[data-testid=copilot-user-toolbar]]:pointer-events-auto! hover:[&_[data-testid=copilot-user-toolbar]]:opacity-100!",
+  "[&_[data-testid=copilot-user-toolbar]]:focus-within:pointer-events-auto! [&_[data-testid=copilot-user-toolbar]]:focus-within:opacity-100!",
+  "hover-none:[&_[data-testid=copilot-user-toolbar]]:pointer-events-auto! hover-none:[&_[data-testid=copilot-user-toolbar]]:opacity-100!",
+].join(" ");
+const userBubble = "max-w-[90%]! wrap-anywhere! bg-brand-tint! text-[var(--foreground)]! rounded-[.875rem_.875rem_.25rem_.875rem]! px-3! py-2!";
+
+function UserMessage(props: CopilotChatUserMessageProps) {
+  return <CopilotChatUserMessage {...props} className={cn(userRow, props.className)} messageRenderer={{ className: userBubble }} />;
 }
 
 const groupWhileRunning = (messages: Message[]) => stepRows(messages, true);
 const groupWhenIdle = (messages: Message[]) => stepRows(messages, false);
+const composerSuggestions = { children: () => null };
 
 export function ChatPane() {
   return (
@@ -49,7 +60,6 @@ export function ChatPane() {
 }
 
 function ChatPaneView() {
-  const { activeFile, selection, experiment } = useWorkspace();
   const { chat } = useWorkbench();
   // Past chats show in place of the conversation (on phones the list slides
   // over it). Picking one, or starting a new one, changes the thread, which
@@ -64,83 +74,44 @@ function ChatPaneView() {
     setShownThread(threadId);
     chatConfig?.setDrawerOpen(false);
   }, [threadId, shownThread, chatConfig]);
-  // Each turn's thinking and tool calls fold into one block (issue #154). The
+  // Each turn's thinking and tool calls fold into one block. The
   // grouping only changes when a run starts or ends, so the view is rebuilt then.
   const { running } = useChatSteps();
   const messageView = useMemo(
     () => ({
       // A slot may be any component taking the message's props; the type asks for its statics too.
       assistantMessage: AssistantMessage as typeof CopilotChatAssistantMessage,
+      userMessage: UserMessage as typeof CopilotChatUserMessage,
       reasoningMessage: ReasoningStep as typeof CopilotChatReasoningMessage,
       groupMessages: running ? groupWhileRunning : groupWhenIdle,
     }),
     [running],
   );
-  const headerButton =
-    "flex size-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] cursor-pointer";
-
   return (
     <section aria-label="Chat" className="flex h-full min-h-0 flex-col bg-[var(--background)]">
       {/* Controls stay left: the CopilotKit inspector button floats at the top-right. */}
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--secondary)] px-3">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-          Claude
-        </span>
-        <button
-          type="button"
+      <header className="flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3">
+        <span className="flex items-center gap-2 text-body font-semibold"><BrandMark icon={MessagesSquare} /> Chat</span>
+        <IconButton
           title="New chat"
           aria-label="New chat"
           onClick={() => {
             setHistory(false);
             chat.newThread();
           }}
-          className={headerButton}
         >
-          <MessageSquarePlus className="size-4" />
-        </button>
-        <button
-          type="button"
+          <MessageSquarePlus />
+        </IconButton>
+        <IconButton
           title={history ? "Back to chat" : "Chat history"}
           aria-label="Chat history"
           aria-pressed={history}
           onClick={() => setHistory(!history)}
-          className={cn(headerButton, history && "bg-[var(--card)] text-[var(--foreground)] shadow-sm")}
         >
-          <History className="size-4" />
-        </button>
-        <StepsModeButton className={headerButton} />
+          <History />
+        </IconButton>
+        <StepsModeButton />
       </header>
-
-      {/* What Claude can see right now, so "this file" never feels like magic. */}
-      <div
-        data-testid="chat-context"
-        className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]"
-      >
-        <span>Claude sees:</span>
-        {experiment && (
-          <span
-            data-testid="chat-context-run"
-            title={`Experiment "${experiment.title}": its files, report, parameters and results`}
-            className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]"
-          >
-            <FlaskConical className="size-3 shrink-0" />
-            <span className="truncate">{experiment.title}</span>
-          </span>
-        )}
-        {activeFile ? (
-          <span className="flex max-w-full items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--foreground)]">
-            <FileText className="size-3 shrink-0" />
-            <span className="truncate">{fileName(activeFile.path)}</span>
-          </span>
-        ) : (
-          <span>your file list</span>
-        )}
-        {selection && (
-          <span className="flex items-center gap-1 rounded-full bg-[var(--accent)] px-2 py-0.5 text-[var(--accent-foreground)]">
-            <TextSelect className="size-3" /> {selection.length} selected chars
-          </span>
-        )}
-      </div>
 
       {history && (
         <div data-testid="chat-history" className="min-h-0 flex-1">
@@ -148,64 +119,38 @@ function ChatPaneView() {
         </div>
       )}
       {/* Kept mounted under the history so the conversation and its tools survive. */}
-      <div className={cn("min-h-0 flex-1", history && "hidden")}>
+      <div className={cn("relative min-h-0 flex-1", history && "hidden")}>
         <CopilotChat
           attachments={{ enabled: true }}
           // A slot may be any component taking the input's props; the type asks for its statics too.
           input={SkillChatInput as typeof CopilotChatInput}
           messageView={messageView}
+          suggestionView={composerSuggestions}
+          welcomeScreen={false}
           className="h-full"
         />
+        <ChatEmptyState />
       </div>
     </section>
   );
 }
 
-/** Answer links: file references (file-refs.ts) open in the middle pane, the rest on the web. */
-function AnswerLink({ href, className, children, node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) {
-  const fileRef = parseFileRef(href);
-  if (fileRef) return <FileRefLink fileRef={fileRef}>{children}</FileRefLink>;
-  // As Streamdown's own link, which this replaces.
+/** A new chat says what Claude can work with, above the suggestions and the composer. */
+function ChatEmptyState() {
+  const { agent } = useAgent({ updates: [UseAgentUpdate.OnMessagesChanged, UseAgentUpdate.OnRunStatusChanged] });
+  const { status, mode, incognito } = useMemory();
+  if (agent.messages.length > 0 || agent.isRunning) return null;
+  const remembers = status === "ready" && mode !== "off" && !incognito;
   return (
-    <a
-      data-streamdown="link"
-      href={href}
-      rel="noreferrer"
-      target="_blank"
-      {...props}
-      className={cn("wrap-anywhere font-medium text-primary underline", className)}
-    >
-      {children}
-    </a>
-  );
-}
-
-function FileRefLink({ fileRef: { path, lines }, children }: { fileRef: FileRef; children: ReactNode }) {
-  const { getFile } = useWorkspace();
-  const { open } = useWorkbench().editor;
-  const file = getFile(path);
-  const where = !lines
-    ? path
-    : lines.start === lines.end
-      ? `${path}, line ${lines.start}`
-      : `${path}, lines ${lines.start}–${lines.end}`;
-  if (!file) {
-    return (
-      <span title={`${where} (not a file in your workspace)`} className="text-[var(--muted-foreground)] underline decoration-dashed">
-        {children}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      data-testid="file-ref"
-      title={`Open ${where}`}
-      onClick={() => open(file.path, lines)}
-      className="rounded bg-[var(--secondary)] px-1 font-medium text-[var(--foreground)] underline decoration-[var(--muted-foreground)] underline-offset-2 hover:bg-[var(--accent)] cursor-pointer"
-    >
-      <FileIcon file={file} className="mr-1 inline size-3.5 align-[-2px]" />
-      {children}
-    </button>
+    // Over the empty message list, under CopilotKit's input overlay (z-20).
+    <div data-testid="chat-empty"
+      className="pointer-events-none absolute inset-x-0 top-0 z-10 grid gap-1.5 px-6 pt-[12%] text-center text-body text-[var(--muted-foreground)]">
+      <p className="text-title font-semibold text-[var(--foreground)]">Ask Claude about your workspace</p>
+      <p>
+        Claude sees the file you have open and any text you select, and can read, create and edit files here.
+        {remembers && " It remembers what helps across chats."}
+      </p>
+      <p>Pick a suggestion below, or type <kbd className="rounded border border-[var(--border)] px-1.25 font-[family-name:var(--font-code)] text-label">/</kbd> to run a skill.</p>
+    </div>
   );
 }

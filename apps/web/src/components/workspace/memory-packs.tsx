@@ -10,14 +10,17 @@ import {
   typeLabel,
   useMemory,
   when,
-  type MemoryType,
   type PackInstall,
   type SharedPlace,
 } from "./memory";
 import { PlaceIcon, placeKey } from "./shared-memory";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
- * Memory packs and import in the Memory view (issue #93, step 4).
+ * Memory packs and import in the Memory view.
  * - Import: another assistant's memory (pasted, or a file) or a .zip export
  *   becomes changes in your inbox, to accept one by one.
  * - Memory packs: a place's shared notes published to the hub, for other
@@ -29,39 +32,9 @@ import { PlaceIcon, placeKey } from "./shared-memory";
 /** In the editor, the memory pack hub. */
 export const PACKS = "packs:";
 
-interface PackFlag {
-  kind: string;
-  path: string;
-  line?: number;
-  detail: string;
-}
+type PackListing = Schema["PackListing"];
 
-interface PackVersion {
-  version: number;
-  description: string;
-  notes: number;
-  flags: PackFlag[];
-  publishedBy: string | null;
-  publishedAt: string;
-  verified: boolean;
-  yanked: boolean;
-  yankReason: string | null;
-}
-
-interface PackListing {
-  name: string;
-  owner: string | null;
-  mine: boolean;
-  latest: PackVersion | null;
-  updatedAt: string;
-}
-
-interface PackDetail extends PackListing {
-  versions: PackVersion[];
-  version: PackVersion;
-  notes: { name: string; description: string; type: MemoryType; body: string }[];
-  isAdmin: boolean;
-}
+type PackDetail = Schema["PackDetail"];
 
 type Place = Pick<SharedPlace, "scope" | "nodeId" | "groupId">;
 

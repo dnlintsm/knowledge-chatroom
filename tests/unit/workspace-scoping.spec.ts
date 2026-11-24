@@ -16,7 +16,7 @@ import { ChatRunner } from "../../apps/web/src/lib/chat-runner";
 import { AgentChatStore, AutoChatStore, MemoryChatStore } from "../../apps/web/src/lib/chat-store";
 import { defaultWorkspacePath, findWorkspace, homeWorkspacePath } from "../../apps/web/src/lib/workspaces";
 
-/** Saved state, chats and the page's workspace, per workspace (issue #226, docs/workspaces.md). */
+/** Saved state, chats and the page's workspace, per workspace (docs/workspaces.md). */
 
 const WS1 = "11111111-2222-4333-8444-555555555555";
 const WS2 = "66666666-7777-4888-9999-aaaaaaaaaaaa";
@@ -122,8 +122,8 @@ test.describe("the page's workspace", () => {
 
   test("URLs without one go to the default workspace, keeping their query", () => {
     expect(defaultWorkspacePath()).toBe("/w/default");
-    expect(defaultWorkspacePath("experiment=e1&list=all")).toBe("/w/default?experiment=e1&list=all");
-    expect(defaultWorkspacePath("?experiment=e1")).toBe("/w/default?experiment=e1");
+    expect(defaultWorkspacePath("experiment_id=e1&list=all")).toBe("/w/default?experiment_id=e1&list=all");
+    expect(defaultWorkspacePath("?experiment_id=e1")).toBe("/w/default?experiment_id=e1");
   });
 
   test("/ goes to the default workspace when the user is in it, otherwise to their first", async () => {

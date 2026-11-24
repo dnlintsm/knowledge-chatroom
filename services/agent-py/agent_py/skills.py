@@ -1,6 +1,6 @@
-"""The run's skills (issue #176, step 3).
+"""The run's skills.
 
-The Python twin of apps/agent/src/skills/run.ts. The agent server decides
+api-py decides
 which skills a run gets: built-in, hub and workspace skills that aren't off for
 the user in this chat (GET /skills/run, with the run's storage token). Claude
 Code loads skills from <cwd>/.claude/skills/, so each user gets a folder of
@@ -10,8 +10,9 @@ the run starts there with:
   skills          the ones it may use; any other skill is hidden and refused
   skillOverrides  auto -> "on", manual -> "user-invocable-only" (/name only)
   no shell        `!` commands in a SKILL.md never run, and the run has no
-                  shell tool. Skills' scripts (SKILL_SCRIPTS=on on the agent
-                  server) don't run here.
+                  shell tool, unless scripts are on: with SKILL_SCRIPTS=on, a
+                  run with a skill that ships scripts gets Bash in Claude
+                  Code's sandbox (scripts.py).
 
 The folder stays the same per user, so resumed sessions (stored by Claude Code
 per working folder) still find their history. Each skill the run uses is
@@ -48,11 +49,13 @@ class RunSkill:
     mode: Literal["auto", "manual"]
     source: str
     user_invocable: bool = True
+    # It ships scripts, which run only with SKILL_SCRIPTS=on (scripts.py).
+    needs_execution: bool = False
     files: tuple[tuple[str, bytes], ...] = field(default=(), repr=False)
 
 
 async def fetch_skills(storage: Storage, thread: str) -> list[RunSkill]:
-    """The skills the agent server gives a run for this user in this chat."""
+    """The skills api-py gives a run for this user in this chat."""
     data = await storage.json("GET", "/skills/run", params={"thread": thread})
     skills = []
     for s in data.get("skills", []):
@@ -64,16 +67,22 @@ async def fetch_skills(storage: Storage, thread: str) -> list[RunSkill]:
                 s["name"],
                 s["mode"],
                 s.get("source", "builtin"),
-                bool(s.get("userInvocable", True)),
-                files,
+                user_invocable=bool(s.get("userInvocable", True)),
+                needs_execution=bool(s.get("needsExecution", False)),
+                files=files,
             )
         )
     return skills
 
 
+def run_folder(root: Path, user: str) -> Path:
+    """The run folder under `root` for `user` (their id, with the workspace when there is one)."""
+    return root / hashlib.sha256(user.encode()).hexdigest()[:16]
+
+
 def materialize(root: Path, user: str, skills: Sequence[RunSkill]) -> Path:
     """Writes the user's skills to their run folder under `root` (if they changed) and returns it."""
-    cwd = root / hashlib.sha256(user.encode()).hexdigest()[:16]
+    cwd = run_folder(root, user)
     claude = cwd / ".claude"
     target = claude / "skills"
     digest = hashlib.sha256()

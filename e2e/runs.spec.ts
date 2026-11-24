@@ -2,17 +2,19 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 // The agent's database client: provenance is only written by Claude's tools,
 // which the mock agent doesn't run, so this test writes one directly.
 import postgres from "postgres";
+import { showPlaces } from "./places";
 
 /** Shows a sidebar view; clicking it while it is already shown would fold the sidebar away. */
 async function showView(page: Page, name: "Files" | "Experiments") {
+  if (name === "Experiments") return showPlaces(page, "Experiments");
   const button = page.getByRole("button", { name, exact: true });
   if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
 }
 const showFiles = (page: Page) => showView(page, "Files");
 
 /**
- * Runs are experiments with a report (issue #82), shown as experiments
- * (#185). They need server storage,
+ * Runs are experiments with a report, shown as experiments.
+ * They need server storage,
  * so this runs with it (pnpm test:e2e:storage). Screenshots continue the
  * numbering of preview.spec.ts.
  */
@@ -52,7 +54,7 @@ async function send(page: Page, text: string) {
 
 /** Opens a run by its link and waits for its report. */
 async function gotoRun(page: Page, run: Experiment, report: string) {
-  await page.goto(`/?experiment=${run.id}`);
+  await page.goto(`/?experiment_id=${run.id}`);
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText(run.title);
   await expect(page.getByTestId("file-preview")).toContainText(report);
 }
@@ -81,11 +83,16 @@ test("runs: runs open from the Runs view and links", async ({ page, request }) =
 
   // Picking a run moves into it and opens its report.
   await list.getByRole("button").filter({ hasText: "etch-2026-10-01" }).click();
-  await expect(page).toHaveURL(/\?experiment=[0-9a-f-]{36}$/);
+  await expect(page).toHaveURL(/\?experiment_id=[0-9a-f-]{36}$/);
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText("etch-2026-10-01");
   await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
   await expect(page.getByTestId("chat-context-run")).toContainText("etch-2026-10-01");
   const etchUrl = page.url();
+  // A link made before experiment_id (?experiment=<id>) opens the same run, in today's form.
+  const etchId = new URL(etchUrl).searchParams.get("experiment_id");
+  await page.goto(`/?experiment=${etchId}`);
+  await expect(page).toHaveURL(etchUrl);
+  await expect(page.getByTestId("file-preview")).toContainText("xDOE report: etch rate");
   await showFiles(page);
   await expect(page.locator('[role="treeitem"][title="effects.csv"]')).toBeVisible();
   await expect(page.getByTestId("actions")).toBeVisible();
@@ -142,7 +149,7 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await expect(rows).toHaveCount(3);
 
     // Going to a node in the tree points the list there, sub-levels included.
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     const tree = page.getByRole("tree", { name: "Knowledge tree" });
     await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
     await showView(page, "Experiments");
@@ -153,7 +160,7 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     // Opening one from outside the list (a link) keeps the node scope.
     const { experiments } = await (await request.get("/api/experiments")).json();
     const root = (experiments as Experiment[]).find((e) => e.title === "Root scope check")!;
-    await page.goto(`/?list=${etch}&experiment=${root.id}`);
+    await page.goto(`/?list=${etch}&experiment_id=${root.id}`);
     await expect(page.getByRole("navigation", { name: "Location" })).toContainText("Root scope check");
     await showView(page, "Experiments");
     await expect(scope).toContainText("In Scope etch");
@@ -188,7 +195,7 @@ test("the experiment list keeps its scope when an experiment opens (#186)", asyn
     await expect(page).toHaveURL(/[?&]list=all/);
 
     // On a node, All chosen with ✕ survives a reload too.
-    await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+    await showPlaces(page);
     await tree.getByTestId("knowledge-node").filter({ hasText: "Scope etch" }).first().click();
     await showView(page, "Experiments");
     await expect(scope).toContainText("In Scope etch");
@@ -210,7 +217,7 @@ test("runs: a new run at the root starts empty and tracks its state", async ({ p
   await page.getByRole("button", { name: "New experiment in the workspace" }).click();
   await page.getByRole("textbox", { name: "New experiment title" }).fill("First uploads");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\?experiment=/);
+  await expect(page).toHaveURL(/\?experiment_id=/);
   const panel = page.getByTestId("experiment-panel");
   await expect(panel).toContainText("Experiment in the workspace");
   await expect(panel).toContainText("It started empty");
@@ -225,12 +232,12 @@ test("an archived experiment says why it's read only, and a rerun reads its inpu
     data: { inputs: [{ path: "uploads/dose.csv", experiment: run.id }] },
   });
   expect(linked.ok()).toBe(true);
-  // Since #175 the copy under inputs/ is an ordinary file; someone edits it.
+  // The copy under inputs/ is an ordinary file; someone edits it.
   const edit = await request.put(`/api/files/inputs/dose.csv?experiment=${run.id}`, { data: "dose\n99\n", headers: md });
   expect(edit.ok()).toBe(true);
   expect((await request.patch(`/api/experiments/${run.id}`, { data: { status: "archived" } })).ok()).toBe(true);
 
-  await page.goto(`/?experiment=${run.id}`);
+  await page.goto(`/?experiment_id=${run.id}`);
   await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Dose sweep", exact: true }).click();
   const panel = page.getByTestId("experiment-panel");
   await expect(panel.getByTestId("read-only-reason")).toHaveText("Archived, so it's read only. Restore it to change it.");
@@ -294,7 +301,7 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   // A rerun links back to the run it ran again.
   await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
   await provenance.getByRole("button", { name: first.title }).click();
-  await expect(page).toHaveURL(new RegExp(`experiment=${first.id}$`));
+  await expect(page).toHaveURL(new RegExp(`experiment_id=${first.id}$`));
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText(first.title);
 });
 
@@ -333,9 +340,9 @@ test("files can be uploaded into an existing run and added as its inputs", async
 });
 
 test("a link to a missing run, or an old ?run= link, drops out of the URL", async ({ page }) => {
-  await page.goto("/?experiment=00000000-0000-4000-8000-000000000000");
+  await page.goto("/?experiment_id=00000000-0000-4000-8000-000000000000");
   await expect(page.getByTestId("notices")).toContainText("That experiment isn't there, or isn't shared with you.");
-  await expect(page).not.toHaveURL(/experiment=/);
+  await expect(page).not.toHaveURL(/experiment(_id)?=/);
   await page.goto(`/?run=${ETCH}`);
   await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
   await expect(page).not.toHaveURL(/run=/);
@@ -369,7 +376,7 @@ test("the Actions block starts a new chat about the run", async ({ page, request
 
   // Outside a run there are no actions.
   await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "My workspace", exact: true }).click();
-  await expect(page).not.toHaveURL(/experiment=/);
+  await expect(page).not.toHaveURL(/experiment(_id)?=/);
   await expect(page.getByTestId("actions")).toHaveCount(0);
 });
 
@@ -454,7 +461,7 @@ test("Claude runs actions and switches runs through the workbench", async ({ pag
   // The conversation carries on in the other run.
   await expect(page.getByText("Switched to the other run.")).toBeVisible(reply);
   await expect(page.getByTestId("chat-context-run")).toContainText("litho-2026-10-03");
-  await expect(page).toHaveURL(new RegExp(`experiment=${other.id}$`));
+  await expect(page).toHaveURL(new RegExp(`experiment_id=${other.id}$`));
 });
 
 test("each chat run in a run tells the agent which run (docs/remote-agent.md)", async ({ page, request }) => {

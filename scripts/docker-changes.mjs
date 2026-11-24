@@ -1,4 +1,4 @@
-// Decides which demo images a pull request can affect (issue #218).
+// Decides which demo images a pull request can affect.
 //
 //   node scripts/docker-changes.mjs            # in CI: writes `images` (JSON) and `compose` to $GITHUB_OUTPUT
 //   node scripts/docker-changes.mjs a.py b.ts  # locally: prints them for these paths
@@ -9,10 +9,9 @@
 // and a diff that cannot be computed also build everything.
 //
 // The rules follow what each Dockerfile copies:
-// - app (Dockerfile, target app): the pnpm manifests, packages/contracts, apps/web.
-// - agent (Dockerfile, target agent): the pnpm manifests, packages/contracts, apps/agent.
-// - api-py: the uv workspace, packages/knowledge-py, services/api-py, and from
-//   apps/agent the storage migrations and the skills.
+// - app (Dockerfile): the pnpm manifests, packages/contracts, apps/web.
+// - api-py: the uv workspace, packages/knowledge-py, services/api-py (with its
+//   migrations and built-in skills).
 // - agent-py, lab-tools, papers-mcp: the uv workspace, packages/knowledge-py, their service.
 // `compose` is the `docker compose config` check of docker-compose.yml.
 //
@@ -24,10 +23,10 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { matches } from "./ci-changes.mjs";
 
-export const IMAGES = ["app", "agent", "api-py", "agent-py", "lab-tools", "papers-mcp"];
+export const IMAGES = ["app", "api-py", "agent-py", "lab-tools", "papers-mcp"];
 export const TARGETS = [...IMAGES, "compose"];
 
-const NODE = ["app", "agent"];
+const NODE = ["app"];
 const PYTHON = ["api-py", "agent-py", "lab-tools", "papers-mcp"];
 
 // [path pattern, targets]. Patterns: `dir/**` (anything below), or an exact path.
@@ -37,6 +36,10 @@ export const RULES = [
   ["README.md", []],
   ["CHANGELOG.md", []],
   ["LICENSE", []],
+  ["SECURITY.md", []],
+  ["CONTRIBUTING.md", []],
+  ["AGENTS.md", []],
+  ["CLAUDE.md", []],
   ["e2e/**", []],
   ["tests/**", []],
   ["examples/**", []],
@@ -49,14 +52,7 @@ export const RULES = [
   ["Dockerfile", NODE],
   ["docker-compose.yml", ["compose"]],
   ["infra/**", ["compose"]],
-  // api-py packages these from the agent (services/api-py/Dockerfile).
-  ["apps/agent/src/storage/migrations/**", ["agent", "api-py"]],
-  ["apps/agent/skills/**", ["agent", "api-py"]],
-  // Both Node images install from every workspace manifest.
-  ["apps/web/package.json", NODE],
-  ["apps/agent/package.json", NODE],
   ["apps/web/**", ["app"]],
-  ["apps/agent/**", ["agent"]],
   ["packages/contracts/**", NODE],
   ["package.json", NODE],
   ["pnpm-lock.yaml", NODE],

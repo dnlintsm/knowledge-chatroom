@@ -1,6 +1,6 @@
 /**
  * Whether people sign in, decided the same way by the Next.js app and the
- * agent (issue #64). AUTH_MODE picks it:
+ * agent. AUTH_MODE picks it:
  *
  * - `oidc`: sign in with an OpenID Connect provider; needs AUTH_SECRET.
  * - `local`: no login; one built-in user owns everything (demos, development).

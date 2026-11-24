@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api_py import tokens
+from knowledge_chatroom import identity as shared_identity
 
 SECRET = "0123456789abcdef0123456789abcdef"
 # From signIdentityToken / identityPublicKey with SECRET, in TypeScript.
@@ -60,3 +61,23 @@ def test_refuses_expired_forged_and_other_secrets():
     )
     assert tokens.verify(tokens.sign({"exp": 1893456000}, SECRET), SECRET, None, NOW) is None
     assert tokens.read(tokens.sign({"sub": "kc|a", "exp": True}, SECRET), SECRET, NOW) is None
+
+
+def test_the_public_key_alone_reads_what_the_secret_signed():
+    # Outside services hold only the public key; both sides run the same check.
+    key = shared_identity.public_key(tokens.public_key(SECRET))
+    assert shared_identity.claims(TS_STORAGE, key, NOW) == STORAGE_CLAIMS
+    assert tokens.read(TS_STORAGE, SECRET, NOW) == STORAGE_CLAIMS
+    signed = tokens.sign({"sub": "kc|alice", "aud": "mcp:lab", "exp": 1893456000}, SECRET)
+    assert shared_identity.verify(signed, key, "mcp:lab", NOW) == shared_identity.User(
+        sub="kc|alice"
+    )
+    assert shared_identity.verify(signed, key, "mcp:other", NOW) is None
+
+
+def test_the_headers_are_the_ones_outside_services_read():
+    assert (tokens.IDENTITY_HEADER, tokens.STORAGE_HEADER, tokens.MEMORY_HEADER) == (
+        "x-knowledge-user",
+        "x-knowledge-storage",
+        "x-knowledge-memory",
+    )

@@ -27,14 +27,15 @@ from . import stats
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
-# The chatroom's public key (agent GET /identity/public-key) when login is on;
-# unset = no login. Never give this server AUTH_SECRET.
-PUBLIC_KEY = (
-    identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"])
-    if os.environ.get("KNOWLEDGE_PUBLIC_KEY")
-    else None
-)
-# The chatroom's agent server (LOCAL_AGENT_URL): its storage API for workspace
+# Whether callers must be signed in. AUTH_MODE=local: no login.
+# With login, KNOWLEDGE_PUBLIC_KEY is the chatroom's public key (the API server's
+# GET /identity/public-key); never give this server AUTH_SECRET. Neither set is
+# an error at startup: a missing key must not turn login off.
+try:
+    LOGIN = identity.login_from_env(os.environ)
+except identity.LoginConfigError as err:
+    raise SystemExit(f"[lab-tools] {err}") from None
+# The chatroom's API server, api-py (the app's LOCAL_AGENT_URL): its storage API for workspace
 # files, and /memory/agent for the user's memory.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
@@ -46,7 +47,7 @@ mcp = MCPServer(
 
 def require_user(ctx: Context) -> identity.User:
     """The signed-in user calling this tool; refuses calls that can't prove one."""
-    user = identity.caller(ctx.headers, PUBLIC_KEY, f"mcp:{SERVER_NAME}")
+    user = identity.caller(ctx.headers, LOGIN, f"mcp:{SERVER_NAME}")
     if user is None:
         raise ToolError(
             "Unknown caller: the chatroom must forward the user (forwardIdentity), "
@@ -93,7 +94,7 @@ def describe_column(
     """
     require_user(ctx)
     token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
-    if PUBLIC_KEY and not token:
+    if LOGIN.required and not token:
         raise ToolError(
             'Workspace files need "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.'
         )

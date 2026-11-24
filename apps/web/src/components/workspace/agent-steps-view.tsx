@@ -23,8 +23,12 @@ import {
   type MessageGroupWrapperProps,
   type MessageRow,
 } from "@copilotkit/react-core/v2";
+import { IconButton } from "@/components/ui/icon-button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ChatAnswer } from "./chat-answer";
+import { ChatMemoryActivity, useMemory } from "./memory";
+import { useSkills } from "./skills";
 import {
   StepTimes,
   currentActivity,
@@ -38,14 +42,14 @@ import {
 } from "./agent-steps";
 
 /**
- * Collapsed agent steps (issue #154), the React side of agent-steps.ts.
+ * Collapsed agent steps, the React side of agent-steps.ts.
  *
  * Each turn's thinking, tool calls and narration render inside a StepsBlock:
  * a "Worked for 14s · 5 steps" header (a live status line while it runs) that
  * opens into the steps. The block always renders its messages, inside a
  * StepsContext; the step renderers (ReasoningStep, StepAssistantMessage, the
  * generic tool row in tool-rendering.tsx) read it and hide while the block is
- * closed. Everything else, i.e. paper cards, charts, A2UI, a tool waiting
+ * closed. Everything else, i.e. paper cards, charts, a tool waiting
  * for the user, keeps showing, so outcomes never fold away.
  */
 
@@ -127,23 +131,21 @@ export function useChatSteps() {
 }
 
 /** The chat header's switch between Compact and Detailed steps. */
-export function StepsModeButton({ className }: { className?: string }) {
+export function StepsModeButton() {
   const { mode, setMode } = useChatSteps();
   const detailed = mode === "detailed";
   const title = detailed ? "Detailed steps: showing every step. Switch to compact" : "Compact steps: showing results. Switch to detailed";
   const Icon = detailed ? ListTree : ListCollapse;
   return (
-    <button
-      type="button"
+    <IconButton
       data-testid="steps-mode"
       title={title}
       aria-label="Show every step"
       aria-pressed={detailed}
       onClick={() => setMode(detailed ? "compact" : "detailed")}
-      className={cn(className, detailed && "bg-[var(--card)] text-[var(--foreground)] shadow-sm")}
     >
-      <Icon className="size-4" />
-    </button>
+      <Icon />
+    </IconButton>
   );
 }
 
@@ -178,7 +180,8 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
   // The live block is the latest turn's, while the run lasts.
   const lastId = messages[messages.length - 1]?.id;
   const at = agent.messages.findIndex((m) => m.id === lastId);
-  const live = running && at >= 0 && !agent.messages.slice(at + 1).some((m) => m.role === "user");
+  const latest = at >= 0 && !agent.messages.slice(at + 1).some((m) => m.role === "user");
+  const live = running && latest;
   useTicker(live);
 
   const detailed = mode === "detailed";
@@ -212,8 +215,21 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
       </button>
       <div id={id} className={cn(open && "mt-1 ml-1.5 border-l border-[var(--border)] pl-3")}>
         <StepsContext.Provider value={{ inBlock: true, open, detailed }}>{children}</StepsContext.Provider>
+        {open && latest && <ChatTurnActivity />}
       </div>
     </div>
+  );
+}
+
+function ChatTurnActivity() {
+  const { turn } = useSkills();
+  return (
+    <>
+      {turn.used.map((use) => (
+        <p key={use.skill} className="my-1 text-xs text-muted-foreground">Used skill <code>/{use.skill}</code></p>
+      ))}
+      <ChatMemoryActivity reads />
+    </>
   );
 }
 
@@ -227,9 +243,19 @@ function StepsBlock({ messages, children, state, setState }: MessageGroupWrapper
  */
 export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
   const view = useStepsView();
+  const { turn: memory } = useMemory();
+  const { turn: skills } = useSkills();
+  // CopilotKit memoizes old message rows, so their message-list prop may predate this turn.
+  const { agent } = useAgent({ updates: [] });
+  const messages = agent.messages;
+  const turn = messages.slice(messages.findLastIndex((message) => message.role === "user") + 1);
+  const answer = turn.findLast((message) => message.role === "assistant" && message.content?.trim());
+  const current = answer?.id === props.message.id;
+  const hasSteps = current && turn.slice(0, turn.findIndex((message) => message.id === props.message.id)).some((message) =>
+    message.role === "reasoning" || (message.role === "assistant" && message.toolCalls?.length));
   return (
     <CopilotChatAssistantMessage {...props}>
-      {({ markdownRenderer, toolCallsView, toolbar, toolbarVisible, message }) => {
+      {({ markdownRenderer, toolCallsView, toolbar, toolbarVisible, copyButton, inspectorButton, message }) => {
         const text = typeof message.content === "string" && message.content.trim().length > 0;
         if (view.inBlock) {
           return (
@@ -254,9 +280,18 @@ export function StepAssistantMessage(props: CopilotChatAssistantMessageProps) {
             data-message-id={message.id}
             className={cn("copilotKitMessage copilotKitAssistantMessage", props.className)}
           >
-            <div className="cpk:prose cpk:max-w-full cpk:break-words cpk:dark:prose-invert">{markdownRenderer}</div>
+            {text && (
+              // The answer's actions sit in its header row rather than a toolbar row of their own.
+              <ChatAnswer isRunning={props.isRunning && current} actions={toolbarVisible && <>{copyButton}{inspectorButton}</>}>
+                {markdownRenderer}
+              </ChatAnswer>
+            )}
             {toolCallsView}
-            {toolbarVisible && toolbar}
+            {current && !hasSteps && (skills.used.length > 0 || memory.events.some((event) => event.kind === "read")) && (
+              <details className="mt-1.5 text-label text-[var(--muted-foreground)]"><summary className="cursor-pointer">Activity</summary><ChatTurnActivity /></details>
+            )}
+            {current && <ChatMemoryActivity />}
+            {!text && toolbarVisible && toolbar}
           </div>
         );
       }}

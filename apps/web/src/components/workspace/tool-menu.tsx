@@ -16,7 +16,7 @@ import { chipsOn, readChips, setChip, writeChips, type ChipsByChat, type ToolMen
 import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
- * The chat's "+" menu of outside tools (issue #151). The agent lists the MCP
+ * The chat's "+" menu of outside tools. The agent lists the MCP
  * servers that have a `ui` block (GET /api/tools); picking one turns its chip
  * on for this chat, and the chips go out with every run as
  * forwardedProps.knowledge_chatroom.tools (use-chatroom-props.ts), so Claude
@@ -77,7 +77,7 @@ export function ToolMenuProvider({ children }: { children: ReactNode }) {
       .then((body: { tools?: ToolMenuItem[] }) => {
         if (live) setMenu(Array.isArray(body.tools) ? body.tools : []);
       })
-      // No agent server, or an older one: no "+" menu tools.
+      // No API server, or an older one: no "+" menu tools.
       .catch(() => {});
     return () => {
       live = false;
@@ -150,7 +150,7 @@ export function ToolChipRow() {
   const { menu, chips, setChip } = useToolMenu();
   if (!chips.length) return null;
   return (
-    <div data-testid="tool-chips" className="pointer-events-none relative z-20 mx-auto flex max-w-3xl flex-wrap gap-1.5 px-4 pb-1.5 @3xl:px-0">
+    <div data-testid="tool-chips" className="pointer-events-none relative z-20 flex max-w-3xl flex-wrap gap-1.5">
       {chips.map((server) => {
         const item = menu.find((m) => m.server === server)!;
         const Icon = toolIcon(item.icon);

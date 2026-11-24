@@ -4,7 +4,7 @@ import { localAgentUrl } from "./agent-target";
 import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth";
 
 /**
- * Forwards a route group to this repo's agent server (apps/agent/src/storage/http.ts)
+ * Forwards a route group to this repo's API server (services/api-py/api_py/storage_routes.py)
  * at LOCAL_AGENT_URL, also when the chat goes to a remote backend (AGENT_URL),
  * so the browser talks to one origin and the agent port stays private.
  * Responses stream through, which carries the /files?watch change stream too.
@@ -14,8 +14,9 @@ import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth
 const LOCAL_AGENT_URL = localAgentUrl();
 
 // x-knowledge-workspace: the workspace the page is in (src/lib/workspace-request.ts),
-// which the API server checks the user belongs to (issue #226).
-const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "x-knowledge-workspace"];
+// which the API server checks the user belongs to.
+// if-match: a save names the version it replaces, so it can't overwrite someone else's.
+const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "if-match", "x-knowledge-workspace"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-length",
@@ -27,7 +28,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "content-disposition",
   // Binary downloads may redirect to a signed object-store link.
   "location",
-  // Stored files opened as pages stay sandboxed (apps/agent/src/storage/http.ts).
+  // Stored files opened as pages stay sandboxed (services/api-py/api_py/storage_routes.py).
   "content-security-policy",
   "x-content-type-options",
 ];
@@ -70,7 +71,7 @@ export function agentProxy(prefix: string) {
         signal: req.signal,
       });
     } catch {
-      return Response.json({ error: "Agent server unreachable" }, { status: 502 });
+      return Response.json({ error: "API server unreachable" }, { status: 502 });
     }
 
     const out = new Headers();

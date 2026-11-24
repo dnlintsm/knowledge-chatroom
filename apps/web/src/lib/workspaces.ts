@@ -3,7 +3,7 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
 import { DEFAULT_SLUG, type WorkspaceInfo } from "./workspace-request";
 
 /**
- * Which workspace a page's `/w/<slug>` names (issue #226, docs/workspaces.md):
+ * Which workspace a page's `/w/<slug>` names (docs/workspaces.md):
  * looked up once, on the server, among the user's own workspaces, which the
  * API server (services/api-py) lists at GET /workspaces.
  *
@@ -11,7 +11,7 @@ import { DEFAULT_SLUG, type WorkspaceInfo } from "./workspace-request";
  * - missing: there is no such workspace, or it isn't the user's (the same
  *   answer for both, as the API server gives); with the user's own, which
  *   may be none, and whether they may create one.
- * - unavailable: the server has no workspaces (the agent server alone, or no
+ * - unavailable: the server has no workspaces (the e2e mock, or api-py without
  *   storage, answers 404), or can't be reached right now. The default
  *   workspace still opens then, as before workspaces; others can't.
  */

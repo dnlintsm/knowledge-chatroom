@@ -54,6 +54,8 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByRole("treeitem", { name: /welcome\.md/ })).toBeVisible();
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
   await expect(page.getByTestId("chat-context-run")).toHaveCount(0);
+  // A new chat says what Claude can work with instead of starting blank.
+  await expect(page.getByTestId("chat-empty")).toContainText("Ask Claude about your workspace");
   await shot(page, "01-workspace");
 
   // A report from a sample run folder, and Claude seeing it.
@@ -69,6 +71,7 @@ test("workspace walkthrough", async ({ page }) => {
   await expect(page.getByTestId("chat-context")).toContainText("selected chars");
 
   await send(page, "Summarize this file and save it under artifacts/");
+  await expect(page.getByTestId("chat-empty")).toHaveCount(0);
   // The suggestion chips hide while a run streams and come back once it ends.
   await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
@@ -100,13 +103,8 @@ test("workspace walkthrough", async ({ page }) => {
   // Hidden while showing the history, the chat reopens on the conversation.
   await page.getByRole("button", { name: "Chat history" }).click();
 
-  await page.getByRole("button", { name: "Hide chat" }).click();
-  await page.getByRole("button", { name: "Files", exact: true }).click();
-  await shot(page, "08-hidden-chat");
-  // The chat icon at the top-right opens the chat with the cursor in its input.
-  await page.getByRole("button", { name: "Show chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
-  await shot(page, "08b-chat-reopened");
+  // The chat has no toggle: it stays open beside the editor.
+  await expect(page.getByRole("button", { name: /^(Hide|Show) chat$/ })).toHaveCount(0);
 
   // The app name at the top-left goes home to the Runs view, which needs server storage.
   await page.getByRole("link", { name: "Knowledge Chatroom" }).click();
@@ -229,13 +227,16 @@ test("Claude remembers across chats, and you see, undo and edit it", async ({ pa
   await shot(page, "29b-memory-panel");
 
   // An incognito chat leaves memory alone.
+  await page.getByTestId("memory-status").locator("summary").click();
   await page.getByTestId("memory-incognito").click();
   await expect(page.getByTestId("memory-status")).toContainText("Incognito");
+  await page.getByTestId("memory-status").locator("summary").click();
   await send(page, "Remember that I like tables.");
   await expect(page.getByTestId("copilot-assistant-message").last()).toContainText("mock agent", reply);
   await expect(chip).toHaveCount(0);
   await expect(page.getByTestId("skill-status")).toContainText("auto ·");
   await shot(page, "29c-memory-incognito");
+  await page.getByTestId("memory-status").locator("summary").click();
   await page.getByTestId("memory-incognito").click();
   await expect(page.getByTestId("memory-incognito")).toHaveAttribute("aria-pressed", "false");
 
@@ -320,10 +321,6 @@ test("a workspace with no runs still has the chat", async ({ page }) => {
   }, "knowledge-chatroom.workspace.v1");
   await page.goto("/");
   await expect(page.getByTestId("copilot-chat-textarea")).toBeVisible();
-  await page.getByRole("button", { name: "Hide chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeHidden();
-  await page.getByRole("button", { name: "Show chat" }).click();
-  await expect(page.getByTestId("copilot-chat-textarea")).toBeFocused();
   await shot(page, "20-chat-without-runs");
 });
 
@@ -367,13 +364,14 @@ test("files and layout survive a reload", async ({ page }) => {
   await page.getByRole("button", { name: "New file", exact: true }).click();
   await page.getByRole("textbox", { name: "New file path" }).press("Enter");
   await page.getByTestId("file-editor").fill("# Kept after reload");
-  await page.getByRole("button", { name: "Hide chat" }).click();
   await page.reload();
   await expect(page.getByRole("treeitem", { name: /untitled-1\.md/ })).toHaveAttribute(
     "title",
     "notes/untitled-1.md",
   );
-  await expect(page.getByRole("button", { name: "Show chat" })).toBeVisible();
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
 });
 
 test("collapsed folders stay collapsed across views and reloads", async ({ page }) => {
@@ -401,24 +399,26 @@ test("collapsed folders stay collapsed across views and reloads", async ({ page 
   await expect(skill).toBeVisible();
 });
 
-test("file toolbar: collapse all, reveal, filter and new file in a folder", async ({ page }) => {
+test("file toolbar: collapse all, filter and new file in a folder", async ({ page }) => {
   await gotoReport(page);
   const folder = (name: string) => page.getByRole("button", { name, exact: true });
   const report = page.locator(`[role="treeitem"][title="${REPORT}"]`);
 
-  // Collapse all, then bring the open report back into view.
+  // Collapse all, then expand all again.
   await page.getByRole("button", { name: "Collapse all folders" }).click();
   for (const name of ["notes", "runs", "skills", "uploads"]) {
     await expect(folder(name)).toHaveAttribute("aria-expanded", "false");
   }
   await expect(report).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Expand all folders" })).toBeVisible();
-  await page.getByRole("button", { name: "Reveal open file" }).click();
-  await expect(report).toBeFocused();
+  await page.getByRole("button", { name: "Expand all folders" }).click();
+  await expect(report).toBeVisible();
   await expect(folder("runs")).toHaveAttribute("aria-expanded", "true");
-  await expect(folder("notes")).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("button", { name: "Collapse all folders" })).toBeVisible();
-  await shot(page, "35-file-toolbar-reveal");
+  await expect(page.getByRole("button", { name: "Reveal open file" })).toHaveCount(0);
+  await shot(page, "35-file-toolbar");
+  await folder("uploads").click();
+  await expect(folder("uploads")).toHaveAttribute("aria-expanded", "false");
 
   // The name filter shows matches inside collapsed folders, without opening them for good.
   await page.getByRole("button", { name: "Filter files" }).click();
@@ -522,7 +522,12 @@ test("file references in answers open the cited lines", async ({ page }) => {
   test.skip(process.env.E2E_MODE === "live", "Needs the mock agent's canned answer.");
   await openHome(page);
   await send(page, citesFiles);
-  await fileRef(page, "The Pragmatic Programmer").click(reply);
+  // The link text stays readable in the sentence, with its source number beside it.
+  const book = fileRef(page, "The Pragmatic Programmer");
+  await expect(book).toBeVisible(reply);
+  expect((await book.boundingBox())!.width).toBeGreaterThan(80);
+  await expect(book.getByTestId("citation-number")).toHaveText("1");
+  await book.click();
 
   // The preview switches to the file and highlights the cited table row.
   await expect(page.getByRole("tab", { name: /reading-list\.md/ })).toHaveAttribute("aria-selected", "true");
@@ -542,6 +547,15 @@ test("file references in answers open the cited lines", async ({ page }) => {
   // A range highlights each row it covers.
   await fileRef(page, "sales.csv:3-4").click();
   await expect(page.getByTestId("file-preview").locator("tr[data-revealed]")).toHaveText([/2026-08/, /2026-09/]);
+
+  // The image-form Markdown for a workspace note is a citation too.
+  await expect(fileRef(page, "welcome.md")).toHaveAccessibleName(/Open notes\/welcome\.md · Line 1/);
+  await page.getByRole("button", { name: "Sources 3", exact: true }).click();
+  const sources = page.getByTestId("chat-sources");
+  await sources.getByRole("button", { name: /reading-list\.md/ }).click();
+  await expect(sources.locator("pre")).toContainText("The Pragmatic Programmer");
+  await sources.getByRole("button", { name: "Open in editor" }).click();
+  await expect(page.getByRole("tab", { name: /reading-list\.md/ })).toHaveAttribute("aria-selected", "true");
 });
 
 test("file references on a phone show the editor", async ({ page }) => {
@@ -549,7 +563,7 @@ test("file references on a phone show the editor", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "Files" }).last().click();
-  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  // Uploads are a folder in the Files tree; there is no Uploads view.
   await page.getByRole("treeitem", { name: /sales\.csv/ }).click();
   // The CopilotKit inspector sometimes pops open over the editor toolbar on a phone.
   await page.getByRole("button", { name: "edit", exact: true }).dispatchEvent("click");
@@ -575,15 +589,61 @@ test("chat suggestions: first round follows what is open, then follow-ups", asyn
   await page.getByRole("treeitem", { name: /effects\.csv/ }).click();
   await expect(chip("Summarize effects.csv")).toBeVisible();
   await chip("Draft a note").click();
-  await expect(page.getByText("draft a short note at notes/next-steps.md")).toBeVisible();
+  const input = page.getByTestId("copilot-chat-textarea");
+  await expect(input).toHaveValue(/draft a short note at notes\/next-steps\.md/);
+  await expect(page.getByTestId("copilot-user-message")).toHaveCount(0);
+  await page.getByTestId("copilot-send-button").click();
+  await expect(page.getByTestId("copilot-user-message")).toContainText("draft a short note at notes/next-steps.md");
 
   // After the reply, the suggester's follow-ups replace the first round
   // (the mock agent's canned ones without an API key).
   await expect(page.getByTestId("copilot-assistant-message").first()).toBeVisible(reply);
   await expect(page.getByTestId("copilot-suggestion").first()).toBeVisible(reply);
   await expect(chip("Draft a note")).toHaveCount(0);
-  if (process.env.E2E_MODE !== "live") await expect(chip("Check the evidence")).toBeVisible();
+  if (process.env.E2E_MODE !== "live") {
+    await expect(chip("Check the evidence")).toBeVisible();
+    await expect(page.getByTestId("copilot-suggestion")).toHaveCount(3);
+    // No label is cut off: it has to be read before choosing.
+    const clipped = await page.getByTestId("copilot-suggestion").locator("span").evaluateAll((labels) =>
+      labels.filter((label) => label.scrollWidth > label.clientWidth).map((label) => label.textContent));
+    expect(clipped).toEqual([]);
+    await chip(/Compare which assumptions/).click();
+    await expect(input).toHaveValue(/and point to the supporting lines\./);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const prompts = page.getByTestId("copilot-suggestions");
+    await expect(prompts).toBeVisible();
+    const boxes = await prompts.locator("button").evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top));
+    expect(boxes[0]).toBe(boxes[1]);
+    expect(boxes[2]).toBeGreaterThan(boxes[1]);
+    const composer = await page.getByTestId("copilot-chat-input").boundingBox();
+    const promptBox = await prompts.boundingBox();
+    expect(composer!.y - (promptBox!.y + promptBox!.height)).toBeLessThan(45);
+  }
   await shot(page, "17-chat-follow-ups");
+});
+
+test("chat composer uses the advertised model and stops a streamed reply", async ({ page, request }) => {
+  test.skip(process.env.E2E_MODE === "live", "Uses the mock agent's slow response and captured run.");
+  await page.route("**/api/chat/models", (route) => route.fulfill({ json: {
+    default: "claude-sonnet-5", models: ["claude-sonnet-5", "claude-test-model"],
+  } }));
+  await openHome(page);
+  await page.getByTestId("chat-model").selectOption("claude-test-model");
+  await send(page, "Preview a streamed response");
+  const stop = page.getByRole("button", { name: "Stop generating", exact: true });
+  await expect(stop).toBeVisible();
+  await expect(page.getByTestId("chat-model")).toBeDisabled();
+  const answer = page.getByTestId("copilot-assistant-message").last();
+  await expect(answer).toContainText("mock agent");
+  await expect(fileRef(page, "welcome.md")).toBeVisible();
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toHaveCount(0);
+  await stop.click();
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
+  await expect(answer).toContainText("mock agent");
+  await expect(answer.getByRole("button", { name: "Sources 1", exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-model")).toBeEnabled();
+  const lastRun = await (await request.get(`${process.env.LOCAL_AGENT_URL}/last-run`)).json();
+  expect(lastRun.forwardedProps.knowledge_chatroom.model).toBe("claude-test-model");
 });
 
 test("each chat run tells the agent who the user is and where (docs/remote-agent.md)", async ({ page, request }) => {

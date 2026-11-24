@@ -1,32 +1,31 @@
 [project]
 name = "api-py"
-version = "0.2.3"
-description = "The agent server's HTTP API in Python, in front of the TypeScript server while routes move over (issue #190)"
+version = "0.3.0"
+description = "The app's HTTP API: storage, access, skills, memory, search and chat history"
 requires-python = ">=3.12"
 dependencies = [
     "knowledge-chatroom",
     "fastapi>=0.115",
     "uvicorn>=0.30",
-    # The pass-through to the TypeScript server, streamed both ways.
+    # Calls to the model and embedding APIs, and the pass-through to TS_AGENT_URL (proxy.py).
     "httpx>=0.27",
-    # Postgres, with the same migrations and row-level security as the TypeScript server.
+    # Postgres.
     "psycopg[binary,pool]>=3.2",
     # Signing and checking identity tokens (tokens.py).
     "cryptography>=42",
-    # The S3-compatible blob store, as @aws-sdk/client-s3 is for the TypeScript server.
+    # The S3-compatible blob store (blobs.py).
     "boto3>=1.36",
     # POST /experiments/upload's multipart body, read part by part (uploads.py).
     "python-multipart>=0.0.20",
-    # Search by meaning with the local embedding model (semantic.py): the ONNX file
-    # transformers.js runs in the TypeScript server, its tokenizer, and the download.
+    # Search by meaning with the local embedding model (semantic.py): running its
+    # ONNX file, its tokenizer, and the download.
     "onnxruntime>=1.20",
     "tokenizers>=0.20",
     "huggingface-hub>=0.26",
     "numpy>=1.26",
     # Sorting as JavaScript's localeCompare does (collation.py), with CLDR's root table.
     "pyuca>=1.2",
-    # The app's direct calls to outside MCP servers' tools (/tools, tools.py), as the
-    # TypeScript server makes them with @modelcontextprotocol/sdk.
+    # The app's direct calls to outside MCP servers' tools (/tools, tools.py).
     "mcp>=2.2,<3",
 ]
 

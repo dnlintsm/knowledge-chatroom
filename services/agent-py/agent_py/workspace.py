@@ -1,13 +1,11 @@
-"""Workspace file tools over the storage API (issue #176, step 2).
+"""Workspace file tools over the storage API.
 
-The Python twin of apps/agent/src/storage/tools.ts: the same tool names,
-descriptions and results, so the chat, its tool cards and the system prompt work
-the same whichever agent serves it. Instead of opening the database, each call
+The chat's tool cards and the system prompt know these tools by name. Each call
 goes to the storage API on LOCAL_AGENT_URL with the run's X-Knowledge-Storage
 token, which acts as Claude for the signed-in user: only what they can reach,
 writes in a knowledge node (and to skills) as proposals, no renaming, deleting
 or sharing (docs/remote-agent.md). Without login there is no token and the API
-answers as the local user. Each call also names the run's workspace (issue #226)
+answers as the local user. Each call also names the run's workspace
 with the X-Knowledge-Workspace header the app sent with the run, so a chat in
 one workspace never works on another's files, with or without login.
 
@@ -32,8 +30,8 @@ from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 
 from .text import MAX_READ_CHARS, EditError, apply_edit, read_lines
 
-# The TypeScript agent's server name, so tools have the same full names
-# (mcp__copilotkit__read_file, ...) with either agent.
+# The MCP server name the tools are under: the app's tool cards and saved chats
+# know them by their full names (mcp__copilotkit__read_file, ...).
 SERVER_NAME = "copilotkit"
 STORAGE_HEADER = "X-Knowledge-Storage"
 WORKSPACE_HEADER = "X-Knowledge-Workspace"
@@ -53,7 +51,7 @@ TEXT_EXTENSIONS = set(
 
 
 def storage_url(env: Mapping[str, str]) -> str:
-    """The agent server that serves storage, as the app finds it (apps/web/src/lib/agent-target.ts)."""
+    """Where api-py serves storage, as the app finds it (apps/web/src/lib/agent-target.ts)."""
     return (env.get("LOCAL_AGENT_URL") or DEFAULT_STORAGE_URL).rstrip("/")
 
 
@@ -78,6 +76,10 @@ class WorkspaceError(Exception):
         self.status = status
 
 
+# Seconds one call to the storage API may take.
+STORAGE_TIMEOUT = 60
+
+
 @dataclass
 class Storage:
     """The storage API for one run: its base URL, the run's token and its workspace (None: the default one)."""
@@ -86,6 +88,9 @@ class Storage:
     token: str | None
     transport: httpx.AsyncBaseTransport | None = None
     workspace: str | None = None
+    # The server's one HTTP client (its base URL is `base_url`), so calls reuse
+    # connections: a run makes several per tool call. None opens one per call.
+    client: httpx.AsyncClient | None = None
 
     async def call(
         self,
@@ -110,12 +115,22 @@ class Storage:
             headers["Content-Type"] = "application/octet-stream"
         query = {k: v for k, v in (params or {}).items() if v is not None}
         try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url, timeout=60, transport=self.transport
-            ) as client:
-                response = await client.request(
+            if self.client is not None:
+                response = await self.client.request(
                     method, route, params=query, json=json_body, content=content, headers=headers
                 )
+            else:
+                async with httpx.AsyncClient(
+                    base_url=self.base_url, timeout=STORAGE_TIMEOUT, transport=self.transport
+                ) as client:
+                    response = await client.request(
+                        method,
+                        route,
+                        params=query,
+                        json=json_body,
+                        content=content,
+                        headers=headers,
+                    )
         except httpx.HTTPError as err:
             raise WorkspaceError(f"Workspace storage is unavailable right now ({err}).") from err
         if response.status_code >= 400:
@@ -235,14 +250,22 @@ def tool_versions() -> dict[str, str]:
 
 
 def file_tools(
-    storage: Callable[[], Storage], meta: Mapping[str, Any] | None = None
+    storage: Callable[[], Storage],
+    meta: Mapping[str, Any] | None = None,
+    workdir: Path | None = None,
 ) -> list[SdkMcpTool[Any]]:
     """The workspace tools; `storage` gives the current run's storage API.
 
     `meta` is about the chat, for the provenance of runs Claude starts: its
-    `chat` (the AG-UI thread) and `model`.
+    `chat` (the AG-UI thread) and `model`. `workdir` is the run's folder when it
+    holds a copy of the workspace (workdir.py): it adds save_file, and runs
+    Claude starts get their inputs copied there.
     """
+    from .workdir import is_inside, write_run_inputs
+
     meta = meta or {}
+    # Absolute, so a file's path isn't read against the folder twice.
+    workdir = workdir.resolve() if workdir is not None else None
     versions = tool_versions()
 
     def guarded(fn: Callable[[Storage, dict[str, Any]], Awaitable[ToolResult]]):
@@ -798,6 +821,9 @@ def file_tools(
         elif not args.get("rerunOf"):
             body["nodeId"] = None
         run = await s.json("POST", "/experiments/runs", json_body=body)
+        linked = [i["path"] for i in run["provenance"].get("inputs", [])]
+        # The working folder's copy may be older than what the run linked: scripts read these.
+        local = await write_run_inputs(s, workdir, run["id"], linked) if workdir else {}
         return text(
             {
                 "ok": True,
@@ -805,7 +831,8 @@ def file_tools(
                 "title": run["title"],
                 "state": run["state"],
                 "files": run["fileCount"],
-                "inputs": [i["path"] for i in run["provenance"].get("inputs", [])],
+                "inputs": linked,
+                **({"inputsInWorkingFolder": local} if local else {}),
                 "report": "report.md",
             }
         )
@@ -850,6 +877,43 @@ def file_tools(
             }
         )
 
+    @tool(
+        "save_file",
+        "Save a file from the working folder (one a script made, e.g. out/plot.png or a CSV) "
+        "into the workspace, with the same rules as write_file: where the user is working "
+        "unless they say otherwise, PROPOSED in a knowledge node or for skills, kept as a "
+        "version. Use write_file for text you write yourself.",
+        schema(
+            {
+                "from": {
+                    "type": "string",
+                    "description": "Path in the working folder, e.g. out/plot.png",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Workspace path to save it as, e.g. artifacts/plot.png",
+                },
+                "node": NODE,
+                "experiment": EXPERIMENT,
+                "summary": SUMMARY,
+            },
+            "from",
+            "path",
+        ),
+    )
+    @guarded
+    async def save_file(s: Storage, args: dict[str, Any]) -> ToolResult:
+        assert workdir is not None  # only offered with a working folder
+        given = str(args["from"])
+        source = workdir / given
+        if not is_inside(workdir, source):
+            return error(f"{given} is not in the working folder.")
+        if is_inside(workdir / ".claude", source):
+            return error("Skills can't be saved from here.")
+        if not source.is_file():
+            return error(f"No file at {given} in the working folder.")
+        return await store(s, args["path"], source.read_bytes(), args)
+
     return [
         list_nodes,
         create_node,
@@ -858,6 +922,7 @@ def file_tools(
         search_files,
         write_file,
         edit_file,
+        *([save_file] if workdir else []),
         list_experiments,
         create_experiment,
         set_experiment_results,

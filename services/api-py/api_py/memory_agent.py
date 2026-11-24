@@ -1,10 +1,10 @@
-"""Claude's memory tools for a remote backend's run (#190, step 8c), as /memory/agent in apps/agent/src/memory/http.ts.
+"""Claude's memory tools for a chat run (/memory/agent).
 
-The chat's own agent on a remote backend (services/agent-py, docs/remote-agent.md)
-uses the user's memory as Claude does in a chat on the agent server: with an
+The chat agent (services/agent-py, or another remote backend: docs/remote-agent.md)
+uses the user's memory through this API: with an
 X-Knowledge-Memory token `via` "remote", which only the app signs, it gets the
-memory section of its prompt and the memory_* and chats_* tools
-(apps/agent/src/memory/run.ts). Its changes are made with Undo until the run
+memory section of its prompt and the memory_* and chats_* tools.
+Its changes are made with Undo until the run
 has used another tool (`?tainted=1`, and `tainted` in each answer), or wait in
 the user's Memory inbox when the user asked to review them first. Shared
 notes are only ever proposals for their editors. Each answer lists the notes
@@ -53,8 +53,8 @@ from .text_index import from_units, to_units
 logger = logging.getLogger("api_py")
 
 REMOTE_VIA = "remote"
-# The tools' names, descriptions and JSON schemas, as run.ts declares them
-# (z.toJSONSchema); apps/agent/src/memory/run.test.ts checks they match.
+# The tools' names, descriptions and JSON schemas. test_memory_agent.py checks
+# them against MemoryTools below.
 TOOL_SPECS: list[dict[str, Any]] = json.loads(
     (Path(__file__).parent / "data" / "memory-tools.json").read_text("utf-8")
 )
@@ -86,7 +86,7 @@ def _clip(text: str, units: int) -> str:
 
 class MemoryRecall:
     """
-    Search by meaning over memory notes (recall.ts): vectors live in this
+    Search by meaning over memory notes: vectors live in this
     process only, keyed by the text they came from, so nothing derived from
     private notes is stored.
     """
@@ -184,7 +184,7 @@ def recall_for(semantic: SemanticIndex | None) -> MemoryRecall | None:
 
 @dataclass
 class RunMemory:
-    """What a run knows of the user's memory (RunMemory in run.ts)."""
+    """What a run knows of the user's memory."""
 
     service: MemoryService
     shared_service: SharedMemoryService
@@ -263,7 +263,7 @@ def _shared_index(notes: list[dict[str, Any]]) -> list[str]:
 
 
 def memory_prompt(memory: RunMemory, chats: bool = False) -> str:
-    """The system prompt's memory section, with the index of notes (memoryPrompt in run.ts)."""
+    """The system prompt's memory section, with the index of notes."""
     text, shown, total = memory.index["text"], memory.index["shown"], memory.index["total"]
     more = (
         f"\n({total - shown} more notes not listed: memory_search finds them.)"
@@ -350,7 +350,7 @@ def parse_args(spec: dict[str, Any], given: Any) -> dict[str, Any] | None:
 
 
 class MemoryTools:
-    """The memory_* and chats_* tools for one run, as run.ts makes them."""
+    """The memory_* and chats_* tools for one run."""
 
     def __init__(self, memory: RunMemory) -> None:
         self.m = memory
@@ -636,6 +636,8 @@ class AgentRequest:
     recall: MemoryRecall | None
     search_chats: Any
     read_chat: Any
+    # (chat id) -> whether the chat's saved runs read outside content (chats.py).
+    chat_read_outside: Any = None
 
 
 def _send(status: int, body: Any) -> Response:
@@ -648,7 +650,7 @@ def _send(status: int, body: Any) -> Response:
 
 
 async def serve(request: Request, raw: str, given: AgentRequest, read_json: Any) -> Response:
-    """/memory/agent for a grant: `raw` is the path, not decoded (as http.ts splits it)."""
+    """/memory/agent for a grant: `raw` is the path, not decoded."""
     chat = given.via == REMOTE_VIA
     run_param = first_param(request, "run")
     run = _clip(run_param, 200) if run_param is not None else None
@@ -663,10 +665,20 @@ async def serve(request: Request, raw: str, given: AgentRequest, read_json: Any)
     )
     if memory is None:
         return _send(403, {"error": "Memory is off in this chat (incognito, or turned off)"})
-    # Outside the chat: every change waits for the user.
+    # Outside the chat: every change waits for the user. In it, they wait once
+    # the run has used another tool (the agent says so with ?tainted=1), and
+    # also when the server can see a reason itself, which a
+    # client that forgets the flag can't undo:
+    # - an earlier run of this chat read outside content, which is still in
+    #   the conversation Claude is continuing;
+    # - the prompt carries other people's words: the shared notes' index.
     memory.tainted = (
         bool(_TAINTED.fullmatch(first_param(request, "tainted") or "")) if chat else True
     )
+    if not memory.tainted and any(n["mode"] == "auto" for n in memory.shared):
+        memory.tainted = True
+    if not memory.tainted and given.chat_read_outside is not None:
+        memory.tainted = await given.chat_read_outside(given.thread)
     has_chats = chat and memory.search_chats is not None
     specs = tool_specs(has_chats)
     parts = [p for p in raw[len("/memory") :].split("/") if p]

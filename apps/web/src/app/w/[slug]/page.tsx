@@ -25,7 +25,7 @@ function queryString(params: SearchParams): string {
 }
 
 /**
- * A workspace's page, /w/<slug> (issue #226, docs/workspaces.md). The slug is
+ * A workspace's page, /w/<slug> (docs/workspaces.md). The slug is
  * resolved to the workspace's id once, here; the page then sends that id with
  * every request (src/lib/workspace-request.ts). With login on, it is for
  * signed-in users only.
@@ -43,13 +43,13 @@ export default async function WorkspacePage({
     const here = `/w/${encodeURIComponent(slug)}${queryString(await searchParams)}`;
     redirect(`/api/auth/login?returnTo=${encodeURIComponent(here)}`);
   }
-  // How much of each turn's steps the chat shows until a user picks (issue #154).
+  // How much of each turn's steps the chat shows until a user picks.
   const chatSteps = stepsModeFrom(process.env.CHAT_STEPS);
   const userKey = user?.sub ?? "local";
 
   const found = await findWorkspace(user, slug);
   if (found.status === "found") return <Home chatSteps={chatSteps} workspace={found.workspace} userKey={userKey} />;
-  // No workspaces on this server (the agent server alone), or no answer: the
+  // No workspaces on this server (it has no storage), or no answer: the
   // default workspace, as before them. Requests then name none, which means
   // the default workspace, and without any server the files stay in the browser.
   if (found.status === "unavailable" && slug.toLowerCase() === DEFAULT_SLUG) {

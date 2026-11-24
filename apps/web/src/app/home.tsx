@@ -12,8 +12,6 @@ import { recordVisit } from "@/lib/workspace-choice";
 import { DEFAULT_SLUG, WORKSPACE_HEADER, setRequestWorkspace, type WorkspaceInfo } from "@/lib/workspace-request";
 
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
-// A2UI catalog: definitions + renderers in ./declarative-generative-ui/
-import { demonstrationCatalog } from "./declarative-generative-ui/renderers";
 
 function Demos() {
   useGenerativeUIExamples();
@@ -21,7 +19,7 @@ function Demos() {
 }
 
 /**
- * The app in one workspace (issue #226): the one the page's `/w/<slug>`
+ * The app in one workspace: the one the page's `/w/<slug>`
  * names, or null when the server has no workspaces. Everything below is
  * mounted again when it changes, so no chat, file or request carries over.
  */
@@ -53,7 +51,7 @@ export function Home({
     }
   }, [id, userKey, isDefault]);
   const headers = useMemo(() => (id ? { [WORKSPACE_HEADER]: id } : undefined), [id]);
-  // Its name as shown: a rename (issue #255) changes it in place.
+  // Its name as shown: a rename changes it in place.
   const [renamed, setRenamed] = useState<{ id: string; name: string } | null>(null);
   const shown = useMemo(
     () => (workspace && renamed?.id === workspace.id ? { ...workspace, name: renamed.name } : workspace),
@@ -72,7 +70,6 @@ export function Home({
       runtimeUrl="/api/copilotkit"
       // The chat's runs and history go to this workspace (route.ts, src/lib/chat-runner.ts).
       headers={headers}
-      a2ui={{ catalog: demonstrationCatalog }}
       openGenerativeUI={{}}
       useSingleEndpoint={false}
     >

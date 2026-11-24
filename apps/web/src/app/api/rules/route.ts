@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { authSecret, sessionFrom } from "@/lib/auth";
 import { mockRules } from "@/lib/rules-mock";
 
 /**
@@ -7,11 +8,15 @@ import { mockRules } from "@/lib/rules-mock";
  * the server, so the API's address and any credentials stay off the client.
  * A run is an experiment: `run` is its title, `experiment` its id. Without
  * RULES_API_URL it answers with the built-in mock (src/lib/rules-mock.ts).
+ * With login on it needs a session, like the storage routes (src/lib/agent-proxy.ts).
  */
 
 const TIMEOUT_MS = 30_000;
 
 export async function GET(req: NextRequest) {
+  if (authSecret() && !sessionFrom(req)) {
+    return Response.json({ error: "Sign in first" }, { status: 401 });
+  }
   const run = req.nextUrl.searchParams.get("run");
   if (!run) return Response.json({ error: "Missing ?run=" }, { status: 400 });
 

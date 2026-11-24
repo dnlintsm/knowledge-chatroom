@@ -1,11 +1,11 @@
 /**
- * Exact-text edits for the agent's edit tools (apps/agent/src/storage/tools.ts
+ * Exact-text edits for the agent's edit tools (services/agent-py/agent_py/workspace.py
  * edit_file and the browser's editWorkspaceFile), with no Node, React or
  * package dependencies.
  *
  * Changing part of a file this way keeps a chat's context small: rewriting a
  * whole page for each tweak puts the page into the history twice per change,
- * which fills a smaller model's window within a few rounds (issue #126).
+ * which fills a smaller model's window within a few rounds.
  */
 
 export interface TextEdit {

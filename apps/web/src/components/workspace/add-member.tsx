@@ -27,7 +27,7 @@ export async function workspacesApi<T>(path: string, init?: RequestInit): Promis
 }
 
 /**
- * Adding someone to the workspace (issue #226, docs/workspaces.md, "Adding a
+ * Adding someone to the workspace (docs/workspaces.md, "Adding a
  * member"), for its Owners and Admins: found by the exact email they signed
  * in with, as a Member or an Admin, with a starting access to everything in
  * the workspace. Someone already a member keeps their role and access.

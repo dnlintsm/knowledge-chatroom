@@ -1,4 +1,4 @@
-"""Outside MCP servers and tool chips: the same MCP_SERVERS as the agent server, with the user's tokens."""
+"""Outside MCP servers and tool chips: the same MCP_SERVERS as api-py, with the user's tokens."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ SERVERS = {
 
 
 class AgentServer:
-    """The agent server's /skills/run, /memory/agent and /identity/mcp-tokens."""
+    """api-py's /skills/run, /memory/agent and /identity/mcp-tokens."""
 
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
@@ -79,6 +79,7 @@ def agent_server() -> AgentServer:
 @pytest.fixture
 def client(claude, agent_server, tmp_path):
     env = {
+        "AUTH_MODE": "local",
         "AGENT_PY_WORKDIR": str(tmp_path),
         "MCP_SERVERS": json.dumps(SERVERS),
         "LAB_TOKEN": "s3cret",

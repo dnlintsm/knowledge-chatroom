@@ -1,23 +1,17 @@
 /**
- * The chat's tool chips, per chat, kept in the browser (issue #151): which
+ * The chat's tool chips, per chat, kept in the browser: which
  * "+" menu tools the user turned on in each conversation. Pure functions so
  * they are unit-tested; the React side is tool-menu.tsx.
  */
+
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
 
 export const TOOL_CHIPS_KEY = "knowledge-chatroom.chat.tool-chips.v1";
 /** Chats remembered; the oldest are forgotten first. */
 const MAX_CHATS = 100;
 
-/** One server in the "+" menu, as the agent's GET /tools lists it (apps/agent/src/tools-api.ts). */
-export interface ToolMenuItem {
-  server: string;
-  label: string;
-  chip: string;
-  description: string | null;
-  icon: string | null;
-  mode: "auto" | "manual";
-  callable: string[];
-}
+/** One server in the "+" menu, as the agent's GET /tools lists it (services/api-py/api_py/tools.py). */
+export type ToolMenuItem = components["schemas"]["ToolMenuItem"];
 
 /** { [threadId]: servers whose chip is on }, oldest chat first. */
 export type ChipsByChat = Record<string, string[]>;

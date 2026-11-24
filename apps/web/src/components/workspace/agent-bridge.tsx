@@ -250,8 +250,8 @@ export function useWorkspaceAgent() {
   useFrontendTool({
     name: "hidePane",
     description:
-      "Hide the explorer or the chat pane (the editor always stays). Hiding the chat keeps this conversation.",
-    parameters: z.object({ pane: z.enum(["explorer", "chat"]) }),
+      "Hide the explorer pane on the left. The editor and the chat always stay open.",
+    parameters: z.object({ pane: z.enum(["explorer"]) }),
     handler: async ({ pane }) => {
       latestWorkbench.current.panes.hide(pane);
       return { ok: true };

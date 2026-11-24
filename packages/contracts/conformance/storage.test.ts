@@ -1,5 +1,5 @@
 /**
- * Storage API conformance (issue #169, step 2): drives every operation in
+ * Storage API conformance: drives every operation in
  * openapi/storage.yaml over HTTP against a running backend and checks each answer
  * against the spec: the status code is documented, JSON bodies validate against
  * the response schema, and no field is missing from the spec. Any backend that
@@ -9,8 +9,8 @@
  * Needs STORAGE_URL (the backend's base URL) and AUTH_SECRET (the backend's
  * secret, to sign the test users' identity tokens). The backend must use a fresh
  * database: the first user to sign in becomes the workspace owner, and the suite
- * relies on that being its own user. `pnpm -C apps/agent test:conformance` starts
- * the agent on the test database and runs this file.
+ * relies on that being its own user. `pnpm test:conformance` starts
+ * api-py on the test database and runs this file.
  *
  * With CONFORMANCE_SAMPLES set to a file path, every JSON answer that matched the
  * spec, and every JSON request that succeeded, is written there as one JSON line
@@ -217,9 +217,9 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/access", { headers: bob, expect: 200 });
     await call("GET", "/access/people", { headers: alice, expect: 200 });
     await call("GET", "/access/people", { headers: bob, expect: 403 });
-    const users = await call<{ users: Schema["User"][] }>("GET", "/access/users", { headers: alice, expect: 200 });
-    bobId = users.data.users.find((u) => u.subject === "conformance|bob")!.id;
-    aliceId = users.data.users.find((u) => u.subject === "conformance|alice")!.id;
+    const users = await call<{ users: Schema["UserSummary"][] }>("GET", "/access/users", { headers: alice, expect: 200 });
+    bobId = users.data.users.find((u) => u.email === "bob@example.com")!.id;
+    aliceId = users.data.users.find((u) => u.email === "alice@example.com")!.id;
   });
 
   step("workspaces", async () => {
@@ -243,7 +243,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/workspaces/${lab.id}/members`, { headers: alice, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/members`, { headers: bob, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/lookup?email=alice@example.com`, { headers: bob, expect: 403 });
-    // Administration (#255): rename, roles, removal, archive.
+    // Administration: rename, roles, removal, archive.
     await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: { name: `Lab renamed ${stamp}` }, expect: 200 });
     await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: {}, expect: 400 });
     await call("PATCH", `/workspaces/${lab.id}`, { headers: bob, json: { name: "Mine now" }, expect: 403 });
@@ -266,7 +266,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/workspaces/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
     await call("GET", "/workspaces", { headers: storageToken("conformance|alice"), expect: 403 });
     await call("GET", "/workspaces", { expect: 401 });
-    // The workspace inventory (#255), for the deployment's admins (PLATFORM_ADMINS).
+    // The workspace inventory, for the deployment's admins (PLATFORM_ADMINS).
     const platform = user("conformance|platform", "platform");
     const inventory = await call<{ workspaces: Schema["PlatformWorkspace"][] }>("GET", "/platform/workspaces", { headers: platform, expect: 200 });
     assert.deepEqual(inventory.data.workspaces.find((w) => w.id === lab.id)?.owners.map((o) => o.id), [aliceId]);
@@ -307,6 +307,11 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     const read = await call("GET", `/files/notes/a.md${q}`, { headers: alice, expect: 200 });
     assert.equal(read.text, "# A\nhello conformance");
     await call("GET", `/files/notes/a.md${q}`, { headers: { ...alice, "If-None-Match": read.res.headers.get("etag")! }, expect: 304 });
+    // A save names the version it replaces: the same bytes again, then a version that isn't the file's.
+    await call("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "Content-Type": "text/markdown", "If-Match": read.res.headers.get("etag")! }, body: "# A\nhello conformance", expect: 200 });
+    const stale = await call<Schema["Error"]>("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "If-Match": '"0000"' }, body: "lost update", expect: 412 });
+    assert.equal(stale.data.changed, true);
+    assert.equal(`"${stale.data.sha256}"`, read.res.headers.get("etag"));
     // 200 with the bytes, or 302 to the object store when S3_PUBLIC_URL is set.
     await call("GET", `/files/uploads/pic.bin${q}`, { headers: alice });
     await call("GET", `/files/notes/a.md${q}&versions`, { headers: alice, expect: 200 });
@@ -339,7 +344,11 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/proposals/${p1.id}`, { headers: alice, expect: 200 });
     await call("GET", `/proposals/${p1.id}/content`, { headers: alice, expect: 200 });
     await call("POST", `/proposals/${p1.id}/accept`, { headers: bob, expect: 403 });
-    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, expect: 200 });
+    // An accept of something other than what the reviewer saw: revised content, then a changed file.
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: "0000" }, expect: 409 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: p1.sha256, base: null }, expect: 409 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: 1 }, expect: 400 });
+    await call("POST", `/proposals/${p1.id}/accept`, { headers: alice, json: { sha256: p1.sha256 }, expect: 200 });
     await call("POST", `/proposals/${p2.id}/reject`, { headers: alice, expect: 200 });
     await call("POST", `/proposals/${p3.id}/withdraw`, { headers: bob, expect: 200 });
   });
@@ -371,7 +380,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/proposals", { headers: alice, json: { experimentId: exp.id, note: "promote" }, expect: 201 });
     await call("GET", `/proposals?experiment=${exp.id}`, { headers: alice, expect: 200 });
     await call("PATCH", `/experiments/${exp.id}`, { headers: alice, json: { status: "shared" }, expect: 200 });
-    // Who works on it (#255); the rules are in workspaces.test.ts.
+    // Who works on it; the rules are in workspaces.test.ts.
     await call("PUT", `/experiments/${exp.id}/collaborators/${bobId}`, { headers: alice, expect: 200 });
     await call("PUT", `/experiments/${exp.id}/collaborators/00000000-0000-4000-8000-000000000000`, { headers: alice, expect: 400 });
     await call("PUT", `/experiments/${exp.id}/collaborators/${aliceId}`, { headers: bob, expect: 403 });
@@ -635,7 +644,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/health", { expect: 200 });
     const key = await call<{ key: string }>("GET", "/identity/public-key", { expect: 200 });
     assert.ok(key.data.key, "a public key");
-    // A remote backend trades its run's tokens for its MCP servers' (issue #176).
+    // A remote backend trades its run's tokens for its MCP servers'.
     const remote = {
       "X-Knowledge-Storage": signIdentityToken({ sub: "conformance|alice", exp: now() + 600, aud: "storage", via: "remote" }, SECRET!),
       ...memoryToken("conformance|alice", `conformance-${stamp}`, "remote"),

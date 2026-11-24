@@ -1,4 +1,4 @@
-"""Proposed versions of files, as ProposalService in apps/agent/src/storage/proposals.ts.
+"""Proposed versions of files.
 
 A proposal (008_proposals.sql) is a change to a file in a knowledge node, or at
 the workspace root, that someone who can edit there accepts or rejects.
@@ -33,6 +33,13 @@ InTx = Callable[[AsyncConnection], Awaitable[Any]]
 
 class ProposalError(Exception):
     """The request can't be done as asked: nothing changed, already decided, ... (400)."""
+
+
+class ProposalChangedError(Exception):
+    """An accept of something its reviewer hasn't seen: the proposal was revised, or its file changed (409)."""
+
+
+REVISED = "This proposal was revised after you opened it; look at it again before accepting"
 
 
 # The live file at a proposal's path, as a join condition on f for proposal p.
@@ -176,10 +183,12 @@ async def propose(
     experiment_id: str | None = None,
     note: str | None = None,
     in_tx: Callable[[AsyncConnection, str], Awaitable[Any]] | None = None,
+    stored: bool = False,
 ) -> str:
     """
-    Proposes new content for a file: bytes, or a blob already stored ({sha256,
-    size}, an experiment's file). The proposer's open proposal for the same
+    Proposes new content for a file: bytes (`stored`: put in the blob store
+    already, with store()), or a blob already stored ({sha256, size}, an
+    experiment's file). The proposer's open proposal for the same
     file, if any, is replaced, so Claude revising its edit leaves one to review.
     Returns its id; ProposalError when the file already has this content.
     """
@@ -191,7 +200,8 @@ async def propose(
     ws = storage.workspace_id
     if isinstance(content, bytes):
         sha256, size = sha256_hex(content), len(content)
-        await storage.require_blobs().put(sha256, content, mime)
+        if not stored:
+            await storage.require_blobs().put(sha256, content, mime)
     else:
         sha256, size = content["sha256"], content["size"]
 
@@ -283,17 +293,29 @@ async def propose(
         return proposal_id
 
 
+async def store(storage: Storage, path: str, content: bytes, mime: str | None = None) -> None:
+    """
+    Puts proposed bytes in the blob store ahead of propose(..., stored=True),
+    without a database connection.
+    """
+    mime = mime or mime_for_path(normalize_path(path))
+    await storage.require_blobs().put(sha256_hex(content), content, mime)
+
+
 async def decide_in(
     conn: AsyncConnection,
     storage: Storage,
     proposal_id: str,
     decision: str,
     user_id: str,
+    *,
+    sha256: str | None = None,
 ) -> None:
     """
     Inside a transaction, marks an open proposal decided. For an accept, call it
-    after writing the file, so it records the version that made. ProposalError
-    if it was already decided.
+    after writing the file, so it records the version that made, and with the
+    `sha256` that was written: ProposalChangedError if the proposal holds other
+    content by now. ProposalError if it was already decided.
     """
     status = DECIDED[decision]
     cur = await conn.execute(
@@ -303,16 +325,24 @@ async def decide_in(
             version_id = CASE WHEN %(status)s = 'accepted' THEN (
               SELECT f.current_version_id FROM files f WHERE {_TARGET_FILE}) END
         WHERE p.id = %(id)s AND p.workspace_id = %(ws)s AND p.status = 'open'
+          AND (%(sha256)s::text IS NULL OR p.blob_sha256 = %(sha256)s)
         RETURNING p.node_id, p.path, p.author_type, p.author_id""",
         {
             "status": status,
             "user": user_id,
             "id": proposal_id,
             "ws": storage.workspace_id,
+            "sha256": sha256,
         },
     )
     row = await cur.fetchone()
     if not row:
+        cur = await conn.execute(
+            "SELECT 1 FROM proposals WHERE id = %s AND workspace_id = %s AND status = 'open'",
+            (proposal_id, storage.workspace_id),
+        )
+        if sha256 is not None and await cur.fetchone():
+            raise ProposalChangedError(REVISED)
         raise ProposalError("This proposal was already accepted, rejected or withdrawn")
     node, path, author, author_id = row
     await storage.notify(
@@ -336,10 +366,12 @@ async def decide(
     decision: str,
     user_id: str,
     in_tx: InTx | None = None,
+    *,
+    sha256: str | None = None,
 ) -> None:
     """Marks an open proposal decided in a transaction of its own."""
     async with conn.transaction():
-        await decide_in(conn, storage, proposal_id, decision, user_id)
+        await decide_in(conn, storage, proposal_id, decision, user_id, sha256=sha256)
         if in_tx:
             await in_tx(conn)
 

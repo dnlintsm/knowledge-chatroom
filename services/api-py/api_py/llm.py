@@ -1,10 +1,11 @@
-"""One call to the Messages API, as createMessage in apps/agent/src/suggest.ts makes it with the Anthropic SDK.
+"""One call to the Messages API, over HTTP.
 
-For the memory work that needs a small model (importing plain text now, the
-background learner later). The SDK's settings are read the same way: the key
+For the work that needs a small model: the chat's follow-up chips, importing
+plain-text memory, and the background learner. The settings are read as the
+Anthropic SDK reads them: the key
 from ANTHROPIC_API_KEY (x-api-key) or ANTHROPIC_AUTH_TOKEN (a bearer token),
 the endpoint from ANTHROPIC_BASE_URL, a 30 s timeout and one retry. The model
-is chosen as the agent server chooses it (model.ts, suggest.ts, memory/learn.ts).
+comes from CLAUDE_MODEL, SUGGESTIONS_MODEL and MEMORY_MODEL (below).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from typing import Any
 
 import httpx
 
-# The same defaults as apps/agent/src/model.ts and suggest.ts.
+# The defaults for CLAUDE_MODEL and SUGGESTIONS_MODEL; agent-py's model.py has the same first one.
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
 DEFAULT_SUGGESTIONS_MODEL = "claude-haiku-5-5"
 API_VERSION = "2023-06-01"
@@ -52,7 +53,7 @@ def suggestions_model(env: Mapping[str, str] | None = None) -> str:
 
 
 def learn_model(env: Mapping[str, str] | None = None) -> str:
-    """MEMORY_MODEL, else the suggestions model: what memory/learn.ts uses."""
+    """MEMORY_MODEL, else the suggestions model: what the memory import and the learner use."""
     env = os.environ if env is None else env
     configured = (env.get("MEMORY_MODEL") or "").strip()
     return _api_name(configured) if configured else suggestions_model(env)

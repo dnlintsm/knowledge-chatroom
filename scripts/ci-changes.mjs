@@ -1,4 +1,4 @@
-// Decides which CI suites a pull request can affect (issue #192).
+// Decides which CI suites a pull request can affect.
 //
 //   node scripts/ci-changes.mjs            # in CI: writes suite flags to $GITHUB_OUTPUT
 //   node scripts/ci-changes.mjs a.py b.ts  # locally: prints the flags for these paths
@@ -15,18 +15,30 @@ export const SUITES = ["node", "python", "browser", "storage", "pyagent"];
 
 // [path pattern, suites]. Patterns: `dir/**` (anything below), or an exact path.
 export const RULES = [
-  // Documentation outside the code. Markdown under apps/ is runtime content (skills).
+  // The settings reference is checked against the code (scripts/settings-check.mjs).
+  ["docs/settings.md", ["node"]],
+  // Documentation outside the code. Markdown in services/api-py/skills is runtime content.
   ["docs/**", []],
   ["README.md", []],
   ["CHANGELOG.md", []],
   ["LICENSE", []],
+  ["SECURITY.md", []],
+  ["CONTRIBUTING.md", []],
+  ["AGENTS.md", []],
+  ["CLAUDE.md", []],
+  [".github/ISSUE_TEMPLATE/**", []],
+  [".github/pull_request_template.md", []],
   // Python services the E2E suites never start (the mock agent stands in for them).
   ["services/lab-tools/**", ["python"]],
   ["services/papers-mcp/**", ["python"]],
   ["examples/python-agent/**", ["python"]],
-  // api-py sits in front of the agent in the storage and login E2E runs (#190).
+  // The migrations and built-in skills api-py serves reach every suite: the mock
+  // agent and the browser specs mirror them.
+  ["services/api-py/migrations/**", SUITES],
+  ["services/api-py/skills/**", SUITES],
+  // api-py sits in front of the agent in the storage and login E2E runs.
   ["services/api-py/**", ["python", "storage"]],
-  // agent-py serves the chat in the Python agent E2E run (#176).
+  // agent-py serves the chat in the Python agent E2E run.
   ["services/agent-py/**", ["python", "storage", "pyagent"]],
   // Shared by both Python services, or the whole uv workspace.
   ["packages/knowledge-py/**", ["python", "storage", "pyagent"]],

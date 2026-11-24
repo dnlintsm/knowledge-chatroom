@@ -1,13 +1,11 @@
-# The Python API server (api_py/app.py, issue #190) for docker-compose.yml's
-# `api` service. It sits in front of the TypeScript agent server and passes it
-# every route not ported yet. It builds from the repository root, the uv
-# workspace that also holds packages/knowledge-py:
+# The API server (api_py/app.py) for docker-compose.yml's `api` service:
+# storage, access, skills, memory, search and chat history. It builds from the
+# repository root, the uv workspace that also holds packages/knowledge-py:
 #
 #   docker build -f services/api-py/Dockerfile -t knowledge-chatroom-api-py .
 #
-# The image carries the agent server's SQL migrations, so it can check that the
-# database has exactly the ones it was built for (the TypeScript server applies them),
-# and its built-in skills.
+# The image carries the SQL migrations, which the server applies as it starts
+# and expects the database to have exactly, and the built-in skills.
 
 ARG PYTHON_IMAGE=python:3.12-slim
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.32
@@ -22,9 +20,9 @@ COPY pyproject.toml uv.lock ./
 COPY packages/knowledge-py ./packages/knowledge-py
 COPY services/api-py/pyproject.toml ./services/api-py/
 RUN uv sync --frozen --no-dev --package api-py
-COPY apps/agent/src/storage/migrations ./migrations
-# The built-in skills /skills lists, as the agent server ships them.
-COPY apps/agent/skills ./skills
+COPY services/api-py/migrations ./migrations
+# The built-in skills /skills lists.
+COPY services/api-py/skills ./skills
 COPY services/api-py/api_py ./services/api-py/api_py
 
 RUN useradd --create-home --uid 10001 api \

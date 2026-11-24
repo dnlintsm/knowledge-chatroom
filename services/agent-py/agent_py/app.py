@@ -3,14 +3,22 @@
     uv run python -m agent_py.app    # http://127.0.0.1:9300, then AGENT_URL=http://127.0.0.1:9300
 
 Environment:
-    CLAUDE_MODEL / ANTHROPIC_MODEL  the model (model.py), as for the TypeScript agent
+    CLAUDE_MODEL / ANTHROPIC_MODEL  the model (model.py)
+    CHAT_MODELS                    comma-separated additional models users can select
     ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...  read by Claude Code itself
-    KNOWLEDGE_PUBLIC_KEY            the agent server's GET /identity/public-key; set it with login on
+    KNOWLEDGE_PUBLIC_KEY            api-py's GET /identity/public-key; set it with login on
     AGENT_RUN_TIMEOUT_SECONDS       stop a run after this long (default 1800, 0 = never)
-    LOCAL_AGENT_URL                 the agent server with the storage API (default http://localhost:8000)
-    MCP_SERVERS                     outside MCP servers and tool chips, as for the agent server (mcp.py)
+    LOCAL_AGENT_URL                 api-py, which serves the storage API (default http://localhost:8000)
+    MCP_SERVERS                     outside MCP servers and tool chips, the same value as api-py's (mcp.py)
     AGENT_PY_WORKDIR                where each user's working folder (with their skills) goes
                                     (default: a new empty temp folder)
+    AGENT_WORKDIR                   off: no copy of the workspace in the working folder (workdir.py)
+    AGENT_WORKDIR_MAX_MB, AGENT_WORKDIR_MAX_FILE_MB
+                                    its size limits (default 500 and 25)
+    AGENT_WORKDIR_IDLE_HOURS        remove a user's working folder after this long without a run
+                                    (default 24, at least 1; 0: never)
+    SKILL_SCRIPTS                   on: skills' scripts run, in Claude Code's sandbox (scripts.py)
+    SKILL_SCRIPTS_DENY_READ         more absolute paths scripts can't read (comma-separated)
     AGENT_PY_HOST / AGENT_PY_PORT   where to listen (default 127.0.0.1:9300)
 """
 
@@ -29,14 +37,16 @@ from ag_ui.encoder import EventEncoder
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from knowledge_chatroom.identity import User, caller, public_key
+from knowledge_chatroom.identity import LoginConfigError, User, caller, login_from_env
 
 from .adapter import ChatroomAdapter
 from .mcp import servers_from_env
 from .memory import MEMORY_HEADER
-from .model import resolve_model
+from .model import chat_models
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
+from .scripts import scripts_from_env
+from .workdir import idle_seconds_from_env, limits_from_env, workdir_enabled
 from .workspace import STORAGE_HEADER, WORKSPACE_HEADER, storage_url
 
 logger = logging.getLogger("agent_py")
@@ -48,22 +58,31 @@ def make_adapter(
     timeout = float(env.get("AGENT_RUN_TIMEOUT_SECONDS") or 1800)
     # Not this server's folder: Claude Code describes its working folder (git
     # status and all) to the model. Each user works in a folder in here.
-    root = env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-")
+    # Absolute: run folders, the sandbox's paths and the working folder's
+    # checks all build on it.
+    root = str(Path(env.get("AGENT_PY_WORKDIR") or tempfile.mkdtemp(prefix="agent-py-")).resolve())
+    models = chat_models(env)
     return ChatroomAdapter(
         name="report",
         description="The chatroom's chat agent",
         options={
-            "model": resolve_model(dict(env)),
+            "model": models[0],
             # No built-in Claude Code tools: the browser's tools and this
-            # agent's own MCP tools are the only ones (adapter.py).
+            # agent's own MCP tools are the only ones (adapter.py), plus Skill,
+            # Read/Glob/Grep for the working folder (workdir.py) and Bash for
+            # skills' scripts when they are on (scripts.py).
             "tools": [],
             "cwd": root,
         },
         system_prompt=SYSTEM_PROMPT,
+        models=models,
         storage_url=storage_url(env),
         skills_root=Path(root),
         transport=transport,
         mcp_servers=servers_from_env(env),
+        scripts=scripts_from_env(env),
+        workdir=limits_from_env(env) if workdir_enabled(env) else None,
+        idle_seconds=idle_seconds_from_env(env),
         query_timeout_seconds=timeout or None,
     )
 
@@ -91,7 +110,14 @@ def create_app(
     env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | None = None
 ) -> FastAPI:
     env = os.environ if env is None else env
-    key = public_key(env["KNOWLEDGE_PUBLIC_KEY"]) if env.get("KNOWLEDGE_PUBLIC_KEY") else None
+    # Whether runs must be signed: AUTH_MODE says, and a missing key
+    # never means "no login". Unconfigured, this raises and the server won't start.
+    login = login_from_env(env)
+    if login.required and login.key is None:
+        logger.warning(
+            "Login is on but KNOWLEDGE_PUBLIC_KEY is not set: every run is refused until it is "
+            "(the API server's GET /identity/public-key)."
+        )
     adapter = adapter or make_adapter(env)
 
     @asynccontextmanager
@@ -99,18 +125,34 @@ def create_app(
         yield
         await adapter.shutdown()
 
+    # What a caller who can't be identified is told.
+    if not login.required:
+        refused = (
+            "This agent runs without login (AUTH_MODE=local) but the request is signed, so the "
+            "app has login on. Set AUTH_MODE=oidc and KNOWLEDGE_PUBLIC_KEY here"
+        )
+    elif login.key is None:
+        refused = "Set KNOWLEDGE_PUBLIC_KEY: login is on"
+    else:
+        refused = "Sign in first"
+
     app = FastAPI(title="agent-py", lifespan=lifespan)
     app.state.adapter = adapter
+
+    @app.get("/agent/models")
+    async def models(request: Request) -> dict[str, str | tuple[str, ...]]:
+        if caller(dict(request.headers), login, audience=None) is None:
+            raise HTTPException(401, refused)
+        available = chat_models(env)
+        return {"default": available[0], "models": available}
 
     @app.post("/agent/report")
     async def report(input_data: RunAgentInput, request: Request) -> StreamingResponse:
         # The app's X-Knowledge-User has no audience. Without login there is
         # no header and everyone is the local user.
-        user = caller(dict(request.headers), key, audience=None)  # pyrefly: ignore[bad-argument-type]
+        user = caller(dict(request.headers), login, audience=None)
         if user is None:
-            raise HTTPException(
-                401, "Sign in first" if key else "Set KNOWLEDGE_PUBLIC_KEY: login is on"
-            )
+            raise HTTPException(401, refused)
         encoder = EventEncoder(accept=request.headers.get("accept"))
         reason = refusal(input_data, user)
 
@@ -123,7 +165,7 @@ def create_app(
                 storage_token=request.headers.get(STORAGE_HEADER),
                 user=user.sub,
                 memory_token=request.headers.get(MEMORY_HEADER),
-                # The page's workspace (issue #226): storage, skills and memory calls name it.
+                # The page's workspace: storage, skills and memory calls name it.
                 workspace=request.headers.get(WORKSPACE_HEADER) or None,
             ):
                 yield encoder.encode(event)
@@ -141,8 +183,12 @@ def main() -> None:
     import uvicorn
 
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    try:
+        app = create_app()
+    except LoginConfigError as err:
+        raise SystemExit(f"[agent-py] {err}") from None
     uvicorn.run(
-        create_app(),
+        app,
         host=os.environ.get("AGENT_PY_HOST", "127.0.0.1"),
         port=int(os.environ.get("AGENT_PY_PORT", "9300")),
     )

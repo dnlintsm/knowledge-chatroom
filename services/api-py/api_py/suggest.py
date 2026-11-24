@@ -1,4 +1,4 @@
-"""Follow-up suggestions for the chat, as apps/agent/src/suggest.ts makes them (issue #190, step 9).
+"""Follow-up suggestions for the chat.
 
 CopilotKit's dynamic suggestions run a provider agent with a forced
 `copilotkitSuggest` tool call. `POST /suggest` answers it with one plain
@@ -33,6 +33,12 @@ AGUI_MEDIA_TYPE = "application/vnd.ag-ui.event+proto"
 MAX_TRANSCRIPT_CHARS = 12_000
 MAX_MESSAGE_CHARS = 2_000
 MAX_CONTEXT_CHARS = 6_000
+# What a request may add beyond that: its last message, how many
+# context items, and the suggestion tool's description and schema.
+MAX_REQUEST_CHARS = 8_000
+MAX_CONTEXTS = 8
+MAX_TOOL_CHARS = 8_000
+UNAVAILABLE = "Suggestions are unavailable right now."
 
 SYSTEM = f"""You suggest what the user might ask Claude next in Knowledge Chatroom. It is a workspace where Claude reads and writes the user's files, works on experiment runs and their xDOE reports, keeps a knowledge tree (technology, module, loop, process) with experiments on its nodes, searches the workspace by words and by meaning, and runs skills. Your suggestions appear as chips under the chat; clicking one sends its message as the user.
 
@@ -64,7 +70,7 @@ def js_string(value: Any = _MISSING) -> str:
 
 def clip(text: str, most: int) -> str:
     """
-    clip in suggest.ts: at most `most` UTF-16 units, then "…". A character cut
+    At most `most` UTF-16 units of `text`, then "…". A character cut
     in two ends as U+FFFD, where JavaScript sends the API its lone half.
     """
     units = to_units(text)
@@ -138,7 +144,8 @@ def _request(message: Any) -> str:
         for line in text_of(content).split("\n")
         if not line.startswith("The user has the following tools available:")
     ]
-    return js_trim("\n".join(kept))
+    # Clipped like every other part: the caller pays for this call, not the sender.
+    return clip(js_trim("\n".join(kept)), MAX_REQUEST_CHARS)
 
 
 def _clip_any(value: Any, most: int) -> Any:
@@ -171,7 +178,8 @@ def suggest_prompt(given: dict[str, Any]) -> dict[str, Any] | None:
     if tool is None or not isinstance(last, dict) or last.get("role") != "user":
         return None
     contexts = given.get("context")
-    context = "\n".join(_context(c) for c in (contexts if isinstance(contexts, list) else []))
+    contexts = contexts[:MAX_CONTEXTS] if isinstance(contexts, list) else []
+    context = "\n".join(_context(c) for c in contexts)
     parts = [
         f"<conversation>\n{transcript(messages[:-1]) or '(empty)'}\n</conversation>",
         f"<workspace>\n{context}\n</workspace>" if context else "",
@@ -180,8 +188,9 @@ def suggest_prompt(given: dict[str, Any]) -> dict[str, Any] | None:
     spec: dict[str, Any] = {"name": SUGGEST_TOOL}
     # Undefined fields are left out of the request, as JSON.stringify leaves them out.
     if "description" in tool:
-        spec["description"] = tool["description"]
-    if "parameters" in tool:
+        spec["description"] = _clip_any(tool["description"], MAX_TOOL_CHARS)
+    # The app's own small schema. One too large to be it is left out rather than sent.
+    if "parameters" in tool and len(js_json(tool["parameters"])) <= MAX_TOOL_CHARS:
         spec["input_schema"] = tool["parameters"]
     return {"system": SYSTEM, "user": "\n\n".join(p for p in parts if p), "tool": spec}
 
@@ -237,9 +246,9 @@ async def suggest(given: dict[str, Any], create: CreateMessage) -> list[dict[str
         if not _truthy(args):
             raise ValueError("the model didn't call the suggestion tool")
     except Exception as err:  # every failure is the chips' RUN_ERROR
-        message = str(err)
-        logger.error("[suggest] no suggestions: %s", message)
-        return [started, {"type": "RUN_ERROR", "message": message}]
+        # The reason is logged, not sent: a provider's error can name keys, URLs and models.
+        logger.error("[suggest] no suggestions: %s", err)
+        return [started, {"type": "RUN_ERROR", "message": UNAVAILABLE}]
 
     tool_call_id = str(uuid.uuid4())
     finished: dict[str, Any] = {**started, "type": "RUN_FINISHED"}

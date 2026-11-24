@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from agent_py.app import create_app, make_adapter
 from agent_py.prompt import SYSTEM_PROMPT
+from knowledge_chatroom.identity import LoginConfigError
 
 KEY = Ed25519PrivateKey.generate()
 PUBLIC_KEY = base64.urlsafe_b64encode(
@@ -69,7 +70,7 @@ def types(evts: list[dict[str, Any]]) -> list[str]:
 
 
 def no_skills(request: httpx.Request) -> httpx.Response:
-    """The agent server, as far as a run without skills sees it."""
+    """api-py, as far as a run without skills sees it."""
     if request.url.path == "/skills/run":
         return httpx.Response(200, json={"skills": []})
     return httpx.Response(500, json={"error": f"unexpected {request.method} {request.url.path}"})
@@ -78,7 +79,7 @@ def no_skills(request: httpx.Request) -> httpx.Response:
 @pytest.fixture
 def client(claude):
     adapter = make_adapter({}, transport=httpx.MockTransport(no_skills))
-    with TestClient(create_app(env={}, adapter=adapter)) as c:
+    with TestClient(create_app(env={"AUTH_MODE": "local"}, adapter=adapter)) as c:
         yield c
 
 
@@ -92,6 +93,29 @@ def test_a_run_streams_the_models_answer(client, claude):
     assert types(evts)[-1] == "RUN_FINISHED"
     text = "".join(e.get("delta", "") for e in evts if e["type"] == "TEXT_MESSAGE_CONTENT")
     assert text == claude.reply
+
+
+def test_model_discovery_and_switching_in_one_thread(claude):
+    env = {
+        "AUTH_MODE": "local",
+        "CLAUDE_MODEL": "claude-sonnet-5",
+        "CHAT_MODELS": "claude-haiku-4.5, claude-sonnet-5",
+    }
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as client:
+        assert client.get("/agent/models").json() == {
+            "default": "claude-sonnet-5",
+            "models": ["claude-sonnet-5", "claude-haiku-4-5"],
+        }
+        bad = client.post("/agent/report", json=run_input(user=LOCAL, model="unavailable"))
+        assert types(events(bad)) == ["RUN_ERROR"]
+        assert claude.created == []
+        for model in ("claude-haiku-4-5", None, "claude-haiku-4-5"):
+            response = client.post("/agent/report", json=run_input(user=LOCAL, model=model))
+            assert types(events(response))[-1] == "RUN_FINISHED"
+        (session,) = claude.created
+        assert session.options.model == "claude-haiku-4-5"
+        assert session.model_changes == ["claude-sonnet-5", "claude-haiku-4-5"]
 
 
 def test_the_session_has_the_chatrooms_options(client, claude):
@@ -162,6 +186,26 @@ def test_a_header_without_a_key_is_refused(client):
     assert "KNOWLEDGE_PUBLIC_KEY" in response.json()["detail"]
 
 
+def test_login_is_never_guessed_from_a_missing_key(claude):
+    """A setting left out must not turn login off."""
+    with pytest.raises(LoginConfigError, match="Login is not configured"):
+        create_app(env={}, adapter=make_adapter({}, httpx.MockTransport(no_skills)))
+    with pytest.raises(LoginConfigError, match="must not be set"):
+        env = {"AUTH_MODE": "local", "KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
+        create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+    # Login is on (the mode says so, or the shared .env has the app's secret) but
+    # the key is missing: nobody is the local user, signed or not.
+    for env in ({"AUTH_MODE": "oidc"}, {"AUTH_SECRET": "0123456789abcdef0123456789abcdef"}):
+        app = create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
+        with TestClient(app) as c:
+            for headers in ({}, {"X-Knowledge-User": ALICE}):
+                response = c.post("/agent/report", json=run_input(user=LOCAL), headers=headers)
+                assert response.status_code == 401
+                assert "KNOWLEDGE_PUBLIC_KEY" in response.json()["detail"]
+            assert c.get("/agent/models").status_code == 401
+    assert claude.created == []
+
+
 @pytest.fixture
 def login_client(claude):
     env = {"KNOWLEDGE_PUBLIC_KEY": PUBLIC_KEY}
@@ -212,7 +256,7 @@ def test_the_note_also_goes_in_front_of_a_message_with_parts(client, claude):
 
 
 def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     with TestClient(
         create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(no_skills)))
     ) as c:
@@ -228,7 +272,7 @@ def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
 
 
 def test_the_runs_workspace_goes_with_its_storage_calls(claude):
-    """Without login there is no storage token: the app's workspace header names it (issue #226)."""
+    """Without login there is no storage token: the app's workspace header names it."""
     ws = "11111111-2222-4333-8444-555555555555"
     seen: list[httpx.Request] = []
 
@@ -236,7 +280,7 @@ def test_the_runs_workspace_goes_with_its_storage_calls(claude):
         seen.append(request)
         return no_skills(request)
 
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     with TestClient(
         create_app(env=env, adapter=make_adapter(env, httpx.MockTransport(server)))
     ) as c:
@@ -247,4 +291,121 @@ def test_the_runs_workspace_goes_with_its_storage_calls(claude):
         )
         storage = c.app.state.adapter._storage("t1")
     assert storage.workspace == ws and storage.token is None
-    assert [r.headers.get("x-knowledge-workspace") for r in seen] == [ws]
+    # Skills, then the working folder's copy (workdir.py): all in the page's workspace.
+    assert {"/skills/run", "/nodes", "/experiments"} <= {r.url.path for r in seen}
+    assert {r.headers.get("x-knowledge-workspace") for r in seen} == {ws}
+
+
+def test_an_unexpected_failure_getting_a_run_ready_is_a_run_error(client, claude, monkeypatch):
+    """It used to break the stream with no event at all; the chat showed nothing."""
+    from agent_py.adapter import ChatroomAdapter
+
+    load_skills = ChatroomAdapter._skills_for
+    failed = False
+
+    async def fails_once(self, thread_id):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("the disk under /var/lib/agent-py is full")
+        return await load_skills(self, thread_id)
+
+    monkeypatch.setattr(ChatroomAdapter, "_skills_for", fails_once)
+    evts = events(client.post("/agent/report", json=run_input(user=LOCAL)))
+    assert types(evts) == ["RUN_ERROR"]
+    # What went wrong is for the log, not the chat.
+    assert evts[0]["message"] == "Couldn't start the run. Please try again."
+    assert claude.created == []
+
+    # Nothing is left half set up: the next run of the same chat works.
+    again = events(client.post("/agent/report", json=run_input(user=LOCAL)))
+    assert (types(again)[0], types(again)[-1]) == ("RUN_STARTED", "RUN_FINISHED")
+
+
+def test_a_run_marks_its_folder_and_idle_ones_are_removed_as_runs_start(claude, tmp_path):
+    from agent_py.skills import run_folder
+    from agent_py.workdir import LAST_USED, mark_used
+
+    stale = run_folder(tmp_path, "someone-who-left")
+    mark_used(stale)
+    (stale / "workspace").mkdir()
+    long_ago = time.time() - 3 * 24 * 3600
+    os.utime(stale / LAST_USED, (long_ago, long_ago))
+
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        evts = events(c.post("/agent/report", json=run_input(user=LOCAL)))
+        assert types(evts)[-1] == "RUN_FINISHED"
+        mine = run_folder(tmp_path, LOCAL["id"])
+        assert (mine / LAST_USED).exists()
+        assert not stale.exists()
+        # Held only while the run lasts.
+        assert not adapter._in_use
+
+
+def test_a_folders_idle_time_counts_from_the_end_of_its_last_run(claude, tmp_path, monkeypatch):
+    """A run longer than the idle wait must not leave its folder due for removal as it finishes."""
+    from agent_py.skills import run_folder
+    from agent_py.workdir import LAST_USED
+
+    mark = run_folder(tmp_path, LOCAL["id"]) / LAST_USED
+    long_ago = time.time() - 3 * 24 * 3600
+    answer = claude.query
+
+    async def after_days(self, prompt, session_id="default"):
+        # As if the run had started three days ago.
+        os.utime(mark, (long_ago, long_ago))
+        await answer(self, prompt, session_id)
+
+    monkeypatch.setattr(claude, "query", after_days)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        evts = events(c.post("/agent/report", json=run_input(user=LOCAL)))
+        assert types(evts)[-1] == "RUN_FINISHED"
+        assert time.time() - mark.stat().st_mtime < 60
+        # Another chat's run, starting right after, leaves the folder alone.
+        adapter._swept_at = None
+        other = run_input(user=LOCAL)
+        other["threadId"] = "t2"
+        events(c.post("/agent/report", json=other))
+        assert mark.exists()
+
+
+def test_every_storage_call_of_the_server_goes_through_one_http_client(claude, monkeypatch):
+    """A client per call meant a new connection for each of the several calls a tool call makes."""
+    made: list[httpx.AsyncClient] = []
+    init = httpx.AsyncClient.__init__
+
+    def counting(self, *args, **kwargs):
+        made.append(self)
+        init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", counting)
+    ws = "11111111-2222-4333-8444-555555555555"
+    seen: list[httpx.Request] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return no_skills(request)
+
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
+    adapter = make_adapter(env, httpx.MockTransport(api))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        for thread in ("t1", "t2"):
+            body = run_input(user=LOCAL)
+            body["threadId"] = thread
+            headers = {"X-Knowledge-Storage": f"tok-{thread}", "X-Knowledge-Workspace": ws}
+            events(c.post("/agent/report", json=body, headers=headers))
+        client = adapter._http
+        assert client is not None and not client.is_closed
+        assert adapter._storage("t1").client is adapter._storage("t2").client is client
+    # Several calls per run (skills, the working folder's listing), all on that client.
+    to_storage = [m for m in made if str(m.base_url).startswith("http://storage.test")]
+    assert len(seen) >= 4 and to_storage == [client]
+    # Each call still carries its own run's token and workspace.
+    assert {r.headers.get("x-knowledge-storage") for r in seen} == {"tok-t1", "tok-t2"}
+    assert {r.headers.get("x-knowledge-workspace") for r in seen} == {ws}
+    # Closed with the server.
+    assert client.is_closed and adapter._http is None

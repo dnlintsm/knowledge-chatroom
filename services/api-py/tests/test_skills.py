@@ -121,7 +121,7 @@ def test_workspace_and_merged_skills_sort_as_javascript_does():
         "é",
         "f",
     ]
-    # Beyond ASCII too, as Node's ICU sorts them (#206 review): "ø" goes with "o", before "z".
+    # Beyond ASCII too, as Node's ICU sorts them: "ø" goes with "o", before "z".
     others = ["z", "ø", "o", "p", "Ø", "oz", "–", "-", "€", "0", "α", "中", "“", '"', "ł", "m"]
     assert sorted(others, key=collation_key) == [
         "-",

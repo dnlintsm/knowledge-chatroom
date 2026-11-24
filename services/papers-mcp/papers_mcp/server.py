@@ -1,4 +1,4 @@
-"""Paper search as an MCP server for the chatroom's agent (issue #151).
+"""Paper search as an MCP server for the chatroom's agent.
 
 Run it:
 
@@ -38,14 +38,15 @@ from .models import PaperDetails, PaperSearchResult, PaperText, SavedPaper, pars
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("PAPERS_NAME", "papers")
-# The chatroom's public key (agent GET /identity/public-key) when login is on;
-# unset = no login. Never give this server AUTH_SECRET.
-PUBLIC_KEY = (
-    identity.public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"])
-    if os.environ.get("KNOWLEDGE_PUBLIC_KEY")
-    else None
-)
-# The chatroom's agent server (LOCAL_AGENT_URL), whose storage API save_paper writes through.
+# Whether callers must be signed in. AUTH_MODE=local: no login.
+# With login, KNOWLEDGE_PUBLIC_KEY is the chatroom's public key (the API server's
+# GET /identity/public-key); never give this server AUTH_SECRET. Neither set is
+# an error at startup: a missing key must not turn login off.
+try:
+    LOGIN = identity.login_from_env(os.environ)
+except identity.LoginConfigError as err:
+    raise SystemExit(f"[papers-mcp] {err}") from None
+# The chatroom's API server, api-py (the app's LOCAL_AGENT_URL), whose storage API save_paper writes through.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
 INSTRUCTIONS = """Search academic papers (OpenAlex, with arXiv for new preprints).
@@ -73,7 +74,7 @@ PaperId = Annotated[
 
 def require_user(ctx: Context) -> identity.User:
     """The signed-in user calling this tool; refuses calls that can't prove one."""
-    user = identity.caller(ctx.headers, PUBLIC_KEY, f"mcp:{SERVER_NAME}")
+    user = identity.caller(ctx.headers, LOGIN, f"mcp:{SERVER_NAME}")
     if user is None:
         raise ToolError(
             "Unknown caller: the chatroom must forward the user (forwardIdentity), "
@@ -280,7 +281,9 @@ def _save(
     if include_pdf:
         if not paper.pdf_url:
             raise ToolError(f"{paper.title} has no open-access PDF; save it without include_pdf.")
-        data = net.get(paper.pdf_url, accept="application/pdf", max_bytes=fulltext.MAX_PDF_BYTES)
+        data = net.get_public(
+            paper.pdf_url, accept="application/pdf", max_bytes=fulltext.MAX_PDF_BYTES
+        )
         if not data.startswith(b"%PDF"):
             raise ToolError(f"{paper.pdf_url} isn't a PDF; save it without include_pdf.")
         pdf_path = target.removesuffix(".md") + ".pdf"
@@ -342,7 +345,7 @@ async def save_paper(
     Saving the same paper again updates its note."""
     require_user(ctx)
     token = (ctx.headers or {}).get(storage.STORAGE_HEADER)
-    if PUBLIC_KEY and not token:
+    if LOGIN.required and not token:
         raise ToolError(
             'Saving needs "storageAccess": true for this server in the chatroom\'s MCP_SERVERS.'
         )

@@ -57,7 +57,7 @@ const STORAGE_URL = process.env.STORAGE_URL?.replace(/\/+$/, "");
 /** The input of the last chat run, for GET /last-run. */
 let lastRun = null;
 
-/** The "+" menu, as the agent's GET /tools lists a papers server (apps/agent/src/tools-api.ts). */
+/** The "+" menu, as the agent's GET /tools lists a papers server (services/api-py/api_py/tools.py). */
 const TOOL_MENU = [
   {
     server: "papers", label: "Search papers", chip: "Papers", description: "Academic papers from OpenAlex and arXiv",
@@ -111,10 +111,11 @@ const REPLY =
 // (apps/web/src/components/workspace/file-refs.ts).
 const CITING_REPLY =
   "Read [The Pragmatic Programmer](notes/reading-list.md#L7) next: it's the one marked Next. " +
-  "Meanwhile [sales.csv:3-4](uploads/sales.csv#L3-L4) shows revenue still climbing.";
+  "Meanwhile [sales.csv:3-4](uploads/sales.csv#L3-L4) shows revenue still climbing. " +
+  "See also ![welcome.md](/notes/welcome.md#L1).";
 
 // "Think it through": thinking and backend tool calls before the answer, as
-// Claude streams them, so the chat folds them into one steps block (issue #154).
+// Claude streams them, so the chat folds them into one steps block.
 const STEPS_REPLY = "Your reading list puts **The Pragmatic Programmer** next, and none of your notes cover it yet.";
 const STEPS = [
   { thinking: "The user wants to know what to read next. I should check the reading list first." },
@@ -137,6 +138,7 @@ const ARTIFACT = `# Summary
 const FOLLOW_UPS = [
   { title: "Check the evidence", message: "How strong is the evidence for that? Point me to the lines that support it." },
   { title: "Save it as a note", message: "Save what you just told me as a short note next to the report." },
+  { title: "Compare which assumptions might change the conclusions in this report", message: "Compare which assumptions might change the conclusions in this report and point to the supporting lines." },
 ];
 
 const TOOL_REPLIES = {
@@ -145,7 +147,7 @@ const TOOL_REPLIES = {
   openRun: "Switched to the other run.",
 };
 
-// The agent's built-in skills (apps/agent/skills/), as GET /skills lists them.
+// The agent's built-in skills (services/api-py/skills/), as GET /skills lists them.
 const SKILLS = [
   {
     name: "analysis",
@@ -562,7 +564,9 @@ const server = http.createServer(async (req, res) => {
           ? CITING_REPLY
           : remember
             ? REMEMBER_REPLY
-            : REPLY;
+            : asked === "Preview a streamed response"
+              ? `See [welcome.md](/notes/welcome.md#L1). ${`${REPLY} `.repeat(6).trim()}`
+              : REPLY;
 
   send({ type: "RUN_STARTED", threadId, runId });
   if (slashSkill) {
@@ -642,6 +646,7 @@ const server = http.createServer(async (req, res) => {
   }
   send({ type: "TEXT_MESSAGE_START", messageId, role: "assistant" });
   for (const word of reply.split(/(?<= )/)) {
+    if (res.destroyed) return;
     send({ type: "TEXT_MESSAGE_CONTENT", messageId, delta: word });
     await new Promise((r) => setTimeout(r, 30));
   }

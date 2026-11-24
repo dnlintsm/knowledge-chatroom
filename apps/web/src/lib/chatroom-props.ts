@@ -65,6 +65,8 @@ export interface ChatroomPlace {
    * MCP_SERVERS names, so their tools are mcp__<name>__<tool>.
    */
   tools: string[];
+  /** Model selected from this backend's advertised options, when supported. */
+  model?: string;
 }
 
 export interface ChatroomProps extends ChatroomPlace {
@@ -82,9 +84,10 @@ export interface PlaceInput {
   selectedPath: string | null;
   /** The chat's tool chips that are on. */
   tools?: string[];
+  model?: string;
 }
 
-export function chatroomPlace({ storage, lineage, experiment, report, selectedPath, tools = [] }: PlaceInput): ChatroomPlace {
+export function chatroomPlace({ storage, lineage, experiment, report, selectedPath, tools = [], model }: PlaceInput): ChatroomPlace {
   const path = lineage.map(({ id, name, type }) => ({ id, name, type }));
   const node = path.at(-1);
   return {
@@ -104,6 +107,7 @@ export function chatroomPlace({ storage, lineage, experiment, report, selectedPa
       : null,
     selected_path: selectedPath,
     tools,
+    ...(model && { model }),
   };
 }
 

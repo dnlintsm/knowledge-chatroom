@@ -13,7 +13,7 @@ import { CHATROOM_PROPS, LOCAL_USER, withChatroomUser, type ChatroomUser } from 
  *
  * A remote backend's chat agent also gets an X-Knowledge-Memory token for the
  * run's chat (and knowledge node), to use the user's memory there through the
- * agent server's /memory/agent (docs/remote-agent.md).
+ * API server's /memory/agent (docs/remote-agent.md).
  */
 class ChatroomAgent extends HttpAgent {
   protected override requestInit(input: RunAgentInput): RequestInit {
@@ -46,15 +46,15 @@ function runNode(input: RunAgentInput): string | null {
 
 /**
  * The chat's agent: a remote backend's `${AGENT_URL}/agent/report` when
- * AGENT_URL is set, else this repo's agent server (src/lib/agent-target.ts).
+ * AGENT_URL is set, else this repo's API server (src/lib/agent-target.ts).
  */
 export function createDefaultAgent(): HttpAgent {
   return new ChatroomAgent({ url: chatAgentUrl() });
 }
 
 /**
- * The chat's follow-up chips after a reply: this repo's agent server's
- * `/suggest` answers with one small-model call (apps/agent/src/suggest.ts),
+ * The chat's follow-up chips after a reply: this repo's API server's
+ * `/suggest` answers with one small-model call (services/api-py/api_py/suggest.py),
  * also when a remote backend (AGENT_URL) serves the chat.
  */
 export function createSuggesterAgent(): HttpAgent {

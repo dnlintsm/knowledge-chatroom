@@ -173,7 +173,33 @@ def mime_for_path(path: str) -> str:
     )
 
 
+_MIME = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}")
+# What a browser may show in place when it opens a signed link to the object
+# store. Everything else is downloaded: the store's origin has none of the
+# sandboxing the app puts on the files it serves itself, so a page, an SVG or
+# an XML document there would run as a site of its own.
+_INLINE = re.compile(r"(image/(?!svg\+xml$)|audio/|video/)[a-z0-9.+-]+|application/pdf")
+
+
+def clean_mime(value: str | None) -> str | None:
+    """
+    A content type as it is stored: its type/subtype in lowercase, without
+    parameters. None when it isn't one, or says nothing (application/octet-stream),
+    so the type comes from the path instead.
+    """
+    mime = (value or "").split(";")[0].strip().lower()
+    if not _MIME.fullmatch(mime) or mime == "application/octet-stream":
+        return None
+    return mime
+
+
+def shown_inline(mime: str) -> bool:
+    """Whether a file of this type may open in the browser from the object store's own origin."""
+    return bool(_INLINE.fullmatch(mime.lower()))
+
+
 def is_text_file(path: str, mime: str, svg_as_text: bool = True) -> bool:
+    mime = mime.lower()
     return (
         mime.startswith("text/")
         or mime == "application/json"

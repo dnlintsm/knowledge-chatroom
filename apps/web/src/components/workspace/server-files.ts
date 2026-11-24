@@ -1,14 +1,22 @@
 import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-chatroom/contracts/storage-contract";
 import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
 export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
 import { WORKSPACE_HEADER, workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
-import { FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
+import { FileChangedError, FileExistsError, isTextFile, type WorkspaceFile } from "./types";
 
 /**
  * Client for the server file API (/api/files, forwarded to the agent's
  * storage service). When it answers, workspace files live on the server;
  * otherwise the workspace keeps them in the browser (see store.tsx).
  */
+
+/**
+ * The storage API's shapes, generated from packages/contracts/openapi/storage.yaml.
+ * The types below that name one are that schema, so a change to the spec that this
+ * app doesn't follow is a compile error here, not a surprise at run time.
+ */
+type Schema = components["schemas"];
 
 /** A knowledge node id, or null for the workspace root. */
 export type NodeId = string | null;
@@ -31,32 +39,16 @@ export const eventPlace = (event: { node: NodeId; experiment?: string | null }):
 export const WATCH_URL = "/api/files?watch";
 
 /** A level of the knowledge tree, such as tech (depth 1). */
-export interface NodeType {
-  name: string;
-  depth: number;
-}
+export type NodeType = Schema["NodeType"];
 
 /** viewer reads, editor also writes, owner also deletes and shares. */
-export type Role = "viewer" | "editor" | "owner";
+export type Role = Schema["Role"];
 
-export interface KnowledgeNode {
-  id: string;
-  parentId: string | null;
-  type: string;
-  depth: number;
-  name: string;
-  fileCount: number;
-  updatedAt: string;
-  /** Your role here; null when shown only as the path to something you can see. */
-  role: Role | null;
-}
+/** A node you can see. `role` is yours there; null when it is shown only as the path to something you can see. */
+export type KnowledgeNode = Schema["VisibleNode"];
 
-export interface KnowledgeTree {
-  types: NodeType[];
-  /** Your role at the workspace root (root files and top-level nodes). */
-  rootRole: Role | null;
-  nodes: KnowledgeNode[];
-}
+/** The tree's levels, the nodes you can see, and your role at the workspace root (`rootRole`). */
+export type KnowledgeTree = Schema["Tree"];
 
 /**
  * fetch for the storage API, in the page's workspace (workspaceFetch). With
@@ -95,7 +87,7 @@ const deleteKey = (path: string, place: PlaceId) => `${place ?? ""}\n${path}`;
 const deleted = (path: string, place: PlaceId) => deleting.get(deleteKey(path, place));
 
 /**
- * The file list; "starting" when storage (or the agent server) may just not be
+ * The file list; "starting" when storage (or the API server) may just not be
  * up yet (503, 502, network error), so asking again shortly makes sense; null
  * when this session has no server storage (404 = not configured, 500 = failed).
  * A place you have no access to lists as empty.
@@ -159,19 +151,20 @@ export async function loadServerFile(info: ServerFile, place: PlaceId = null): P
 export async function loadServerText(path: string, place: PlaceId = null): Promise<{ content: string; sha256: string | null }> {
   const res = await apiFetch(fileUrl(path, place), { cache: "no-store" });
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
-  const etag = res.headers.get("etag");
-  return { content: await res.text(), sha256: etag ? etag.replace(/^(W\/)?"|"$/g, "") : null };
+  return { content: await res.text(), sha256: etagHash(res) };
 }
 
 /**
  * Saves a file. With `createOnly` the server refuses to replace an existing
- * file (FileExistsError). With `workspace` it is saved there, even when the
- * page has moved to another workspace meanwhile (a delayed save).
+ * file (FileExistsError). With `replaces` (a version's sha256) it only writes
+ * over that version: FileChangedError when someone else saved, or deleted the
+ * file, meanwhile. With `workspace` it is saved there, even when the page has
+ * moved to another workspace meanwhile (a delayed save).
  */
 export async function putServerFile(
   file: Pick<WorkspaceFile, "path" | "mime" | "content">,
   place: PlaceId = null,
-  opts: { createOnly?: boolean; workspace?: string | null } = {},
+  opts: { createOnly?: boolean; replaces?: string; workspace?: string | null } = {},
 ): Promise<ServerFile> {
   await deleted(file.path, place);
   // Binary uploads arrive as data: URLs; send their bytes.
@@ -181,9 +174,14 @@ export async function putServerFile(
       : file.content;
   const headers: Record<string, string> = { "Content-Type": file.mime };
   if (opts.createOnly) headers["If-None-Match"] = "*";
+  if (opts.replaces) headers["If-Match"] = `"${opts.replaces}"`;
   if (opts.workspace) headers[WORKSPACE_HEADER] = opts.workspace;
   const res = await apiFetch(fileUrl(file.path, place), { method: "PUT", headers, body });
-  if (res.status === 412) throw new FileExistsError(file.path);
+  if (res.status === 412) {
+    const refused = (await res.json().catch(() => ({}))) as { changed?: boolean; sha256?: string | null };
+    if (refused.changed) throw new FileChangedError(file.path, refused.sha256 ?? null);
+    throw new FileExistsError(file.path);
+  }
   if (res.status === 403) throw new Error(`You can't change files here (${file.path})`);
   if (!res.ok) throw new Error(`PUT ${file.path}: ${res.status}`);
   return parseFileInfo(await res.json());
@@ -257,44 +255,22 @@ export const renameServerNode = (id: string, name: string) =>
 export const deleteServerNode = (id: string) =>
   nodeRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
-export type ExperimentStatus = "draft" | "shared" | "archived";
+export type ExperimentStatus = Schema["ExperimentStatus"];
 /** How far a run got, apart from who sees it (status). */
-export type ExperimentState = "ready" | "running" | "done" | "failed";
+export type ExperimentState = Schema["ExperimentState"];
 
 /**
  * A sandbox on a knowledge node, with its own copy of the node's files, or
  * at the workspace root (nodeId null), starting empty. One with a report.md
  * is a run.
  */
-export interface Experiment {
-  id: string;
-  nodeId: string | null;
-  /** Who created it; never changes (provenance). */
-  authorId: string;
-  authorName: string | null;
-  /** Who is responsible for it now: its author until they hand it over (#255). */
-  maintainerId: string;
-  maintainerName: string | null;
-  /** Whether its maintainer is still a member of the workspace. */
-  maintainerIsMember: boolean;
-  /** Members its maintainer added to work on it with them. */
-  collaborators: { id: string; name: string | null }[];
-  title: string;
-  hypothesis: string;
-  params: Record<string, unknown>;
-  results: Record<string, unknown>;
-  status: ExperimentStatus;
-  state: ExperimentState;
-  forkedAt: string;
-  updatedAt: string;
-  fileCount: number;
-  /** Where a run came from, when Claude started it (apps/agent/src/storage/run-report.ts); else {}. */
+export type Experiment = Omit<Schema["Experiment"], "provenance"> & {
+  /**
+   * Where a run came from, when Claude started it (services/api-py/api_py/run_report.py);
+   * else {}. The API describes it as an open object; these are the fields this app reads.
+   */
   provenance?: RunProvenance;
-  /** writer: you maintain it or collaborate on it, and it isn't archived. */
-  access: "writer" | "reader";
-  /** You maintain it: you may share, archive, restore or delete it, and choose who works on it. */
-  mine: boolean;
-}
+};
 
 /** Recorded by the agent; every field may be missing on older or hand-made runs. */
 export interface RunProvenance {
@@ -351,7 +327,7 @@ export const addServerRunInputs = (id: string, paths: string[]) =>
     inputs: paths.map((path) => ({ path, experiment: id })),
   });
 /**
- * Runs experiment `id` again as a new one of yours (#187), reading its inputs
+ * Runs experiment `id` again as a new one of yours, reading its inputs
  * at the content its record names; the server says why when it can't.
  */
 export const rerunServerExperiment = (id: string) =>
@@ -392,51 +368,16 @@ export async function changeServerExperimentPeople(
   return data.experiment ?? null;
 }
 
-export type ProposalStatus = "open" | "accepted" | "rejected" | "withdrawn";
+export type ProposalStatus = Schema["ProposalStatus"];
 
 /**
  * A proposed version of a file in a node (or at the root), waiting for someone
- * who can edit there to accept or reject it (apps/agent/src/storage/proposals.ts).
+ * who can edit there to accept or reject it (services/api-py/api_py/proposals.py).
  */
-export interface Proposal {
-  id: string;
-  node: NodeId;
-  path: string;
-  sha256: string;
-  size: number;
-  mime: string;
-  /** agent: Claude proposed it, acting for authorName. */
-  author: WorkspaceFile["author"];
-  authorId: string;
-  authorName: string | null;
-  /** The experiment it was promoted from, if any (and its title, if you may see it). */
-  experiment: string | null;
-  experimentTitle: string | null;
-  note: string;
-  status: ProposalStatus;
-  decidedByName: string | null;
-  decidedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  /** Accepting creates the file. */
-  isNew: boolean;
-  /** The file changed after this was proposed. */
-  fileChanged: boolean;
-  /** You proposed it, so you may withdraw it. */
-  mine: boolean;
-  /** You may accept or reject it. */
-  canDecide: boolean;
-}
+export type Proposal = Schema["Proposal"];
 
 /** A file an experiment changed that its node doesn't have yet. */
-export interface Promotable {
-  path: string;
-  change: "new" | "changed";
-  size: number;
-  mime: string;
-  /** This experiment's open proposal with exactly this content, if any. */
-  proposal: string | null;
-}
+export type Promotable = Schema["Promotable"];
 
 /** Open proposals you can see, everywhere; null when they can't be read. */
 export async function listProposals(): Promise<Proposal[] | null> {
@@ -460,15 +401,35 @@ async function proposalRequest<T>(method: string, path: string, body?: unknown):
   return data;
 }
 
-/** The proposed content as text. */
-export async function proposalText(id: string): Promise<string> {
-  const res = await apiFetch(`/api/proposals/${encodeURIComponent(id)}/content`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Couldn't load the proposed version (${res.status})`);
-  return res.text();
+/** The sha256 an ETag names (a file's or a proposal's content), or null without one. */
+function etagHash(res: Response): string | null {
+  const etag = res.headers.get("etag");
+  return etag ? etag.replace(/^(W\/)?"|"$/g, "") : null;
 }
 
-export const decideProposal = (id: string, decision: "accept" | "reject" | "withdraw") =>
-  proposalRequest<Proposal>("POST", `/${encodeURIComponent(id)}/${decision}`);
+/** The proposed content as text, and which content that is (its sha256). */
+export async function proposalText(id: string): Promise<{ content: string; sha256: string | null }> {
+  const res = await apiFetch(`/api/proposals/${encodeURIComponent(id)}/content`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Couldn't load the proposed version (${res.status})`);
+  return { content: await res.text(), sha256: etagHash(res) };
+}
+
+/**
+ * What a reviewer looked at when accepting: the proposed content, and the
+ * file it was compared with (null: there was none). The server refuses the
+ * accept when either is another version by then.
+ */
+export interface Reviewed {
+  sha256?: string;
+  base?: string | null;
+}
+
+export const decideProposal = (id: string, decision: "accept" | "reject" | "withdraw", reviewed?: Reviewed) =>
+  proposalRequest<Proposal>(
+    "POST",
+    `/${encodeURIComponent(id)}/${decision}`,
+    decision === "accept" && reviewed && Object.keys(reviewed).length ? reviewed : undefined,
+  );
 
 /** Proposes an experiment's changed files (all, or `paths`) to its node. */
 export const promoteExperiment = (experimentId: string, paths?: string[], note?: string) =>
@@ -480,22 +441,8 @@ export const listPromotable = (experimentId: string) =>
     `/promotable?experiment=${encodeURIComponent(experimentId)}`,
   ).then((r) => r.files);
 
-/** A file whose text or path matched a search (apps/agent/src/storage/search.ts). */
-export interface SearchHit {
-  path: string;
-  kind: FileKind;
-  mime: string;
-  node: NodeId;
-  experiment: string | null;
-  /** Node names from the top down to the file's node (an experiment's node for its files). */
-  where: string[];
-  experimentTitle: string | null;
-  /** The passage that matched; "" when only the path did. */
-  snippet: string;
-  /** "meaning": no words in common, but a passage close in meaning. */
-  match: "words" | "meaning";
-  updatedAt: string;
-}
+/** A file whose text or path matched a search (services/api-py/api_py/search.py). */
+export type SearchHit = Schema["SearchHit"];
 
 /**
  * Files you can read that match `query`, best first; those near `near` (where

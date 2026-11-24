@@ -3,13 +3,13 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
 import { WORKSPACE_HEADER } from "./workspace-request";
 
 /**
- * Where each user's chat history is kept (issue #91). With server storage
- * (DATABASE_URL on the agent server) that is the agent's `/chats` API
- * (apps/agent/src/storage/chats.ts), in Postgres, so chats survive restarts.
+ * Where each user's chat history is kept. With server storage
+ * (DATABASE_URL on the API server) that is its `/chats` API
+ * (services/api-py/api_py/chats.py), in Postgres, so chats survive restarts.
  * Without it, this process's memory: lost on restart, but still one history
  * per user. src/lib/chat-runner.ts saves runs here and replays them.
  *
- * Chats belong to a workspace (issue #226): `inWorkspace(id)` is the store
+ * Chats belong to a workspace: `inWorkspace(id)` is the store
  * for the one a request names, and the store itself is the default
  * workspace's (requests that name none).
  */
@@ -75,7 +75,7 @@ export class ChatStoreError extends Error {}
 // Long enough for a big run to be written, short enough not to hold a reply.
 const TIMEOUT_MS = 15_000;
 
-/** The agent server's /chats API, which keeps chats in Postgres. */
+/** The API server's /chats API, which keeps chats in Postgres. */
 export class AgentChatStore implements ChatStore {
   constructor(
     private readonly base = localAgentUrl(),
@@ -294,8 +294,8 @@ const summary = ({ id, name, agentId, archived, createdAt, updatedAt, lastRunAt 
 });
 
 /**
- * The agent server's store when it has server storage, else memory. Which one
- * is asked of the agent server (its /chats answers 404 without DATABASE_URL,
+ * The API server's store when it has server storage, else memory. Which one
+ * is asked of the API server (its /chats answers 404 without DATABASE_URL,
  * 500 when storage failed to start) and remembered; until it answers (still
  * starting, or unreachable) memory stands in, and what it kept moves to the
  * server once that is ready.

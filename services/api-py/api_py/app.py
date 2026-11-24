@@ -1,10 +1,9 @@
-"""The agent server's HTTP API in Python, in front of the TypeScript server (issue #190).
+"""The app's HTTP API: storage, access, skills, memory, search and chat history.
 
     uv run python -m api_py.app    # http://127.0.0.1:8000, the app's LOCAL_AGENT_URL
 
-It serves the route groups ported so far (routes.py) and passes every other
-request to the TypeScript agent server at TS_AGENT_URL (proxy.py), so the app,
-the Python chat agent and the MCP servers keep one address while routes move.
+It serves the route groups in routes.py. Any other request is answered 404, or
+forwarded to an older release's server while TS_AGENT_URL is set (proxy.py).
 Settings: config.py.
 """
 
@@ -24,26 +23,29 @@ from psycopg_pool import AsyncConnectionPool
 
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
+from .identity import RefuseSignedWithoutLogin
 from .memory_learn import MemoryLearner
 from .platform import Platform, parse_admins
 from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
 from .semantic import SemanticIndex
-from .storage import Storage, open_storage
+from .storage import RowSecurityOffError, Storage, open_storage
 from .workspaces import Workspaces
 
 logger = logging.getLogger("api_py")
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 SCHEMA_POLL_SECONDS = 2.0
+# With MIGRATIONS=off, how many polls between reminders that something else must apply them.
+WAITING_REMINDER_POLLS = 30
 
 
 async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
     """
-    Opens the storage routes moved to Python once the database has exactly the
-    migrations this server knows, applying them first (unless MIGRATIONS=off:
-    then the TypeScript server does). Returns whether they are served; until
-    then they pass through to the TypeScript server.
+    Opens the storage routes once the database has exactly the migrations this
+    server knows, applying them first (unless MIGRATIONS=off: then another
+    process does). Returns whether they are served; until then they answer 503,
+    or are forwarded while TS_AGENT_URL is set (proxy.forward).
     """
     if app.state.storage is not None:
         return True
@@ -69,10 +71,22 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
         if found.state is not db.SchemaState.READY:
             return False
         try:
-            storage = await open_storage(pool, settings.s3)
+            storage = await open_storage(
+                pool, settings.s3, require_row_security=settings.row_security_required
+            )
+        except RowSecurityOffError as err:
+            # Not served until an admin grants the role; said once, checked again each poll.
+            if not app.state.row_security_refused:
+                logger.error("not serving storage: %s", err)
+            app.state.row_security = "off"
+            # Refused, not merely not ready: a legacy upstream doesn't get the requests either (proxy.forward).
+            app.state.row_security_refused = True
+            return False
         except Exception as err:  # Try again while the database may still be settling.
             logger.warning("can't open storage yet: %s", err)
             return False
+        app.state.row_security = "on" if storage.row_security else "off"
+        app.state.row_security_refused = False
         _start_search(app, storage, settings)
         _start_learner(app, settings)
         app.state.storage = storage
@@ -82,9 +96,8 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
 
 def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
     """
-    The search indexer's background work, which runs here and not on the
-    TypeScript server (SEARCH_INDEXER=off there): indexing files written before
-    search existed, and with an embedding model, embedding passages.
+    The search indexer's background work: indexing files written before search
+    existed, and with an embedding model, embedding passages.
     """
     if settings.embedding:
         storage.semantic = SemanticIndex(
@@ -97,8 +110,7 @@ def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
 
 def _start_learner(app: FastAPI, settings: Settings) -> None:
     """
-    With memory, learning from quiet chats, which runs here and not on the
-    TypeScript server (MEMORY_LEARN=off there; memory_learn.py).
+    With memory, learning from quiet chats (memory_learn.py).
     """
     if not settings.memory or not settings.memory_learn:
         return
@@ -137,6 +149,7 @@ async def _serve_storage_when_ready(
     app: FastAPI, pool: AsyncConnectionPool, settings: Settings
 ) -> None:
     """Follows the database until the storage routes can be served (or it turns out newer than this server)."""
+    polls = 0
     while not await _try_storage(app, pool, settings):
         found = app.state.schema
         if found and found.state is db.SchemaState.AHEAD:
@@ -145,6 +158,19 @@ async def _serve_storage_when_ready(
                 ", ".join(found.unknown),
             )
             return
+        polls += 1
+        if (
+            found
+            and found.state is db.SchemaState.BEHIND
+            and not settings.migrations
+            and polls % WAITING_REMINDER_POLLS == 0
+        ):
+            # Nothing here will ever apply them: say what would, now and then.
+            logger.warning(
+                "still waiting for another process to apply %s (MIGRATIONS=off): "
+                "run `python -m api_py.migrate`, or start a server without MIGRATIONS=off",
+                ", ".join(found.missing),
+            )
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
 
 
@@ -157,7 +183,11 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.state.create_message = llm.message_creator()
         app.state.pool = None
         app.state.schema = None
-        # The ported storage routes; None while they pass through (no database, or not ready yet).
+        # "on" or "off" once storage was opened (or refused for it, ROW_SECURITY=required).
+        app.state.row_security = None
+        # ROW_SECURITY=required and it is off: storage requests are refused (503), also with a legacy upstream.
+        app.state.row_security_refused = False
+        # The storage behind the storage routes; None while it isn't open (no database, or not ready yet).
         app.state.storage = None
         app.state.storage_lock = asyncio.Lock()
         # Background work started with storage (the search indexer), stopped on shutdown.
@@ -165,7 +195,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
 
         async def storage_ready() -> bool:
             # A request in between polls checks too, so the first one after the
-            # TypeScript server has migrated is already served here.
+            # migrations are applied is already served.
             if app.state.storage is not None:
                 return True
             if not app.state.pool or (
@@ -196,14 +226,15 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 await pool.close()
                 raise RuntimeError(
                     f"The database has migrations this server doesn't know ({', '.join(found.unknown)}): "
-                    "update api-py to the TypeScript server's version"
+                    "update api-py to the release that applied them"
                 )
             app.state.schema = found
             if found and found.state is not db.SchemaState.READY:
                 logger.info(
                     "applying %s"
                     if settings.migrations
-                    else "waiting for the TypeScript server to apply %s",
+                    else "waiting for another process to apply %s (MIGRATIONS=off): "
+                    "`python -m api_py.migrate`, or a server without MIGRATIONS=off",
                     ", ".join(found.missing),
                 )
             watcher = asyncio.create_task(_serve_storage_when_ready(app, pool, settings))
@@ -251,13 +282,21 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         storage_ready = (
             not settings.database_url or request.app.state.storage is not None or upstream == "ok"
         )
-        if upstream != "down" and database_ready and storage_ready:
-            return JSONResponse(
-                {"status": "ok"}
-            )  # the spec's answer (getHealth), as the TypeScript server gives it
+        # Whether Postgres enforces access too, once storage was opened (or refused over it).
+        row_security: str | None = request.app.state.row_security
+        extra = {"rowSecurity": row_security} if row_security else {}
+        # Required and off: not healthy, whatever a legacy upstream answers.
+        refused = request.app.state.row_security_refused
+        if upstream != "down" and database_ready and storage_ready and not refused:
+            return JSONResponse({"status": "ok", **extra})  # the spec's answer (getHealth)
         return JSONResponse(
-            {"status": "degraded", "upstream": upstream, "database": database}, status_code=503
+            {"status": "degraded", "upstream": upstream, "database": database, **extra},
+            status_code=503,
         )
+
+    if not settings.auth_secret:
+        # Without login, a request signed for a user is refused, not made the local user.
+        app.add_middleware(RefuseSignedWithoutLogin)
 
     for router in ROUTERS:
         app.include_router(router)

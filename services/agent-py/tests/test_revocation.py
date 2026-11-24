@@ -1,4 +1,4 @@
-"""Revocation at tool boundaries (issue #255), the Python agent's side.
+"""Revocation at tool boundaries, the Python agent's side.
 
 The engine tests run the real Claude Code engine (the SDK's bundled CLI) against
 a scripted Messages API, so they can count model turns, and a storage API that
@@ -95,14 +95,14 @@ def test_an_archived_workspace_counts_as_gone_and_a_storage_failure_doesnt():
     unreachable = Storage("http://storage.test", None, httpx.MockTransport(down))
     assert not asyncio.run(no_longer_member(unreachable))
 
-    # An agent server without storage routes answers a bare 404: not a revocation.
+    # A server without storage routes answers a bare 404: not a revocation.
     bare = Storage("http://storage.test", None, httpx.MockTransport(lambda _r: httpx.Response(404)))
     assert not asyncio.run(no_longer_member(bare))
 
 
 def test_the_adapter_checks_first_before_each_call_and_after_each_batch():
     ws = Workspace()
-    env = {"LOCAL_AGENT_URL": "http://storage.test/"}
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
     options = make_adapter(env, httpx.MockTransport(ws.handler)).build_options(None, "t1")
     hooks = cast(dict[str, Any], options.hooks)
     assert hooks["PreToolUse"][0].matcher is None

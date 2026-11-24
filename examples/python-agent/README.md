@@ -1,7 +1,7 @@
 # Sample Python agent
 
 This sample shows how to bring a Python Claude agent into Knowledge Chatroom
-(issue #60). The chatroom runs **one** agent, the TypeScript one in `apps/agent/`, which
+(issue #60). The chatroom runs **one** agent, its chat agent in `services/agent-py/`, which
 already has the workspace, storage, skills and permissions. A Python agent doesn't
 run beside it. Its parts move into that agent instead:
 
@@ -47,7 +47,7 @@ and `whoami` shows the forwarded user.
    Claude now has `mcp__lab__describe_metric`, `mcp__lab__compare_runs`,
    `mcp__lab__describe_column` (a CSV column in the workspace) and
    `mcp__lab__whoami`, with no permission prompt. Set `KNOWLEDGE_STORAGE_URL`
-   to the chatroom's agent server if it isn't `http://127.0.0.1:8000`.
+   to the chatroom's API server if it isn't `http://127.0.0.1:8000`.
 
 3. Add the skill. In the Skills panel, choose **Import .zip** and pick a zip of
    `skills/lab-analyst` (`cd skills && zip -r lab-analyst.zip lab-analyst`).
@@ -68,7 +68,10 @@ docker compose --profile demo --profile python-sample up --build
 
 ## Login and the forwarded user
 
-Without login, nobody is forwarded and every call is the local user.
+Without login, nobody is forwarded and every call is the local user. Say so with
+`AUTH_MODE=local`: the server reads its login setting with
+`identity.login_from_env()`, which refuses to start when neither `AUTH_MODE` nor
+`KNOWLEDGE_PUBLIC_KEY` is set, so a forgotten key can't turn login off.
 
 With login on, give the tools server the chatroom's public key as
 `KNOWLEDGE_PUBLIC_KEY`. The agent logs it at startup and serves it at
@@ -84,7 +87,7 @@ in your tools when they act for a person.
 ## Workspace files
 
 A tool that needs workspace files reads or writes them through the chatroom's
-storage API (its agent server's `/files`, `/nodes`, `/experiments`, ...), never
+storage API (its API server's `/files`, `/nodes`, `/experiments`, ...), never
 the database or object store directly: the API is where each user's access is
 checked. With `"storageAccess": true`, each run sends the server an
 `X-Knowledge-Storage` token. Pass it on unchanged, as `knowledge_chatroom.storage` does for
@@ -142,6 +145,7 @@ uv sync --all-packages                             # from the repository root
 (cd packages/knowledge-py && uv run pytest -q)     # the identity tests
 ```
 
-The identity tests use tokens signed by the TypeScript agent, so they fail if
-the two sides stop agreeing on the format. CI runs them in the Quality
+The identity tests use tokens the chatroom's signer
+(`packages/contracts/src/identity-token.ts`) made, so they fail if the two sides
+stop agreeing on the format. CI runs them in the Quality
 workflow's `python` job.

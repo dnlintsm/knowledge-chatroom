@@ -46,68 +46,7 @@ services:
       timeout: 5s
       retries: 20
 
-  # --- Retired TypeScript agent, only for explicit legacy comparisons ---
-  # No login (one built-in user owns everything); chat needs ANTHROPIC_API_KEY.
-  agent:
-    profiles: [legacy-agent]
-    build:
-      context: .
-      target: agent
-    environment:
-      # The demo runs without login; production images refuse to guess.
-      AUTH_MODE: local
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
-      SUGGESTIONS_MODEL: ${SUGGESTIONS_MODEL:-}
-      # Outside MCP servers (JSON); use service names, not localhost, for URLs.
-      MCP_SERVERS: ${MCP_SERVERS:-}
-      # Personalized memory (experimental): MEMORY=on turns it on (.env.example).
-      MEMORY: ${MEMORY:-}
-      MEMORY_MODEL: ${MEMORY_MODEL:-}
-      # The api service in front learns from chats (issue #190, step 8d).
-      MEMORY_LEARN: "off"
-      # Point at an Anthropic-compatible gateway (OpenRouter, LiteLLM) instead.
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
-      # Context window for a model the engine doesn't know, e.g. a local one
-      # (.env.example). No value: passed through only when set.
-      CLAUDE_CODE_MAX_CONTEXT_TOKENS:
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW:
-      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
-      DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
-      S3_ENDPOINT: http://s3:8333
-      S3_REGION: us-east-1
-      S3_BUCKET: knowledge
-      S3_ACCESS_KEY_ID: knowledge
-      S3_SECRET_ACCESS_KEY: knowledge-secret
-      S3_FORCE_PATH_STYLE: "true"
-      # Binary downloads go straight to the store, as the browser reaches it.
-      S3_PUBLIC_URL: http://localhost:8333
-      # Search by meaning through an embeddings API instead of the local model
-      # (.env.example). Empty keeps the local model.
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
-      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
-      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-}
-      SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
-      # The api service in front runs the search indexer; this one embeds only queries.
-      SEARCH_INDEXER: "off"
-      # The api service in front applies the migrations; this one waits for them.
-      MIGRATIONS: "off"
-    volumes:
-      - models:/var/lib/knowledge/models
-    depends_on:
-      postgres:
-        condition: service_healthy
-      s3:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    # The agent port stays private: the UI forwards to it and signs identities.
-
-  # The standalone Python HTTP API. Legacy TypeScript forwarding is disabled.
+  # The Python HTTP API: storage, skills, memory and every route but the chat.
   api:
     profiles: [demo]
     build:
@@ -191,14 +130,17 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      CHAT_MODELS: ${CHAT_MODELS:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       CLAUDE_CODE_MAX_CONTEXT_TOKENS:
       CLAUDE_CODE_AUTO_COMPACT_WINDOW:
       CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:
       MCP_SERVERS: ${MCP_SERVERS:-}
       LOCAL_AGENT_URL: http://api:8000
-      # The demo has no login. With login, give it the agent server's public
-      # key (GET /identity/public-key), never AUTH_SECRET.
+      # The demo has no login, and says so: without AUTH_MODE the agent won't
+      # start. With login, AUTH_MODE: oidc and the API server's public key
+      # (GET /identity/public-key), never AUTH_SECRET.
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
     depends_on:
       api:
@@ -222,9 +164,10 @@ services:
       LAB_TOOLS_NAME: lab
       # Workspace files, read through the storage API as the calling user.
       KNOWLEDGE_STORAGE_URL: http://api:8000
-      # The demo has no login, so every call is the local user. With login, give
-      # this server the agent's public key, never AUTH_SECRET
+      # The demo has no login, so every call is the local user. With login,
+      # AUTH_MODE: oidc and the API server's public key, never AUTH_SECRET
       # (examples/python-agent/README.md).
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
 
   # --- Paper search (services/papers-mcp, issue #151) ---
@@ -239,8 +182,9 @@ services:
       PAPERS_NAME: papers
       # save_paper writes through the storage API as the calling user.
       KNOWLEDGE_STORAGE_URL: http://api:8000
-      # The demo has no login, so every call is the local user. With login, give
-      # this server the agent's public key, never AUTH_SECRET.
+      # The demo has no login, so every call is the local user. With login,
+      # AUTH_MODE: oidc and the API server's public key, never AUTH_SECRET.
+      AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
       # Optional: a bigger OpenAlex budget, and the "polite pool".
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
@@ -249,5 +193,4 @@ services:
 volumes:
   postgres-data:
   s3-data:
-  models:
   api-models:

@@ -1,4 +1,4 @@
-"""Learning from past chats, as apps/agent/src/memory/learn.ts does (issue #93, step 2; #190, step 8d).
+"""Learning from past chats.
 
 Once a chat has been quiet for MEMORY_IDLE_MINUTES (default 10), a small model
 reads it with the user's notes and says what to add, update or delete: new
@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .access import Principal
-from .chats import get_chat
+from .chats import get_chat, read_outside_content
 from .llm import CreateMessage, learn_model
 from .memory import (
     LEARN_RUN,
@@ -48,6 +48,27 @@ LOOKBACK_DAYS = 3
 # Chats learned from per sweep.
 BATCH = 5
 SWEEP_SECONDS = 60.0
+# A chat whose learning failed (the model was down, say) is tried again this
+# often, for this long after it went quiet. Before, one failure skipped it for good.
+RETRY_MINUTES = 30
+RETRY_HOURS = 6
+# What a chat's row says while a process is learning from it. It is how two
+# processes are kept off the same chat, and it reads as a failure to retry if
+# that process dies.
+CLAIMED = "learning (not finished)"
+
+# Takes the chat for this process: no row yet, new runs since it was learned
+# from, or a failed or abandoned try whose wait is over. One statement, so of
+# two processes sweeping at once only one gets a row back.
+_CLAIM = """
+    INSERT INTO memory_learned_chats (chat_id, user_id, through, error)
+    VALUES (%s, %s, %s::text::timestamptz, %s)
+    ON CONFLICT (chat_id) DO UPDATE
+      SET through = EXCLUDED.through, error = EXCLUDED.error, learned_at = now()
+      WHERE memory_learned_chats.through < EXCLUDED.through
+         OR (memory_learned_chats.error IS NOT NULL
+             AND memory_learned_chats.learned_at <= now() - %s * interval '1 minute')
+    RETURNING 1"""
 DEFAULT_IDLE_MINUTES = 10.0
 
 
@@ -152,7 +173,16 @@ _DUE = """
     WHERE c.last_run_at IS NOT NULL
       AND c.last_run_at < now() - %s * interval '1 minute'
       AND c.last_run_at > now() - %s * interval '1 day'
-      AND NOT EXISTS (SELECT 1 FROM memory_learned_chats l WHERE l.chat_id = c.id AND l.through >= c.last_run_at)
+      -- Not learned from through its latest run. A try that failed, or one a
+      -- process never finished (its claim), counts as done only for a while:
+      -- it is tried again after RETRY_MINUTES, for RETRY_HOURS after the chat
+      -- went quiet.
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_learned_chats l
+        WHERE l.chat_id = c.id AND l.through >= c.last_run_at
+          AND (l.error IS NULL
+               OR l.learned_at > now() - %s * interval '1 minute'
+               OR c.last_run_at < now() - %s * interval '1 hour'))
       AND NOT EXISTS (
         SELECT 1 FROM memory_incognito_chats i
         WHERE i.workspace_id = c.workspace_id AND i.user_id = c.user_id AND i.thread_id = c.id)
@@ -203,7 +233,9 @@ class MemoryLearner:
         if not s:
             return []
         async with s.pool.connection() as conn:
-            cur = await conn.execute(_DUE, (self.idle, LOOKBACK_DAYS, limit))
+            cur = await conn.execute(
+                _DUE, (self.idle, LOOKBACK_DAYS, RETRY_MINUTES, RETRY_HOURS, limit)
+            )
             return [
                 {"id": id_, "user_id": str(user), "workspace_id": str(ws), "last_run_at": at}
                 for id_, user, ws, at in await cur.fetchall()
@@ -227,8 +259,9 @@ class MemoryLearner:
             async def learn_all(chats: list[dict[str, str]]) -> None:
                 nonlocal learned
                 for chat in chats:
-                    await self.learn(chat)
-                    learned += 1
+                    done = await self.learn(chat)
+                    if not done.get("skipped"):
+                        learned += 1
 
             # Every user's settled, not the first failure: the guard is released
             # only once nothing is still learning.
@@ -250,16 +283,29 @@ class MemoryLearner:
         if not s:
             return {"made": 0, "proposed": 0}
         user = chat["user_id"]
-        # In the chat's own workspace (a chat lives in one, issue #226).
+        # In the chat's own workspace (a chat lives in one).
         s = s.in_workspace(chat.get("workspace_id") or s.workspace_id)
         session = Session(s, s.access, Principal(user_id=user))
         memory = MemoryService(session.scoped, s.workspace_id, user)
         made = proposed = 0
         error: str | None = None
+        async with s.pool.connection() as conn:
+            cur = await conn.execute(
+                _CLAIM, (chat["id"], user, chat["last_run_at"], CLAIMED, RETRY_MINUTES)
+            )
+            if await cur.fetchone() is None:
+                # Another process has it, or it was learned from meanwhile.
+                return {"made": 0, "proposed": 0, "skipped": True}
         try:
             async with session.scoped() as conn:
                 found = await get_chat(conn, s.workspace_id, user, chat["id"])
             mode = (await memory.settings(chat["id"]))["mode"]
+            # A chat in which Claude read a file, a search result or anyone
+            # else's words is learned from as in Ask first: its replies may
+            # repeat text from there, so what it would save waits for the user,
+            # as a save in such a chat does.
+            if found and mode == "on" and read_outside_content(found["messages"]):
+                mode = "ask"
             if found and mode != "off":
                 notes, versions = await memory.notes_for_learning()
                 changes = await propose_changes(notes, found["messages"], self.create())

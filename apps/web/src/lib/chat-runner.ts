@@ -14,13 +14,13 @@ import { ChatTakenError, type ChatStore, type ChatUser, type StoredRun } from ".
 import { workspaceFromHeaders } from "./workspace-request";
 
 /**
- * Runs the chat and keeps each user's chats (issue #91). In place of
+ * Runs the chat and keeps each user's chats. In place of
  * CopilotKit's InMemoryAgentRunner, which keeps every thread in one
  * process-wide list for everyone and forgets it on restart, this runner:
  *
  * - streams a live run from memory, so reconnecting mid-run works as before;
  * - saves every finished run (its compacted AG-UI events and the messages
- *   after it) to a ChatStore: Postgres through the agent server when it has
+ *   after it) to a ChatStore: Postgres through the API server when it has
  *   storage, else memory, per user either way (src/lib/chat-store.ts);
  * - replays a chat from the store when the browser connects to it, e.g. when
  *   it is picked from the history after a restart.
@@ -28,8 +28,8 @@ import { workspaceFromHeaders } from "./workspace-request";
  * Who a run is for comes from the X-Knowledge-User header the app's route
  * signed (route.ts); without login everyone is the local user. A thread id
  * that is someone else's chat is refused. The workspace a run is in comes
- * from the page's X-Knowledge-Workspace header, read when it starts (issue
- * #226); its chat is kept there. The history routes themselves are answered
+ * from the page's X-Knowledge-Workspace header, read when it starts; its
+ * chat is kept there. The history routes themselves are answered
  * by src/lib/chat-routes.ts.
  */
 
@@ -136,7 +136,7 @@ export class ChatRunner extends AgentRunner {
     const seen: BaseEvent[] = [];
     const emit = (original: BaseEvent) => {
       // Stamped with the server's time, streamed and saved, so the chat can say
-      // how long a turn's steps took, also when it is reopened (issue #154).
+      // how long a turn's steps took, also when it is reopened.
       const event = original.timestamp === undefined ? { ...original, timestamp: Date.now() } : original;
       seen.push(event);
       events.next(event);

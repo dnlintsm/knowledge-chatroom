@@ -6,7 +6,13 @@ import psycopg
 import pytest
 from support import ALICE, BOB, URL, Client, storage_token
 
-from api_py.chats import ChatError, _read_cursor, clean_name, valid_chat_id
+from api_py.chats import (
+    ChatError,
+    _read_cursor,
+    clean_name,
+    read_outside_content,
+    valid_chat_id,
+)
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -30,6 +36,41 @@ def test_names_ids_and_cursors():
     for bad in ("nope", "|abc", "yesterday|abc"):
         with pytest.raises(ChatError, match="Invalid cursor"):
             _read_cursor(bad)
+
+
+def test_which_chats_read_outside_content():
+    """What a chat's saved messages say about where Claude's words may come from."""
+
+    def used(name: str, arguments: str = "{}") -> dict:
+        call = {"id": "c", "type": "function", "function": {"name": name, "arguments": arguments}}
+        return {"id": "a", "role": "assistant", "content": "", "toolCalls": [call]}
+
+    said = [
+        {"id": "u", "role": "user", "content": "hi"},
+        {"id": "a", "role": "assistant", "content": "hello"},
+    ]
+    assert not read_outside_content(said)
+    assert not read_outside_content([]) and not read_outside_content(None)
+    # Claude's own memory tools, however the engine prefixes them, and finding tools.
+    own = ("memory_save", "mcp__memory__memory_edit", "mcp__memory__memory_delete", "ToolSearch")
+    for name in own:
+        assert not read_outside_content([*said, used(name)]), name
+    assert not read_outside_content([used("memory_view", '{"name":"reply-style"}')])
+    # A shared note is someone else's words; so is anything a file or outside tool returns.
+    assert read_outside_content([used("mcp__memory__memory_view", '{"name":"shared:1234"}')])
+    for name in (
+        "Read",
+        "readWorkspaceFile",
+        "mcp__papers__search_papers",
+        "memory_search",
+        "chats_read",
+    ):
+        assert read_outside_content([*said, used(name)]), name
+    # A call it can't read counts: unknown is not known to be harmless.
+    assert read_outside_content([{"role": "assistant", "toolCalls": [{"id": "c"}]}])
+    assert read_outside_content(
+        [{"role": "assistant", "toolCalls": [{"function": {"name": None}}]}]
+    )
 
 
 @needs_database

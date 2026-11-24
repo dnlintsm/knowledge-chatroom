@@ -1,7 +1,6 @@
 """The workspace tools against a fake storage API (httpx.MockTransport).
 
-They were also run against the real agent server (with and without login);
-these pin the requests they make and what Claude gets back.
+These pin the requests they make and what Claude gets back.
 """
 
 from __future__ import annotations

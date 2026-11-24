@@ -6,9 +6,13 @@
 // One row per setting a release removed or renamed; newest last.
 export const MIGRATIONS = [
   { key: "AGENT_URL", since: "0.1.2", renamed: "LOCAL_AGENT_URL", when: (value) => /:8000\/?$/.test(value),
-    note: "AGENT_URL now names a remote chat backend; this repo's agent server is LOCAL_AGENT_URL" },
+    note: "AGENT_URL now names a remote chat backend; this repo's API server is LOCAL_AGENT_URL" },
   { key: "RUN_DIR_MARKERS", since: "0.1.2", note: "runs are experiments now; run folder markers are gone" },
-  { key: "IDENTITY_FORMAT", since: "0.2.1", note: "identity tokens are only v2; the agent refuses to start while it is set" },
+  { key: "IDENTITY_FORMAT", since: "0.2.1", note: "identity tokens are only v2; nothing reads this setting" },
+  { key: "AGENT_HOST", since: "0.3.0", note: "the TypeScript agent server is gone; api-py listens on API_PY_HOST" },
+  { key: "AGENT_PORT", since: "0.3.0", note: "the TypeScript agent server is gone; api-py listens on API_PY_PORT" },
+  { key: "SKILLS_RUN_DIR", since: "0.3.0", note: "the TypeScript agent server is gone; agent-py keeps run folders under AGENT_PY_WORKDIR" },
+  { key: "SEARCH_INDEXER", since: "0.3.0", note: "the TypeScript agent server is gone; api-py always runs the search indexer" },
 ];
 
 const ACTIVE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
@@ -128,7 +132,7 @@ export function report(plan, { envPath = ".env", write = false } = {}) {
     plan.removed.map((m) => `${m.key}  (removed in ${m.since}: ${m.note})`));
   list(write ? "Renamed:" : "Rename:", plan.renamed.map((m) => `${m.key} -> ${m.renamed}  (${m.since}: ${m.note})`));
   list("Check by hand:", plan.check.map((m) =>
-    `${m.key}  (${m.since}: ${m.note}. If it points at this repo's agent server, rename it to ${m.renamed}.)`));
+    `${m.key}  (${m.since}: ${m.note}. If it points at this repo's API server, rename it to ${m.renamed}.)`));
   const bySection = new Map();
   for (const { key, section } of plan.added) {
     const name = section?.replace(/^#\s*---\s*|\s*---\s*$/g, "") ?? "General";

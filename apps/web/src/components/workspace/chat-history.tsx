@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Archive, ArchiveRestore, Check, Pencil, Trash2, X } from "lucide-react";
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { ago, cn } from "@/lib/utils";
-import { workspaceFetch } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
 
 /**
- * The user's past chats (issue #91), kept on the server per user: open one to
+ * The user's past chats, kept on the server per user: open one to
  * carry on where it left off, rename, archive or delete it. Reads the
  * runtime's thread routes, which this app answers from its own chat store
  * (src/lib/chat-routes.ts); they have the same shape with CopilotKit
@@ -27,7 +27,8 @@ const RUNTIME = "/api/copilotkit";
 const AGENT = "default";
 
 async function call(path: string, init?: RequestInit) {
-  const res = await workspaceFetch(`${RUNTIME}${path}`, {
+  // apiFetch: a session that ended sends the browser to sign in.
+  const res = await apiFetch(`${RUNTIME}${path}`, {
     ...init,
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
   });

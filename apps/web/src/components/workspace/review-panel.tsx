@@ -49,6 +49,13 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
   const ws = useWorkspace();
   const [before, setBefore] = useState<string | null>(null);
   const [after, setAfter] = useState<string | null>(null);
+  // Which versions the diff shows, for the accept to name: the
+  // proposed content, and the file it is compared with (null: no file;
+  // undefined: not known, or the copy open here).
+  const [afterVersion, setAfterVersion] = useState<string | null>(null);
+  const [baseVersion, setBaseVersion] = useState<string | null | undefined>(undefined);
+  // Raised to load both sides again after an accept was refused as out of date.
+  const [round, setRound] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const text = isTextFile(p);
@@ -61,12 +68,16 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
     if (!text) return;
     let live = true;
     proposalText(p.id)
-      .then((t) => live && setAfter(t))
+      .then((t) => {
+        if (!live) return;
+        setAfter(t.content);
+        setAfterVersion(t.sha256);
+      })
       .catch((err: Error) => live && setError(err.message));
     return () => {
       live = false;
     };
-  }, [p.id, p.updatedAt, text]);
+  }, [p.id, p.updatedAt, text, round]);
 
   useEffect(() => {
     if (!text) return;
@@ -76,26 +87,48 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
     }
     if (p.isNew) {
       setBefore("");
+      setBaseVersion(null);
       return;
     }
     let live = true;
     apiFetch(fileUrl(p.path, p.node), { cache: "no-store" })
-      .then(async (res) => live && setBefore(res.ok ? await res.text() : ""))
-      .catch(() => live && setBefore(""));
+      .then(async (res) => {
+        const content = res.ok ? await res.text() : "";
+        if (!live) return;
+        setBefore(content);
+        const etag = res.headers.get("etag");
+        // 404: there is no file (it was deleted since), so accepting adds one.
+        setBaseVersion(res.ok ? (etag?.replace(/^(W\/)?"|"$/g, "") ?? undefined) : res.status === 404 ? null : undefined);
+      })
+      .catch(() => {
+        if (!live) return;
+        setBefore("");
+        setBaseVersion(undefined);
+      });
     return () => {
       live = false;
     };
-  }, [p.path, p.node, p.isNew, p.updatedAt, text, local]);
+  }, [p.path, p.node, p.isNew, p.updatedAt, text, local, round]);
 
   const decide = async (decision: "accept" | "reject" | "withdraw") => {
     setBusy(true);
+    setError(null);
     try {
-      await ws.decideProposal(p.id, decision);
+      // An accept names what this card showed, so the server refuses it when the
+      // proposal was revised, or the file changed, after the diff was loaded.
+      // A binary file has no diff: the proposal as listed is what was offered.
+      const reviewed = !text
+        ? { sha256: p.sha256 }
+        : { sha256: afterVersion ?? undefined, ...(local ? { openCopy: true } : { base: baseVersion }) };
+      await ws.decideProposal(p.id, decision, decision === "accept" ? reviewed : undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
+      setRound((n) => n + 1);
     }
   };
+  // Nothing to accept until the diff it would be judged by is on screen.
+  const loaded = !text || (before !== null && after !== null);
 
   const who = p.author === "agent" ? `Claude${p.authorName ? ` for ${p.authorName}` : ""}` : (p.authorName ?? "Someone");
 
@@ -134,7 +167,7 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
               <ReviewButton onClick={() => decide("reject")} disabled={busy}>
                 <X className="size-3.5" /> Reject
               </ReviewButton>
-              <ReviewButton onClick={() => decide("accept")} disabled={busy} primary>
+              <ReviewButton onClick={() => decide("accept")} disabled={busy || !loaded} primary>
                 <Check className="size-3.5" /> Accept
               </ReviewButton>
             </>

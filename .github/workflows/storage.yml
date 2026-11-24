@@ -1,11 +1,12 @@
-# Runs the storage integration tests (apps/agent/src/storage) against real Postgres
-# and SeaweedFS whenever the storage code changes.
+# Runs the storage API conformance suite and api-py's database tests against real
+# Postgres and SeaweedFS whenever the storage code changes. Not a required check:
+# api-py's database tests also run in the required `python` check (quality.yml,
+# issue #303); here they add the real embedding model (EMBEDDING_TEST).
 name: Storage tests
 
 on:
   pull_request:
     paths:
-      - "apps/agent/**"
       - "packages/**"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -13,10 +14,14 @@ on:
       - "uv.lock"
       - "services/api-py/**"
       - "scripts/ci-*.mjs"
+      - "scripts/test-conformance.mjs"
       - "docker-compose.yml"
       - "infra/**"
       - ".github/workflows/storage.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -40,8 +45,7 @@ jobs:
       S3_ENDPOINT: http://localhost:8333
       S3_ACCESS_KEY_ID: knowledge
       S3_SECRET_ACCESS_KEY: knowledge-secret
-      # Also check the real embedding model (embeddings.test.ts, and api-py's
-      # test_search.py), cached below.
+      # Also check the real embedding model (api-py's test_search.py), cached below.
       EMBEDDING_TEST: 1
     steps:
       - uses: actions/checkout@v4
@@ -62,13 +66,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
       # pnpm at the version in package.json "packageManager".
       - name: Enable pnpm
         run: npm install --global pnpm@12.18.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -76,20 +80,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/knowledge-chatroom/models
-          # Both servers' copies: transformers.js's and huggingface_hub's layouts.
-          key: embedding-model-multilingual-e5-small-q8-ts-py
+          # huggingface_hub's layout.
+          key: embedding-model-multilingual-e5-small-q8-py
 
-      - name: Install agent and contracts dependencies
-        run: pnpm install --frozen-lockfile --filter ./apps/agent... --filter ./packages/contracts
+      # The conformance runner (scripts/, with postgres) and the suite (packages/contracts).
+      - name: Install the runner's and contracts' dependencies
+        run: pnpm install --frozen-lockfile --filter knowledge-chatroom --filter ./packages/contracts
 
-      - name: Typecheck
-        run: pnpm -C apps/agent typecheck
-
-      - name: Test
-        run: node scripts/ci-tests.mjs run "Storage integration" tap -- pnpm -C apps/agent test:integration
-      # api-py (services/api-py, issue #190) sits in front of the agent in the conformance run.
       - uses: astral-sh/setup-uv@v6
-        if: always()
         with:
           version: "0.11.32"
           python-version: "3.12"
@@ -98,18 +96,15 @@ jobs:
           # checkout, node_modules included, which took 20-70 s here (issue #219).
           cache-dependency-glob: uv.lock
       - name: Install api-py
-        if: always()
         run: uv sync --all-packages --locked
-      # The agent's HTTP answers against packages/contracts/openapi/storage.yaml (issue #169),
-      # through api-py as `pnpm dev` and compose run it.
+      # api-py's HTTP answers against packages/contracts/openapi/storage.yaml (issue #169).
       - name: Storage API conformance
-        if: always()
         env:
           # Every request and answer that matched the spec, for the Python models below.
           CONFORMANCE_SAMPLES: ${{ runner.temp }}/api-samples.jsonl
-        run: node scripts/ci-tests.mjs run "Storage API conformance" tap -- pnpm -C apps/agent test:conformance
+        run: node scripts/ci-tests.mjs run "Storage API conformance" tap -- pnpm test:conformance
       # The generated pydantic models (packages/knowledge-py) parse that real traffic.
-      - name: Python models parse the agent's traffic
+      - name: Python models parse api-py's traffic
         working-directory: packages/knowledge-py
         env:
           API_SAMPLES: ${{ runner.temp }}/api-samples.jsonl
@@ -121,4 +116,4 @@ jobs:
         run: uv run --locked pytest -q
       - name: Summarize test suites
         if: always()
-        run: node scripts/ci-tests.mjs summary "Storage integration" "Storage API conformance"
+        run: node scripts/ci-tests.mjs summary "Storage API conformance"

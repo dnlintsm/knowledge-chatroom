@@ -1,4 +1,4 @@
-"""Search by meaning, as apps/agent/src/storage/semantic.ts.
+"""Search by meaning.
 
 Every passage of indexed text (blob_chunks, 006_search.sql) gets an embedding
 from a small model that runs inside this server with ONNX Runtime (the same
@@ -11,7 +11,7 @@ word-based.
 Embedding happens in the background (SemanticIndex.start), so a new file is
 found by its words at once and by meaning a few seconds later. This server
 runs that loop; the TypeScript server behind it, started with
-SEARCH_INDEXER=off, only embeds queries (issue #190, step 5).
+SEARCH_INDEXER=off, only embeds queries.
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ class ApiEmbedder:
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
-    """EMBEDDING_* as the TypeScript server reads them (storage/config.ts)."""
+    """The EMBEDDING_* settings."""
 
     model: str
     cache_dir: str | None = None
@@ -243,6 +243,16 @@ def default_min_similarity(model: str, configured: float | None = None) -> float
     return 0.82 if re.search(r"e5-", model, re.IGNORECASE) else 0.5
 
 
+class ModelChangedError(Exception):
+    """Another server now embeds this database with a different model: this one's vectors don't belong in it."""
+
+    def __init__(self, ours: str, theirs: str | None) -> None:
+        super().__init__(
+            f"this database's vectors are now from {theirs or 'another model'}, not {ours}: "
+            "this server stops embedding and searches by words only until it runs the same EMBEDDING_MODEL"
+        )
+
+
 class SemanticIndex:
     """Keeps blob_chunks.embedding filled for `embedder`, and embeds queries; `ready` once the database can hold its vectors."""
 
@@ -253,6 +263,8 @@ class SemanticIndex:
         self.embedder = embedder
         self.min_similarity = default_min_similarity(embedder.model, min_similarity)
         self.ready = False
+        # The size of this model's vectors, once prepare() has measured it.
+        self.dims: int | None = None
         self._task: asyncio.Task[None] | None = None
 
     async def prepare(self) -> bool:
@@ -309,6 +321,7 @@ class SemanticIndex:
                     (model, dims),
                 )
                 logger.info("[search] search by meaning uses %s (%d dimensions)", model, dims)
+        self.dims = dims
         self.ready = True
         return True
 
@@ -345,13 +358,30 @@ class SemanticIndex:
             return 0
         vectors = await self.embedder.embed([body for _, _, body in rows], "passage")
         async with self.pool.connection() as conn:
-            await conn.execute(
+            # Only while the recorded model is still this one: a server started
+            # with another model has begun the column over since prepare(), and
+            # vectors of the same size from two models would mix for good.
+            cur = await conn.execute(
                 """
                 UPDATE blob_chunks c SET embedding = u.embedding::vector
                 FROM unnest(%s::text[], %s::int[], %s::text[]) AS u(sha256, ord, embedding)
-                WHERE c.sha256 = u.sha256 AND c.ord = u.ord AND c.embedding IS NULL""",
-                ([r[0] for r in rows], [r[1] for r in rows], [to_vector(v) for v in vectors]),
+                WHERE c.sha256 = u.sha256 AND c.ord = u.ord AND c.embedding IS NULL
+                  AND EXISTS (SELECT 1 FROM search_embedding e WHERE e.model = %s AND e.dims = %s)""",
+                (
+                    [r[0] for r in rows],
+                    [r[1] for r in rows],
+                    [to_vector(v) for v in vectors],
+                    self.embedder.source,
+                    self.dims,
+                ),
             )
+            if cur.rowcount == 0:
+                cur = await conn.execute("SELECT model FROM search_embedding")
+                now = await cur.fetchone()
+                if not now or now[0] != self.embedder.source:
+                    # Queries embedded here don't compare with the other model's vectors either.
+                    self.ready = False
+                    raise ModelChangedError(self.embedder.source, now[0] if now else None)
         return len(rows)
 
     async def embed_all(self) -> int:
@@ -396,6 +426,9 @@ class SemanticIndex:
             try:
                 if await self.embed_pending() == 0:
                     await asyncio.sleep(IDLE_SECONDS)
+            except ModelChangedError as err:
+                logger.warning("[search] %s", err)
+                return
             except Exception:
                 logger.exception("[search] embedding passages failed; trying again in a minute")
                 await asyncio.sleep(RETRY_SECONDS)

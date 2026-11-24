@@ -18,7 +18,7 @@ const reply = { timeout: 60_000 };
 async function send(page: Page, text: string) {
   // While a run is going, CopilotKit's send button is a stop button. A reply's
   // text shows before its run ends, so clicking right after it can stop that
-  // run instead of sending (issue #244). With the box empty and no run going,
+  // run instead of sending. With the box empty and no run going,
   // the button is disabled: wait for that before typing.
   await expect(page.getByTestId("copilot-send-button")).toBeDisabled(reply);
   await page.getByTestId("copilot-chat-textarea").fill(text);
@@ -44,12 +44,16 @@ test("the chat runs on the Python agent: replies, browser tools, skills, follow-
   expect(tools).toContain("mcp__copilotkit__list_files");
   expect(JSON.stringify(sent.system)).toContain("assistant in a knowledge workspace");
   expect(JSON.stringify(sent.messages)).toContain("<workspace>");
+  expect(sent.model).toBe("claude-sonnet-5");
 
   // A browser tool: the model writes a file in the browser's workspace, and the
-  // run goes on with the tool's result.
+  // run goes on with the tool's result, on the selected model in the same chat.
+  await page.getByTestId("chat-model").selectOption("claude-haiku-4-5");
   await send(page, "Write a short note under artifacts/");
   await expect(page.getByRole("treeitem", { name: /python-agent\.md/ })).toBeVisible(reply);
   await expect(answer).toContainText("Saved artifacts/python-agent.md", reply);
+  const switched = await (await request.get(`${MODEL_URL}/last-request`)).json();
+  expect(switched.model).toBe("claude-haiku-4-5");
 
   // A skill by its slash command: the agent server hands the run the skill's
   // files, Claude Code follows them, and the chat shows the skill used.

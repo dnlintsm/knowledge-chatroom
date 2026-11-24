@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * A tool call as one step of a turn (issue #154): a line in plain words
+ * A tool call as one step of a turn: a line in plain words
  * ("Read notes/x.md"), opening into the tool's name, arguments and result.
  * Inside a closed steps block it renders nothing; the block's header says
  * what is happening instead (src/components/workspace/agent-steps-view.tsx).

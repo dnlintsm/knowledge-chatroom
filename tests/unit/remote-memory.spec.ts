@@ -7,7 +7,7 @@ import { IDENTITY_HEADER, identityHeader, readIdentityHeader, storageHeader } fr
 
 /**
  * A remote backend's chat agent gets an X-Knowledge-Memory token for the run's
- * chat (apps/web/src/agent.ts, issue #176 step 4), so it can use the user's
+ * chat (apps/web/src/agent.ts), so it can use the user's
  * memory there through the agent server's /memory/agent.
  */
 

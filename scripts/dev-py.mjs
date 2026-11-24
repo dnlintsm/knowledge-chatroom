@@ -1,6 +1,6 @@
 /**
  * Runs a Python service of services/ for `pnpm dev`, with the repository's
- * .env as `pnpm dev:agent` reads it (variables already set win). Needs uv
+ * .env (variables already set win). Needs uv
  * (https://docs.astral.sh/uv/).
  *
  *   node scripts/dev-py.mjs api-py      # `pnpm dev:api`: the API server on :8000,
@@ -30,6 +30,10 @@ if (existsSync(file)) {
     if (env[key] === undefined) env[key] = value;
   }
 }
+
+// The Python services refuse to start until AUTH_MODE says whether people sign
+// in. In development, a .env that sets no login at all means none.
+if (!env.AUTH_MODE && !env.AUTH_SECRET && !env.KNOWLEDGE_PUBLIC_KEY) env.AUTH_MODE = "local";
 
 const child = spawn("uv", ["run", "python", "-m", SERVICES[name]], {
   cwd: fileURLToPath(new URL(`services/${name}/`, root)),

@@ -16,12 +16,12 @@ import {
 } from "@knowledge-chatroom/contracts/identity-token";
 
 /**
- * Login, for deployments that set AUTH_SECRET (the agent server must have the
+ * Login, for deployments that set AUTH_SECRET (the API server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
- * signed cookie. Every request it forwards to the agent server carries a
+ * signed cookie. Every request it forwards to the API server carries a
  * short-lived signed X-Knowledge-User header (packages/contracts/src/identity-token.ts makes
- * it, apps/agent/src/storage/identity.ts checks it), so the agent knows whose
+ * it, services/api-py/api_py/identity.py checks it), so the server knows whose
  * access rules apply.
  *
  * AUTH_MODE=local turns login off and everyone is the local user; see
@@ -113,7 +113,7 @@ export function identityHeader(user: SessionUser): string {
  * An X-Knowledge-Storage token for a remote backend (`via` "remote"): it lets
  * the backend use the storage API as Claude acting for this user for as long
  * as a run may take (STORAGE_TOKEN_SECONDS), where X-Knowledge-User lasts
- * minutes. With `ws` it is bound to that workspace (issue #226): the run's;
+ * minutes. With `ws` it is bound to that workspace: the run's;
  * without, to the default one. docs/remote-agent.md.
  */
 export function storageHeader(user: SessionUser, via: string, ws: string | null = null): string {
@@ -126,10 +126,10 @@ export function storageHeader(user: SessionUser, via: string, ws: string | null 
 /**
  * An X-Knowledge-Memory token for one run of a remote backend's chat agent
  * (`via` "remote"): the user's memory in chat `thread`, through the agent
- * server's /memory/agent, as Claude has it there. The agent server checks on
+ * server's /memory/agent, as Claude has it there. The API server checks on
  * each call that memory is on and the chat isn't incognito. Without login
  * (`user` null) it is the unsigned local form. With `ws`, the chat's
- * workspace (issue #226); without, the default one. docs/remote-agent.md.
+ * workspace; without, the default one. docs/remote-agent.md.
  */
 export function memoryHeader(user: SessionUser | null, thread: string, node: string | null, ws: string | null = null): string {
   const claims = { via: REMOTE_VIA, thread, node, ...(ws ? { ws } : {}) };
@@ -247,12 +247,25 @@ export function oidcConfig(): Promise<oidc.Configuration> {
   return provider;
 }
 
-/** The person a finished sign-in names. */
-export function userFromClaims(claims: oidc.IDToken): SessionUser {
+/**
+ * Whether the provider vouches for the email in `claims`. Admin
+ * lists and adding people by email match on it, so an address a user typed in
+ * themselves must not count: only `email_verified: true` does. A provider that
+ * verifies emails but never sends the claim needs OIDC_ASSUME_EMAIL_VERIFIED=true;
+ * an explicit `false` is never trusted.
+ */
+export function emailIsTrusted(claims: oidc.IDToken, env: Record<string, string | undefined> = process.env): boolean {
+  if (claims.email_verified === true) return true;
+  return claims.email_verified === undefined && env.OIDC_ASSUME_EMAIL_VERIFIED === "true";
+}
+
+/** The person a finished sign-in names. An email the provider doesn't vouch for is left out. */
+export function userFromClaims(claims: oidc.IDToken, env: Record<string, string | undefined> = process.env): SessionUser {
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  const email = emailIsTrusted(claims, env) ? str(claims.email) : undefined;
   return {
     sub: `${claims.iss}|${claims.sub}`,
-    email: str(claims.email),
-    name: str(claims.name) ?? str(claims.preferred_username) ?? str(claims.email),
+    email,
+    name: str(claims.name) ?? str(claims.preferred_username) ?? email,
   };
 }

@@ -5,7 +5,12 @@ import { ArrowLeft, BadgeCheck, Ban, Download, Flag, Search, ShieldAlert, Store,
 import { cn } from "@/lib/utils";
 import { Diff } from "./review-panel";
 import { ScriptsBadge, useSkills, type SkillInfo } from "./skills";
-import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
+import { workspaceUrl } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
  * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
@@ -13,7 +18,7 @@ import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
  * update (after reviewing the diff) or fork installed ones, and move skills
  * in and out as .zip files. Each version shows what the publish check
  * flagged, whether a hub admin verified it, and whether it was yanked;
- * anyone can report a skill. The agent server checks every action.
+ * anyone can report a skill. The API server checks every action.
  */
 
 export interface Notice {
@@ -23,58 +28,13 @@ export interface Notice {
 
 type Notify = (notice: Notice) => void;
 
-interface ScanFlag {
-  kind: "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
-  path: string;
-  line: number | null;
-  detail: string;
-}
+type ScanFlag = Schema["ScanFlag"];
 
-interface HubListing {
-  name: string;
-  description: string;
-  argumentHint: string | null;
-  needsExecution: boolean;
-  publisher: string | null;
-  mine: boolean;
-  /** The newest version that isn't yanked; `verified`, `yanked` and `flags` are about it. */
-  latest: number;
-  verified: boolean;
-  yanked: boolean;
-  flags: number;
-  updatedAt: string;
-  installed: number | null;
-  /** Open reports, shown to hub admins and the publisher. */
-  reports: number | null;
-}
+type HubListing = Schema["HubListing"];
 
-interface HubVersion {
-  version: number;
-  publishedAt: string;
-  publishedBy: string | null;
-  files: number;
-  size: number;
-  verified: boolean;
-  yanked: boolean;
-  yankReason: string | null;
-  flags: ScanFlag[];
-}
+type HubDetail = Schema["HubDetail"];
 
-interface HubDetail extends HubListing {
-  versions: HubVersion[];
-  version: number;
-  skillMd: string;
-  canModerate: boolean;
-  canYank: boolean;
-  openReports: { id: string; version: number | null; reason: string; reporter: string | null; createdAt: string }[] | null;
-}
-
-interface HubDiff {
-  from: number;
-  to: number;
-  files: { path: string; change: "added" | "removed" | "changed"; before: string | null; after: string | null; binary: boolean }[];
-  flags: ScanFlag[];
-}
+type HubDiff = Schema["HubDiff"];
 
 const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
   scripts: "Script",
@@ -87,7 +47,8 @@ const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
 
 /** Calls the skills or hub API; throws the server's error message. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await workspaceFetch(path, { cache: "no-store", ...init });
+  // apiFetch: a session that ended sends the browser to sign in.
+  const res = await apiFetch(path, { cache: "no-store", ...init });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);

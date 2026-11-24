@@ -4,6 +4,7 @@ import {
   experimentFromSearch,
   experimentsIn,
   findReport,
+  hasLegacyExperiment,
   listScopeFromSearch,
   runsUnder,
   searchWithExperiment,
@@ -34,29 +35,41 @@ test("the runs at a place are those on it and below it; at the root, all of them
   expect(ids("other")).toEqual(["r-other"]);
 });
 
-test("keeps the run in the URL, and drops old ?run= links", () => {
+test("keeps the run in the URL as ?experiment_id=, and drops old ?run= links", () => {
   expect(experimentFromSearch("")).toBeNull();
-  expect(experimentFromSearch("?experiment=")).toBeNull();
-  expect(experimentFromSearch("?experiment=9f8e")).toBe("9f8e");
-  expect(searchWithExperiment("", "9f8e")).toBe("?experiment=9f8e");
-  expect(searchWithExperiment("?debug=1", "9f8e")).toBe("?debug=1&experiment=9f8e");
-  expect(searchWithExperiment("?experiment=a&debug=1", null)).toBe("?debug=1");
+  expect(experimentFromSearch("?experiment_id=")).toBeNull();
+  expect(experimentFromSearch("?experiment_id=9f8e")).toBe("9f8e");
+  expect(searchWithExperiment("", "9f8e")).toBe("?experiment_id=9f8e");
+  expect(searchWithExperiment("?debug=1", "9f8e")).toBe("?debug=1&experiment_id=9f8e");
+  expect(searchWithExperiment("?experiment_id=a&debug=1", null)).toBe("?debug=1");
   expect(searchWithExperiment("?run=runs/etch-01", null)).toBe("");
   expect(experimentFromSearch(searchWithExperiment("?run=x", "a&b=c"))).toBe("a&b=c");
 });
 
+test("old ?experiment= links still name their run, and are rewritten to ?experiment_id=", () => {
+  expect(experimentFromSearch("?experiment=9f8e")).toBe("9f8e");
+  expect(experimentFromSearch("?experiment=")).toBeNull();
+  // The new parameter wins when a link has both.
+  expect(experimentFromSearch("?experiment=old&experiment_id=new")).toBe("new");
+  expect(hasLegacyExperiment("?experiment=9f8e")).toBe(true);
+  expect(hasLegacyExperiment("?run=runs/etch-01")).toBe(true);
+  expect(hasLegacyExperiment("?experiment_id=9f8e&list=all")).toBe(false);
+  expect(searchWithExperiment("?experiment=9f8e&list=all", "9f8e")).toBe("?list=all&experiment_id=9f8e");
+  expect(searchWithExperiment("?experiment=a&debug=1", null)).toBe("?debug=1");
+});
+
 test("the list scope round-trips through the URL, apart from the experiment", () => {
   expect(listScopeFromSearch("")).toBeNull();
-  expect(listScopeFromSearch("?experiment=e1")).toBeNull();
+  expect(listScopeFromSearch("?experiment_id=e1")).toBeNull();
   expect(listScopeFromSearch("?list=all")).toEqual(ALL_EXPERIMENTS);
   expect(listScopeFromSearch("?list=loop")).toEqual({ node: "loop", descendants: true });
   expect(listScopeFromSearch("?list=loop&direct=1")).toEqual({ node: "loop", descendants: false });
 
-  const scoped = searchWithListScope("?experiment=e1", { node: "loop", descendants: false });
-  expect(new URLSearchParams(scoped).get("experiment")).toBe("e1");
+  const scoped = searchWithListScope("?experiment_id=e1", { node: "loop", descendants: false });
+  expect(new URLSearchParams(scoped).get("experiment_id")).toBe("e1");
   expect(listScopeFromSearch(scoped)).toEqual({ node: "loop", descendants: false });
   // All is no parameter at all, so root links stay as they were.
-  expect(searchWithListScope(scoped, ALL_EXPERIMENTS)).toBe("?experiment=e1");
+  expect(searchWithListScope(scoped, ALL_EXPERIMENTS)).toBe("?experiment_id=e1");
   expect(searchWithListScope("?list=loop&direct=1", ALL_EXPERIMENTS)).toBe("");
   // All chosen on a node stays in the URL, so a reload keeps it.
   const all = searchWithListScope("?list=loop&direct=1", ALL_EXPERIMENTS, true);

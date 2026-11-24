@@ -1,8 +1,9 @@
-"""The route groups this server serves itself (issue #190), one router each.
+"""The route groups this server serves, one router each.
 
-Each step of #190 adds one here; every other request goes to the TypeScript
-server (proxy.py). A router added here takes its paths from that server, so
-it has to pass the conformance suite (packages/contracts/conformance) first.
+Every other request goes to proxy.forward, which answers 404 unless
+TS_AGENT_URL is set. A route added here is in the API's spec
+(packages/contracts/openapi/storage.yaml) and its conformance suite
+(packages/contracts/conformance).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from . import (
 # step 7: /skills and /hub (skills_routes.py), and /tools (tools.py; no storage needed);
 # step 8: /memory (memory_routes.py, with MEMORY=on);
 # step 9: /identity/public-key, /identity/mcp-tokens and /suggest (server_routes.py; no storage needed);
-# /workspaces (workspaces.py, issue #226) and /platform (platform.py, issue #255), served here only.
+# /workspaces (workspaces.py) and /platform (platform.py), served here only.
 ROUTERS: list[APIRouter] = [
     workspaces.router,
     platform.router,

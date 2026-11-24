@@ -1,4 +1,4 @@
-"""The agent server's own routes besides the chat (issue #190, step 9), as apps/agent/src/server.ts answers them.
+"""The routes that need no storage: the public key, MCP tokens and the chat's suggestions.
 
 - `GET /identity/public-key`: the Ed25519 key outside services verify identity
   and storage tokens with (docs/remote-agent.md).
@@ -22,7 +22,14 @@ from . import tokens
 from .mcp_tokens import MAX_BODY_BYTES, mcp_tokens
 from .proxy import forward
 from .run_report import js_json, js_order
-from .storage_routes import ALL_METHODS, parse_json, raw_path
+from .storage_routes import (
+    ALL_METHODS,
+    MAX_RUN_BYTES,
+    parse_body,
+    parse_json,
+    raw_path,
+    read_body,
+)
 from .suggest import AGUI_MEDIA_TYPE, accepts_protobuf, encode_sse, suggest
 
 router = APIRouter()
@@ -90,9 +97,13 @@ async def suggest_route(request: Request) -> Response:
     secret: str | None = request.app.state.settings.auth_secret
     if secret and not tokens.verify(_header(request, tokens.IDENTITY_HEADER), secret):
         return _send(401, {"error": "Sign in first"})
+    # A run's input, so as large as a saved run may be and no larger.
+    data = await read_body(request, MAX_RUN_BYTES)
+    if data is None:
+        return _send(413, {"error": f"A run may be at most {MAX_RUN_BYTES} bytes"})
     try:
-        given = _parse((await request.body()).decode("utf-8", errors="replace"))
-    except ValueError:
+        given = js_order(await parse_body(data))
+    except (ValueError, RecursionError):
         given = None
     if given is None:
         # null too: the TypeScript server can't read a run out of it either.

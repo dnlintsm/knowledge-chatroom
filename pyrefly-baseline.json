@@ -44,27 +44,6 @@
       "severity": "error"
     },
     {
-      "column": 11,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "bad-assignment",
-      "concise_description": "`_Environ[str] | dict[str, str]` is not assignable to variable `env` with type `dict[str, str] | None`",
-      "severity": "error"
-    },
-    {
-      "column": 13,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `get`",
-      "severity": "error"
-    },
-    {
-      "column": 40,
-      "path": "services/agent-py/agent_py/model.py",
-      "name": "missing-attribute",
-      "concise_description": "Object of class `NoneType` has no attribute `get`",
-      "severity": "error"
-    },
-    {
       "column": 60,
       "path": "services/agent-py/agent_py/skills.py",
       "name": "bad-argument-type",
@@ -223,20 +202,6 @@
       "path": "services/api-py/api_py/tools.py",
       "name": "missing-attribute",
       "concise_description": "Object of type `AudioContent | EmbeddedResource | ImageContent | ResourceLink | TextContent` has no attribute `text`",
-      "severity": "error"
-    },
-    {
-      "column": 28,
-      "path": "services/lab-tools/lab_tools/server.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Mapping[str, str] | None` is not assignable to parameter `headers` with type `dict[str, str] | None` in function `knowledge_chatroom.identity.caller`",
-      "severity": "error"
-    },
-    {
-      "column": 28,
-      "path": "services/papers-mcp/papers_mcp/server.py",
-      "name": "bad-argument-type",
-      "concise_description": "Argument `Mapping[str, str] | None` is not assignable to parameter `headers` with type `dict[str, str] | None` in function `knowledge_chatroom.identity.caller`",
       "severity": "error"
     }
   ]

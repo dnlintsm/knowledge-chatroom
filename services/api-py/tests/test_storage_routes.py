@@ -1,11 +1,10 @@
 """/access and /nodes served by api-py, against a real, migrated Postgres.
 
 Set TEST_DATABASE_URL to a Postgres this test may create databases on; each
-test module run gets a new database with the agent server's migrations
-applied, as the TypeScript server applies them. The TypeScript server is a
-stand-in here that fails the test if a ported route reaches it.
-The conformance suite (pnpm test:conformance) checks the same routes against
-the spec, through the real TypeScript server.
+test module run gets a new database with the migrations applied. The
+TS_AGENT_URL upstream is a stand-in here that fails the test if a route
+api-py serves reaches it. The conformance suite (pnpm test:conformance)
+checks the same routes against the spec.
 """
 
 from __future__ import annotations
@@ -286,3 +285,58 @@ async def test_whoever_adds_a_node_owns_it(database, row_security):
         assert (await api.delete(f"/nodes/{made['id']}", headers=BOB)).json() == {
             "deleted": made["id"]
         }
+
+
+async def test_json_bodies_are_bounded_and_big_ones_parsed_off_the_loop(api, monkeypatch):
+    """No route reads a body without a limit, and megabytes of JSON don't stall the server."""
+    import threading
+
+    from api_py import storage_routes
+
+    # /workspaces and /platform read their bodies with the 64 KiB reader the other routers use.
+    big = json.dumps({"name": "Lab", "pad": "x" * 70_000})
+    for path in ("/workspaces", "/platform/workspaces/00000000-0000-4000-8000-000000000000/owners"):
+        answer = await api.post(
+            path, headers={**ALICE, "content-type": "application/json"}, content=big
+        )
+        assert answer.status_code in (400, 403), (path, answer.text)
+    made = await api.post("/workspaces", headers=ALICE, json={"name": "Lab"})
+    assert made.status_code == 201, made.text
+
+    # A small body is parsed where it is read; a large one in a worker thread.
+    seen: list[str] = []
+    parse = storage_routes.parse_json
+
+    def spy(text: str):
+        seen.append(threading.current_thread().name)
+        return parse(text)
+
+    monkeypatch.setattr(storage_routes, "parse_json", spy)
+    assert await storage_routes.parse_body(b'{"a": 1}') == {"a": 1}
+    large = json.dumps({"events": ["x" * 1000] * 400}).encode()
+    assert len(large) > storage_routes.PARSE_INLINE_BYTES
+    assert (await storage_routes.parse_body(large))["events"][0] == "x" * 1000
+    assert seen[0] == threading.current_thread().name and seen[1] != seen[0]
+
+
+async def test_a_malformed_escape_or_id_is_a_bad_request_not_a_server_error(api):
+    """An id that isn't one must not reach the database or a traceback."""
+    from api_py import identity, memory, shared_memory
+
+    await api.get("/access", headers=ALICE)
+    # Bytes that aren't UTF-8, where a handler decodes an id out of the path
+    # (test_experiments.py has /experiments, which needs the blob store).
+    bad = "%E0%A4%A"
+    for path in (
+        f"/nodes/{bad}",
+        f"/access/grants/{bad}",
+    ):
+        for method in ("GET", "PATCH", "DELETE"):
+            answer = await api.request(method, path, headers=ALICE, json={})
+            assert answer.status_code in (400, 404, 405), (method, path, answer.status_code)
+    # Thirty-six dashes used to pass as an id and fail in Postgres.
+    dashes = "-" * 36
+    real = "11111111-2222-4333-8444-555555555555"
+    for pattern in (identity._UUID, memory._ID, shared_memory._UUID):
+        assert not pattern.fullmatch(dashes) and pattern.fullmatch(real)
+    assert not shared_memory.is_uuid("1111111122224333-8444-555555555555----")

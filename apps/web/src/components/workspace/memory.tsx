@@ -3,16 +3,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Archive, Bot, Brain, Check, Download, EyeOff, History, Inbox, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
+import { buttonVariants } from "@/components/ui/button";
+import { PopoverMenu, PopoverMenuItem, closePopoverMenu } from "@/components/ui/popover-menu";
 import { cn } from "@/lib/utils";
 import { ImportMemory, InstalledPacks, PACKS, PackBrowser } from "./memory-packs";
 import { SharedNoteEditor, SharedSection, ShareCopy } from "./shared-memory";
 import { useWorkspace } from "./store";
 import { MEMORY_TAB } from "./types";
 import { useWorkbench } from "./workbench";
-import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
+import { workspaceUrl } from "@/lib/workspace-request";
+import { apiFetch } from "./server-files";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
- * Personalized memory (issue #93): notes Claude keeps about you across chats,
+ * Personalized memory: notes Claude keeps about you across chats,
  * that only you can see.
  * - the Memory view of the side panel lists your notes, sets memory on, ask
  *   first or off for you, and exports them; it also holds the inbox (changes
@@ -21,154 +28,51 @@ import { workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
  * - under the chat input, a line says which notes Claude read or changed in
  *   the current turn (the agent sends a "memory" event for each), with Undo
  *   for its changes, and makes the chat incognito: no memory read or saved.
- * The agent server keeps the notes (/api/memory); it needs MEMORY=on and
+ * The API server keeps the notes (/api/memory); it needs MEMORY=on and
  * server storage, and without them memory doesn't show at all.
  */
 
-export type MemoryType = "preference" | "profile" | "project" | "reference" | "feedback";
+export type MemoryType = Schema["MemoryType"];
 
-export interface MemorySummary {
-  name: string;
-  description: string;
-  type: MemoryType;
-  version: number;
-  createdBy: "user" | "agent";
-  updatedBy: "user" | "agent";
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string | null;
-}
+export type MemorySummary = Schema["MemorySummary"];
 
-export interface MemoryNote extends MemorySummary {
-  body: string;
-}
+export type MemoryNote = Schema["MemoryNote"];
 
-export interface MemoryVersion {
-  version: number;
-  description: string;
-  type: MemoryType;
-  body: string;
-  changedBy: "user" | "agent";
-  createdAt: string;
-}
+export type MemoryVersion = Schema["MemoryVersion"];
 
 /** A change Claude proposed, waiting for you. */
-export interface InboxItem {
-  id: string;
-  op: "add" | "update" | "delete";
-  name: string;
-  description: string | null;
-  type: MemoryType | null;
-  body: string | null;
-  source: "chat" | "learn" | "import";
-  reason: string | null;
-  createdAt: string;
-}
+export type InboxItem = Schema["InboxItem"];
 
 /** One of Claude's changes, in the activity list. */
-export interface MemoryActivity {
-  id: string;
-  name: string;
-  kind: "create" | "update" | "archive";
-  source: "chat" | "learn" | "inbox";
-  at: string;
-  undone: boolean;
-  /** Still the note's latest change, so it can be undone. */
-  undoable: boolean;
-}
+export type MemoryActivity = Schema["MemoryActivity"];
 
 /** A note Claude read, changed or proposed a change to in this turn (the agent's "memory" event). */
-export interface MemoryEvent {
-  id: string;
-  name: string;
-  description: string;
-  kind: "read" | "create" | "update" | "archive" | "propose";
-  version: number;
-  /** A shared note's: which one, and where it lives. */
-  shared?: { id: string; label: string };
-  /** Set here once the user undid it. */
+export type MemoryEvent = Schema["MemoryEvent"] & {
+  /** Set here, not by the API, once the user undid it. */
   undone?: boolean;
-}
+};
 
-export type SharedScope = "workspace" | "node" | "group";
-export type SharedMode = "auto" | "manual" | "off";
+export type SharedScope = Schema["SharedScope"];
+export type SharedMode = Schema["SharedMode"];
 
 /** Where a shared note lives. */
-export interface SharedPlace {
-  scope: SharedScope;
-  nodeId: string | null;
-  groupId: string | null;
-  label: string;
-}
+export type SharedPlace = Schema["SharedPlace"];
 
 /** A note shared with you: by your workspace, a knowledge node or a group. */
-export interface SharedSummary {
-  id: string;
-  name: string;
-  description: string;
-  type: MemoryType;
-  version: number;
-  place: SharedPlace;
-  canEdit: boolean;
-  /** What applies to you: yours, else everyone's. */
-  mode: SharedMode;
-  myMode: SharedMode | null;
-  everyoneMode: SharedMode;
-  /** From an installed memory pack: read-only until the place forks it. */
-  pack: { installId: string; name: string; version: number } | null;
-  updatedAt: string;
-}
+export type SharedSummary = Schema["SharedSummary"];
 
-export interface SharedNote extends SharedSummary {
-  body: string;
-}
+export type SharedNote = Schema["SharedNote"];
 
-export interface SharedVersion {
-  version: number;
-  description: string;
-  type: MemoryType;
-  body: string;
-  changedBy: string | null;
-  changedAs: "user" | "agent";
-  createdAt: string;
-}
+export type SharedVersion = Schema["SharedVersion"];
 
 /** A change to shared memory waiting for its editors. */
-export interface SharedProposal {
-  id: string;
-  op: "add" | "update" | "delete";
-  place: SharedPlace;
-  memoryId: string | null;
-  name: string;
-  description: string | null;
-  type: MemoryType | null;
-  body: string | null;
-  author: string | null;
-  authorType: "user" | "agent";
-  mine: boolean;
-  canDecide: boolean;
-  reason: string | null;
-  createdAt: string;
-}
+export type SharedProposal = Schema["SharedProposal"];
 
 /** A place you can share a copy of a note to. */
-export interface SharedTarget extends SharedPlace {
-  canEdit: boolean;
-}
+export type SharedTarget = Schema["SharedTargetPlace"];
 
 /** A memory pack installed in a place you read (step 4). */
-export interface PackInstall {
-  id: string;
-  name: string;
-  version: number;
-  /** A newer version that isn't yanked. */
-  latest: number | null;
-  place: SharedPlace;
-  canEdit: boolean;
-  notes: number;
-  installedAt: string;
-}
+export type PackInstall = Schema["PackInstall"];
 
 /** In the editor, a shared note is `shared:<id>`. */
 export const sharedSelection = (id: string) => `shared:${id}`;
@@ -195,7 +99,7 @@ interface Turn {
   events: MemoryEvent[];
 }
 
-export type MemoryMode = "on" | "ask" | "off";
+export type MemoryMode = Schema["MemoryMode"];
 
 interface Memory {
   status: "loading" | "ready" | "unavailable";
@@ -257,7 +161,8 @@ export function useMemory(): Memory {
 
 /** The answer's JSON, or an Error with the server's message. */
 export async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await workspaceFetch(url, { cache: "no-store", ...init });
+  // apiFetch: a session that ended sends the browser to sign in.
+  const res = await apiFetch(url, { cache: "no-store", ...init });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
   return body as T;
@@ -584,7 +489,14 @@ function InboxRow({ item }: { item: InboxItem }) {
   );
 }
 
-const ACTIVITY_LABEL: Record<MemoryActivity["kind"], string> = { create: "saved", update: "updated", archive: "deleted" };
+// The activity list holds changes; the API's type also allows the two kinds a chat shows.
+const ACTIVITY_LABEL: Record<MemoryActivity["kind"], string> = {
+  create: "saved",
+  update: "updated",
+  archive: "deleted",
+  read: "used",
+  propose: "proposed",
+};
 const SOURCE_LABEL: Record<MemoryActivity["source"], string> = {
   chat: "in a chat",
   learn: "from a past chat",
@@ -1003,9 +915,32 @@ const CHANGE_LABEL: Record<MemoryEvent["kind"], string> = {
   propose: "for review",
 };
 
-/** Under the chat input: what Claude read and changed in this turn, Undo, and incognito. */
-export function MemoryStatus() {
-  const { status, mode, incognito, setIncognito, turn, undo, openNote } = useMemory();
+export function ChatMemoryControl() {
+  const { status, mode, incognito, setIncognito } = useMemory();
+  const { sidebar } = useWorkbench();
+  if (status !== "ready") return null;
+  const label = mode === "off" ? "Off" : incognito ? "Incognito" : mode === "ask" ? "Ask" : "On";
+  return (
+    <PopoverMenu className="me-auto" data-testid="memory-status"
+      triggerClassName={buttonVariants({ variant: "quiet", size: "xs" })}
+      trigger={<><Brain aria-hidden="true" /><span>Memory · {label}</span></>}>
+      {mode !== "off" && (
+        <PopoverMenuItem data-testid="memory-incognito" aria-pressed={incognito}
+          onClick={() => void setIncognito(!incognito)}>
+          <EyeOff aria-hidden="true" /> {incognito ? "Resume memory in this chat" : "Pause memory in this chat"}
+        </PopoverMenuItem>
+      )}
+      <PopoverMenuItem onClick={(event) => {
+        closePopoverMenu(event.currentTarget);
+        sidebar.show("memory");
+      }}><Brain aria-hidden="true" /> Manage memory</PopoverMenuItem>
+    </PopoverMenu>
+  );
+}
+
+/** What Claude read or changed in the current turn, with links and Undo for changes. */
+export function ChatMemoryActivity({ reads = false }: { reads?: boolean }) {
+  const { status, turn, undo, openNote } = useMemory();
   const { sidebar } = useWorkbench();
   const [failed, setFailed] = useState<string | null>(null);
   if (status !== "ready") return null;
@@ -1017,20 +952,12 @@ export function MemoryStatus() {
     const seen = byNote.get(key);
     if (!seen || event.kind !== "read") byNote.set(key, event);
   }
-  const chips = [...byNote.values()];
-  const off = mode === "off";
+  const chips = [...byNote.values()].filter((event) => (event.kind === "read") === reads);
+  if (chips.length === 0) return null;
   return (
-    <div
-      data-testid="memory-status"
-      className="pointer-events-auto mx-auto flex max-w-3xl flex-wrap items-center gap-1.5 px-5 pt-1 text-xs text-[var(--muted-foreground)]"
-    >
-      <Brain className="size-3 shrink-0 text-violet-500" />
-      {off ? (
-        <span>Memory is off</span>
-      ) : incognito ? (
-        <span title="Claude doesn&apos;t read or save memory in this chat">Incognito: no memory in this chat</span>
-      ) : chips.length > 0 ? (
-        chips.map((event) => (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-raised px-2 py-1.5 text-label text-[var(--muted-foreground)]">
+      <Brain className="size-3.5 shrink-0 text-violet-500" aria-hidden="true" />
+      {chips.map((event) => (
           <span
             key={event.shared ? `shared:${event.shared.id || event.name}` : event.name}
             data-testid="memory-chip"
@@ -1080,26 +1007,8 @@ export function MemoryStatus() {
               </button>
             )}
           </span>
-        ))
-      ) : (
-        <span>{turn.running ? "No memory used yet" : "Claude remembers what helps across chats"}</span>
-      )}
+      ))}
       {failed && <span role="alert" className="text-red-600">{failed}</span>}
-      {!off && (
-        <button
-          type="button"
-          data-testid="memory-incognito"
-          aria-pressed={incognito}
-          title={incognito ? "Use memory in this chat again" : "Keep this chat out of memory"}
-          onClick={() => void setIncognito(!incognito)}
-          className={cn(
-            "ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer",
-            incognito && "bg-[var(--secondary)] text-[var(--foreground)]",
-          )}
-        >
-          <EyeOff className="size-3" /> Incognito
-        </button>
-      )}
     </div>
   );
 }

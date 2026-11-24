@@ -1,6 +1,6 @@
 /**
  * The one helper every browser call to this app's `/api/…` goes through, so
- * each one names the workspace the page is in (issue #226, docs/workspaces.md,
+ * each one names the workspace the page is in (docs/workspaces.md,
  * "How a request finds its workspace"). The page resolves its `/w/<slug>` to
  * an id once (src/app/w/[slug]/page.tsx) and sets it here; fetches then carry
  * it as the X-Knowledge-Workspace header, and plain links, images and
@@ -11,8 +11,8 @@
  * arrives after the switch is dropped (it throws an AbortError), so nothing
  * from the old workspace lands in the new one.
  *
- * Without a workspace (no workspaces API: the agent server alone, without
- * api-py) requests name none, which means the default workspace.
+ * Without a workspace (no workspaces API: the e2e mock, or api-py without
+ * storage) requests name none, which means the default workspace.
  */
 
 export const WORKSPACE_HEADER = "X-Knowledge-Workspace";
@@ -101,7 +101,7 @@ export interface WorkspaceInfo {
   slug: string;
   name: string;
   role: "owner" | "admin" | "member";
-  /** "archived" only in the list of archived workspaces an Owner may restore (issue #255). */
+  /** "archived" only in the list of archived workspaces an Owner may restore. */
   status?: "active" | "archived";
 }
 

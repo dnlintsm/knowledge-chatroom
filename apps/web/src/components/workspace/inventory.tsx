@@ -27,7 +27,7 @@ const day = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" }) : "never";
 
 /**
- * The workspace inventory (issue #255, docs/workspaces.md, "Workspace
+ * The workspace inventory (docs/workspaces.md, "Workspace
  * inventory"): every workspace in the deployment, active and archived, with
  * who created it, how many members it has, its Owners and when it was last
  * used, and no content. "Add an Owner" is for a workspace whose Owners can no

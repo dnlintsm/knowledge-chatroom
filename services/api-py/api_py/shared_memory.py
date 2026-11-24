@@ -1,4 +1,4 @@
-"""Shared memory, as SharedMemoryService in apps/agent/src/storage/shared-memory.ts (issue #93, step 3; migration 020).
+"""Shared memory (migration 020).
 
 Notes like personal memory's, but for a whole workspace, a knowledge node (and
 everything below it) or a group of people. Who reads and edits each place
@@ -10,8 +10,8 @@ someone who can edit the place accepts or rejects. A person shares one of
 their own notes by copying it in: directly where they can edit, else as a
 proposal.
 
-What a chat run uses (forRun, texts, search) stays on the TypeScript server
-until #190's step 8c.
+What a chat run uses (for_run, texts, search) serves /memory/agent
+(memory_agent.py).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ MAX_SHARED_NOTES = 200
 # Open proposals per author; more are refused until some are decided.
 MAX_SHARED_PROPOSALS = 50
 
-_UUID = re.compile(r"[0-9a-fA-F-]{36}")
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _SPACES = re.compile(f"[{JS_SPACE}]+")
 _PROPOSAL_COLUMNS = (
     "p.id::text AS id, p.op, p.scope, p.node_id::text AS node_id, p.group_id::text AS group_id, "

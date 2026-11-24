@@ -21,6 +21,7 @@ jobs:
     outputs:
       node: ${{ steps.affected.outputs.node }}
       python: ${{ steps.affected.outputs.python }}
+      storage: ${{ steps.affected.outputs.storage }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +72,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -104,8 +105,28 @@ jobs:
         if: matrix.python == '3.12'
         working-directory: packages/knowledge-py
         run: uv run --locked datamodel-codegen --check
+      # A setting added or removed in a Python service is in docs/settings.md. The node
+      # checks run the same comparison, but not for a change to Python files alone.
+      - name: The settings reference matches the code
+        if: matrix.python == '3.12'
+        run: node scripts/settings-check.mjs
+      # Most of api-py's tests need Postgres and S3 and skip without TEST_DATABASE_URL:
+      # access, row security, workspaces, memory, proposals. They run here, in the
+      # required check, whenever the change can affect storage (issue #303). The
+      # images are the pinned ones in docker-compose.yml.
+      - name: Start Postgres and S3 for api-py's database tests
+        if: needs.changes.outputs.storage == 'true'
+        run: |
+          docker compose up -d --wait postgres s3
+          docker compose exec -T postgres createdb -U knowledge knowledge_test
       - name: Python tests
         id: python_tests
+        env:
+          # Empty leaves the database tests skipped, as for a change that can't affect them.
+          TEST_DATABASE_URL: ${{ needs.changes.outputs.storage == 'true' && 'postgres://knowledge:knowledge@localhost:5432/knowledge_test' || '' }}
+          S3_ENDPOINT: ${{ needs.changes.outputs.storage == 'true' && 'http://localhost:8333' || '' }}
+          S3_ACCESS_KEY_ID: ${{ needs.changes.outputs.storage == 'true' && 'knowledge' || '' }}
+          S3_SECRET_ACCESS_KEY: ${{ needs.changes.outputs.storage == 'true' && 'knowledge-secret' || '' }}
         run: |
           status=0
           coverage_sources="$GITHUB_WORKSPACE/packages/knowledge-py/src/knowledge_chatroom,$GITHUB_WORKSPACE/services/agent-py/agent_py,$GITHUB_WORKSPACE/services/api-py/api_py,$GITHUB_WORKSPACE/services/lab-tools/lab_tools,$GITHUB_WORKSPACE/services/papers-mcp/papers_mcp"

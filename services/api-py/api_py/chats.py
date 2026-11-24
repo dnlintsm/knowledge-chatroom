@@ -1,4 +1,4 @@
-"""Chat history, as ChatService in apps/agent/src/storage/chats.ts (issue #91, migrations/017_chats.sql).
+"""Chat history (migrations/017_chats.sql).
 
 Each AG-UI thread the app's chat runs is a chat owned by the user who started
 it. The app's CopilotKit runner (apps/web/src/lib/chat-runner.ts) saves every
@@ -136,6 +136,46 @@ async def list_chats(
     }
 
 
+# Tools that bring nothing in from outside the user's own words and notes:
+# finding (deferred) tools, and Claude's changes to memory. memory_view is one
+# too unless it reads a shared note (someone else's words).
+_OWN_TOOLS = frozenset({"ToolSearch", "memory_save", "memory_edit", "memory_delete", "memory_view"})
+
+
+def read_outside_content(messages: Any) -> bool:
+    """
+    Whether Claude used anything in this chat but the user's words and own
+    notes: a file, a search, an outside tool, a shared note, a past chat. What
+    it read stays in the conversation, so from then on text from there could
+    be steering it, and its memory changes wait for the user.
+    `messages` are a chat's saved AG-UI messages.
+    """
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        calls = message.get("toolCalls") if isinstance(message, dict) else None
+        for call in calls if isinstance(calls, list) else ():
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict):
+                return True
+            name = function.get("name")
+            # mcp__memory__memory_save and the like: the tool's own name is the last part.
+            base = name.rsplit("__", 1)[-1] if isinstance(name, str) else ""
+            if base not in _OWN_TOOLS:
+                return True
+            if base == "memory_view" and "shared:" in str(function.get("arguments") or ""):
+                return True
+    return False
+
+
+async def chat_read_outside_content(
+    conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str
+) -> bool:
+    """read_outside_content for one of the user's chats; False for a chat not saved yet."""
+    found = await get_chat(conn, workspace_id, user_id, chat_id)
+    return bool(found) and read_outside_content(found["messages"])
+
+
 async def get_chat(
     conn: AsyncConnection, workspace_id: str, user_id: str, chat_id: str
 ) -> dict[str, Any] | None:
@@ -255,7 +295,7 @@ def _text_of(part: Any) -> str:
 
 
 def chat_lines(messages: Any) -> list[dict[str, str]]:
-    """What the user and Claude said in a chat's messages, in order (chatLines in chats.ts)."""
+    """What the user and Claude said in a chat's messages, in order."""
     lines: list[dict[str, str]] = []
     for message in messages if isinstance(messages, list) else []:
         if not isinstance(message, dict):

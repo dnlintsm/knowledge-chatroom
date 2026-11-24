@@ -1,37 +1,36 @@
 # Remote agent backend
 
 The chat pane can talk to an agent that runs in a separate backend (for example
-Python with `ag_ui_claude_sdk`) instead of this repository's own Claude agent
-(`apps/agent/`). This page is the contract between the two: what the app sends, and what the
-backend has to do.
+Python with `ag_ui_claude_sdk`) instead of this repository's own chat agent
+(`services/agent-py`, itself such a backend). This page is the contract between the app and
+a backend: what the app sends, and what the backend has to do.
 
 ## Turning it on
 
 | Variable (Next.js server) | Meaning |
 | --- | --- |
-| `AGENT_URL` | The backend's base URL: every chat run is posted to `${AGENT_URL}/agent/report`. Unset, it is the Python chat agent (`services/agent-py`) at `http://127.0.0.1:9300` (issue #264). `AGENT_URL=local` sends the chat to the legacy TypeScript agent server at `LOCAL_AGENT_URL` instead. |
-| `LOCAL_AGENT_URL` | This repo's agent server (default `http://localhost:8000`). It always serves storage (`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`, `/access`), skills and the skill hub, so keep running it with storage. Before this change `AGENT_URL` held this address. |
+| `AGENT_URL` | The backend's base URL: every chat run is posted to `${AGENT_URL}/agent/report`. Unset, it is the Python chat agent (`services/agent-py`) at `http://127.0.0.1:9300` (issue #264). `AGENT_URL=local` posts it to `LOCAL_AGENT_URL`, which only the e2e mock agent serves. |
+| `LOCAL_AGENT_URL` | This repo's API server, `services/api-py` (default `http://localhost:8000`). It always serves storage (`/files`, `/nodes`, `/experiments`, `/search`, `/proposals`, `/access`), skills and the skill hub, so keep running it with storage. Before this change `AGENT_URL` held this address. |
 
 With `AGENT_URL` set:
 
 - **Chat**: runs go to the backend (`apps/web/src/lib/agent-target.ts`, `apps/web/src/agent.ts`).
-- **Follow-up chips**: still from this repo's agent server. After each reply the app
+- **Follow-up chips**: still from this repo's API server. After each reply the app
   posts the conversation to `${LOCAL_AGENT_URL}/suggest`, which needs only the messages,
   so the backend doesn't have to write them. That server needs a model for it (its
   `ANTHROPIC_API_KEY`, or `SUGGESTIONS_MODEL` behind a gateway); `CHAT_SUGGESTIONS=static`
   on the app keeps the first-round chips instead.
-- **This repo's agent server**: when it sees `AGENT_URL` too (in development both read the
-  same `.env`), it turns its own chat route off (`POST /` answers 404) and serves storage,
-  skills and the follow-up chips.
+- **This repo's API server**: serves storage, skills, memory and the follow-up chips as
+  before; it has no chat route of its own.
 - **Skills**: the Skills view and the `/` menu still list this repo's skills, but they
   reach the backend only if it asks for them: `GET ${LOCAL_AGENT_URL}/skills/run?thread=<id>`
   with the run's `X-Knowledge-Storage` token returns the skills that run gets, with their
   files, and `POST /skills/used` adds a use to the history, as `services/agent-py` does
   (`agent_py/skills.py`). Otherwise a message such as `/tldr RF power` arrives as plain text.
-- **Memory** (`MEMORY=on` on the agent server): the Memory view works the same, and the
+- **Memory** (`MEMORY=on` on the API server): the Memory view works the same, and the
   backend gets the user's memory in the chat only if it asks for it with the run's
   `X-Knowledge-Memory` token (below), as `services/agent-py` does (`agent_py/memory.py`).
-  The agent server keeps learning from chats once they go quiet, whichever agent served them.
+  The API server keeps learning from chats once they go quiet, whichever agent served them.
 - **The browser**: works the same. It still talks only to the Next.js app (`/api/copilotkit`).
 
 The variable names come from the code (`apps/web/src/lib/agent-target.ts`). The backend is called only
@@ -105,6 +104,9 @@ from the signed-in session (`apps/web/src/agent.ts`), replacing anything the bro
 | `experiment` | The experiment (run) the user is working in, a sandbox on `node` with its own copy of the node's files, or at the workspace root (`node_id` null). When set, file work belongs here, not in the node. `state` is how far the run got (`ready`, `running`, `done`, `failed`), `report` its report's path in it (`null` until it has one), and `can_change` is false when the user isn't its author or it's archived. |
 | `selected_path` | The file open in the middle pane. `null` when a non-file tab is open, such as the task board. |
 | `tools` | The tool chips the user turned on in this chat from the "+" menu: names of MCP servers in this repo's `MCP_SERVERS` that have a `ui` block, e.g. `"papers"` for paper search. Empty when none is on. See step 8 below. Added without a new `version`. |
+| `model` | Optional model ID selected in this chat. The app shows the picker when `GET /agent/models` returns `{ "default": "<id>", "models": ["<id>", "<another-id>"] }`. The backend validates the selection against its own allowed models before passing it to the SDK. |
+
+The app keeps the model selection per chat for the lifetime of the workspace page. Reloading the page or opening the chat on another device starts with the backend's default model.
 
 Paths are relative to the place: the experiment when there is one, else the node, else the
 workspace root. That is how the storage API (`/files/<path>?node=` or `?experiment=`) and file
@@ -124,7 +126,7 @@ derived from `AUTH_SECRET`, and it is valid for 5 minutes:
 v2.<base64url JSON {sub, email, name, exp}>.<base64url Ed25519 signature of "v2.<payload>">
 ```
 
-- **Verifying it**: with the public key only. The agent server gives it at
+- **Verifying it**: with the public key only. The API server gives it at
   `GET ${LOCAL_AGENT_URL}/identity/public-key` (`{"alg": "Ed25519", "key": "<base64url>"}`)
   and logs it at startup; pin it in the backend's config as `KNOWLEDGE_PUBLIC_KEY`. Don't
   give the backend `AUTH_SECRET`: whoever holds it can sign for any user.
@@ -164,7 +166,7 @@ to it.
 Sent on every run, for the user's memory in this chat through `/memory/agent` at
 `LOCAL_AGENT_URL`. It has `aud` `memory`, `via` `remote`, the run's `thread` and `node`, its
 workspace `ws` when the page named one, and lasts as long as the storage token. Without login it is `local.<base64url JSON>` with the same
-claims, accepted only by an agent server without login. Pass it on unchanged:
+claims, accepted only by an API server without login. Pass it on unchanged:
 
 - `GET /memory/agent` gives `{prompt, tools}`: the system prompt's memory section (with the
   index of the user's notes) and the `memory_*` and `chats_*` tools with their JSON schemas.
@@ -218,12 +220,11 @@ An outside MCP server's memory token (`memoryAccess`, `via` `mcp:<name>`) gets o
      it as `provenance`: chat, model, skill) and finish it with `POST /experiments/{id}/finish`,
      so its report.md front matter records where it came from.
 
-   `apps/agent/src/storage/tools.ts` is this repo's version, and
-   `services/agent-py/agent_py/workspace.py` the same tools in Python, to copy from.
+   `services/agent-py/agent_py/workspace.py` is this repo's version, to copy from.
 6. **Cite files the way the chat can open them.** A Markdown link to the file's path in the
    place, with GitHub-style lines: `[report.md:12-18](report.md#L12-L18)`.
    The chat opens it in the middle pane (`apps/web/src/components/workspace/file-refs.ts`). Teach it in
-   the system prompt, as `apps/agent/src/agent.ts` does, and number lines in file content your
+   the system prompt, as `services/agent-py/agent_py/prompt.py` does, and number lines in file content your
    tools return, the same way. Links to working-folder copies or other places show greyed out.
 7. **Optional**: report each skill a run uses as an AG-UI `CUSTOM` event named `skill_used`
    (`{skill, source, trigger}`), as this repo's agent does, to show it under the chat input,
@@ -251,7 +252,7 @@ An outside MCP server's memory token (`memoryAccess`, `via` `mcp:<name>`) gets o
      `agent_py/mcp.py`, reading the same `MCP_SERVERS`.
 
    The "+" menu and the paper cards' buttons (`POST /tools/<server>/<tool>`) always go
-   through this repo's agent server, so they work the same with a remote backend.
+   through this repo's API server, so they work the same with a remote backend.
 
 ## With `ag_ui_claude_sdk` (Python)
 
@@ -272,16 +273,17 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
 
-from knowledge_chatroom.identity import HEADER, public_key, verify  # packages/knowledge-py
+from knowledge_chatroom.identity import caller, login_from_env  # packages/knowledge-py
 
 PROPS = "knowledge_chatroom"
-# The agent server's GET /identity/public-key; unset without login.
-KEY = public_key(os.environ["KNOWLEDGE_PUBLIC_KEY"]) if os.environ.get("KNOWLEDGE_PUBLIC_KEY") else None
+# AUTH_MODE=local for no login; with login, KNOWLEDGE_PUBLIC_KEY is the API server's
+# GET /identity/public-key. With neither set this raises: a missing key is not "no login".
+LOGIN = login_from_env(os.environ)
 
 
 def require_user(request: Request):
     # With login on, only runs the Next.js app signed get through.
-    if KEY and not verify(request.headers.get(HEADER, ""), KEY, audience=None):
+    if caller(dict(request.headers), LOGIN, audience=None) is None:
         raise HTTPException(401, "Sign in first")
 
 
@@ -327,7 +329,7 @@ Notes (checked against `ag_ui_claude_sdk` 0.2.2):
 - **Tool chips change in the middle of a chat**, like the place: read
   `knowledge_chatroom.tools` on every run (in `run()`, next to the "the user now has … open"
   note), not only in `build_options`.
-- **Tools should take the place as a parameter**, as `apps/agent/src/storage/tools.ts` does with
+- **Tools should take the place as a parameter**, as `services/agent-py/agent_py/workspace.py` does with
   `node`/`experiment`, rather than fix it when the session starts: the user can move to
   another node, experiment or run in the middle of a chat.
 - **The tool names change.** Your tools arrive as `mcp__<server>__<tool>`. The chat shows

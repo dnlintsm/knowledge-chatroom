@@ -7,21 +7,17 @@ The default test command runs only fast units; integration and E2E are explicit.
 | Command | Services/credentials | Coverage |
 | --- | --- | --- |
 | `pnpm check:web` | None | Frontend ESLint, root/web/contracts TypeScript, frontend unit tests |
-| `pnpm test` / `pnpm test:unit` | None | Frontend pure tests and agent unit tests |
-| `pnpm test:integration` | Disposable PostgreSQL + S3 | Storage, ACL/RLS, identity, events, experiments and HTTP |
-| `pnpm test:conformance` | Disposable PostgreSQL + S3 | Every agent server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
+| `pnpm test` / `pnpm test:unit` | None | Frontend pure tests |
+| `pnpm test:conformance` | Disposable PostgreSQL + S3 + uv | Every API server operation (storage, memory, skills, hub, tools, ...) against `openapi/storage.yaml` |
 | `pnpm test:e2e` | Chromium | Browser-only UI with canned AG-UI replies |
 | `pnpm test:e2e:storage` | Chromium + uv + PostgreSQL + S3 | Python API storage, knowledge tree, experiments, runs and chat history with mock chat |
 | `pnpm test:e2e:login` | Chromium + uv + fresh PostgreSQL + S3 | Test OIDC login, sharing and read-only access |
 | `pnpm test:e2e:python` | Chromium + uv (`uv sync --package agent-py`) | The chat on the Python agent (`services/agent-py`, `AGENT_URL`) with a real Claude Code engine and a scripted model: replies, a browser tool, a skill, follow-up chips |
 | `pnpm test:e2e:python-storage` | Chromium + uv + PostgreSQL + S3 | Real Python API and chat agent: streamed replies, built-in skill, reload from persisted history; only the model is scripted |
-| `pnpm test:live` | Chromium + Anthropic key | Opt-in live provider smoke coverage |
+| `pnpm test:live` | Chromium + uv + Anthropic key | Opt-in live smoke coverage: the browser suite with the chat on the Python agent and the real model |
 
 Units use `playwright.unit.config.ts`, start no server and do not require a
-browser installation. Put new pure frontend specs under `tests/unit`. Agent test files
-are listed one by one: service-free ones in `apps/agent/package.json` (`test:unit`), ones
-that need PostgreSQL and S3 in `apps/agent/scripts/test-integration.mjs`. Add a new
-`*.test.ts` to the matching list, or it never runs.
+browser installation. Put new pure frontend specs under `tests/unit`.
 
 The Python side is one uv workspace (root `pyproject.toml`, one `uv.lock`):
 `services/*` and `packages/knowledge-py`, each with its own pytest suite (Python 3.12+),
@@ -61,6 +57,11 @@ checks for future Python-specific dependency markers. Review scheduled results
 in **Actions → Python dependency audit**; this workflow does not create issues.
 Optional extras are not exported unless selected through a workspace runtime dependency.
 
+JavaScript production dependencies get the same treatment from the **JavaScript dependency
+audit** workflow (`pnpm audit --prod`, weekly and on lockfile or `package.json` changes).
+Advisories without a compatible fix are listed, with the reason, in
+[Development](development.md#dependency-security).
+
 ## Disposable integration databases
 
 The storage suite **drops the public schema** of `TEST_DATABASE_URL`. Never point
@@ -77,20 +78,18 @@ export S3_ACCESS_KEY_ID=knowledge
 export S3_SECRET_ACCESS_KEY=knowledge-secret
 export S3_BUCKET=knowledge-test
 export S3_PUBLIC_URL=http://localhost:8333
-pnpm test:integration
+pnpm test:conformance
 ```
 
-Create each database once. This bucket name matches the integration fixtures and
-avoids reserving separate SeaweedFS volume collections for each suite. Test blobs
-are disposable. Missing `TEST_DATABASE_URL` or `S3_ENDPOINT` fails before testing;
-integration does not fall back to `DATABASE_URL`.
+Create each database once. One bucket avoids reserving separate SeaweedFS volume
+collections for each suite. Test blobs are disposable. Missing `TEST_DATABASE_URL` or
+`S3_ENDPOINT` fails before testing; it does not fall back to `DATABASE_URL`. api-py's
+own database tests use the same values (`services/api-py/README.md`).
 
 `pnpm test:conformance` uses the same `TEST_DATABASE_URL` and S3 values. It resets the
 database and starts the Python API server (`services/api-py`, which needs uv) on it with
-a throwaway `AUTH_SECRET` and no TypeScript server behind it, as `pnpm dev` does (#264).
-Then it runs `packages/contracts/conformance/storage.test.ts` against it
-(`CONFORMANCE_TARGET=ts` runs it against the legacy TypeScript agent server alone, which doesn't serve `/workspaces`
-and refuses other workspaces' storage requests, so those tests fail there). That suite calls every operation in
+a throwaway `AUTH_SECRET`, as `pnpm dev` does.
+Then it runs `packages/contracts/conformance/storage.test.ts` against it. That suite calls every operation in
 `packages/contracts/openapi/storage.yaml` and fails when a status code isn't in the spec,
 a JSON answer doesn't validate, an answer has a field the spec doesn't list, or an
 operation was never called. It only speaks HTTP, so it can check any backend that
@@ -123,10 +122,10 @@ cd packages/knowledge-py && API_SAMPLES=/tmp/api-samples.jsonl uv run pytest -q 
 After changing the spec, regenerate the models with `uv run datamodel-codegen` in
 `packages/knowledge-py` (the Quality workflow runs it with `--check`).
 
-The normal integration suite tests vector search using a deterministic embedder.
-Set `EMBEDDING_TEST=1` to also run the real model-download test (in the agent and in
-`services/api-py`, which loads the same model through ONNX Runtime); it needs network
-access and caches roughly 120 MB for each. api-py's search tests use pgvector when the
+api-py's search tests use a deterministic embedder for vector search.
+Set `EMBEDDING_TEST=1` to also run the real model-download test in `services/api-py`,
+which loads the model through ONNX Runtime; it needs network access and caches
+roughly 120 MB. api-py's search tests use pgvector when the
 test database has it and skip search by meaning otherwise. For local UI tests, `EMBEDDING_MODEL=off` keeps
 keyword-search coverage without downloading the model.
 
@@ -150,7 +149,7 @@ The runner owns its servers and refuses existing ones. Defaults: UI 3000, mock
 agent 8000, storage 8001 (the standalone Python API server), test OIDC 9400, Python agent 9300, scripted model
 9500. Override `E2E_UI_PORT`, `E2E_AGENT_PORT`, `E2E_STORAGE_PORT`, `E2E_OIDC_PORT`,
 `E2E_PY_AGENT_PORT`, `E2E_MODEL_PORT` to isolate local runs. The storage and login
-modes need uv for the API server. `E2E_API_PY=off` is an explicit comparison against the retired TypeScript API.
+modes need uv for the API server.
 
 The Python mode runs `services/agent-py` with Claude Code pointed at
 `e2e/mock-anthropic.mjs`, a stand-in for the Messages API that streams scripted turns
@@ -165,6 +164,9 @@ mode. Forward Playwright arguments after `--`, for example
 generated artifacts and are ignored by git. Preview screenshots go in `preview/`.
 
 For an intentional live run, export `ANTHROPIC_API_KEY` and use `pnpm test:live`.
+It runs the browser suite with the chat on `services/agent-py` and the real model
+(`ANTHROPIC_BASE_URL` points it at a gateway); the mock agent server serves the
+rest, or api-py when `DATABASE_URL` and the S3 values are set. It needs uv.
 Live coverage may cost money and depends on the provider/network. Mock-specific
 answer checks are excluded from live mode; it is not a replacement for required
 mock coverage. It is not run by required CI.
@@ -174,12 +176,14 @@ mock coverage. It is not run by required CI.
 See [CI merge gates](ci.md) for the repository ruleset settings that enforce
 successful checks before merging and for preview-step limits.
 
-- `quality.yml`: the `checks` job (locked root/agent install, lint/types/units,
+- `quality.yml`: the `checks` job (locked install, lint/types/units,
   unchanged lockfile) plus the `python` job: `uv sync --locked` and the pytest
-  suites of `packages/knowledge-py` and every `services/*` project.
-- `storage.yml`: real PostgreSQL/pgvector/S3 integration for storage-related changes,
-  including the cached real embedding-model test (`EMBEDDING_TEST=1`), then the storage
-  API conformance suite against the running agent.
+  suites of `packages/knowledge-py` and every `services/*` project. When the change can
+  affect storage it starts the compose file's PostgreSQL and S3 first, so api-py's
+  database tests run instead of skipping, and the coverage report includes them.
+- `storage.yml`: for storage-related changes, the storage API conformance suite against
+  api-py and api-py's own tests on real PostgreSQL/pgvector/S3, including the cached
+  real embedding-model test (`EMBEDDING_TEST=1`).
 - `ui-preview.yml`: browser, storage + login, and Python agent E2E in parallel jobs,
   gated by the required `preview` job; then `publish` (not required) makes the GIF,
   uploads the images and updates the preview comment. See [CI merge gates](ci.md).
@@ -215,19 +219,25 @@ place stay visible through remote events/reconnect until a subsequent edit saves
 a successful save of a different file must not hide their error. Permission
 revocation changes the editor to read-only without replacing the unsaved content.
 These drafts are held in memory: this policy does not promise durability across
-reload or navigation after a failed save.
+reload or navigation after a failed save. A signed-in page whose storage fails at
+load must stay in loading with "Storage unreachable", offer no editor, keep asking,
+and show the server's files once it answers.
 
 `e2e/sync-storage.spec.ts` runs only in storage mode. Two pages in one browser
 context share a real workspace and receive its real stream. It checks both
 persisted bytes and the other tab's editor, then confirms remote deletion closes
 both tabs. Its fixture uses a dedicated note and removes it after testing.
+It also covers the two overwrites issue #293 closed: someone else saves a file while
+this page's own save is held back (the editor asks which version to keep, and both
+choices are followed to the stored bytes), and a proposal is revised after its diff
+loaded (the accept is refused, the diff reloads, and accepting again writes the revision).
 
 ## Chat history
 
 `tests/unit/chat-history.spec.ts` checks the chat runner and history routes with
 chats in memory: a chat replays after a new runner (as after a restart), and with
-login on each user sees, continues and changes only their own chats. The storage
-integration suite covers the `/chats` API and its row-level security, and
+login on each user sees, continues and changes only their own chats. api-py's
+`tests/test_chats.py` covers the `/chats` API and its row-level security, and
 `e2e/chat-history.spec.ts` (storage mode) chats, finds the chat in Postgres,
 reloads and reopens it from the history. `e2e/preview.spec.ts` does the same with
 chats in memory.

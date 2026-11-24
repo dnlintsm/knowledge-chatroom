@@ -2,9 +2,9 @@
 
 With "storageAccess": true in MCP_SERVERS, each run sends this server an
 X-Knowledge-Storage token. Passed on unchanged to the chatroom's storage API
-(the agent server's /files, KNOWLEDGE_STORAGE_URL), it reads and writes
+(api-py's /files, KNOWLEDGE_STORAGE_URL), it reads and writes
 files as Claude acting for the signed-in user: only what that user can
-reach, with writes in a knowledge node as proposals (issue #88). This server
+reach, with writes in a knowledge node as proposals. This server
 never connects to the chatroom's database or object store itself.
 
 Without login there is no token, and the storage API answers as the local user.
@@ -18,6 +18,21 @@ import urllib.parse
 import urllib.request
 
 STORAGE_HEADER = "x-knowledge-storage"
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """
+    Never follows a redirect. The storage API answers a binary file with a link
+    to the object store, and urllib would send the request's headers on to it:
+    the user's storage token, to another server.
+    """
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirects)
+_REDIRECTS = (301, 302, 303, 307, 308)
 
 
 class WorkspaceError(Exception):
@@ -39,9 +54,12 @@ def read_text(
         url += "?" + urllib.parse.urlencode(query)
     request = urllib.request.Request(url, headers={STORAGE_HEADER: token} if token else {})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _opener.open(request, timeout=timeout) as response:
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as err:
+        if err.code in _REDIRECTS:
+            # A link to the object store: what the API sends for a binary file.
+            raise WorkspaceError(f"{path} isn't a text file") from err
         raise WorkspaceError(f"Couldn't read {path} ({err.code}): {_reason(err)}") from err
     except (urllib.error.URLError, TimeoutError) as err:
         raise WorkspaceError(
@@ -78,7 +96,7 @@ def write(
         headers[STORAGE_HEADER] = token
     request = urllib.request.Request(url, data=data, method="PUT", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout):
+        with _opener.open(request, timeout=timeout):
             return propose
     except urllib.error.HTTPError as err:
         if err.code == 413:

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2, UserCog, X } from "lucide-react";
 import { ago, cn } from "@/lib/utils";
 import type { Role } from "./server-files";
-import { access, personLabel, ROLES, type Group, type Person } from "./sharing";
+import { access, personLabel, ROLES, type Group } from "./sharing";
 import { useWorkspace } from "./store";
 import { AddMember } from "./add-member";
 import { MemberRoleMenu, RemoveMember, type MemberTarget } from "./members";
@@ -12,33 +12,24 @@ import { useCurrentWorkspace } from "./current-workspace";
 import { apiFetch } from "./server-files";
 import { MEMBER_ROLE_LABEL } from "@/lib/workspace-choice";
 import type { WorkspaceInfo } from "@/lib/workspace-request";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
- * Admin panel (#67): the people and their access to the whole workspace, the
+ * Admin panel: the people and their access to the whole workspace, the
  * org tree of groups and its members, and recent access changes. With
- * workspaces (issue #226) it is for the workspace's Owners and Admins, who
+ * workspaces it is for the workspace's Owners and Admins, who
  * also add members here; without them, for the owners of the workspace root.
  * Everything goes through the server's /access and /workspaces APIs, which
  * check the caller; this only hides the button from everyone else.
  */
 
-interface PersonRow extends Person {
-  createdAt: string;
-  lastSeenAt: string | null;
-  role: Role | null;
-  grantId: string | null;
-  effectiveRole: Role | null;
-  groupIds: string[];
-}
+/** A member as /access/people lists them: with their login subject, roles and groups. */
+type PersonRow = Schema["Person"];
 
-interface AuditEntry {
-  id: string;
-  actorType: "user" | "agent";
-  actorId: string | null;
-  action: string;
-  target: Record<string, unknown>;
-  at: string;
-}
+type AuditEntry = Schema["AuditEntry"];
 
 type Tab = "people" | "groups" | "activity";
 

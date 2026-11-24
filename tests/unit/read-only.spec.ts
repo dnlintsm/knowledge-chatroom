@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readOnlyReason } from "../../apps/web/src/components/workspace/read-only";
 import type { Experiment } from "../../apps/web/src/components/workspace/server-files";
 
-/** Why a place is read only (apps/web/src/components/workspace/read-only.ts), #187. */
+/** Why a place is read only (apps/web/src/components/workspace/read-only.ts). */
 
 const exp = (fields: Partial<Experiment>) =>
   ({
@@ -38,7 +38,7 @@ test("someone else's experiment names its maintainer (not who started it) and of
   expect(reason.label).toBe("Read only · only Alice can edit");
   expect(reason.detail).toBe("Only Alice can edit this experiment. Rerun it to work on your own copy.");
   expect(at(exp({ maintainerName: null }))!.label).toBe("Read only · only its maintainer can edit");
-  // Its collaborators edit it too (#255).
+  // Its collaborators edit it too.
   const shared = at(exp({ collaborators: [{ id: "c", name: "Carol" }] }))!;
   expect(shared.detail).toBe("Only Alice and the collaborators can edit this experiment. Rerun it to work on your own copy.");
   // Rerun is offered only where the user may start one.

@@ -9,15 +9,13 @@ The repository root `.env` is shared by the frontend and Python services.
 Copy `.env.example` to `.env`, run `uv sync --all-packages --locked`, and set
 `ANTHROPIC_API_KEY` for real chat. `pnpm dev` / `pnpm dev:python` starts the UI on 3000,
 the Python API (`services/api-py`) on 8000, and the Python chat agent
-(`services/agent-py`) on 9300. No `apps/agent` process is started.
-`TS_AGENT_URL` is unset by default, so Python never silently falls back to it.
+(`services/agent-py`) on 9300.
 Storage, built-in skills and persistent chat history require PostgreSQL and S3;
 without them the UI still supports browser-local files and chat without skills.
 
 `pnpm dev:ui`, `pnpm dev:api` and `pnpm dev:agent-py` run the services separately;
 set `AGENT_URL=http://127.0.0.1:9300` when starting the UI separately.
 `GET http://localhost:8000/health` reports readiness of the Python API and its storage.
-`pnpm dev:ts` is an explicit legacy comparison, outside Node 26 frontend support.
 
 After an upgrade, `pnpm env:check` compares `.env` with `.env.example`: settings a
 release removed or renamed, new settings, and ones `.env.example` doesn't know. Only
@@ -47,7 +45,7 @@ Uncomment the workspace storage values in `.env.example` when copying to `.env`:
 `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` and `S3_PUBLIC_URL`. Local defaults
 are documented there and in `infra/seaweedfs/s3.json`.
 
-Migrations run at agent startup. PostgreSQL stores metadata/history; the object
+Migrations run when the Python API server (api-py) starts. PostgreSQL stores metadata/history; the object
 store holds content keyed by SHA-256. Keep both volumes to retain the workspace.
 `docker compose down` stops services without deleting volumes.
 
@@ -103,17 +101,18 @@ arguments and result); `CHAT_STEPS=detailed` on the UI makes that the default. S
 
 ## Skills
 
-Built-in skills live in `apps/agent/skills/`; with server storage, the agent also loads
+Built-in skills live in `services/api-py/skills/`; with server storage, the API also serves
 workspace skills from `skills/<name>/SKILL.md` and skills installed from the hub. Users choose Auto, Manual, or Off, for
 themselves or one chat; editors of the workspace root set the default for everyone.
 Slash commands run only enabled skills; the status bar shows enabled and used
-skills. `SKILLS_RUN_DIR` sets the agent's temporary per-user working directory; with server
+skills. `AGENT_PY_WORKDIR` sets the chat agent's per-user working directory; with server
 storage it also holds a read-only copy of the user's files that Claude searches with
 Read/Glob/Grep (`AGENT_WORKDIR=off` turns it off; see
 [Working folder](architecture.md#working-folder)).
 Skills are instructions; embedded shell commands are not executed. With
-`SKILL_SCRIPTS=on` the agent runs skills' scripts in the SDK's sandbox, which needs
-bubblewrap (`apt-get install bubblewrap`; macOS has its own) on the agent host; see
+`SKILL_SCRIPTS=on` (for both api-py and agent-py, which `pnpm dev` gives the same `.env`) the
+chat agent runs skills' scripts in the SDK's sandbox, which needs bubblewrap and socat
+(`apt-get install bubblewrap socat`; macOS has its own) on the agent host; see
 [Skill scripts](architecture.md#skill-scripts). `HUB_ADMINS`
 (emails or login subjects, comma-separated) names who may verify hub skills and
 dismiss reports; without login the built-in user is an admin. See
@@ -175,7 +174,7 @@ without the chip. `icon` is a lucide name (`book-open`, `globe`, `search`,
 `database`; otherwise a wrench). `tools` lists the tools the app itself may call for the
 signed-in user, as the paper cards' Save button does:
 
-| Route (agent server, `/api/tools` in the app) | Answer |
+| Route (API server, `/api/tools` in the app) | Answer |
 | --- | --- |
 | `GET /tools` | `{tools: [{server, label, chip, description, icon, mode, callable}]}` |
 | `POST /tools/<server>/<tool>` with `{arguments: {...}}` | `{result, text}`: the tool's structured content (or the JSON in its text). `422 {error}` is the tool's own error, `403` a tool not in `tools`, `502` a server that is down. |
@@ -224,7 +223,7 @@ mcp.run(transport="streamable-http", host="127.0.0.1", port=9100)
 
 The chat can use an agent from a separate backend instead of this repo's own:
 set `AGENT_URL` to its base URL, and every chat run goes to
-`${AGENT_URL}/agent/report`. This repo's agent server keeps serving storage,
+`${AGENT_URL}/agent/report`. This repo's API server keeps serving storage,
 skills and the follow-up chips at `LOCAL_AGENT_URL` (default `http://localhost:8000`,
 which `pnpm dev` starts), and turns its own chat off. Each run tells the backend who the user is and
 where they are in `forwardedProps.knowledge_chatroom`. What the backend receives and
@@ -246,11 +245,17 @@ Generate one with `openssl rand -hex 32`. Configure `OIDC_ISSUER`, `OIDC_CLIENT_
 and, for confidential clients, `OIDC_CLIENT_SECRET`. Register
 `<APP_URL>/api/auth/callback` with the provider; set `APP_URL` to the external UI URL.
 The issuer and `APP_URL` must use https unless they are on localhost; set
-`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. The first person to
-sign in owns the workspace. Without login (`AUTH_MODE=local`, or no `AUTH_SECRET`
-in development), one built-in user owns it. The [Deployment guide](deployment.md) covers the private agent boundary.
+`AUTH_ALLOW_HTTP=true` to test with an http provider elsewhere. A user's email is kept
+only when the provider marks it verified (`email_verified`), because `PLATFORM_ADMINS`,
+`HUB_ADMINS`, `WORKSPACE_CREATORS` and adding people by email match on it; for a provider
+that verifies emails but sends no such claim, set `OIDC_ASSUME_EMAIL_VERIFIED=true`. Login
+subjects (`<issuer>|<subject>`) always work in those lists. The first person to
+sign in owns the default workspace. Without login (`AUTH_MODE=local`, or neither
+`AUTH_MODE` nor `AUTH_SECRET` under `pnpm dev`), one built-in user owns it. The Python
+services need the mode spelled out: `pnpm dev` passes `AUTH_MODE=local` for them when
+`.env` sets no login, and started any other way they refuse to start without it. The [Deployment guide](deployment.md) covers the private agent boundary.
 
-Chat history needs nothing extra: each user's chats are kept by the agent server, in
+Chat history needs nothing extra: each user's chats are kept by the API server, in
 Postgres with `DATABASE_URL` and in memory without it ([Architecture](architecture.md#chat-history)).
 `CPK_INTELLIGENCE_API_KEY` is optional and keeps threads in CopilotKit Intelligence
 instead. Its browser gate is resolved at build time, so rebuild after changing it for a
@@ -261,13 +266,12 @@ production run.
 `pnpm audit` checks the whole workspace. Patched transitive versions are pinned in
 `pnpm-workspace.yaml` (`overrides`, which apply to every package), and the UI's
 `@ag-ui/core` is a direct dependency pinned to 1.0.2, so CopilotKit's peers resolve to the
-same version as the UI's `@ag-ui/client` while the agent keeps 1.0.4:
+same version as the UI's `@ag-ui/client`:
 
 | Where | What |
 | --- | --- |
-| `pnpm-workspace.yaml` `overrides` | `adm-zip`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
+| `pnpm-workspace.yaml` `overrides` | `@hono/node-server`, `body-parser`, `follow-redirects`, `graphql-scalars`, `katex`, `sharp` and `undici` |
 | Root `package.json` | `@ag-ui/core` 1.0.2, the version of the UI's `@ag-ui/client` |
-| `apps/agent/package.json` | its own `@ag-ui/core`, `@ag-ui/encoder` and `@ag-ui/client` on 1.0.4, which use Zod 4 |
 
 When updating these dependencies, recheck the overrides and run the build and tests
 before removing any. The `undici` and `graphql-scalars` overrides cross an upstream
@@ -281,9 +285,21 @@ deployments, configure request-size limits at the reverse proxy according to the
 files and requests the deployment needs. This reduces exposure to oversized
 inputs but is not a substitute for upgrading the affected dependency.
 
+`@hono/node-server` comes in through CopilotKit's MCP packages. The override takes it to
+1.19.18, the last 1.x fix; [GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)
+is fixed only in 2.x, which those packages don't accept yet. It concerns `serveStatic`,
+which this app doesn't use.
+
+Those two advisories are listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`,
+so `pnpm audit --prod` passes while they are the only ones. The **JavaScript dependency
+audit** workflow runs it weekly and on pull requests that change a `package.json` or the
+lockfile, and fails on any advisory not listed there. When an upgrade fixes one, remove
+it from the list in the same PR.
+
 ## Troubleshooting
 
-- Agent connection errors: check port 8000, the health endpoint and the API key.
+- Connection errors: check `GET /health` on the Python API (port 8000) and on the chat
+  agent (port 9300), and the API key for chat.
 - Dependency errors: select Node 26, stop dev/test servers, then run `pnpm install`.
 - Test port in use: stop your existing server or override the E2E ports listed in
   [Testing](testing.md). The runner intentionally refuses to reuse an unknown server.

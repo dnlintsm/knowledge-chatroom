@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import threading
+import urllib.error
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -120,13 +121,14 @@ def web(monkeypatch):
     fake = FakeWeb()
     monkeypatch.setattr(net, "get", fake.get)
     monkeypatch.setattr(net, "get_json", fake.get_json)
+    monkeypatch.setattr(net, "get_public", fake.get)  # a paper's PDF link
     fulltext._cache.clear()
     return fake
 
 
 @pytest.fixture
 def ctx(monkeypatch):
-    monkeypatch.setattr(server, "PUBLIC_KEY", TEST_KEY.public_key())
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=True, key=TEST_KEY.public_key()))
     monkeypatch.setattr(server, "SERVER_NAME", "papers")
     return SimpleNamespace(headers={identity.HEADER: FOR_PAPERS})
 
@@ -441,7 +443,7 @@ def test_tool_list_is_the_contract():
 
 def test_results_go_out_as_structured_content_and_json_text(web, monkeypatch):
     """Through the MCP protocol, as the chatroom's agent calls it."""
-    monkeypatch.setattr(server, "PUBLIC_KEY", None)  # no login: the local user
+    monkeypatch.setattr(server, "LOGIN", identity.Login(required=False))  # no login: the local user
 
     async def call():
         async with Client(server.mcp) as client:
@@ -451,3 +453,232 @@ def test_results_go_out_as_structured_content_and_json_text(web, monkeypatch):
     assert not result.is_error
     assert result.structured_content["results"][0]["id"] == "openalex:W3027879771"
     assert json.loads(result.content[0].text) == result.structured_content
+
+
+def test_errors_leave_the_openalex_key_and_address_out(monkeypatch):
+    """Error messages reach Claude and the chat, so they name the URL without them."""
+    monkeypatch.setenv("OPENALEX_API_KEY", "secret-key")
+    monkeypatch.setenv("OPENALEX_MAILTO", "ops@example.com")
+    url = openalex._url("/works/doi:10.1/x", {"select": "id,title"})
+    assert "secret-key" in url and "ops%40example.com" in url  # still sent to the source
+
+    def refuse(code: int):
+        def urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(request.full_url, code, "", None, None)
+
+        return urlopen
+
+    def unreachable(request, timeout=None):
+        raise urllib.error.URLError("no route")
+
+    for urlopen in (refuse(404), refuse(500), unreachable):
+        monkeypatch.setattr(net.urllib.request, "urlopen", urlopen)
+        with pytest.raises(net.SourceError) as caught:
+            net.get(url)
+        message = str(caught.value)
+        assert "secret-key" not in message and "ops" not in message
+        assert "https://api.openalex.org/works/doi:10.1/x?select=id,title" in message
+
+    # A URL with nothing private is shown as it was asked.
+    assert (
+        net.shown("https://arxiv.org/pdf/2005.11401?v=1") == "https://arxiv.org/pdf/2005.11401?v=1"
+    )
+
+
+def addresses(*ips: str):
+    """A resolver answering every name with these addresses."""
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        return [(None, None, None, "", (ip, port)) for ip in ips]
+
+    return getaddrinfo
+
+
+def test_a_link_from_a_source_is_only_followed_to_public_https(monkeypatch):
+    """A paper's pdf_url is whatever the source's answer says."""
+    for bad in (
+        "file:///etc/passwd",
+        "ftp://example.org/a.pdf",
+        "http://example.org/a.pdf",
+        "https://127.0.0.1/a.pdf",
+        "https://10.0.0.8/a.pdf",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://[::1]/a.pdf",
+        "https://[::ffff:192.168.1.5]/a.pdf",
+        "https://localhost/a.pdf",
+        "https://db.internal/a.pdf",
+        "https:///a.pdf",
+    ):
+        with pytest.raises(net.SourceError):
+            net.check_public(bad)
+    assert net.check_public("https://arxiv.org/pdf/2005.11401").hostname == "arxiv.org"
+    assert net.check_public("https://8.8.8.8/a.pdf").hostname == "8.8.8.8"
+
+    # A public-looking name is refused where it resolves, if any address is inside.
+    monkeypatch.setattr(net.socket, "getaddrinfo", addresses("93.184.216.34"))
+    assert net.public_address("papers.example.org", 443) == ("93.184.216.34", 443)
+    for inside in (("10.1.2.3",), ("93.184.216.34", "192.168.0.9"), ("100.64.0.1",), ()):
+        monkeypatch.setattr(net.socket, "getaddrinfo", addresses(*inside))
+        with pytest.raises(net.SourceError, match="inside the network"):
+            net.public_address("papers.example.org", 443)
+
+
+def test_every_redirect_of_a_fetched_link_is_checked(monkeypatch):
+    class Answer:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, n: int) -> bytes:
+            return self.body[:n]
+
+    def redirect(to: str) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError("https://x", 302, "Found", {"Location": to}, None)  # type: ignore[arg-type]
+
+    def web_of(pages: dict):
+        asked: list[str] = []
+
+        def open_public(url: str, accept: str):
+            asked.append(url)
+            answer = pages[url]
+            if isinstance(answer, Exception):
+                raise answer
+            return Answer(answer)
+
+        monkeypatch.setattr(net, "_open_public", open_public)
+        return asked
+
+    # Followed while each hop is public https, relative ones included.
+    asked = web_of(
+        {
+            "https://doi.example.org/10.1/x": redirect("https://publisher.example.org/a"),
+            "https://publisher.example.org/a": redirect("/files/a.pdf"),
+            "https://publisher.example.org/files/a.pdf": b"%PDF-1.7 ...",
+        }
+    )
+    got = net.get_public("https://doi.example.org/10.1/x", max_bytes=1_000)
+    assert got.startswith(b"%PDF") and len(asked) == 3
+
+    # A hop that leaves https, or goes inside, ends it before anything is fetched there.
+    for inside in (
+        "http://publisher.example.org/a.pdf",
+        "https://169.254.169.254/a",
+        "file:///etc/hosts",
+    ):
+        asked = web_of({"https://doi.example.org/10.1/x": redirect(inside)})
+        with pytest.raises(net.SourceError):
+            net.get_public("https://doi.example.org/10.1/x", max_bytes=1_000)
+        assert asked == ["https://doi.example.org/10.1/x"]
+
+    # No endless chains, and no body larger than asked for.
+    web_of({"https://a.example.org/": redirect("https://a.example.org/")})
+    with pytest.raises(net.SourceError, match="redirects too many times"):
+        net.get_public("https://a.example.org/", max_bytes=1_000)
+    web_of({"https://a.example.org/big.pdf": b"x" * 2_000_001})
+    with pytest.raises(net.SourceError, match="larger than 2 MB"):
+        net.get_public("https://a.example.org/big.pdf", max_bytes=2_000_000)
+
+
+def test_a_pdf_is_read_up_to_a_page_limit(monkeypatch):
+    monkeypatch.setattr(fulltext, "MAX_PDF_PAGES", 1)
+    lines = fulltext.pdf_lines(tiny_pdf(PAPER_LINES))
+    assert lines and lines == fulltext.pdf_lines(tiny_pdf(PAPER_LINES))
+
+
+def test_a_fetched_link_connects_to_the_address_that_was_checked(monkeypatch, tmp_path):
+    """
+    The real connection, against a local TLS server: the request goes to the
+    address public_address() approved, and the certificate is still checked
+    against the link's name.
+    """
+    import datetime
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "papers.test")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(hours=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("papers.test")]), critical=False)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    cert_file, key_file = tmp_path / "cert.pem", tmp_path / "key.pem"
+    cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_file.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/moved":
+                self.send_response(302)
+                self.send_header("Location", "/a.pdf")
+                self.end_headers()
+                return
+            body = b"%PDF-1.7 for " + self.headers["Host"].encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    serving = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    serving.load_cert_chain(cert_file, key_file)
+    httpd.socket = serving.wrap_socket(httpd.socket, server_side=True)
+    port = httpd.server_port
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        approved: list[str] = []
+
+        def approve(host: str, port_: int) -> tuple[str, int]:
+            approved.append(host)
+            return "127.0.0.1", port_
+
+        # No proxy for this name, the name "resolves" to the local server, and its certificate is trusted.
+        monkeypatch.setenv("NO_PROXY", "papers.test")
+        monkeypatch.setenv("no_proxy", "papers.test")
+        monkeypatch.setattr(net, "public_address", approve)
+        monkeypatch.setattr(net, "_TLS", ssl.create_default_context(cafile=str(cert_file)))
+        got = net.get_public(f"https://papers.test:{port}/moved", max_bytes=1_000)
+        assert got == f"%PDF-1.7 for papers.test:{port}".encode()
+        assert approved == ["papers.test", "papers.test"]  # once per hop
+
+        # Another name at the same address: the certificate doesn't cover it.
+        monkeypatch.setenv("NO_PROXY", "papers.test,other.test")
+        monkeypatch.setenv("no_proxy", "papers.test,other.test")
+        with pytest.raises(net.SourceError, match="Couldn't reach"):
+            net.get_public(f"https://other.test:{port}/a.pdf", max_bytes=1_000)
+
+        # A name that resolves inside the network is refused at the connection.
+        monkeypatch.undo()
+        monkeypatch.setenv("NO_PROXY", "papers.test")
+        monkeypatch.setenv("no_proxy", "papers.test")
+        monkeypatch.setattr(net.socket, "getaddrinfo", addresses("127.0.0.1"))
+        with pytest.raises(net.SourceError, match="inside the network"):
+            net.get_public(f"https://papers.test:{port}/a.pdf", max_bytes=1_000)
+    finally:
+        httpd.shutdown()

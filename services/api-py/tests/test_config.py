@@ -8,17 +8,17 @@ SECRET = "0123456789abcdef0123456789abcdef"
 
 
 def test_defaults_put_this_server_where_the_app_looks():
-    settings = settings_from_env({})
+    settings = settings_from_env({"AUTH_MODE": "local"})
     assert (settings.host, settings.port) == ("127.0.0.1", 8000)
     assert settings.ts_agent_url is None
-    assert settings_from_env({"TS_AGENT_URL": "  "}).ts_agent_url is None
+    assert settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "  "}).ts_agent_url is None
     assert settings.tools is not None and settings.tools.servers == {}
     assert settings.database_url is None and settings.auth_secret is None
     assert (DEFAULT_MIGRATIONS_DIR / "001_init.sql").exists() or any(
         DEFAULT_MIGRATIONS_DIR.glob("001_*.sql")
     )
     assert (
-        settings_from_env({"TS_AGENT_URL": "http://agent:8000/"}).ts_agent_url
+        settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://agent:8000/"}).ts_agent_url
         == "http://agent:8000"
     )
 
@@ -32,16 +32,19 @@ def test_login_follows_the_typescript_rules():
         {"AUTH_MODE": "local", "AUTH_SECRET": SECRET},
         {"AUTH_SECRET": "short"},
         {"AUTH_MODE": "maybe"},
-        {"NODE_ENV": "production"},
+        # Neither set: refused everywhere, not only in production.
+        {},
+        {"NODE_ENV": "development"},
+        {"AUTH_SECRET": ""},
     ):
         with pytest.raises(ConfigError):
             auth_secret(env)
     with pytest.raises(ConfigError):
-        settings_from_env({"API_PY_PORT": "eighty"})
+        settings_from_env({"AUTH_MODE": "local", "API_PY_PORT": "eighty"})
 
 
 def test_the_blob_store_reads_the_typescript_settings():
-    s3 = settings_from_env({}).s3
+    s3 = settings_from_env({"AUTH_MODE": "local"}).s3
     assert s3 is not None
     assert (s3.endpoint, s3.region, s3.bucket, s3.force_path_style, s3.public_url) == (
         None,
@@ -51,6 +54,7 @@ def test_the_blob_store_reads_the_typescript_settings():
         None,
     )
     env = {
+        "AUTH_MODE": "local",
         "S3_ENDPOINT": "http://s3:8333",
         "S3_FORCE_PATH_STYLE": "false",
         "S3_PUBLIC_URL": "https://files.example",
@@ -61,9 +65,23 @@ def test_the_blob_store_reads_the_typescript_settings():
         False,
         "https://files.example",
     )
-    assert settings_from_env({}).max_upload_bytes == 50 * 1024 * 1024
+    assert settings_from_env({"AUTH_MODE": "local"}).max_upload_bytes == 50 * 1024 * 1024
     # Number.parseInt, as the TypeScript server reads it.
-    assert settings_from_env({"MAX_UPLOAD_BYTES": " 1048576 bytes"}).max_upload_bytes == 1048576
+    assert (
+        settings_from_env(
+            {"AUTH_MODE": "local", "MAX_UPLOAD_BYTES": " 1048576 bytes"}
+        ).max_upload_bytes
+        == 1048576
+    )
     for bad in ("lots", "0", "-5"):
         with pytest.raises(ConfigError):
-            settings_from_env({"MAX_UPLOAD_BYTES": bad})
+            settings_from_env({"AUTH_MODE": "local", "MAX_UPLOAD_BYTES": bad})
+
+
+def test_row_security_is_optional_unless_required():
+    base = {"AUTH_MODE": "local"}
+    assert settings_from_env(base).row_security_required is False
+    assert settings_from_env({**base, "ROW_SECURITY": "optional"}).row_security_required is False
+    assert settings_from_env({**base, "ROW_SECURITY": " Required "}).row_security_required is True
+    with pytest.raises(ConfigError, match="ROW_SECURITY must be required or optional"):
+        settings_from_env({**base, "ROW_SECURITY": "on"})

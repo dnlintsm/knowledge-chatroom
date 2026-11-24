@@ -13,7 +13,7 @@ import { access } from "./sharing";
 import { useWorkspace } from "./store";
 
 /**
- * Who works on an experiment, in its header (issue #255, docs/workspaces.md,
+ * Who works on an experiment, in its header (docs/workspaces.md,
  * "Experiment handover"): "Maintained by Alice · started by Bob" when they
  * differ, and its collaborators. Its maintainer adds and removes
  * collaborators and hands it over; an Owner or Admin hands over a shared or

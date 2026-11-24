@@ -1,7 +1,7 @@
 /**
  * The chat's first-round suggestion chips: knowledge-work actions on what the
  * user has in front of them. Each chip shows only when it applies and names
- * the file or run it works on, so a click sends a complete request.
+ * the file or run it works on, so selecting one fills the composer with a complete request.
  */
 import { fileName } from "./types";
 
@@ -67,7 +67,7 @@ export function firstRoundSuggestions(place: SuggestionPlace): ChatSuggestion[] 
 }
 
 /**
- * What the suggester (apps/agent/src/suggest.ts) is asked for after each reply;
+ * What the suggester (services/api-py/api_py/suggest.py) is asked for after each reply;
  * it also sees the conversation and the workspace context.
  */
 export const FOLLOW_UP_INSTRUCTIONS =

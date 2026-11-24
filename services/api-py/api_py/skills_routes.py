@@ -1,4 +1,4 @@
-"""The skills API and the skill hub (#190, step 7), as apps/agent/src/skills/http.ts serves them.
+"""The routes of the skills API and the skill hub.
 
     GET    /skills              {skills, canSetDefaults, canPublish, hub, scripts}:
                                 every skill you can use, with its modes; ?thread=<id>
@@ -63,6 +63,7 @@ from .storage_routes import (
     ALL_METHODS,
     MAX_JSON_BYTES,
     _MalformedPath,
+    declares_json,
     decode_component,
     first_param,
     parse_json,
@@ -106,11 +107,11 @@ def services(request: Request, storage: Storage | None = None) -> tuple[SkillSer
 
 async def read_json(request: Request) -> Any:
     """
-    The JSON body, as json() in http.ts: an empty body is {}, an array counts as
+    The JSON body: an empty body is {}, an array counts as
     an object, and anything else (too big, not JSON, a byte order mark) is None.
     """
     body = await read_body(request, MAX_JSON_BYTES)
-    if body is None:
+    if body is None or (body and not declares_json(request)):
         return None
     try:
         value = parse_json(body.decode("utf-8", errors="replace") or "{}")

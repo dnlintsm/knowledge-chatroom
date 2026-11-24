@@ -62,11 +62,14 @@ def servers(config: dict[str, Any], **env: str) -> dict[str, ExternalServer]:
 def test_mcp_servers_unset_serves_an_empty_menu_unless_legacy_forwarding_is_explicit():
     assert servers_from_env({}) is None
     assert servers_from_env({"MCP_SERVERS": " \n"}) is None
-    settings = settings_from_env({})
+    settings = settings_from_env({"AUTH_MODE": "local"})
     assert settings.tools is not None and settings.tools.servers == {}
-    whitespace = settings_from_env({"MCP_SERVERS": " \n"})
+    whitespace = settings_from_env({"AUTH_MODE": "local", "MCP_SERVERS": " \n"})
     assert whitespace.tools is not None and whitespace.tools.servers == {}
-    assert settings_from_env({"TS_AGENT_URL": "http://legacy:8100"}).tools is None
+    assert (
+        settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://legacy:8100"}).tools
+        is None
+    )
 
 
 def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCaptureFixture):
@@ -159,8 +162,10 @@ def test_timeouts_and_token_lifetimes():
         with pytest.raises(ValueError, match="STORAGE_TOKEN_SECONDS"):
             storage_token_seconds({"STORAGE_TOKEN_SECONDS": bad})
     with pytest.raises(ConfigError, match="STORAGE_TOKEN_SECONDS"):
-        settings_from_env({"MCP_SERVERS": "{}", "STORAGE_TOKEN_SECONDS": "5"})
-    tools = settings_from_env({"MCP_SERVERS": "{}", "TOOLS_CALL_TIMEOUT_MS": "500"}).tools
+        settings_from_env({"AUTH_MODE": "local", "MCP_SERVERS": "{}", "STORAGE_TOKEN_SECONDS": "5"})
+    tools = settings_from_env(
+        {"AUTH_MODE": "local", "MCP_SERVERS": "{}", "TOOLS_CALL_TIMEOUT_MS": "500"}
+    ).tools
     assert tools == ToolsSettings(servers={}, timeout=0.5, storage_token_seconds=3600)
 
 
@@ -286,6 +291,29 @@ async def test_a_call_carries_the_users_tokens():
     assert storage and storage["sub"] == "kc|alice" and storage["via"] == "mcp:lab"
     assert 590 <= storage["exp"] - identity["exp"] + 3600 <= 600
     assert tokens.MEMORY_HEADER not in headers
+    assert "ws" not in storage  # no workspace named: the default one, as before
+
+
+async def test_a_calls_storage_token_is_bound_to_the_pages_workspace():
+    """A tool's writes landed in the default workspace, wherever the user was."""
+    recorder = Recorder(ToolAnswer({}, "{}", False))
+    lab = "11111111-2222-4333-8444-555555555555"
+    async with api(lab_tools(), call=recorder) as client:
+        for named in (lab.upper(), "not-an-id", "my-lab"):
+            answer = await client.post(
+                "/tools/lab/save",
+                headers={**ALICE, "X-Knowledge-Workspace": named},
+                json={"arguments": {}},
+            )
+            assert answer.status_code == 200
+    bound = [
+        tokens.verify(call[3][tokens.STORAGE_HEADER], SECRET, tokens.STORAGE_AUDIENCE)
+        for call in recorder.calls
+    ]
+    assert [b.get("ws") for b in bound if b] == [lab, None, None]
+    # The identity token names who is calling, not where.
+    identity = tokens.verify(recorder.calls[0][3][tokens.IDENTITY_HEADER], SECRET, "mcp:lab")
+    assert identity and "ws" not in identity
 
 
 async def test_without_login_no_tokens_are_sent():

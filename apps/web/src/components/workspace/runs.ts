@@ -1,7 +1,7 @@
 /**
- * Runs: a run is an experiment with a report (issue #82), the experiment's
+ * Runs: a run is an experiment with a report, the experiment's
  * `report.md`. The experiment the user is in lives in the URL as
- * `?experiment=<id>`, so links open a run and back/forward move between runs.
+ * `?experiment_id=<id>`, so links open a run and back/forward move between runs.
  */
 
 import type { Experiment, KnowledgeNode } from "./server-files";
@@ -29,24 +29,38 @@ export function runsUnder(experiments: Experiment[], nodes: KnowledgeNode[], nod
   return experiments.filter((e) => under(e.nodeId));
 }
 
+/** The URL parameter naming the experiment the user is in: `?experiment_id=<id>`. */
+export const EXPERIMENT_PARAM = "experiment_id";
+
+/** Links made before `experiment_id` (`?experiment=<id>`) still open their run. */
+const LEGACY_EXPERIMENT_PARAM = "experiment";
+
 /** The experiment named in a URL query string, or null. */
 export function experimentFromSearch(search: string): string | null {
-  return new URLSearchParams(search).get("experiment")?.trim() || null;
+  const params = new URLSearchParams(search);
+  return params.get(EXPERIMENT_PARAM)?.trim() || params.get(LEGACY_EXPERIMENT_PARAM)?.trim() || null;
 }
 
-/** The query string with `experiment` set (or removed), keeping other parameters. */
+/** Whether the query string names the experiment the old way (`?experiment=`, `?run=`), so it wants rewriting. */
+export function hasLegacyExperiment(search: string): boolean {
+  const params = new URLSearchParams(search);
+  return params.has(LEGACY_EXPERIMENT_PARAM) || params.has("run");
+}
+
+/** The query string with `experiment_id` set (or removed), keeping other parameters. */
 export function searchWithExperiment(search: string, id: string | null): string {
   const params = new URLSearchParams(search);
-  params.delete("experiment");
+  params.delete(EXPERIMENT_PARAM);
+  params.delete(LEGACY_EXPERIMENT_PARAM);
   // The old ?run= links have nothing to point at any more.
   params.delete("run");
-  if (id) params.set("experiment", id);
+  if (id) params.set(EXPERIMENT_PARAM, id);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
 
 /**
- * Which experiments a list shows (#186): those on `node` (null: every one you
+ * Which experiments a list shows: those on `node` (null: every one you
  * can see) and, with `descendants`, on the nodes under it. It lives in the URL
  * as `?list=<nodeId>` (and `&direct=1` without the sub-levels), apart from
  * where the user is, so opening an experiment doesn't change it. Without a

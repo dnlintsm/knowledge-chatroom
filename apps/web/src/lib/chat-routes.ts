@@ -5,12 +5,29 @@ import { ChatStoreError, ChatTakenError, type ChatStore, type ChatSummary, type 
 /**
  * CopilotKit's thread routes (the history drawer's list, rename, archive and
  * delete, and the inspector's messages, events and state), answered from the
- * chat store for the signed-in user (issue #91). Without CopilotKit
+ * chat store for the signed-in user. Without CopilotKit
  * Intelligence the runtime would answer them from one in-memory list shared
  * by everyone, and refuse the changes. Returns null for any other route.
  *
  * `path` is the part after the runtime's base path, e.g. "/threads/<id>".
  */
+/**
+ * The thread a request asks to stop, or null when it isn't a stop request.
+ * The runtime routes `…/agent/<id>/stop/<thread>` by the end of the path,
+ * whatever comes before it, so this looks at the end too: anchored at the
+ * start, a path with something in front skipped the owner check.
+ */
+export function stopThreadId(path: string): string | null {
+  const stop = path.match(/(?:^|\/)agent\/[^/]+\/stop\/([^/]+)\/?$/);
+  if (!stop) return null;
+  try {
+    return decodeURIComponent(stop[1]);
+  } catch {
+    // The runtime answers a malformed id itself.
+    return stop[1];
+  }
+}
+
 export async function handleChatRoute(
   req: Request,
   path: string,

@@ -3,9 +3,9 @@
 Status: creating, joining and switching workspaces is **done**
 ([#226](https://github.com/dnlintsm/knowledge-chatroom/issues/226), the milestone in
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178#issuecomment-6817847479)).
-Administration and handover is **being specified**, tracked in
-[#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255): see
-[Administration and handover](#administration-and-handover).
+Administration and handover is **done** too
+([#255](https://github.com/dnlintsm/knowledge-chatroom/issues/255)): see
+[Administration and handover](#administration-and-handover). Both shipped in 0.3.0.
 
 This is the short spec and operation matrix that #178 asks for before implementation. It
 covers creating, joining and switching workspaces, the isolation that has to be in place
@@ -62,8 +62,8 @@ Confirmed on 2026-11-13, refined after the review on #227.
 6. **The skill hub and memory-pack hub stay global.** Installs and settings are already per
    workspace.
 7. **This doesn't wait for phase 4 of #169.** Workspace resolution goes into api-py, which
-   fronts every storage route. The TypeScript chat path and its in-process tools take the
-   workspace from the run and apply the same checks.
+   fronts every storage route. The chat agent and its in-process tools take the workspace
+   from the run and apply the same checks.
 8. **Admin is a high-trust role** (below).
 9. **Home** is the current workspace's home. The switcher, with every workspace and
    Create, is always on screen at the breadcrumb root, including for users with one
@@ -160,7 +160,7 @@ A token says **who** is acting and **in which workspace**. It is not a snapshot 
 grants.
 
 - **Each request and each tool dispatch** checks current membership, then content access,
-  from the database, on both api-py and the TypeScript paths. This is how content checks
+  from the database, in api-py and in agent-py's tools. This is how content checks
   already work (`Session.need` reads `effective_role` on every call), and membership joins it.
   So removing a grant or a group member takes effect on the next request or tool call.
 - **An agent run** keeps working only through new checks. Once the user loses access, no new
@@ -267,7 +267,7 @@ the workspace: add them first.
 
 | Surface | Today | Change |
 | --- | --- | --- |
-| Storage services | Built once around the `default` id (`apps/agent/src/storage/index.ts`, `services/api-py/api_py/storage.py`) | Take the workspace per request |
+| Storage services | Built once around the `default` id (`services/api-py/api_py/storage.py`) | Take the workspace per request |
 | Events (`?watch`) | One hub filtered to one workspace | Filter each subscription by its workspace, and recheck membership per event |
 | Search, downloads, chats, memory, shared memory | Queries carry the single workspace id | Use the request's workspace |
 | Agent working copy | `<cwd>/workspace/` per run | Per workspace and run |
@@ -327,7 +327,10 @@ signed-in user with only chats.
 ## Adding a member
 
 **The member list** is the current workspace's members only. Members see names. Owners and
-Admins also see email, sign-up and last-active times. OIDC subjects aren't returned.
+Admins also see email, sign-up and last-active times. OIDC subjects aren't returned. The
+sharing picker's list (`GET /access/users`) follows the same rule: names for a Member, emails
+too for an Owner or Admin, and never subjects. A user gets their own subject from
+`GET /access`, and Owners and Admins see members' subjects in `GET /access/people`.
 
 **Looking someone up to add them** is separate from the member list:
 
@@ -526,9 +529,8 @@ What stops (see [Revalidation](#revalidation)):
 
 - Every request, tool call and memory call in the workspace, including tokens already
   minted: 404, as for any non-member. Their open `?watch` streams close.
-- **Their running chat runs in that workspace end at their next step**, with the
-  TypeScript and the Python chat agent alike. Each checks membership (and that the
-  workspace is active) again before every tool call and after every batch of tool calls,
+- **Their running chat runs in that workspace end at their next step**, in the
+  chat agent. It checks membership (and that the workspace is active) again before every tool call and after every batch of tool calls,
   before the next model request. A tool call that was already accepted runs to its end,
   whether it succeeds or fails, and keeps its result and audit entry; then the run stops,
   so the model gets no turn after it. A tool call after the removal is refused, with the
@@ -686,8 +688,7 @@ In the conformance suite, against the same backend as before:
   maintainer's Experiment with `keepAsCollaborator` doesn't make them a collaborator, also
   after they are added again; the new maintainer or collaborator must be able to
   view the node; agent tokens can't manage collaborators. These run in the default
-  workspace, so they also run with `CONFORMANCE_TARGET=ts`, which checks the TypeScript
-  server's own rules.
+  workspace.
 - Workspace inventory: refused to anyone not in `PLATFORM_ADMINS`, no content in the
   answer, adding an Owner is audited in the workspace.
 - Recovery where the unavailable creator held the only direct root Full access grant and
@@ -701,7 +702,7 @@ default workspace isn't added back at sign-in, and a group membership or grant w
 while its user is being removed, in either order, doesn't come back when they're added
 again.
 
-In `apps/agent` and `services/agent-py` (through the real Claude Code engine, with a
+In `services/agent-py` (through the real Claude Code engine, with a
 scripted Messages API that counts model turns): a run whose user is removed, or whose
 workspace is archived, during an accepted tool call keeps that call's result, whether it
 succeeded or failed, and ends without another model turn; a tool call after that is
@@ -717,9 +718,9 @@ rules.
    adds the departures, keeps `sign_in_memberships` from re-adding someone who left, and
    makes `workspace_members_keep_owner` lock the workspace's row before it looks. The
    routes take that lock first too, so two Owners demoting or removing each other at once
-   leave one. On the agent server, `membershipHook`
-   (`apps/agent/src/storage/revocation.ts`) checks membership before every tool call of a
-   run and stops the run once it is gone.
+   leave one. In the chat agent, a hook checks membership before every tool call of a
+   run and stops the run once it is gone (the TypeScript agent, since removed, did the
+   same).
 3. Backend, Experiments: the migration, maintainer and collaborators in api-py and in the
    TypeScript server's session and tools. Done: `025_experiment_maintainers.sql` adds
    `maintainer_id` (backfilled from the author) and `experiment_collaborators`, rewrites

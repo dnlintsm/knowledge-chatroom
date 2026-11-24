@@ -1,1 +1,1 @@
-"""The agent server's HTTP API in Python (issue #190)."""
+"""The app's HTTP API: storage, access, skills, memory, search and chat history."""

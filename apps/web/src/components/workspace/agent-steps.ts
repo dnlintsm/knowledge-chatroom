@@ -2,7 +2,7 @@ import type { Message } from "@ag-ui/client";
 import { splitToolName } from "./tool-chips";
 
 /**
- * Collapsed agent steps (issue #154): each turn's thinking and tool calls fold
+ * Collapsed agent steps: each turn's thinking and tool calls fold
  * into one "Worked for 14s · 5 steps" block, and the answer stays below it.
  * Pure functions so they are unit-tested; the React side is
  * agent-steps-view.tsx.
@@ -25,7 +25,7 @@ const isStep = (m: Message) => m.role === "reasoning" || toolCallsOf(m).length >
  * still running, text with tool calls is narration rather than the answer,
  * so it folds in as soon as Claude starts a tool. A turn without thinking or
  * tool calls has no block. Outcomes inside a block (paper cards, charts,
- * A2UI, anything waiting for the user) still show when it is collapsed;
+ * anything waiting for the user) still show when it is collapsed;
  * that is up to their renderers, see agent-steps-view.tsx.
  */
 export function groupSteps(messages: Message[], running: boolean): StepRow[] {
@@ -130,7 +130,7 @@ const host = (value: unknown) => {
 type Verb = [running: string, done: string];
 /** [while running, once done], with what the arguments add. */
 const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
-  // The agent's storage and memory tools (apps/agent/src/storage/tools.ts, apps/agent/src/memory).
+  // The agent's storage and memory tools (services/agent-py/agent_py/workspace.py, services/api-py/api_py/memory_agent.py).
   read_file: (a) => [`Reading ${short(a.path) || "a file"}`, `Read ${short(a.path) || "a file"}`],
   write_file: (a) => [`Writing ${short(a.path) || "a file"}`, `Wrote ${short(a.path) || "a file"}`],
   save_file: (a) => [`Saving ${short(a.path) || "a file"}`, `Saved ${short(a.path) || "a file"}`],
@@ -177,7 +177,7 @@ const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
   showPane: () => ["Showing a pane", "Showed a pane"],
   hidePane: () => ["Hiding a pane", "Hid a pane"],
   // listRuns and openRun keep their names (saved chats call them by name);
-  // only what the user reads changed when "run" became "experiment" (#185).
+  // only what the user reads changed when "run" became "experiment".
   listRuns: () => ["Looking at experiments", "Looked at experiments"],
   openRun: () => ["Opening an experiment", "Opened an experiment"],
   listActions: () => ["Looking at actions", "Looked at actions"],
