@@ -640,17 +640,19 @@ async def record_read(
     user_id: str,
     via: str,
     version_id: str | None = None,
-) -> None:
+) -> str | None:
     """
     Records that an agent read this version of one of a running run's files:
     `version_id` when the read named one, else the file's newest version with
     the bytes it read. A run that isn't running, or a read already recorded,
     adds nothing. It holds the experiment's row, so a finish in progress
     (update) either sees this read or turns it away once the run has ended.
+    The run's node when a read was added (None at the root), so the caller can
+    tell whoever watches the run; else nothing.
     """
     if version_id is not None and not is_uuid(version_id):
-        return
-    await conn.execute(
+        return None
+    cur = await conn.execute(
         """
         INSERT INTO run_reads (workspace_id, experiment_id, path, version_id, sha256, user_id, via)
         SELECT e.workspace_id, e.id, f.path, v.id, v.blob_sha256, %(user)s, %(via)s
@@ -666,7 +668,8 @@ async def record_read(
         WHERE e.id = %(experiment)s AND e.workspace_id = %(ws)s
           AND e.state = 'running' AND e.deleted_at IS NULL
         FOR SHARE OF e
-        ON CONFLICT DO NOTHING""",
+        ON CONFLICT DO NOTHING
+        RETURNING (SELECT coalesce(node_id::text, '') FROM experiments WHERE id = experiment_id)""",
         {
             "user": user_id,
             "via": via,
@@ -677,6 +680,8 @@ async def record_read(
             "ws": workspace_id,
         },
     )
+    added = await cur.fetchone()
+    return None if added is None else added[0]
 
 
 async def reads(

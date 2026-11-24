@@ -1354,7 +1354,7 @@ class FilesSession:
         ):
             return
         async with self.session.scoped() as conn:
-            await experiments.record_read(
+            node = await experiments.record_read(
                 conn,
                 self.session.ws,
                 self.experiment_id,
@@ -1364,6 +1364,17 @@ class FilesSession:
                 principal.via,
                 version_id,
             )
+            # A new read changes what the run panel shows: whoever has the run open hears it.
+            if node is not None:
+                await self.session.storage.notify(
+                    conn,
+                    {
+                        "op": "experiment",
+                        "change": "update",
+                        "id": self.experiment_id,
+                        "node": node or None,
+                    },
+                )
 
     async def history(self, path: str) -> builtins.list[dict[str, Any]] | None:
         async with self.session.scoped() as conn:

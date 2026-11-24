@@ -93,6 +93,8 @@ Another viewer's Claude reading a shared run's Rules isn't the run reading them.
   can't lose each other and provenance stays written only when the run starts and finishes.
 - **Which files:** only `models/general_rules.md` for now, kept in one constant
   (`RECORDED_READS`) so other files can join later without a schema change.
+- **Heard:** a new read sends an `experiment` event (change `update`), so a run panel that is
+  open shows it without waiting for another change.
 - **Not recorded:** reads by a person in the browser (viewing isn't executing), reads after the
   run finished, and reads of other files. A deployment without login has no storage tokens,
   so nothing is recorded there.
@@ -181,7 +183,10 @@ view on the Experiment's node, as for every Experiment.
 2. Backend: the past-version read, `run_reads` and the Rules record at finish, `version` on
    the Python agent's `read_file` (api-py, agent-py, contract). Done.
 3. Backend: Recently deleted and restore (migration, api-py, contract). Done.
-4. Screens: input drift, View recorded, and the Rules row in Provenance.
+4. Screens: input drift, View recorded, and the Rules row in Provenance. Done: the panel
+   follows the versions the browser knows of the run's files (the store's `serverHash`), so
+   drift shows as soon as a save lands, and Claude's `currentExperiment` lists the inputs with
+   their state and, for a changed one, the copy's `recordedVersion`.
 5. Screens: Undo after delete, and Recently deleted.
 
 ## Open points for review

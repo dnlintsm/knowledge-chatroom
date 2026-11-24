@@ -287,9 +287,14 @@ export interface RunProvenance {
     path: string;
     from: { node: string | null; experiment: string | null; path: string };
     version: string;
+    /** Missing on runs recorded before inputs kept their hash. */
     sha256: string;
     size: number;
   }[];
+  /** At finish: the version of each recorded file (its Rules) then, null when there was none. */
+  files?: Record<string, { version: string; sha256: string } | null>;
+  /** At finish: the reads recorded while it ran (RunRead, without `by`). */
+  reads?: Omit<Schema["RunRead"], "by">[];
 }
 
 export type ExperimentChange = Partial<
