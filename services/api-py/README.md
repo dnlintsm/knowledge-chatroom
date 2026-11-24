@@ -105,15 +105,15 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | --- | --- | --- |
 | `TS_AGENT_URL` | unset | An older release's TypeScript server to forward unknown routes to. Unset disables forwarding. |
 | `API_PY_HOST`, `API_PY_PORT` | `127.0.0.1`, `8000` | Where it listens. |
-| `DATABASE_URL` | unset | Postgres, the same one agent-py uses. Unset means no storage. |
+| `DATABASE_URL` | unset | Postgres. Only api-py connects to it. Unset means no storage. |
 | `AUTH_MODE`, `AUTH_SECRET` | | Login: `oidc` with the app's `AUTH_SECRET`, or `local` for none. One of them is required: with neither, api-py refuses to start (`pnpm dev` passes `local`). Without login, a request signed for a user is answered 401. |
 | `MIGRATIONS_DIR` | `services/api-py/migrations` | The migrations to apply and expect. |
 | `MIGRATIONS` | unset | `off`: don't apply the migrations, wait for another process to. Otherwise api-py applies them. |
-| `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | | The blob store; give agent-py the same values. |
+| `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL` | | The blob store. Only api-py reads these. |
 | `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | The largest file one upload may add. |
 | `HUB_ADMINS`, `SKILL_SCRIPTS` | unset | Who moderates the skill hub (and verifies memory packs), and `on` when skills' scripts run (set it on agent-py too, which runs them). |
 | `BUILTIN_SKILLS_DIR` | `services/api-py/skills` | The built-in skills (`/app/skills` in the image). |
-| `MEMORY` | unset | `on`: each user's memory; give agent-py the same value. Off disables `/memory`. |
+| `MEMORY` | unset | `on`: each user's memory. Off disables `/memory`. agent-py does not read it. |
 | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | The small model that makes the chat's follow-up chips, sorts imported plain-text memory into notes and learns from chats. Without a key, the chips' request ends with an error (no chips), and imported text waits in the inbox as one note. |
 | `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES` | unset, `10` | `MEMORY_LEARN=off` stops learning from chats, which otherwise runs here once a chat has been quiet that many minutes. |
 | `MCP_SERVERS` | unset | The outside MCP servers; give agent-py the same value. Unset serves an empty `/tools` menu (unless `TS_AGENT_URL` is set). |

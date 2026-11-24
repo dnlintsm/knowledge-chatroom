@@ -86,7 +86,8 @@ with `pnpm test:conformance` ([Testing](docs/testing.md)).
 - Comments say what the code does and why, not how it got here. No issue numbers or "step
   N of the port" as the explanation.
 - A bug fix comes with the test that failed before it.
-- A new setting is documented in `.env.example` and the guide that covers it. A removed or
+- A new setting gets a row in `docs/settings.md` (a check compares that page with the
+  code), and an entry in `.env.example` when people are meant to set it. A removed or
   renamed one gets a row in `scripts/env-upgrade-plan.mjs`.
 - Never skip, disable or loosen a test to get a green run. If a test is wrong, say why and
   fix the test.

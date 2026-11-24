@@ -10,6 +10,8 @@ test("documentation-only changes skip every suite", () => {
     "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md", "CLAUDE.md",
     ".github/pull_request_template.md", ".github/ISSUE_TEMPLATE/bug_report.md",
   ])).toEqual(none);
+  // The settings reference is compared with the code by a unit test.
+  expect(affectedSuites(["docs/settings.md"])).toEqual({ ...none, node: true });
   // A workflow is not documentation: it still runs everything.
   expect(affectedSuites([".github/workflows/quality.yml"])).toEqual(allSuites());
 });
