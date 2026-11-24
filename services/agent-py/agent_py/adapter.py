@@ -290,6 +290,55 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         thread_id = input_data.thread_id
         remember(self._tokens, thread_id, storage_token, self._max_workers)
         remember(self._workspaces, thread_id, workspace, self._max_workers)
+        try:
+            run = await self._prepare(input_data, user, memory_token, workspace, model)
+        except Exception:
+            # What each step expects to go wrong it handles itself, and the run goes
+            # on without that part. Anything else used to break the stream with no
+            # answer at all; the chat gets an error it can show instead.
+            logger.exception("couldn't get the run ready")
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't start the run. Please try again.",
+            )
+            return
+        remember(self._runs, thread_id, run, self._max_workers)
+        try:
+            if model and len(self._models) > 1:
+                await self._switch_cached_model(input_data, model)
+        except Exception as error:
+            logger.warning("couldn't switch chat model: %s", error)
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=thread_id,
+                run_id=input_data.run_id,
+                message="Couldn't switch the chat model. Please try again.",
+            )
+            return
+        prepared, slash = self.prepare(input_data, run.skills)
+        if slash:
+            self._used(thread_id, slash.name, "slash")
+        started = False
+        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
+            async for event in stream:
+                yield event
+                started = started or event.type == EventType.RUN_STARTED
+                while started and run.pending:
+                    name, value = run.pending.pop(0)
+                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+
+    async def _prepare(
+        self,
+        input_data: RunAgentInput,
+        user: str,
+        memory_token: str | None,
+        workspace: str | None,
+        model: str | None,
+    ) -> Run:
+        """What the run needs before the model is asked: its skills, working folder, memory and MCP servers."""
+        thread_id = input_data.thread_id
         run = Run(model=model)
         if self._skills_root is not None:
             # A folder per user and workspace (issue #226): skills and the copy differ by workspace.
@@ -342,30 +391,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 else {}
             )
             run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
-        remember(self._runs, thread_id, run, self._max_workers)
-        try:
-            if model and len(self._models) > 1:
-                await self._switch_cached_model(input_data, model)
-        except Exception as error:
-            logger.warning("couldn't switch chat model: %s", error)
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                thread_id=thread_id,
-                run_id=input_data.run_id,
-                message="Couldn't switch the chat model. Please try again.",
-            )
-            return
-        prepared, slash = self.prepare(input_data, run.skills)
-        if slash:
-            self._used(thread_id, slash.name, "slash")
-        started = False
-        async with aclosing(cast(AsyncGenerator[BaseEvent, None], super().run(prepared))) as stream:
-            async for event in stream:
-                yield event
-                started = started or event.type == EventType.RUN_STARTED
-                while started and run.pending:
-                    name, value = run.pending.pop(0)
-                    yield CustomEvent(type=EventType.CUSTOM, name=name, value=value)
+        return run
 
     async def _switch_cached_model(self, input_data: RunAgentInput, model: str) -> None:
         # The pinned adapter rebuilds the worker for recovery and frontend tools.

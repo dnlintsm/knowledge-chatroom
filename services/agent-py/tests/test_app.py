@@ -294,3 +294,29 @@ def test_the_runs_workspace_goes_with_its_storage_calls(claude):
     # Skills, then the working folder's copy (workdir.py): all in the page's workspace.
     assert {"/skills/run", "/nodes", "/experiments"} <= {r.url.path for r in seen}
     assert {r.headers.get("x-knowledge-workspace") for r in seen} == {ws}
+
+
+def test_an_unexpected_failure_getting_a_run_ready_is_a_run_error(client, claude, monkeypatch):
+    """It used to break the stream with no event at all; the chat showed nothing."""
+    from agent_py.adapter import ChatroomAdapter
+
+    load_skills = ChatroomAdapter._skills_for
+    failed = False
+
+    async def fails_once(self, thread_id):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("the disk under /var/lib/agent-py is full")
+        return await load_skills(self, thread_id)
+
+    monkeypatch.setattr(ChatroomAdapter, "_skills_for", fails_once)
+    evts = events(client.post("/agent/report", json=run_input(user=LOCAL)))
+    assert types(evts) == ["RUN_ERROR"]
+    # What went wrong is for the log, not the chat.
+    assert evts[0]["message"] == "Couldn't start the run. Please try again."
+    assert claude.created == []
+
+    # Nothing is left half set up: the next run of the same chat works.
+    again = events(client.post("/agent/report", json=run_input(user=LOCAL)))
+    assert (types(again)[0], types(again)[-1]) == ("RUN_STARTED", "RUN_FINISHED")
