@@ -68,7 +68,7 @@ export function useAnswerReferences(content: string, streaming: boolean) {
     });
     return {
       components: { a: AnswerLink },
-      // Images from other servers become links before harden runs (issue #291).
+      // Images from other servers become links before harden runs.
       rehypePlugins: [...Object.values(beforeHarden), noteImages, rootRelativeLinks, localImagesOnly, harden],
     };
   }, [isNote]);

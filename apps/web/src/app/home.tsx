@@ -19,7 +19,7 @@ function Demos() {
 }
 
 /**
- * The app in one workspace (issue #226): the one the page's `/w/<slug>`
+ * The app in one workspace: the one the page's `/w/<slug>`
  * names, or null when the server has no workspaces. Everything below is
  * mounted again when it changes, so no chat, file or request carries over.
  */
@@ -51,7 +51,7 @@ export function Home({
     }
   }, [id, userKey, isDefault]);
   const headers = useMemo(() => (id ? { [WORKSPACE_HEADER]: id } : undefined), [id]);
-  // Its name as shown: a rename (issue #255) changes it in place.
+  // Its name as shown: a rename changes it in place.
   const [renamed, setRenamed] = useState<{ id: string; name: string } | null>(null);
   const shown = useMemo(
     () => (workspace && renamed?.id === workspace.id ? { ...workspace, name: renamed.name } : workspace),

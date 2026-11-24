@@ -831,7 +831,7 @@ class MemoryService:
         """
         # One transaction marks the item accepted and makes the change, so a
         # failure (or a crash) between the two leaves it waiting, never
-        # accepted without its change (issue #295). The steps below open their
+        # accepted without its change. The steps below open their
         # own transactions: here those are savepoints of this one.
         async with self.scoped() as conn:
 

@@ -495,7 +495,7 @@ def addresses(*ips: str):
 
 
 def test_a_link_from_a_source_is_only_followed_to_public_https(monkeypatch):
-    """Issue #289: a paper's pdf_url is whatever the source's answer says."""
+    """A paper's pdf_url is whatever the source's answer says."""
     for bad in (
         "file:///etc/passwd",
         "ftp://example.org/a.pdf",

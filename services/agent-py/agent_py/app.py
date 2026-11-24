@@ -110,7 +110,7 @@ def create_app(
     env: Mapping[str, str] | None = None, adapter: ChatroomAdapter | None = None
 ) -> FastAPI:
     env = os.environ if env is None else env
-    # Whether runs must be signed (issue #283): AUTH_MODE says, and a missing key
+    # Whether runs must be signed: AUTH_MODE says, and a missing key
     # never means "no login". Unconfigured, this raises and the server won't start.
     login = login_from_env(env)
     if login.required and login.key is None:
@@ -165,7 +165,7 @@ def create_app(
                 storage_token=request.headers.get(STORAGE_HEADER),
                 user=user.sub,
                 memory_token=request.headers.get(MEMORY_HEADER),
-                # The page's workspace (issue #226): storage, skills and memory calls name it.
+                # The page's workspace: storage, skills and memory calls name it.
                 workspace=request.headers.get(WORKSPACE_HEADER) or None,
             ):
                 yield encoder.encode(event)

@@ -177,7 +177,7 @@ _MIME = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{
 # What a browser may show in place when it opens a signed link to the object
 # store. Everything else is downloaded: the store's origin has none of the
 # sandboxing the app puts on the files it serves itself, so a page, an SVG or
-# an XML document there would run as a site of its own (issue #286).
+# an XML document there would run as a site of its own.
 _INLINE = re.compile(r"(image/(?!svg\+xml$)|audio/|video/)[a-z0-9.+-]+|application/pdf")
 
 

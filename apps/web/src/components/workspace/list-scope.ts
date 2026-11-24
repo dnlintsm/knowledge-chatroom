@@ -4,7 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { ALL_EXPERIMENTS, listScopeFromSearch, searchWithListScope, type ListScope } from "./runs";
 
 /**
- * The experiment list's scope (#186), read from and written to the URL. A
+ * The experiment list's scope, read from and written to the URL. A
  * change replaces the current history entry, so back/forward still move
  * between places, each with the scope it had.
  */

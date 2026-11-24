@@ -16,7 +16,7 @@ import { chipsOn, readChips, setChip, writeChips, type ChipsByChat, type ToolMen
 import { workspaceFetch } from "@/lib/workspace-request";
 
 /**
- * The chat's "+" menu of outside tools (issue #151). The agent lists the MCP
+ * The chat's "+" menu of outside tools. The agent lists the MCP
  * servers that have a `ui` block (GET /api/tools); picking one turns its chip
  * on for this chat, and the chips go out with every run as
  * forwardedProps.knowledge_chatroom.tools (use-chatroom-props.ts), so Claude

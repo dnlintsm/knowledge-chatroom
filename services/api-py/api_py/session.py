@@ -369,7 +369,7 @@ class Session:
         provenance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Starts a run for you (issue #82): a new draft experiment like
+        Starts a run for you: a new draft experiment like
         create_experiment's, in state running unless `given` says otherwise,
         with each input file linked in read only under inputs/, and a report.md
         whose front matter holds the run's record. You need to be able to read
@@ -469,7 +469,7 @@ class Session:
         self, experiment_id: str, inputs: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """
-        Adds input files to an existing run or experiment (issue #114): each is
+        Adds input files to an existing run or experiment: each is
         linked in read only under inputs/ at its current version and appended to
         the inputs its provenance records, so a rerun reads them too. Only its
         maintainer and collaborators can, while it isn't archived; a finished
@@ -509,9 +509,9 @@ class Session:
         provenance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Runs an experiment again as a new run (issue #82): same place, parameters,
+        Runs an experiment again as a new run: same place, parameters,
         hypothesis and inputs unless told otherwise. The inputs are read from
-        the old run's inputs/ at the content its record names (#187), even if
+        the old run's inputs/ at the content its record names, even if
         someone edited them since; `inputs` instead reads those files at their
         current versions. The old run stays as it is; the new one's provenance
         names it. You need to be able to see the old run.
@@ -1082,7 +1082,7 @@ class Session:
         if op == "node":
             return await self.access.sees_node(user_id, str(event.get("id")))
         if op == "experiment":
-            # Who just stopped working on it hears that too, to close it (issue #255).
+            # Who just stopped working on it hears that too, to close it.
             if user_id in (event.get("left") or []):
                 return True
             return await self.access.hears_experiment(
@@ -1103,7 +1103,7 @@ class Session:
     async def users(self) -> list[dict[str, Any]]:
         """
         The workspace's members, not everyone who has signed in: names for a
-        Member, and emails too for an Owner or Admin (issue #287).
+        Member, and emails too for an Owner or Admin.
         """
         return await self.access.users(private=self.membership in ("owner", "admin"))
 

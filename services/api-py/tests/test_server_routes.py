@@ -242,7 +242,7 @@ async def test_the_answer_is_one_forced_call_streamed_as_events():
         raise RuntimeError("overloaded")
 
     failed = await suggest(run_input(), fails)
-    # The reason is logged, not sent: a provider's error can name keys and URLs (issue #288).
+    # The reason is logged, not sent: a provider's error can name keys and URLs.
     assert failed[1] == {"type": "RUN_ERROR", "message": "Suggestions are unavailable right now."}
 
     async def no_call(params: dict) -> dict:
@@ -253,7 +253,7 @@ async def test_the_answer_is_one_forced_call_streamed_as_events():
 
 
 def test_a_request_adds_only_so_much_to_the_model_call():
-    """Issue #288: the deployment pays for this call, so the sender doesn't set its size."""
+    """The deployment pays for this call, so the sender doesn't set its size."""
     from api_py.suggest import MAX_CONTEXTS, MAX_REQUEST_CHARS, suggest_prompt
 
     long = run_input()

@@ -1,7 +1,7 @@
 // Runs the storage API conformance suite (packages/contracts/conformance) against
-// the Python API server (services/api-py) alone, as `pnpm dev` and compose run it
-// since issue #264: resets the test database, starts api-py on it with no
-// TypeScript server behind it, waits for storage, runs the suite and stops it.
+// the Python API server (services/api-py) alone, as `pnpm dev` and compose run it:
+// resets the test database, starts api-py on it with no TS_AGENT_URL upstream,
+// waits for storage, runs the suite and stops it.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -36,7 +36,7 @@ const freePort = () =>
 const apiPort = await freePort();
 const base = `http://127.0.0.1:${apiPort}`;
 const authSecret = randomBytes(32).toString("hex");
-// One "+" menu server, for the /tools routes (api-py serves them, issue #190 step 7).
+// One "+" menu server, for the /tools routes (api-py serves them).
 // Nothing listens on port 9, so a call answers 502.
 const mcpServers = JSON.stringify({
   conformance: { url: "http://127.0.0.1:9/mcp", forwardIdentity: true, ui: { label: "Conformance", tools: ["search"] } },
@@ -57,7 +57,7 @@ const api = spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
     EMBEDDING_MODEL: "off",
     // The suite's owner moderates the skill hub (verify, dismiss reports).
     HUB_ADMINS: "conformance|alice",
-    // The workspace inventory's admins (#255): api-py serves /platform alone.
+    // The workspace inventory's admins: api-py serves /platform alone.
     PLATFORM_ADMINS: "conformance|platform workspaces|platform",
     MCP_SERVERS: mcpServers,
     // api-py serves each user's own notes (step 8); nothing learns in the background.
@@ -87,7 +87,7 @@ async function waitForStorage() {
 let status = 1;
 if (await waitForStorage()) {
   // One file after the other, in this order: storage.test.ts's first user must
-  // become the owner, and workspaces.test.ts (issue #226) relies on that owner.
+  // become the owner, and workspaces.test.ts relies on that owner.
   // One run, so CI reads one set of counts, in TAP (scripts/ci-tests.mjs reads
   // its "# tests" lines; Node 26 prints the spec reporter even when piped).
   const files = ["conformance/storage.test.ts", "conformance/workspaces.test.ts"];

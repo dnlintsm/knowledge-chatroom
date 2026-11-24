@@ -1,4 +1,4 @@
-"""The workspace inventory and adding an Owner (issue #255, step 4; platform.py).
+"""The workspace inventory and adding an Owner (step 4; platform.py).
 
 The rules any client sees (who may ask, no content, the audit, recovery
 without and with `fullAccess`) are in the conformance suite
@@ -86,7 +86,7 @@ async def _email(database: str, subject: str) -> str | None:
 
 async def test_an_email_the_app_stops_vouching_for_stops_counting(database):
     """
-    Issue #284: admin lists match on the stored email. The app now leaves out an
+    Admin lists match on the stored email. The app now leaves out an
     email the provider didn't verify, and that must clear one stored earlier,
     or an account that once claimed an admin's address would keep the match.
     """
@@ -106,7 +106,7 @@ async def test_an_email_the_app_stops_vouching_for_stops_counting(database):
 
 
 async def test_an_email_two_accounts_share_names_nobody(database):
-    """Issue #284: never the most recent of several accounts with one email."""
+    """Never the most recent of several accounts with one email."""
     async with Client(database, SECRET, platform_admins="test|admin") as (api, _app):
         lab, _alice, bob_id = await _lab(api)
         found = await api.get(f"/workspaces/{lab}/lookup?email=bob@example.com", headers=ALICE)

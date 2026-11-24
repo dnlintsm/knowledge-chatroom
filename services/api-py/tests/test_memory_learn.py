@@ -292,7 +292,7 @@ async def test_learning_from_quiet_chats(memory_api, database):
 @needs_database
 async def test_a_chat_that_read_outside_content_is_learned_from_as_ask_first(memory_api, database):
     """
-    Issue #285: a save in a chat that used another tool waits in the inbox, and
+    A save in a chat that used another tool waits in the inbox, and
     learning from that chat afterwards must not make the same change directly.
     Claude's replies there may repeat text from the file or page it read.
     """
@@ -340,7 +340,7 @@ async def test_a_failed_chat_is_tried_again_for_a_while_and_one_chat_has_one_lea
     memory_api, database
 ):
     """
-    Issue #295: one failure used to skip a chat for good, so a provider outage
+    One failure used to skip a chat for good, so a provider outage
     lost every chat that went quiet during it; and nothing kept two processes
     from learning the same chat at once.
     """

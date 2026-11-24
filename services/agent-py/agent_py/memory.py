@@ -16,7 +16,7 @@ chats_* tools, which run there.
   after a browser tool (its result last) starts marked. So does a run whose
   context holds workspace text (place.carries_content). The server also marks
   a chat whose earlier runs read outside content, and one with shared notes
-  in its prompt, whatever this agent says (issue #285).
+  in its prompt, whatever this agent says.
 - Each note a call reads or changes comes back as an event, which goes to the
   chat as a `memory` event for its "Used / Updated" line.
 """

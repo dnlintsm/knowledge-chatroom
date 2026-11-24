@@ -2,7 +2,7 @@ import type { Message } from "@ag-ui/client";
 import { splitToolName } from "./tool-chips";
 
 /**
- * Collapsed agent steps (issue #154): each turn's thinking and tool calls fold
+ * Collapsed agent steps: each turn's thinking and tool calls fold
  * into one "Worked for 14s · 5 steps" block, and the answer stays below it.
  * Pure functions so they are unit-tested; the React side is
  * agent-steps-view.tsx.
@@ -177,7 +177,7 @@ const LABELS: Record<string, (args: Record<string, unknown>) => Verb> = {
   showPane: () => ["Showing a pane", "Showed a pane"],
   hidePane: () => ["Hiding a pane", "Hid a pane"],
   // listRuns and openRun keep their names (saved chats call them by name);
-  // only what the user reads changed when "run" became "experiment" (#185).
+  // only what the user reads changed when "run" became "experiment".
   listRuns: () => ["Looking at experiments", "Looked at experiments"],
   openRun: () => ["Opening an experiment", "Opened an experiment"],
   listActions: () => ["Looking at actions", "Looked at actions"],

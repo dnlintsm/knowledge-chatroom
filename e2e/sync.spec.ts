@@ -311,7 +311,7 @@ test("deleting a failed draft clears its error and allows the same path to sync 
 });
 
 test("a signed-in workspace waits for storage instead of becoming a browser-only one", async ({ page }) => {
-  // Issue #297: with storage down at page load, edits went to this browser and were never uploaded.
+  // With storage down at page load, edits went to this browser and were never uploaded.
   let up = false;
   let asked = 0;
   const info: ServerFile = {

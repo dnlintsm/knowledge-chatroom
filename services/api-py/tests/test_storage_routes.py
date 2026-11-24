@@ -288,7 +288,7 @@ async def test_whoever_adds_a_node_owns_it(database, row_security):
 
 
 async def test_json_bodies_are_bounded_and_big_ones_parsed_off_the_loop(api, monkeypatch):
-    """Issue #288: no route reads a body without a limit, and megabytes of JSON don't stall the server."""
+    """No route reads a body without a limit, and megabytes of JSON don't stall the server."""
     import threading
 
     from api_py import storage_routes
@@ -320,7 +320,7 @@ async def test_json_bodies_are_bounded_and_big_ones_parsed_off_the_loop(api, mon
 
 
 async def test_a_malformed_escape_or_id_is_a_bad_request_not_a_server_error(api):
-    """Issue #297: an id that isn't one must not reach the database or a traceback."""
+    """An id that isn't one must not reach the database or a traceback."""
     from api_py import identity, memory, shared_memory
 
     await api.get("/access", headers=ALICE)

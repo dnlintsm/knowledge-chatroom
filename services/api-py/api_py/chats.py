@@ -147,7 +147,7 @@ def read_outside_content(messages: Any) -> bool:
     Whether Claude used anything in this chat but the user's words and own
     notes: a file, a search, an outside tool, a shared note, a past chat. What
     it read stays in the conversation, so from then on text from there could
-    be steering it, and its memory changes wait for the user (issue #285).
+    be steering it, and its memory changes wait for the user.
     `messages` are a chat's saved AG-UI messages.
     """
     if not isinstance(messages, list):

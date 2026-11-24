@@ -33,7 +33,7 @@ AGUI_MEDIA_TYPE = "application/vnd.ag-ui.event+proto"
 MAX_TRANSCRIPT_CHARS = 12_000
 MAX_MESSAGE_CHARS = 2_000
 MAX_CONTEXT_CHARS = 6_000
-# What a request may add beyond that (issue #288): its last message, how many
+# What a request may add beyond that: its last message, how many
 # context items, and the suggestion tool's description and schema.
 MAX_REQUEST_CHARS = 8_000
 MAX_CONTEXTS = 8

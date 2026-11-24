@@ -1,4 +1,4 @@
-"""The workspace inventory, for whoever runs the deployment (issue #255, step 4).
+"""The workspace inventory, for whoever runs the deployment.
 
 docs/workspaces.md, "Workspace inventory". PLATFORM_ADMINS names the deployment
 admins (emails or login subjects, as WORKSPACE_CREATORS and HUB_ADMINS do); in

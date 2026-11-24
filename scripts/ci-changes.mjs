@@ -1,4 +1,4 @@
-// Decides which CI suites a pull request can affect (issue #192).
+// Decides which CI suites a pull request can affect.
 //
 //   node scripts/ci-changes.mjs            # in CI: writes suite flags to $GITHUB_OUTPUT
 //   node scripts/ci-changes.mjs a.py b.ts  # locally: prints the flags for these paths
@@ -36,9 +36,9 @@ export const RULES = [
   // agent and the browser specs mirror them.
   ["services/api-py/migrations/**", SUITES],
   ["services/api-py/skills/**", SUITES],
-  // api-py sits in front of the agent in the storage and login E2E runs (#190).
+  // api-py sits in front of the agent in the storage and login E2E runs.
   ["services/api-py/**", ["python", "storage"]],
-  // agent-py serves the chat in the Python agent E2E run (#176).
+  // agent-py serves the chat in the Python agent E2E run.
   ["services/agent-py/**", ["python", "storage", "pyagent"]],
   // Shared by both Python services, or the whole uv workspace.
   ["packages/knowledge-py/**", ["python", "storage", "pyagent"]],

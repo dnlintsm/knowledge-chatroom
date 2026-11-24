@@ -256,7 +256,7 @@ def declares_json(request: Request) -> bool:
     Whether the body says it is JSON. A page on another site can post a form
     or plain text here with the user's cookie and no preflight, but not
     application/json: the browser asks first, and the app's proxy doesn't
-    answer for other origins. So a JSON route reads nothing else (issue #286).
+    answer for other origins. So a JSON route reads nothing else.
     """
     media = request.headers.get("content-type", "").split(";")[0].strip().lower()
     return media == "application/json" or media.endswith("+json")
@@ -1199,7 +1199,7 @@ async def watch(session: Session) -> Response:
     principal may see one (the check failed: no database connection in time,
     say), fell more than MAX_WATCH_BACKLOG changes behind, or the server lost
     its own events connection, the stream ends instead: the browser connects
-    again and lists what it has missed (issue #296).
+    again and lists what it has missed.
     """
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=MAX_WATCH_BACKLOG)
     # Set once a change could not be queued, or may never have arrived.

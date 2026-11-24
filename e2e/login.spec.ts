@@ -83,14 +83,14 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await showFiles(bob);
   await bob.getByRole("treeitem", { name: /untitled-1\.md/ }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("Alignment marks moved");
-  // The badge says why (#187), without naming who could grant more.
+  // The badge says why, without naming who could grant more.
   await expect(bob.getByTestId("read-only-badge")).toHaveText("Read only · view access");
   await expect(bob.getByRole("button", { name: "New file", exact: true })).toHaveCount(0);
   await expect(bob.getByRole("button", { name: "Upload files" })).toHaveCount(0);
   await bob.mouse.move(600, 500);
   await shot(bob, "17-read-only-viewer");
 
-  // Actions follow the role where the run lives (#13): Alice adds a run to the
+  // Actions follow the role where the run lives: Alice adds a run to the
   // tech; Bob, a viewer there, can open it and start a chat but not generate
   // its rules, while Alice, the owner, can.
   const { nodes } = (await (await alice.request.get("/api/nodes")).json()) as {
@@ -145,7 +145,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   expect((await alice.request.get(rulesUrl)).ok()).toBe(true);
 
   // The experiment says why Bob can't change it and offers the step he can
-  // take (#187): rerun it as his own. Restore is Alice's alone.
+  // take: rerun it as his own. Restore is Alice's alone.
   await bob.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "r1" }).click();
   const bobPanel = bob.getByTestId("experiment-panel");
   await expect(bobPanel.getByTestId("read-only-reason")).toHaveText(
@@ -159,7 +159,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(bob.getByTestId("experiment-panel")).toContainText("Only you can see this draft.");
   await expect(bob.getByTestId("experiment-panel").getByTestId("read-only-reason")).toHaveCount(0);
 
-  // Admin panel (#67): only workspace owners get it. Alice puts Bob in a
+  // Admin panel: only workspace owners get it. Alice puts Bob in a
   // group, sees the change logged, and makes him a workspace editor.
   await expect(bob.getByRole("button", { name: "Admin", exact: true })).toHaveCount(0);
   await alice.goto("/");
@@ -207,7 +207,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(bob.getByRole("button", { name: "New file", exact: true })).toBeVisible();
 
   // Alice gives Bob Full access and steps down to Can edit. She stays the
-  // workspace's Owner (issue #226), which is what the Admin panel needs.
+  // workspace's Owner, which is what the Admin panel needs.
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
   await admin.getByLabel("Access to the workspace for Bob Builder").selectOption("owner");
   await expect(admin.getByLabel("Access to the workspace for Bob Builder")).toHaveValue("owner");
@@ -233,7 +233,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   const labUrl = new URL(alice.url()).pathname;
   await expect(alice.getByRole("navigation", { name: "Location" }).getByRole("button", { name: lab, exact: true })).toBeVisible();
 
-  // She shares an experiment there by its link (the milestone of #226).
+  // She shares an experiment there by its link.
   const labWs = ((await (await alice.request.get("/api/workspaces")).json()).workspaces as { id: string; slug: string }[]).find(
     (w) => labUrl === `/w/${w.slug}`,
   )!;
@@ -284,7 +284,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(bobLocation.getByRole("button", { name: lab, exact: true })).toBeVisible();
   await expect(bobLocation).toContainText("Lab finding");
 
-  // Administration (issue #255): Alice makes Bob an Admin, then hands the lab
+  // Administration: Alice makes Bob an Admin, then hands the lab
   // over to him and becomes an Admin herself.
   await alice.getByRole("button", { name: "Admin", exact: true }).click();
   await admin.getByLabel("Role of Bob Builder").selectOption("admin");

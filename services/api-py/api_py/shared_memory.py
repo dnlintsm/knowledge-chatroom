@@ -10,8 +10,8 @@ someone who can edit the place accepts or rejects. A person shares one of
 their own notes by copying it in: directly where they can edit, else as a
 proposal.
 
-What a chat run uses (forRun, texts, search) stays on the TypeScript server
-until #190's step 8c.
+What a chat run uses (for_run, texts, search) serves /memory/agent
+(memory_agent.py).
 """
 
 from __future__ import annotations

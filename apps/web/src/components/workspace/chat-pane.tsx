@@ -74,7 +74,7 @@ function ChatPaneView() {
     setShownThread(threadId);
     chatConfig?.setDrawerOpen(false);
   }, [threadId, shownThread, chatConfig]);
-  // Each turn's thinking and tool calls fold into one block (issue #154). The
+  // Each turn's thinking and tool calls fold into one block. The
   // grouping only changes when a run starts or ends, so the view is rebuilt then.
   const { running } = useChatSteps();
   const messageView = useMemo(

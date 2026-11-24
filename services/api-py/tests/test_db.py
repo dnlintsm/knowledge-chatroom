@@ -170,7 +170,7 @@ async def test_applies_the_migrations_itself(database):
                 break
             await anyio.sleep(0.05)
         assert app.state.schema.state is db.SchemaState.READY
-        # Storage is open: /health also says whether Postgres enforces access (issue #297).
+        # Storage is open: /health also says whether Postgres enforces access.
         assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
     async with await psycopg.AsyncConnection.connect(database) as conn:
         cur = await conn.execute("SELECT name FROM schema_migrations ORDER BY name")
@@ -212,7 +212,7 @@ async def test_migrate_applies_each_once_in_order_and_one_process_at_a_time(data
 @pytest.mark.anyio
 @needs_postgres
 async def test_row_security_off_is_reported_and_refused_when_required(database, monkeypatch):
-    """Issue #297: a database user who can't use the restricted role used to cost one log line."""
+    """A database user who can't use the restricted role used to cost one log line."""
     from api_py import app as app_module
     from api_py import storage as storage_module
 
@@ -308,7 +308,7 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
 @pytest.mark.anyio
 @needs_postgres
 async def test_migrations_off_is_served_once_the_migrate_command_ran(database, monkeypatch, capsys):
-    """MIGRATIONS=off used to wait for a TypeScript server that no longer exists (issue #297)."""
+    """MIGRATIONS=off used to wait for a TypeScript server that no longer exists."""
     from api_py import app as app_module
     from api_py import migrate
 

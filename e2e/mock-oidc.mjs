@@ -123,7 +123,7 @@ const server = http.createServer(async (req, res) => {
         iat: now,
         exp: now + 300,
         nonce: grant.nonce,
-        // The app keeps an email only when the provider vouches for it (issue #284).
+        // The app keeps an email only when the provider vouches for it.
         email_verified: true,
         ...USERS[grant.user],
       }),

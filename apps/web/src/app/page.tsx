@@ -8,8 +8,7 @@ import { defaultWorkspacePath, homeWorkspacePath } from "@/lib/workspaces";
 export const dynamic = "force-dynamic";
 
 /**
- * A URL without a workspace goes to one of the user's (issue #226,
- * docs/workspaces.md, decision 5): the default workspace when they belong to
+ * A URL without a workspace goes to one of the user's (* docs/workspaces.md, decision 5): the default workspace when they belong to
  * it, otherwise their first one, keeping its query, so links made before
  * workspaces (e.g. `/?experiment=<id>`) still open. Sign-in happens there.
  */

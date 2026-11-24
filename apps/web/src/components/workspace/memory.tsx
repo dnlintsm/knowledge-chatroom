@@ -19,7 +19,7 @@ import type { components } from "@knowledge-chatroom/contracts/generated/storage
 type Schema = components["schemas"];
 
 /**
- * Personalized memory (issue #93): notes Claude keeps about you across chats,
+ * Personalized memory: notes Claude keeps about you across chats,
  * that only you can see.
  * - the Memory view of the side panel lists your notes, sets memory on, ask
  *   first or off for you, and exports them; it also holds the inbox (changes
@@ -161,7 +161,7 @@ export function useMemory(): Memory {
 
 /** The answer's JSON, or an Error with the server's message. */
 export async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  // apiFetch: a session that ended sends the browser to sign in (issue #297).
+  // apiFetch: a session that ended sends the browser to sign in.
   const res = await apiFetch(url, { cache: "no-store", ...init });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);

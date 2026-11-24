@@ -259,7 +259,7 @@ async def test_binary_files_get_signed_links(database):
 
 async def test_only_media_opens_in_place_from_the_object_store(database):
     """
-    Issue #286: a signed link is served by the store's own origin, without the
+    A signed link is served by the store's own origin, without the
     sandbox the app puts on files it serves. So the type a writer claims is
     normalised, a page-like type is served by the app instead, and whatever
     still goes to the store as something a browser could run is a download.
@@ -313,7 +313,7 @@ async def test_only_media_opens_in_place_from_the_object_store(database):
 
 
 async def test_a_json_route_reads_only_a_body_sent_as_json(files):
-    """Issue #286: a form or plain-text post from another site needs no preflight; application/json does."""
+    """A form or plain-text post from another site needs no preflight; application/json does."""
     body = b'{"parentId": null, "name": "Etch"}'
     for kind in ("text/plain", "application/x-www-form-urlencoded", ""):
         headers = {**ALICE, "content-type": kind} if kind else dict(ALICE)
@@ -417,7 +417,7 @@ async def watching(http: httpx.AsyncClient, lines: list[str]) -> asyncio.Task[No
 
 async def test_a_watch_stream_ends_rather_than_skip_a_change(database, monkeypatch):
     """
-    Issue #296: a change the stream can't check, can't hold, or may never have
+    A change the stream can't check, can't hold, or may never have
     been told of ends the stream, so the browser reconnects and lists again.
     """
     from api_py import storage_routes
@@ -485,7 +485,7 @@ async def test_a_watch_stream_ends_rather_than_skip_a_change(database, monkeypat
 
 
 async def test_the_object_store_is_reached_without_a_database_connection(database, monkeypatch):
-    """Issue #296: a slow object store must not keep one of the pool's connections waiting on it."""
+    """A slow object store must not keep one of the pool's connections waiting on it."""
     from api_py.blobs import BlobStore
 
     async with Client(database, SECRET, s3=s3()) as (api, app):
@@ -520,7 +520,7 @@ async def test_the_object_store_is_reached_without_a_database_connection(databas
 
 
 async def test_a_save_names_the_version_it_replaces(files):
-    """If-Match (issue #293): the second of two people who read the same version doesn't overwrite the first."""
+    """If-Match: the second of two people who read the same version doesn't overwrite the first."""
     first = (await files.put("/files/notes/shared.md", headers=ALICE, content=b"v1")).json()
     etag = (await files.get("/files/notes/shared.md", headers=ALICE)).headers["etag"]
     assert etag == f'"{first["sha256"]}"'

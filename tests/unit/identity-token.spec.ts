@@ -10,7 +10,7 @@ import {
   storageTokenSeconds,
 } from "@knowledge-chatroom/contracts/identity-token";
 
-/** Identity tokens shared by the app, the agent and outside services (packages/contracts/src/identity-token.ts, issue #88). */
+/** Identity tokens shared by the app, the agent and outside services (packages/contracts/src/identity-token.ts). */
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const EXP = 4102444800; // 2100-01-01

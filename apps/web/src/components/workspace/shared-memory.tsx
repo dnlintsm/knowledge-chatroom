@@ -22,7 +22,7 @@ import {
 } from "./memory";
 
 /**
- * Shared memory in the Memory view (issue #93, step 3): notes your workspace,
+ * Shared memory in the Memory view: notes your workspace,
  * knowledge nodes and groups share, each Auto (in every chat's index), Manual
  * (Claude finds it by searching) or Off for you; proposals waiting for their
  * editors; and sharing a copy of one of your own notes.

@@ -301,7 +301,7 @@ async def test_a_remote_run_gets_claudes_memory_tools(memory_api, database):
 @needs_database
 async def test_a_chat_that_read_outside_content_keeps_its_changes_waiting(memory_api):
     """
-    Issue #285: the agent says a run is tainted once it uses another tool, but
+    The agent says a run is tainted once it uses another tool, but
     that was per run. What an earlier run read is still in the conversation, so
     the server looks at the chat's saved messages and decides for itself.
     """
@@ -349,7 +349,7 @@ async def test_a_chat_that_read_outside_content_keeps_its_changes_waiting(memory
 
 @needs_database
 async def test_shared_notes_in_the_prompt_keep_changes_waiting(memory_api):
-    """Issue #285: an Auto shared note puts other people's words in every run's prompt."""
+    """An Auto shared note puts other people's words in every run's prompt."""
     api, _app = memory_api
     args = {**note("Short.", "Short answers", "preference"), "name": "reply-length"}
     assert (await tool(api, "memory_save", args))["tainted"] is False
@@ -419,7 +419,7 @@ async def test_shared_notes_are_only_proposed(memory_api):
         "text": "The user isn't in a knowledge node: use scope workspace",
         "isError": True,
         "events": [],
-        # The workspace's shared note is in the prompt: other people's words (issue #285).
+        # The workspace's shared note is in the prompt: other people's words.
         "tainted": True,
     }
     bad = await tool(api, "memory_view", {"name": "shared:nope"})

@@ -18,9 +18,9 @@ import type { components } from "@knowledge-chatroom/contracts/generated/storage
 type Schema = components["schemas"];
 
 /**
- * Admin panel (#67): the people and their access to the whole workspace, the
+ * Admin panel: the people and their access to the whole workspace, the
  * org tree of groups and its members, and recent access changes. With
- * workspaces (issue #226) it is for the workspace's Owners and Admins, who
+ * workspaces it is for the workspace's Owners and Admins, who
  * also add members here; without them, for the owners of the workspace root.
  * Everything goes through the server's /access and /workspaces APIs, which
  * check the caller; this only hides the button from everyone else.

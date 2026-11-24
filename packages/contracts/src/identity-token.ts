@@ -1,6 +1,6 @@
 /**
  * The signed identity tokens that say who a request is for (X-Knowledge-User),
- * made and checked the same way by the Next.js app and the agent (issue #88).
+ * made and checked the same way by the Next.js app and the agent.
  *
  * Tokens are `v2.<payload>.<Ed25519 signature>`, signed with a key pair
  * derived from AUTH_SECRET. Outside services (remote backends, MCP servers)
@@ -18,9 +18,9 @@
  *
  * Memory tokens (X-Knowledge-Memory) have aud "memory", `via`, and the run's
  * `thread` and `node`: an outside MCP server uses the user's memory for that
- * chat through the agent's /memory/agent API, as Claude does in it (issue #93).
+ * chat through the agent's /memory/agent API, as Claude does in it.
  * The app signs one `via` "remote" for each run of a remote backend's chat
- * agent (issue #176), which is Claude in that chat.
+ * agent, which is Claude in that chat.
  */
 
 import {
@@ -43,7 +43,7 @@ export interface IdentityClaims {
   /** Memory tokens: the chat and the knowledge node the run is in. */
   thread?: string;
   node?: string | null;
-  /** Storage and memory tokens: the workspace they are bound to (issue #226); without it, the default one. */
+  /** Storage and memory tokens: the workspace they are bound to; without it, the default one. */
   ws?: string;
 }
 

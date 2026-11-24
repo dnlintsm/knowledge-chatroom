@@ -113,7 +113,7 @@ export function identityHeader(user: SessionUser): string {
  * An X-Knowledge-Storage token for a remote backend (`via` "remote"): it lets
  * the backend use the storage API as Claude acting for this user for as long
  * as a run may take (STORAGE_TOKEN_SECONDS), where X-Knowledge-User lasts
- * minutes. With `ws` it is bound to that workspace (issue #226): the run's;
+ * minutes. With `ws` it is bound to that workspace: the run's;
  * without, to the default one. docs/remote-agent.md.
  */
 export function storageHeader(user: SessionUser, via: string, ws: string | null = null): string {
@@ -129,7 +129,7 @@ export function storageHeader(user: SessionUser, via: string, ws: string | null 
  * server's /memory/agent, as Claude has it there. The API server checks on
  * each call that memory is on and the chat isn't incognito. Without login
  * (`user` null) it is the unsigned local form. With `ws`, the chat's
- * workspace (issue #226); without, the default one. docs/remote-agent.md.
+ * workspace; without, the default one. docs/remote-agent.md.
  */
 export function memoryHeader(user: SessionUser | null, thread: string, node: string | null, ws: string | null = null): string {
   const claims = { via: REMOTE_VIA, thread, node, ...(ws ? { ws } : {}) };
@@ -248,7 +248,7 @@ export function oidcConfig(): Promise<oidc.Configuration> {
 }
 
 /**
- * Whether the provider vouches for the email in `claims` (issue #284). Admin
+ * Whether the provider vouches for the email in `claims`. Admin
  * lists and adding people by email match on it, so an address a user typed in
  * themselves must not count: only `email_verified: true` does. A provider that
  * verifies emails but never sends the claim needs OIDC_ASSUME_EMAIL_VERIFIED=true;

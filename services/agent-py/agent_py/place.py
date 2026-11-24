@@ -46,7 +46,7 @@ def carries_content(input_data: RunAgentInput) -> bool:
     Whether the run's context holds text from the workspace: the open file, the
     user's selection, or an experiment's details and report. That text is in
     the prompt before any tool runs, and other people may have written it, so a
-    run with it is one that has read outside content (issue #285): its memory
+    run with it is one that has read outside content: its memory
     changes wait for the user. Where the user is and the list of file names
     don't count. Context this can't read does: unknown is not known to be safe.
     """

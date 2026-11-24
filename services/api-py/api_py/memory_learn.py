@@ -176,7 +176,7 @@ _DUE = """
       -- Not learned from through its latest run. A try that failed, or one a
       -- process never finished (its claim), counts as done only for a while:
       -- it is tried again after RETRY_MINUTES, for RETRY_HOURS after the chat
-      -- went quiet (issue #295).
+      -- went quiet.
       AND NOT EXISTS (
         SELECT 1 FROM memory_learned_chats l
         WHERE l.chat_id = c.id AND l.through >= c.last_run_at
@@ -283,7 +283,7 @@ class MemoryLearner:
         if not s:
             return {"made": 0, "proposed": 0}
         user = chat["user_id"]
-        # In the chat's own workspace (a chat lives in one, issue #226).
+        # In the chat's own workspace (a chat lives in one).
         s = s.in_workspace(chat.get("workspace_id") or s.workspace_id)
         session = Session(s, s.access, Principal(user_id=user))
         memory = MemoryService(session.scoped, s.workspace_id, user)
@@ -302,8 +302,8 @@ class MemoryLearner:
             mode = (await memory.settings(chat["id"]))["mode"]
             # A chat in which Claude read a file, a search result or anyone
             # else's words is learned from as in Ask first: its replies may
-            # repeat text from there, so what it would save waits for the user
-            # (issue #285), as a save in such a chat does.
+            # repeat text from there, so what it would save waits for the user,
+            # as a save in such a chat does.
             if found and mode == "on" and read_outside_content(found["messages"]):
                 mode = "ask"
             if found and mode != "off":

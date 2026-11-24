@@ -1,7 +1,7 @@
 """A run's report.md front matter.
 
 A run's report.md carries the run's record in its front matter: state,
-results and provenance (issue #82), so the report says where its numbers came
+results and provenance, so the report says where its numbers came
 from even when it is copied or downloaded on its own. One key per line, values
 as JSON (which YAML reads too). Values are written exactly as JSON.stringify
 writes them, numbers included, as in the reports already stored.

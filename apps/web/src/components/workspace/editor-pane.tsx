@@ -41,7 +41,7 @@ const BUILT_IN_TABS = {
 type Mode = "preview" | "edit";
 
 // Streamdown's defaults, with images from other servers turned into links before its
-// harden step, the last of them (issue #291).
+// harden step, the last of them.
 const { harden, ...beforeHarden } = defaultRehypePlugins;
 const PREVIEW_REHYPE_PLUGINS = [...Object.values(beforeHarden), localImagesOnly, harden, sourceLines];
 
@@ -55,7 +55,7 @@ function canPreview(file: WorkspaceFile) {
 export function EditorPane() {
   const ws = useWorkspace();
   const { tabs, active, activeFile, getFile, open, close, canEdit, proposals, node, experiment, storageMode } = ws;
-  // Why this place's files can't change, when they can't (#187).
+  // Why this place's files can't change, when they can't.
   const reason = canEdit
     ? null
     : readOnlyReason({
@@ -223,7 +223,7 @@ export function EditorPane() {
 
 /**
  * Shown over a file whose save the server refused because someone else saved
- * (or deleted) it while it was being edited here (issue #293). Nothing more
+ * (or deleted) it while it was being edited here. Nothing more
  * is sent for the file until the user picks a version; both stay in its history.
  */
 function SaveConflict({ file }: { file: WorkspaceFile }) {

@@ -173,12 +173,12 @@ interface WorkspaceValue {
    * Storage isn't answering for a workspace that lives on the server (signed
    * in, or one the server named): the page stays in "loading" and keeps
    * asking, rather than turn into a browser-only workspace whose edits would
-   * never be uploaded (issue #297).
+   * never be uploaded.
    */
   storageDown: boolean;
   /**
    * Files in this place whose save the server refused because someone else
-   * changed them meanwhile (issue #293). Their edits stay in this browser,
+   * changed them meanwhile. Their edits stay in this browser,
    * unsaved, until resolveConflict: "mine" saves them over the other version
    * (which stays in the file's history), "theirs" loads that version instead.
    * theirVersion is the other version's text, or null when the file was deleted.

@@ -72,7 +72,7 @@ export function KnowledgeTree() {
       return next;
     });
   // Going to a node in the tree on purpose also points the experiment list
-  // there (#186); opening an experiment doesn't.
+  // there; opening an experiment doesn't.
   const enter = (id: NodeId) => {
     setError(null);
     setListScope(id === null ? ALL_EXPERIMENTS : { node: id, descendants: listScope.descendants });

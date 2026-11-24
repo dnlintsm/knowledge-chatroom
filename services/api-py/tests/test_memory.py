@@ -395,7 +395,7 @@ async def test_the_rest_of_memory_stays_with_typescript(memory_api, database):
 
 @needs_database
 async def test_accepting_an_inbox_change_is_one_transaction(memory_api, monkeypatch):
-    """Issue #295: marked accepted and applied together, so a failure between the two can't lose the change."""
+    """Marked accepted and applied together, so a failure between the two can't lose the change."""
     from contextlib import asynccontextmanager
 
     _api, app = memory_api

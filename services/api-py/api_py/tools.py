@@ -278,7 +278,7 @@ def signer(
     The signed-in user, signed for one server (without memory).
     `workspace` is the one the page is in: the storage token is bound to it
     (`ws`), as a chat run's is, so the server's writes land where the user is
-    and not in the default workspace (issue #297).
+    and not in the default workspace.
     """
     if not secret or claims is None:
         return lambda _server, _kind: None

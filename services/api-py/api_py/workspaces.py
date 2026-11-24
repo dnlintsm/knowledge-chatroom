@@ -1,4 +1,4 @@
-"""Workspaces and their members (issues #226 and #255, docs/workspaces.md).
+"""Workspaces and their members (docs/workspaces.md).
 
     GET    /workspaces[?archived=true]       {workspaces: [{id, slug, name, role, status}],
                                              canCreate}: yours, and whether you may
@@ -261,7 +261,7 @@ class Workspaces:
         The caller's own role, read under the workspace's lock. The route read
         it before the lock to decide whether to ask at all, and an Owner or
         Admin demoted or removed in between must not get one more change
-        through (issue #297). Gone from the workspace: it isn't theirs to see.
+        through. Gone from the workspace: it isn't theirs to see.
         """
         role = await self._member_role(conn, workspace_id, by)
         if role is None:
@@ -535,7 +535,7 @@ class Workspaces:
         """
         Someone who has signed in with exactly this email (case ignored): {id, name}, or None.
         Raises SharedEmail when more than one account has it: an email names
-        one person only if the login provider keeps it unique (issue #284).
+        one person only if the login provider keeps it unique.
         """
         address = email.strip()
         if not address or "@" not in address:

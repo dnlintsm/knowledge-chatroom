@@ -2,9 +2,9 @@ import { hasRole } from "./roles";
 import type { Experiment, Role } from "./server-files";
 
 /**
- * Why the place the user is in can't be changed (#187), in the words the
+ * Why the place the user is in can't be changed, in the words the
  * badges show: `label` for the editor's file header, `detail` for the
- * experiment header and as a tooltip. Since #175 there are only these
+ * experiment header and as a tooltip. There are only these
  * reasons; null when the user can change it.
  */
 export interface ReadOnlyReason {
@@ -27,7 +27,7 @@ interface Place {
 export function readOnlyReason({ experiment, placeRole, placeName, canRerun = true }: Place): ReadOnlyReason | null {
   if (experiment) {
     if (experiment.access === "writer") return null;
-    // Its maintainer (its author until handed over, #255) and collaborators edit it.
+    // Its maintainer (its author until handed over) and collaborators edit it.
     const maintainer = experiment.maintainerName ?? "its maintainer";
     const rerun = canRerun ? " Rerun it to work on your own copy." : "";
     if (experiment.status === "archived") {

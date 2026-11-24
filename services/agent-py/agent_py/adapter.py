@@ -173,7 +173,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._notes: OrderedDict[str, str] = OrderedDict()
         # thread_id -> the storage token of the thread's latest run.
         self._tokens: OrderedDict[str, str | None] = OrderedDict()
-        # Each thread's workspace, as the app named it with the latest run (issue #226).
+        # Each thread's workspace, as the app named it with the latest run.
         self._workspaces: OrderedDict[str, str | None] = OrderedDict()
 
     def build_options(
@@ -229,7 +229,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             options.allowed_tools = [*(options.allowed_tools or []), *tool_names(tools)]
             # Removed from the workspace, or it was archived, mid-run: no further
             # tool call of any kind, and no further turn, also after a call that
-            # was already running (issue #255). Ahead of every other hook.
+            # was already running. Ahead of every other hook.
             revoked = membership_hooks(lambda: self._storage(thread_id or ""))
             ordered: dict[str, list[Any]] = dict(cast(Any, options.hooks) or {})
             for event, matcher in revoked.items():

@@ -49,7 +49,7 @@ function ProposalCard({ proposal: p }: { proposal: Proposal }) {
   const ws = useWorkspace();
   const [before, setBefore] = useState<string | null>(null);
   const [after, setAfter] = useState<string | null>(null);
-  // Which versions the diff shows, for the accept to name (issue #293): the
+  // Which versions the diff shows, for the accept to name: the
   // proposed content, and the file it is compared with (null: no file;
   // undefined: not known, or the copy open here).
   const [afterVersion, setAfterVersion] = useState<string | null>(null);

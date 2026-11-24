@@ -1,5 +1,5 @@
 /**
- * Storage API conformance (issue #169, step 2): drives every operation in
+ * Storage API conformance: drives every operation in
  * openapi/storage.yaml over HTTP against a running backend and checks each answer
  * against the spec: the status code is documented, JSON bodies validate against
  * the response schema, and no field is missing from the spec. Any backend that
@@ -243,7 +243,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `/workspaces/${lab.id}/members`, { headers: alice, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/members`, { headers: bob, expect: 200 });
     await call("GET", `/workspaces/${lab.id}/lookup?email=alice@example.com`, { headers: bob, expect: 403 });
-    // Administration (#255): rename, roles, removal, archive.
+    // Administration: rename, roles, removal, archive.
     await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: { name: `Lab renamed ${stamp}` }, expect: 200 });
     await call("PATCH", `/workspaces/${lab.id}`, { headers: alice, json: {}, expect: 400 });
     await call("PATCH", `/workspaces/${lab.id}`, { headers: bob, json: { name: "Mine now" }, expect: 403 });
@@ -266,7 +266,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/workspaces/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
     await call("GET", "/workspaces", { headers: storageToken("conformance|alice"), expect: 403 });
     await call("GET", "/workspaces", { expect: 401 });
-    // The workspace inventory (#255), for the deployment's admins (PLATFORM_ADMINS).
+    // The workspace inventory, for the deployment's admins (PLATFORM_ADMINS).
     const platform = user("conformance|platform", "platform");
     const inventory = await call<{ workspaces: Schema["PlatformWorkspace"][] }>("GET", "/platform/workspaces", { headers: platform, expect: 200 });
     assert.deepEqual(inventory.data.workspaces.find((w) => w.id === lab.id)?.owners.map((o) => o.id), [aliceId]);
@@ -380,7 +380,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/proposals", { headers: alice, json: { experimentId: exp.id, note: "promote" }, expect: 201 });
     await call("GET", `/proposals?experiment=${exp.id}`, { headers: alice, expect: 200 });
     await call("PATCH", `/experiments/${exp.id}`, { headers: alice, json: { status: "shared" }, expect: 200 });
-    // Who works on it (#255); the rules are in workspaces.test.ts.
+    // Who works on it; the rules are in workspaces.test.ts.
     await call("PUT", `/experiments/${exp.id}/collaborators/${bobId}`, { headers: alice, expect: 200 });
     await call("PUT", `/experiments/${exp.id}/collaborators/00000000-0000-4000-8000-000000000000`, { headers: alice, expect: 400 });
     await call("PUT", `/experiments/${exp.id}/collaborators/${aliceId}`, { headers: bob, expect: 403 });
@@ -644,7 +644,7 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/health", { expect: 200 });
     const key = await call<{ key: string }>("GET", "/identity/public-key", { expect: 200 });
     assert.ok(key.data.key, "a public key");
-    // A remote backend trades its run's tokens for its MCP servers' (issue #176).
+    // A remote backend trades its run's tokens for its MCP servers'.
     const remote = {
       "X-Knowledge-Storage": signIdentityToken({ sub: "conformance|alice", exp: now() + 600, aud: "storage", via: "remote" }, SECRET!),
       ...memoryToken("conformance|alice", `conformance-${stamp}`, "remote"),

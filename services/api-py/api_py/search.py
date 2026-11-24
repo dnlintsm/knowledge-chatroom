@@ -167,7 +167,7 @@ class SearchService:
 
         Call it before taking a database connection, and pass the answer to
         search(): the model may be a remote API, and a connection held while it
-        answers is one no other request can use (issue #296).
+        answers is one no other request can use.
         """
         query = js_trim(query)
         semantic = self.semantic

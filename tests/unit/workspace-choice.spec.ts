@@ -11,7 +11,7 @@ import {
 } from "../../apps/web/src/lib/workspace-choice";
 import type { WorkspaceInfo } from "../../apps/web/src/lib/workspace-request";
 
-/** Choosing a workspace: the switcher's lists and a new workspace's address (issue #226, docs/workspaces.md, "Screens"). */
+/** Choosing a workspace: the switcher's lists and a new workspace's address (docs/workspaces.md, "Screens"). */
 
 class FakeStorage {
   readonly items = new Map<string, string>();

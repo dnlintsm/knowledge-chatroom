@@ -25,7 +25,7 @@ def test_no_note_without_context():
 
 
 def test_which_context_carries_workspace_text():
-    """Issue #285: text from the workspace in the prompt counts as having read it."""
+    """Text from the workspace in the prompt counts as having read it."""
     import json
 
     def context(value) -> RunAgentInput:

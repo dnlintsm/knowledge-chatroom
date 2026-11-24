@@ -1,7 +1,7 @@
 """File paths, types and kinds (paths.py), as the browser reads them.
 
 tests/unit/file-contracts.spec.ts checks the browser's side against the same
-table; it compared both with the TypeScript agent's paths.ts until #264 removed it.
+table.
 """
 
 from __future__ import annotations

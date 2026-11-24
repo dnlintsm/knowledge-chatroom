@@ -327,7 +327,7 @@ export const addServerRunInputs = (id: string, paths: string[]) =>
     inputs: paths.map((path) => ({ path, experiment: id })),
   });
 /**
- * Runs experiment `id` again as a new one of yours (#187), reading its inputs
+ * Runs experiment `id` again as a new one of yours, reading its inputs
  * at the content its record names; the server says why when it can't.
  */
 export const rerunServerExperiment = (id: string) =>

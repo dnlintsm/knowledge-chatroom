@@ -1,5 +1,5 @@
 /**
- * The chat's tool chips, per chat, kept in the browser (issue #151): which
+ * The chat's tool chips, per chat, kept in the browser: which
  * "+" menu tools the user turned on in each conversation. Pure functions so
  * they are unit-tested; the React side is tool-menu.tsx.
  */

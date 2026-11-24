@@ -499,7 +499,7 @@ async def test_other_spellings_stay_with_typescript(api):
 
 @needs_services
 async def test_a_finished_run_stays_as_it_ended_through_every_route(api):
-    """Issue #297: PATCH could rewrite the state and results of a run that had finished."""
+    """PATCH could rewrite the state and results of a run that had finished."""
     await api.get("/access", headers=ALICE)
     made = await api.post(
         "/experiments/runs", headers=ALICE, json={"nodeId": None, "title": "Etch rate"}

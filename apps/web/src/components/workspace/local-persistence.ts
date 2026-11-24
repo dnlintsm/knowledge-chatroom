@@ -15,7 +15,7 @@ type BrowserStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 /**
  * The keys whose state belongs to one workspace's content (its files, tabs,
- * places and folders). With workspaces (issue #226) each user keeps them per
+ * places and folders). With workspaces each user keeps them per
  * workspace; the rest (layout, steps mode, tool chips) stay for the browser.
  */
 const WORKSPACE_KEYS: ReadonlySet<string> = new Set([

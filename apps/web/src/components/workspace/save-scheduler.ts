@@ -37,7 +37,7 @@ export interface SaveConflict {
  * Owns per-place write order, debounce, pending/failed protection and hashes.
  *
  * A save says which version it replaces (the hash last seen), so two people
- * editing one file can't silently overwrite each other (issue #293). A refused
+ * editing one file can't silently overwrite each other. A refused
  * save leaves the file in conflict: its edits stay here, nothing more is sent
  * for it, and incoming changes don't replace it, until the user keeps theirs
  * (keepMine) or takes the server's (dropConflict, then load it).

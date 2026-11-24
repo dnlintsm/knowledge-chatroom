@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * The app in a chosen workspace (issue #226, docs/workspaces.md, rollout step
+ * The app in a chosen workspace (docs/workspaces.md, rollout step
  * 5): pages at /w/<slug>, every request naming the page's workspace, and
  * saved state kept per workspace. Storage mode, with the API server (api-py).
  */

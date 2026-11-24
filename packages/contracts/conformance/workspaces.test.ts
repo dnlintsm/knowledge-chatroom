@@ -1,5 +1,5 @@
 /**
- * Workspace isolation tests (issue #226, steps 3 and 4), for the design in
+ * Workspace isolation tests, for the design in
  * docs/workspaces.md. Like storage.test.ts, this file only speaks HTTP, so it
  * checks any backend that serves the storage API.
  *
@@ -8,7 +8,7 @@
  * - "today's rules" pin behaviour of the default workspace that the membership
  *   layer must keep: Viewer workflows, draft visibility, revalidation of grants
  *   for tokens, and per-event filtering of ?watch streams.
- * - "multi-workspace" tests check what step 4 of #226 adds: creating
+ * - "multi-workspace" tests check what more than one workspace adds: creating
  *   workspaces, the workspace selectors, ids that belong to another workspace,
  *   adding members, and isolation of every surface, including the memory
  *   tokens of the TypeScript agent's runs (step 4b).
@@ -137,7 +137,7 @@ describe("workspaces: setup", { skip: !enabled && "STORAGE_URL and AUTH_SECRET n
     const me = await ok<{ rootRole: string | null }>(200, "GET", "/access", { headers: owner });
     assert.equal(me.rootRole, "owner", `${OWNER} must own the default workspace: run after storage.test.ts, or on a fresh database`);
     for (const who of [carol, dave, erin]) await ok(200, "GET", "/access", { headers: who });
-    // The Owner gets emails with the names; nobody gets login subjects (issue #287).
+    // The Owner gets emails with the names; nobody gets login subjects.
     const { users } = await ok<{ users: { id: string; email?: string | null }[] }>(200, "GET", "/access/users", { headers: owner });
     assert.ok(users.every((u) => !("subject" in u)), "no login subjects in the member list");
     for (const name of ["carol", "dave", "erin"] as const) ids[name] = users.find((u) => u.email === `${name}@example.com`)!.id;
@@ -296,7 +296,7 @@ describe("workspaces: multi-workspace", { skip: !enabled && "STORAGE_URL and AUT
     await ok(404, "GET", `/workspaces/${ws2}/members`, { headers: erin });
     const users = await ok<{ users: Json[] }>(200, "GET", "/access/users", { headers: { ...dave, ...inWs(ws2) } });
     assert.ok(!users.users.some((u) => u.id === ids.erin), "no directory of every signed-in user");
-    // The same rule as the member list (issue #287): names for a Member, emails for an Owner, subjects for nobody.
+    // The same rule as the member list: names for a Member, emails for an Owner, subjects for nobody.
     assert.ok(users.users.every((u) => !("email" in u) && !("subject" in u)), "a Member sees names only");
     const forOwner = await ok<{ users: Json[] }>(200, "GET", "/access/users", { headers: { ...carol, ...inWs(ws2) } });
     assert.ok(forOwner.users.every((u) => "email" in u && !("subject" in u)), "an Owner also sees emails");
@@ -707,7 +707,7 @@ describe("workspaces: inventory and Owner recovery (#255)", { skip: !enabled && 
 
   test("setup: gina's workspace, with carol and dave as Members without access, and some content", async () => {
     for (const who of [admin, gina]) await ok(200, "GET", "/access", { headers: who });
-    // Each asks for their own id: the member list has no login subjects to find them by (issue #287).
+    // Each asks for their own id: the member list has no login subjects to find them by.
     ginaId = (await ok<{ me: { id: string } }>(200, "GET", "/access", { headers: gina })).me.id;
     adminId = (await ok<{ me: { id: string } }>(200, "GET", "/access", { headers: admin })).me.id;
     ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: gina, json: { name: `Gina's lab ${stamp}` } })).id;

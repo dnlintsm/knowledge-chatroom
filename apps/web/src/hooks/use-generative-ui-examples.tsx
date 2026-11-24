@@ -58,7 +58,7 @@ export const useGenerativeUIExamples = () => {
   // Default Tool Rendering (backend tool UI)
   useDefaultRenderTool({
     render: ({ name, status, parameters, result }) => {
-      // Paper search results show as cards (issue #151).
+      // Paper search results show as cards.
       return renderPaperTool({ name, status, parameters, result }) ?? <ToolReasoning name={name} status={status} args={parameters} result={result} />;
     },
   });

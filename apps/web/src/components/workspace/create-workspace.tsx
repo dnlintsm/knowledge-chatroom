@@ -9,7 +9,7 @@ import { STARTING_LEVELS, isSlug, slugify, SLUG_MAX, type StartingLevels } from 
 import type { WorkspaceInfo } from "@/lib/workspace-request";
 
 /**
- * Creating a workspace (issue #226, docs/workspaces.md, "Screens"): its name,
+ * Creating a workspace (docs/workspaces.md, "Screens"): its name,
  * its address (made from the name until the user edits it) and the knowledge
  * levels it starts with. The API server makes the user its Owner.
  */

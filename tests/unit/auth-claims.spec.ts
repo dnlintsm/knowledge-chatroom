@@ -3,7 +3,7 @@ import { emailIsTrusted, userFromClaims } from "../../apps/web/src/lib/auth";
 
 type IDToken = Parameters<typeof userFromClaims>[0];
 
-/** Who a finished sign-in names (apps/web/src/lib/auth.ts), and which emails count (issue #284). */
+/** Who a finished sign-in names (apps/web/src/lib/auth.ts), and which emails count. */
 
 const claims = (extra: Record<string, unknown>) =>
   ({ iss: "https://login.example.com", sub: "u1", aud: "kc", iat: 0, exp: 1, ...extra }) as unknown as IDToken;

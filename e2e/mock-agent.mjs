@@ -115,7 +115,7 @@ const CITING_REPLY =
   "See also ![welcome.md](/notes/welcome.md#L1).";
 
 // "Think it through": thinking and backend tool calls before the answer, as
-// Claude streams them, so the chat folds them into one steps block (issue #154).
+// Claude streams them, so the chat folds them into one steps block.
 const STEPS_REPLY = "Your reading list puts **The Pragmatic Programmer** next, and none of your notes cover it yet.";
 const STEPS = [
   { thinking: "The user wants to know what to read next. I should check the reading list first." },

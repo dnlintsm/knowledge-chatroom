@@ -156,7 +156,7 @@ async def test_accepting_what_the_file_already_has(api):
 
 
 async def test_accept_names_what_its_reviewer_saw(api):
-    """Issue #293: an accept doesn't write content, or replace a file, the reviewer hasn't seen."""
+    """An accept doesn't write content, or replace a file, the reviewer hasn't seen."""
     q = f"node={await node_bob_views(api)}"
     file = (await api.put(f"/files/a.md?{q}", headers=ALICE, content=b"v1")).json()
     first = (await api.put(f"/files/a.md?{q}&propose", headers=BOB, content=b"v1 + bob")).json()
@@ -623,7 +623,7 @@ async def test_large_text_fields_are_refused_while_they_stream():
 
 
 async def test_an_uploads_files_are_limited_together_and_in_number(monkeypatch):
-    """Issue #288: every part is held until the upload is written, so each one's limit isn't enough."""
+    """Every part is held until the upload is written, so each one's limit isn't enough."""
     from api_py import uploads
     from api_py.uploads import UploadError, read_parts
 

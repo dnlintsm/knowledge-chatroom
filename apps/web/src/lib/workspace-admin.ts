@@ -1,6 +1,5 @@
 /**
- * Who may do what to whom among a workspace's members (issue #255,
- * docs/workspaces.md, "Changing a role" and "Removing a member, or leaving"),
+ * Who may do what to whom among a workspace's members (* docs/workspaces.md, "Changing a role" and "Removing a member, or leaving"),
  * for the screens to offer only what the API server would allow. The server
  * checks every change again. Client-safe and without React, so the unit tests
  * can call it directly.

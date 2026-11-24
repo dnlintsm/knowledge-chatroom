@@ -3,7 +3,7 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
 import { DEFAULT_SLUG, type WorkspaceInfo } from "./workspace-request";
 
 /**
- * Which workspace a page's `/w/<slug>` names (issue #226, docs/workspaces.md):
+ * Which workspace a page's `/w/<slug>` names (docs/workspaces.md):
  * looked up once, on the server, among the user's own workspaces, which the
  * API server (services/api-py) lists at GET /workspaces.
  *

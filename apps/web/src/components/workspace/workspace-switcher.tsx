@@ -14,14 +14,13 @@ import { useWorkspace } from "./store";
 import { LeaveWorkspaceDialog, WorkspaceSettingsDialog } from "./workspace-settings";
 
 /**
- * The workspace switcher, at the root of the breadcrumb (issue #226,
- * docs/workspaces.md, "Screens"): the workspace's name, which goes to its
+ * The workspace switcher, at the root of the breadcrumb (* docs/workspaces.md, "Screens"): the workspace's name, which goes to its
  * root as the fixed word "Workspace" did, and a menu of the user's
  * workspaces, recent ones first, with Create. Shown whenever the server has
  * workspaces, also with only one, so Create is always there for those the
  * server lets create one (WORKSPACE_CREATORS).
  *
- * With issue #255 it also opens the current workspace's settings (Owners and
+ * It also opens the current workspace's settings (Owners and
  * Admins), leaving it (with login), and lists the archived workspaces the
  * user owns, to restore. The deployment's admins (PLATFORM_ADMINS) also get
  * the workspace inventory.

@@ -100,7 +100,7 @@ def test_caller_without_login_is_the_local_user():
 
 
 def test_login_comes_from_auth_mode_and_the_key_never_from_a_missing_setting():
-    """Issue #283: no key used to mean "no login", so a forgotten key turned login off."""
+    """No key used to mean "no login", so a forgotten key turned login off."""
     key = "Z1iN8KqPV0u2Dk95GsXXFlHQE05RT15l2-1TzD3XDI8"
     assert identity.login_from_env({"AUTH_MODE": "local"}) == identity.Login(required=False)
     assert identity.login_from_env({"AUTH_MODE": " Local ", "KNOWLEDGE_PUBLIC_KEY": " "}) == (

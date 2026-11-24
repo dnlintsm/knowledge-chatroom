@@ -47,7 +47,7 @@ const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
 
 /** Calls the skills or hub API; throws the server's error message. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  // apiFetch: a session that ended sends the browser to sign in (issue #297).
+  // apiFetch: a session that ended sends the browser to sign in.
   const res = await apiFetch(path, { cache: "no-store", ...init });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
