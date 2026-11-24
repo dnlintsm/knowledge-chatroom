@@ -6,6 +6,9 @@ says what these routes promise.
 
 from __future__ import annotations
 
+import asyncio
+
+import psycopg
 import pytest
 from support import ALICE, BOB, Client, storage_token
 from test_experiments import bob_id, node
@@ -241,3 +244,53 @@ async def test_callers_cant_write_the_servers_record(api):
     run = await start(api, provenance={"files": {"x": 1}, "reads": [1], "model": "m"})
     assert "files" not in run["provenance"] and "reads" not in run["provenance"]
     assert run["provenance"]["model"] == "m"
+
+
+@needs_services
+async def test_a_run_marked_done_in_the_panel_keeps_its_evidence(api):
+    await api.get("/access", headers=ALICE)
+    claude = storage_token("kc|alice", via="remote")
+    run = await start(api, headers=claude)
+    rules = f"{RULES}?experiment={run['id']}"
+    await api.put(rules, headers=ALICE, content=b"R1")
+    await api.get(rules, headers=claude)
+    [v1] = await versions(api, RULES_PATH, f"experiment={run['id']}")
+
+    # The panel ends a run with a PATCH, not /finish: it records the same.
+    done = await api.patch(f"/experiments/{run['id']}", headers=ALICE, json={"state": "done"})
+    assert done.status_code == 200, done.text
+    p = done.json()["provenance"]
+    assert p["finishedAt"].endswith("Z")
+    assert p["files"] == {RULES_PATH: {"version": v1["id"], "sha256": v1["sha256"]}}
+    assert [r["version"] for r in p["reads"]] == [v1["id"]]
+    report = (await api.get(f"/files/report.md?experiment={run['id']}", headers=ALICE)).text
+    assert f'rules_read: ["{v1["sha256"]}"]\n' in report
+
+    # Editing it afterwards leaves what it ended with alone.
+    await api.put(rules, headers=ALICE, content=b"R2")
+    again = await api.patch(f"/experiments/{run['id']}", headers=ALICE, json={"title": "Etch 2"})
+    assert again.json()["provenance"]["files"] == p["files"]
+    assert again.json()["provenance"]["finishedAt"] == p["finishedAt"]
+
+
+@needs_services
+async def test_a_read_during_a_finish_waits_for_it(api, database):
+    await api.get("/access", headers=ALICE)
+    claude = storage_token("kc|alice", via="remote")
+    run = await start(api, headers=claude)
+    rules = f"{RULES}?experiment={run['id']}"
+    await api.put(rules, headers=ALICE, content=b"R1")
+
+    # Another request is finishing the run: it holds the row while it reads the evidence.
+    async with await psycopg.AsyncConnection.connect(database) as finishing:
+        await finishing.execute("SELECT 1 FROM experiments WHERE id = %s FOR UPDATE", (run["id"],))
+        reading = asyncio.create_task(api.get(rules, headers=claude))
+        await asyncio.sleep(0.3)
+        assert not reading.done()
+        await finishing.execute("UPDATE experiments SET state = 'done' WHERE id = %s", (run["id"],))
+        await finishing.commit()
+    async with asyncio.timeout(10):
+        answer = await reading
+    # The agent still gets the file; the ended run doesn't gain a read its record lacks.
+    assert answer.content == b"R1"
+    assert await run_reads(api, run["id"]) == []

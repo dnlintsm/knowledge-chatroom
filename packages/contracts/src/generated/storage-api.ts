@@ -2073,7 +2073,7 @@ export interface components {
             forkedAt: components["schemas"]["Timestamp"];
             updatedAt: components["schemas"]["Timestamp"];
             fileCount: number;
-            /** @description Where a run came from; {} when nobody recorded it. Once a run finishes, `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`). */
+            /** @description Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish or a PATCH of its state), `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`). */
             provenance: {
                 [key: string]: unknown;
             };

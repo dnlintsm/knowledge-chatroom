@@ -96,10 +96,13 @@ Another viewer's Claude reading a shared run's Rules isn't the run reading them.
 - **Not recorded:** reads by a person in the browser (viewing isn't executing), reads after the
   run finished, and reads of other files. A deployment without login has no storage tokens,
   so nothing is recorded there.
-- **At finish**, `finish_run` adds `files: {"models/general_rules.md": {version, sha256} | null}`
+- **At finish**, the run adds `files: {"models/general_rules.md": {version, sha256} | null}`
   to provenance (the version present at completion, or null when there was none) and copies
   the recorded reads into `reads`, so the record and the report keep them. Callers can't set
-  either key.
+  either key. This happens whichever way the run ends: `/finish`, or a PATCH of its state to
+  done or failed from the run panel. It is read under the experiment row's lock, which file
+  writes and recorded reads also hold, so a read or a Rules save racing the finish is either
+  in the record or comes after it.
 - **What the run panel shows** under Provenance, in a Rules row, from the file's own history
   and `run_reads`:
   - written: each version written during the run, with who wrote it and when;

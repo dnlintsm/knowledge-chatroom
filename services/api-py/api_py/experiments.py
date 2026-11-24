@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import AsyncConnection, errors
@@ -417,7 +418,12 @@ async def update(
     in_tx: InTx | None = None,
     provenance: dict[str, Any] | None = None,
 ) -> bool:
-    """Sets the given fields; False if the experiment is gone. `provenance` keys are merged into the recorded ones."""
+    """
+    Sets the given fields; False if the experiment is gone. `provenance` keys
+    are merged into the recorded ones. A run that ends here (its state becomes
+    done or failed), through a finish or a PATCH, also gets what it ended with
+    (`evidence_at_finish`), read under the row's lock.
+    """
     fields = clean_input(given)
     if not is_uuid(experiment_id):
         return False
@@ -443,6 +449,12 @@ async def update(
             raise ExperimentError(
                 f"This run already finished ({state}); its state and results stay as they ended"
             )
+        if fields.get("state") in ("done", "failed") and state not in ("done", "failed"):
+            provenance = {
+                **(provenance or {}),
+                "finishedAt": iso(datetime.now(UTC)),
+                **(await evidence_at_finish(conn, storage.workspace_id, experiment_id)),
+            }
         values = {k: Jsonb(v) if k in ("params", "results") else v for k, v in fields.items()}
         if values:
             assignments = ", ".join(f"{column} = %s" for column in values)
@@ -497,6 +509,39 @@ async def remove(
 RECORDED_READS = (RULES_PATH,)
 
 
+async def evidence_at_finish(
+    conn: AsyncConnection, workspace_id: str, experiment_id: str
+) -> dict[str, Any]:
+    """
+    What a finished run's provenance keeps of its recorded files: the newest
+    version of each as it ends (null when there is none), and the reads
+    recorded while it ran, so the record and the report keep saying what was
+    read. Called with the experiment's row locked (update): file writes and
+    record_read hold that row too, so none lands between this and the end.
+    """
+    cur = await conn.execute(
+        """
+        SELECT f.path, v.id, v.blob_sha256
+        FROM files f
+        JOIN LATERAL (
+          SELECT id, blob_sha256 FROM file_versions WHERE file_id = f.id
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        ) v ON true
+        WHERE f.experiment_id = %s AND f.workspace_id = %s
+          AND f.path = ANY(%s) AND f.deleted_at IS NULL""",
+        (experiment_id, workspace_id, list(RECORDED_READS)),
+    )
+    newest = {row[0]: {"version": str(row[1]), "sha256": row[2]} for row in await cur.fetchall()}
+    return {
+        "files": {path: newest.get(path) for path in RECORDED_READS},
+        "reads": [
+            {key: entry[key] for key in ("path", "version", "sha256", "via", "readAt")}
+            for entry in await reads(conn, workspace_id, experiment_id)
+        ],
+    }
+
+
 async def record_read(
     conn: AsyncConnection,
     workspace_id: str,
@@ -511,7 +556,8 @@ async def record_read(
     Records that an agent read this version of one of a running run's files:
     `version_id` when the read named one, else the file's newest version with
     the bytes it read. A run that isn't running, or a read already recorded,
-    adds nothing.
+    adds nothing. It holds the experiment's row, so a finish in progress
+    (update) either sees this read or turns it away once the run has ended.
     """
     if version_id is not None and not is_uuid(version_id):
         return
@@ -530,6 +576,7 @@ async def record_read(
         ) v ON true
         WHERE e.id = %(experiment)s AND e.workspace_id = %(ws)s
           AND e.state = 'running' AND e.deleted_at IS NULL
+        FOR SHARE OF e
         ON CONFLICT DO NOTHING""",
         {
             "user": user_id,

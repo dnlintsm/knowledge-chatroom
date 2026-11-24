@@ -574,15 +574,10 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]}
         )
-        record = {"finishedAt": _now(), **(await self._evidence_at_finish(experiment_id))}
+        # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
-                conn,
-                self.storage,
-                experiment_id,
-                {"results": results, "state": state},
-                audit,
-                record,
+                conn, self.storage, experiment_id, {"results": results, "state": state}, audit
             )
         run = await self.experiment(experiment_id)
         await self._refresh_report(run, create=True)
@@ -593,31 +588,6 @@ class Session:
         await self.experiment(experiment_id)
         async with self.scoped() as conn:
             return await experiments.reads(conn, self.ws, experiment_id)
-
-    async def _evidence_at_finish(self, experiment_id: str) -> dict[str, Any]:
-        """
-        What a finished run's provenance keeps of its recorded files: the version
-        of each at the end (null when there was none), and the reads recorded
-        while it ran, so the record and the report keep saying what was read.
-        """
-        files = await self.experiment_files(experiment_id)
-        at_finish: dict[str, Any] = {}
-        for path in experiments.RECORDED_READS:
-            versions = await files.history(path)
-            at_finish[path] = (
-                {"version": versions[0]["id"], "sha256": versions[0]["sha256"]}
-                if versions
-                else None
-            )
-        async with self.scoped() as conn:
-            read = await experiments.reads(conn, self.ws, experiment_id)
-        return {
-            "files": at_finish,
-            "reads": [
-                {key: entry[key] for key in ("path", "version", "sha256", "via", "readAt")}
-                for entry in read
-            ],
-        }
 
     async def _refresh_report(self, run: dict[str, Any], create: bool = False) -> None:
         """
