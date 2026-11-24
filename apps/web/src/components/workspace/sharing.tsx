@@ -5,6 +5,10 @@ import { LogOut, Share2, User, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch, type NodeId, type Role } from "./server-files";
 import { useWorkspace } from "./store";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
  * Who you are (with login on) and who a place is shared with. Sharing lists
@@ -16,28 +20,14 @@ import { useWorkspace } from "./store";
  * A member. /access/users gives everyone the name, and Owners and Admins the
  * email; only /access/people (Owners and Admins) has the login subject.
  */
-export interface Person {
-  id: string;
-  name: string | null;
-  email?: string | null;
+export type Person = Schema["UserSummary"] & {
+  /** Only in /access/people. */
   subject?: string;
-}
+};
 
-export interface Group {
-  id: string;
-  parentId: string | null;
-  name: string;
-  /** Direct members. */
-  memberIds: string[];
-}
+export type Group = Schema["Group"];
 
-interface Grant {
-  id: string;
-  nodeId: string | null;
-  principalType: "user" | "group";
-  principalId: string;
-  role: Role;
-}
+type Grant = Schema["Grant"];
 
 /**
  * Content access as the UI names it (docs/workspaces.md, Terms): verb

@@ -7,6 +7,10 @@ import { Diff } from "./review-panel";
 import { ScriptsBadge, useSkills, type SkillInfo } from "./skills";
 import { workspaceUrl } from "@/lib/workspace-request";
 import { apiFetch } from "./server-files";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
  * The skill hub in the Skills panel (issue #7, steps 3 and 4): browse and
@@ -24,58 +28,13 @@ export interface Notice {
 
 type Notify = (notice: Notice) => void;
 
-interface ScanFlag {
-  kind: "scripts" | "network" | "large" | "binary" | "hidden-text" | "instructions";
-  path: string;
-  line: number | null;
-  detail: string;
-}
+type ScanFlag = Schema["ScanFlag"];
 
-interface HubListing {
-  name: string;
-  description: string;
-  argumentHint: string | null;
-  needsExecution: boolean;
-  publisher: string | null;
-  mine: boolean;
-  /** The newest version that isn't yanked; `verified`, `yanked` and `flags` are about it. */
-  latest: number;
-  verified: boolean;
-  yanked: boolean;
-  flags: number;
-  updatedAt: string;
-  installed: number | null;
-  /** Open reports, shown to hub admins and the publisher. */
-  reports: number | null;
-}
+type HubListing = Schema["HubListing"];
 
-interface HubVersion {
-  version: number;
-  publishedAt: string;
-  publishedBy: string | null;
-  files: number;
-  size: number;
-  verified: boolean;
-  yanked: boolean;
-  yankReason: string | null;
-  flags: ScanFlag[];
-}
+type HubDetail = Schema["HubDetail"];
 
-interface HubDetail extends HubListing {
-  versions: HubVersion[];
-  version: number;
-  skillMd: string;
-  canModerate: boolean;
-  canYank: boolean;
-  openReports: { id: string; version: number | null; reason: string; reporter: string | null; createdAt: string }[] | null;
-}
-
-interface HubDiff {
-  from: number;
-  to: number;
-  files: { path: string; change: "added" | "removed" | "changed"; before: string | null; after: string | null; binary: boolean }[];
-  flags: ScanFlag[];
-}
+type HubDiff = Schema["HubDiff"];
 
 const FLAG_LABEL: Record<ScanFlag["kind"], string> = {
   scripts: "Script",

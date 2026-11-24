@@ -20,6 +20,10 @@ import { useWorkspace } from "./store";
 import { ToolChipRow, toolsMenuItems, useToolMenu } from "./tool-menu";
 import { apiFetch } from "./server-files";
 import { useWorkbench } from "./workbench";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
  * Skill management in the workspace (issue #7):
@@ -35,36 +39,9 @@ import { useWorkbench } from "./workbench";
  * chat › you › everyone › the skill's default applies.
  */
 
-export type SkillMode = "auto" | "manual" | "off";
+export type SkillMode = Schema["SkillMode"];
 
-export interface SkillInfo {
-  name: string;
-  description: string;
-  argumentHint: string | null;
-  source: "builtin" | "workspace" | "hub";
-  /** Its SKILL.md in the workspace; null for built-in skills. */
-  path: string | null;
-  /** The mode that applies here (in the current chat). */
-  mode: SkillMode;
-  defaultMode: SkillMode;
-  /** Chosen for everyone; null = the skill's default. */
-  workspaceMode: SkillMode | null;
-  /** Your choice; null = the workspace's. */
-  userMode: SkillMode | null;
-  /** This chat's choice; null = yours. */
-  chatMode: SkillMode | null;
-  /** For a skill installed from the hub: its pinned version, the newest one, and their standing. */
-  hub: {
-    version: number;
-    latest: number;
-    verified: boolean;
-    yanked: boolean;
-    yankReason: string | null;
-  } | null;
-  modelInvocable: boolean;
-  userInvocable: boolean;
-  needsExecution: boolean;
-}
+export type SkillInfo = Schema["SkillInfo"];
 
 export interface SkillUse {
   skill: string;
