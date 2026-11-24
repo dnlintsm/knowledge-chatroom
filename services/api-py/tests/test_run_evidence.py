@@ -7,6 +7,7 @@ says what these routes promise.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import psycopg
 import pytest
@@ -15,6 +16,7 @@ from test_experiments import bob_id, node
 from test_files import S3_ENDPOINT, SECRET, URL, s3
 
 from api_py.run_report import RULES_PATH
+from api_py.storage import EVENTS_CHANNEL
 
 pytestmark = [pytest.mark.anyio]
 needs_services = pytest.mark.skipif(
@@ -294,3 +296,24 @@ async def test_a_read_during_a_finish_waits_for_it(api, database):
     # The agent still gets the file; the ended run doesn't gain a read its record lacks.
     assert answer.content == b"R1"
     assert await run_reads(api, run["id"]) == []
+
+
+@needs_services
+async def test_a_new_read_tells_whoever_has_the_run_open(api, database):
+    await api.get("/access", headers=ALICE)
+    claude = storage_token("kc|alice", via="remote")
+    run = await start(api, headers=claude)
+    rules = f"{RULES}?experiment={run['id']}"
+    await api.put(rules, headers=ALICE, content=b"R1")
+    async with await psycopg.AsyncConnection.connect(database, autocommit=True) as listener:
+        await listener.execute(f"LISTEN {EVENTS_CHANNEL}")
+        await api.get(rules, headers=claude)
+        # The same version again isn't a new read, so the next event is the rewrite's.
+        await api.get(rules, headers=claude)
+        await api.put(rules, headers=ALICE, content=b"R2")
+        events = [json.loads(n.payload) async for n in listener.notifies(timeout=5, stop_after=2)]
+    assert [(e["op"], e.get("change"), e.get("id")) for e in events] == [
+        ("experiment", "update", run["id"]),
+        ("write", None, None),
+    ]
+    assert events[0]["node"] is None

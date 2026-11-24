@@ -23,14 +23,15 @@ export function useInputEvidence(experiment: Experiment | null): InputEvidence[]
     const now = ws.serverHash(input.path);
     return { input, now, drift: inputDrift(input.sha256, ws.getFile(input.path) !== undefined, now) };
   });
-  const keyOf = (input: RecordedInput, now: string | undefined) => `${input.path}\n${input.sha256}\n${now ?? ""}`;
+  // The place is in the key: another experiment's input with the same path and bytes is another file.
+  const keyOf = (input: RecordedInput, now: string | undefined) => `${place ?? ""}\n${input.path}\n${input.sha256}\n${now ?? ""}`;
   const differing = shown.filter((s) => s.drift === "differs").map((s) => keyOf(s.input, s.now));
   const [found, setFound] = useState<Record<string, FileVersion | null>>({});
   const wanted = differing.join("\0");
   useEffect(() => {
     let live = true;
     for (const key of wanted ? wanted.split("\0") : []) {
-      const [path, sha256, now] = key.split("\n");
+      const [, path, sha256, now] = key.split("\n");
       void recordedVersion(path, place, sha256, now).then((version) => {
         if (live) setFound((was) => (key in was ? was : { ...was, [key]: version }));
       });
