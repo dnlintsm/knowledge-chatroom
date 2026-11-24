@@ -59,6 +59,7 @@ for a gateway) in this server's environment.
 | `AGENT_PY_WORKDIR` | Where each user's working folder goes (one per user and workspace), holding their skills and the workspace copy (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
 | `AGENT_WORKDIR` | `off`: no workspace copy in the working folder, and no Read/Glob/Grep or `save_file`. |
 | `AGENT_WORKDIR_MAX_MB`, `AGENT_WORKDIR_MAX_FILE_MB` | The copy's size caps (default 500 and 25): smallest files first, larger ones left out. |
+| `AGENT_WORKDIR_IDLE_HOURS` | A user's run folder is removed after this long without a run (default 24, at least 1; `0`: never). |
 | `SKILL_SCRIPTS` | `on`: skills' scripts run, in Claude Code's sandbox (needs bubblewrap and socat). Set it on api-py too. |
 | `SKILL_SCRIPTS_DENY_READ` | More absolute paths scripts can't read, comma-separated. |
 | `AGENT_PY_HOST`, `AGENT_PY_PORT` | Where it listens (default `127.0.0.1:9300`). Keep it on a private network: only the Next.js server calls it. |

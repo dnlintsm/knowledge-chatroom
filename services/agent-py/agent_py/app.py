@@ -15,6 +15,8 @@ Environment:
     AGENT_WORKDIR                   off: no copy of the workspace in the working folder (workdir.py)
     AGENT_WORKDIR_MAX_MB, AGENT_WORKDIR_MAX_FILE_MB
                                     its size limits (default 500 and 25)
+    AGENT_WORKDIR_IDLE_HOURS        remove a user's working folder after this long without a run
+                                    (default 24, at least 1; 0: never)
     SKILL_SCRIPTS                   on: skills' scripts run, in Claude Code's sandbox (scripts.py)
     SKILL_SCRIPTS_DENY_READ         more absolute paths scripts can't read (comma-separated)
     AGENT_PY_HOST / AGENT_PY_PORT   where to listen (default 127.0.0.1:9300)
@@ -44,7 +46,7 @@ from .model import chat_models
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
 from .scripts import scripts_from_env
-from .workdir import limits_from_env, workdir_enabled
+from .workdir import idle_seconds_from_env, limits_from_env, workdir_enabled
 from .workspace import STORAGE_HEADER, WORKSPACE_HEADER, storage_url
 
 logger = logging.getLogger("agent_py")
@@ -80,6 +82,7 @@ def make_adapter(
         mcp_servers=servers_from_env(env),
         scripts=scripts_from_env(env),
         workdir=limits_from_env(env) if workdir_enabled(env) else None,
+        idle_seconds=idle_seconds_from_env(env),
         query_timeout_seconds=timeout or None,
     )
 

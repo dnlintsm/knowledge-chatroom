@@ -35,7 +35,9 @@ import logging
 import os
 import re
 import shutil
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+import time
+import uuid
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -82,6 +84,87 @@ def limits_from_env(env: Mapping[str, str]) -> Limits:
         return int(value * MB) if value > 0 else fallback * MB
 
     return Limits(mb("AGENT_WORKDIR_MAX_MB", 500), mb("AGENT_WORKDIR_MAX_FILE_MB", 25))
+
+
+# Touched when a run starts in a run folder: how long ago tells whether it is idle.
+# Beside the skills, so the folder itself holds nothing Claude didn't put there.
+LAST_USED = ".claude/last-used"
+# A run folder's name (skills.run_folder), and one on its way out.
+_RUN_FOLDER = re.compile(r"[0-9a-f]{16}")
+_REMOVING = ".removing-"
+DEFAULT_IDLE_HOURS = 24.0
+# Claude Code sessions idle out after 30 minutes; a folder is never removed sooner than this.
+MIN_IDLE_HOURS = 1.0
+
+
+def idle_seconds_from_env(env: Mapping[str, str]) -> float | None:
+    """
+    AGENT_WORKDIR_IDLE_HOURS: how long a run folder may go unused before it is
+    removed (default 24, at least 1). 0 or `off`: never, as before.
+    """
+    raw = (env.get("AGENT_WORKDIR_IDLE_HOURS") or "").strip().lower()
+    if raw in ("0", "off"):
+        return None
+    try:
+        hours = float(raw) if raw else DEFAULT_IDLE_HOURS
+    except ValueError:
+        hours = DEFAULT_IDLE_HOURS
+    if not hours > 0:
+        hours = DEFAULT_IDLE_HOURS
+    return max(hours, MIN_IDLE_HOURS) * 3600
+
+
+def mark_used(cwd: Path) -> None:
+    """Notes that a run is starting in this run folder (see remove_idle)."""
+    mark = cwd / LAST_USED
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    mark.touch()
+
+
+async def remove_idle(
+    root: Path, idle_seconds: float, in_use: Collection[Path], now: float | None = None
+) -> int:
+    """
+    Removes the run folders under `root` that no run has used for `idle_seconds`,
+    leaving those `in_use`; returns how many. A run folder holds a copy of what
+    its user could read, so it shouldn't outlive their use of it by long: they
+    may have lost that access since. A folder from before this existed has no
+    mark yet: it gets one now, and goes after the same wait.
+    """
+    now = time.time() if now is None else now
+    doomed: list[Path] = []
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return 0
+    removed = 0
+    for child in children:
+        if child.name.startswith(_REMOVING):
+            doomed.append(child)  # left by a server that stopped mid-removal
+            continue
+        if not _RUN_FOLDER.fullmatch(child.name) or not child.is_dir() or child in in_use:
+            continue
+        mark = child / LAST_USED
+        try:
+            if not mark.exists():
+                mark.parent.mkdir(parents=True, exist_ok=True)
+                mark.touch()
+                continue
+            if now - mark.stat().st_mtime <= idle_seconds:
+                continue
+            # Out of the way at once, so a run starting now gets a fresh folder
+            # instead of one that is being deleted under it.
+            gone = root / f"{_REMOVING}{uuid.uuid4().hex}"
+            child.rename(gone)
+        except OSError as err:
+            logger.warning("[workdir] couldn't remove the idle run folder %s: %s", child.name, err)
+            continue
+        _locks.pop(child.resolve(), None)
+        doomed.append(gone)
+        removed += 1
+    for folder in doomed:
+        await asyncio.to_thread(shutil.rmtree, folder, True)
+    return removed
 
 
 @dataclass

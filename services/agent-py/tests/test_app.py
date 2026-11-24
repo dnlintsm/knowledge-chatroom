@@ -320,3 +320,25 @@ def test_an_unexpected_failure_getting_a_run_ready_is_a_run_error(client, claude
     # Nothing is left half set up: the next run of the same chat works.
     again = events(client.post("/agent/report", json=run_input(user=LOCAL)))
     assert (types(again)[0], types(again)[-1]) == ("RUN_STARTED", "RUN_FINISHED")
+
+
+def test_a_run_marks_its_folder_and_idle_ones_are_removed_as_runs_start(claude, tmp_path):
+    from agent_py.skills import run_folder
+    from agent_py.workdir import LAST_USED, mark_used
+
+    stale = run_folder(tmp_path, "someone-who-left")
+    mark_used(stale)
+    (stale / "workspace").mkdir()
+    long_ago = time.time() - 3 * 24 * 3600
+    os.utime(stale / LAST_USED, (long_ago, long_ago))
+
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        evts = events(c.post("/agent/report", json=run_input(user=LOCAL)))
+        assert types(evts)[-1] == "RUN_FINISHED"
+        mine = run_folder(tmp_path, LOCAL["id"])
+        assert (mine / LAST_USED).exists()
+        assert not stale.exists()
+        # Held only while the run lasts.
+        assert not adapter._in_use

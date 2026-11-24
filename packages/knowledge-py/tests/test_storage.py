@@ -66,7 +66,11 @@ def test_reads_and_writes_carry_the_token_to_the_storage_api(serve):
     assert storage.write(api.url, "notes/a.md", b"x", "text/markdown", "tok", node="n1") is True
     assert storage.write(api.url, "notes/a.md", b"x", "text/markdown", None) is False
     (get, put, plain) = api.seen
-    assert (get[0], get[1], get[2]["x-knowledge-storage"]) == ("GET", "/files/notes/a.md?node=n1", "tok")
+    assert (get[0], get[1], get[2]["x-knowledge-storage"]) == (
+        "GET",
+        "/files/notes/a.md?node=n1",
+        "tok",
+    )
     assert (put[0], put[1], put[2]["x-knowledge-storage"]) == (
         "PUT",
         "/files/notes/a.md?node=n1&propose=",
@@ -87,8 +91,18 @@ def test_the_token_is_never_sent_on_to_where_the_api_redirects(serve, status):
 
 
 def test_refusals_carry_the_apis_reason(serve):
-    api = serve(lambda path: (403, {"Content-Type": "application/json"}, b'{"error": "You can only view here"}'))
-    with pytest.raises(storage.WorkspaceError, match=r"Couldn't read a.md \(403\): You can only view here"):
+    api = serve(
+        lambda path: (
+            403,
+            {"Content-Type": "application/json"},
+            b'{"error": "You can only view here"}',
+        )
+    )
+    with pytest.raises(
+        storage.WorkspaceError, match=r"Couldn't read a.md \(403\): You can only view here"
+    ):
         storage.read_text(api.url, "a.md", "tok")
-    with pytest.raises(storage.WorkspaceError, match=r"Couldn't save a.md \(403\): You can only view here"):
+    with pytest.raises(
+        storage.WorkspaceError, match=r"Couldn't save a.md \(403\): You can only view here"
+    ):
         storage.write(api.url, "a.md", b"x", "text/markdown", "tok")
