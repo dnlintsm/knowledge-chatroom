@@ -371,3 +371,41 @@ def test_a_folders_idle_time_counts_from_the_end_of_its_last_run(claude, tmp_pat
         other["threadId"] = "t2"
         events(c.post("/agent/report", json=other))
         assert mark.exists()
+
+
+def test_every_storage_call_of_the_server_goes_through_one_http_client(claude, monkeypatch):
+    """A client per call meant a new connection for each of the several calls a tool call makes."""
+    made: list[httpx.AsyncClient] = []
+    init = httpx.AsyncClient.__init__
+
+    def counting(self, *args, **kwargs):
+        made.append(self)
+        init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", counting)
+    ws = "11111111-2222-4333-8444-555555555555"
+    seen: list[httpx.Request] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return no_skills(request)
+
+    env = {"AUTH_MODE": "local", "LOCAL_AGENT_URL": "http://storage.test/"}
+    adapter = make_adapter(env, httpx.MockTransport(api))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        for thread in ("t1", "t2"):
+            body = run_input(user=LOCAL)
+            body["threadId"] = thread
+            headers = {"X-Knowledge-Storage": f"tok-{thread}", "X-Knowledge-Workspace": ws}
+            events(c.post("/agent/report", json=body, headers=headers))
+        client = adapter._http
+        assert client is not None and not client.is_closed
+        assert adapter._storage("t1").client is adapter._storage("t2").client is client
+    # Several calls per run (skills, the working folder's listing), all on that client.
+    to_storage = [m for m in made if str(m.base_url).startswith("http://storage.test")]
+    assert len(seen) >= 4 and to_storage == [client]
+    # Each call still carries its own run's token and workspace.
+    assert {r.headers.get("x-knowledge-storage") for r in seen} == {"tok-t1", "tok-t2"}
+    assert {r.headers.get("x-knowledge-workspace") for r in seen} == {ws}
+    # Closed with the server.
+    assert client.is_closed and adapter._http is None

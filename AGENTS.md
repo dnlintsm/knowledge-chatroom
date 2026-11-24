@@ -56,6 +56,9 @@ A multi-tenant workspace where people and Claude work on files together.
 - `packages/contracts/openapi/storage.yaml` is the source of truth. A route, status code or
   field that changes is changed there, in the conformance suite, and in both generated
   models, in the same pull request.
+- The web app's types for API answers (`server-files.ts`) are the generated ones
+  (`components["schemas"][...]`). Use the generated type for a new answer instead of
+  writing an interface beside it.
 
 ## Before you say a change is done
 

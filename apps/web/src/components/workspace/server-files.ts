@@ -1,14 +1,22 @@
 import { parseFileInfo, parseFileList, StorageContractError } from "@knowledge-chatroom/contracts/storage-contract";
 import type { FileInfo as ServerFile } from "@knowledge-chatroom/contracts/storage-contract";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
 export type { FileInfo as ServerFile, WorkspaceEvent as ServerEvent } from "@knowledge-chatroom/contracts/storage-contract";
 import { WORKSPACE_HEADER, workspaceFetch, workspaceUrl } from "@/lib/workspace-request";
-import { FileChangedError, FileExistsError, isTextFile, type FileKind, type WorkspaceFile } from "./types";
+import { FileChangedError, FileExistsError, isTextFile, type WorkspaceFile } from "./types";
 
 /**
  * Client for the server file API (/api/files, forwarded to the agent's
  * storage service). When it answers, workspace files live on the server;
  * otherwise the workspace keeps them in the browser (see store.tsx).
  */
+
+/**
+ * The storage API's shapes, generated from packages/contracts/openapi/storage.yaml.
+ * The types below that name one are that schema, so a change to the spec that this
+ * app doesn't follow is a compile error here, not a surprise at run time.
+ */
+type Schema = components["schemas"];
 
 /** A knowledge node id, or null for the workspace root. */
 export type NodeId = string | null;
@@ -31,32 +39,16 @@ export const eventPlace = (event: { node: NodeId; experiment?: string | null }):
 export const WATCH_URL = "/api/files?watch";
 
 /** A level of the knowledge tree, such as tech (depth 1). */
-export interface NodeType {
-  name: string;
-  depth: number;
-}
+export type NodeType = Schema["NodeType"];
 
 /** viewer reads, editor also writes, owner also deletes and shares. */
-export type Role = "viewer" | "editor" | "owner";
+export type Role = Schema["Role"];
 
-export interface KnowledgeNode {
-  id: string;
-  parentId: string | null;
-  type: string;
-  depth: number;
-  name: string;
-  fileCount: number;
-  updatedAt: string;
-  /** Your role here; null when shown only as the path to something you can see. */
-  role: Role | null;
-}
+/** A node you can see. `role` is yours there; null when it is shown only as the path to something you can see. */
+export type KnowledgeNode = Schema["VisibleNode"];
 
-export interface KnowledgeTree {
-  types: NodeType[];
-  /** Your role at the workspace root (root files and top-level nodes). */
-  rootRole: Role | null;
-  nodes: KnowledgeNode[];
-}
+/** The tree's levels, the nodes you can see, and your role at the workspace root (`rootRole`). */
+export type KnowledgeTree = Schema["Tree"];
 
 /**
  * fetch for the storage API, in the page's workspace (workspaceFetch). With
@@ -263,44 +255,22 @@ export const renameServerNode = (id: string, name: string) =>
 export const deleteServerNode = (id: string) =>
   nodeRequest("DELETE", `/${encodeURIComponent(id)}`).then(() => undefined);
 
-export type ExperimentStatus = "draft" | "shared" | "archived";
+export type ExperimentStatus = Schema["ExperimentStatus"];
 /** How far a run got, apart from who sees it (status). */
-export type ExperimentState = "ready" | "running" | "done" | "failed";
+export type ExperimentState = Schema["ExperimentState"];
 
 /**
  * A sandbox on a knowledge node, with its own copy of the node's files, or
  * at the workspace root (nodeId null), starting empty. One with a report.md
  * is a run.
  */
-export interface Experiment {
-  id: string;
-  nodeId: string | null;
-  /** Who created it; never changes (provenance). */
-  authorId: string;
-  authorName: string | null;
-  /** Who is responsible for it now: its author until they hand it over (#255). */
-  maintainerId: string;
-  maintainerName: string | null;
-  /** Whether its maintainer is still a member of the workspace. */
-  maintainerIsMember: boolean;
-  /** Members its maintainer added to work on it with them. */
-  collaborators: { id: string; name: string | null }[];
-  title: string;
-  hypothesis: string;
-  params: Record<string, unknown>;
-  results: Record<string, unknown>;
-  status: ExperimentStatus;
-  state: ExperimentState;
-  forkedAt: string;
-  updatedAt: string;
-  fileCount: number;
-  /** Where a run came from, when Claude started it (services/api-py/api_py/run_report.py); else {}. */
+export type Experiment = Omit<Schema["Experiment"], "provenance"> & {
+  /**
+   * Where a run came from, when Claude started it (services/api-py/api_py/run_report.py);
+   * else {}. The API describes it as an open object; these are the fields this app reads.
+   */
   provenance?: RunProvenance;
-  /** writer: you maintain it or collaborate on it, and it isn't archived. */
-  access: "writer" | "reader";
-  /** You maintain it: you may share, archive, restore or delete it, and choose who works on it. */
-  mine: boolean;
-}
+};
 
 /** Recorded by the agent; every field may be missing on older or hand-made runs. */
 export interface RunProvenance {
@@ -398,51 +368,16 @@ export async function changeServerExperimentPeople(
   return data.experiment ?? null;
 }
 
-export type ProposalStatus = "open" | "accepted" | "rejected" | "withdrawn";
+export type ProposalStatus = Schema["ProposalStatus"];
 
 /**
  * A proposed version of a file in a node (or at the root), waiting for someone
  * who can edit there to accept or reject it (services/api-py/api_py/proposals.py).
  */
-export interface Proposal {
-  id: string;
-  node: NodeId;
-  path: string;
-  sha256: string;
-  size: number;
-  mime: string;
-  /** agent: Claude proposed it, acting for authorName. */
-  author: WorkspaceFile["author"];
-  authorId: string;
-  authorName: string | null;
-  /** The experiment it was promoted from, if any (and its title, if you may see it). */
-  experiment: string | null;
-  experimentTitle: string | null;
-  note: string;
-  status: ProposalStatus;
-  decidedByName: string | null;
-  decidedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  /** Accepting creates the file. */
-  isNew: boolean;
-  /** The file changed after this was proposed. */
-  fileChanged: boolean;
-  /** You proposed it, so you may withdraw it. */
-  mine: boolean;
-  /** You may accept or reject it. */
-  canDecide: boolean;
-}
+export type Proposal = Schema["Proposal"];
 
 /** A file an experiment changed that its node doesn't have yet. */
-export interface Promotable {
-  path: string;
-  change: "new" | "changed";
-  size: number;
-  mime: string;
-  /** This experiment's open proposal with exactly this content, if any. */
-  proposal: string | null;
-}
+export type Promotable = Schema["Promotable"];
 
 /** Open proposals you can see, everywhere; null when they can't be read. */
 export async function listProposals(): Promise<Proposal[] | null> {
@@ -507,21 +442,7 @@ export const listPromotable = (experimentId: string) =>
   ).then((r) => r.files);
 
 /** A file whose text or path matched a search (services/api-py/api_py/search.py). */
-export interface SearchHit {
-  path: string;
-  kind: FileKind;
-  mime: string;
-  node: NodeId;
-  experiment: string | null;
-  /** Node names from the top down to the file's node (an experiment's node for its files). */
-  where: string[];
-  experimentTitle: string | null;
-  /** The passage that matched; "" when only the path did. */
-  snippet: string;
-  /** "meaning": no words in common, but a passage close in meaning. */
-  match: "words" | "meaning";
-  updatedAt: string;
-}
+export type SearchHit = Schema["SearchHit"];
 
 /**
  * Files you can read that match `query`, best first; those near `near` (where
