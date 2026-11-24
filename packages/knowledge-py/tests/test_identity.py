@@ -61,6 +61,36 @@ def test_identity_refuses_expired_tampered_and_local_tokens():
     assert identity.verify("garbage", PUBLIC_KEY, "mcp:lab") is None
 
 
+def test_claims_checks_the_signature_and_the_expiry_and_nothing_else():
+    key = TEST_KEY.public_key()
+    # No subject or audience needed: callers check who the token is for.
+    assert identity.claims(sign({"exp": 4102444800}), key) == {"exp": 4102444800}
+    assert identity.claims(sign({"sub": "a", "exp": 100}), key, now=99) == {"sub": "a", "exp": 100}
+    assert identity.claims(sign({"sub": "a", "exp": 100}), key, now=101) is None
+    assert identity.claims(sign({"sub": "a", "exp": 100}), PUBLIC_KEY, now=99) is None
+    # An expiry has to be a number: true is not "in one second".
+    for exp in (True, "4102444800", None):
+        assert identity.claims(sign({"sub": "a", "exp": exp}), key, now=0) is None
+    assert identity.claims(sign({"sub": "a"}), key) is None
+    # Claims are an object, and a signature is 64 bytes.
+    body = "v2." + _b64(b"[1]")
+    assert identity.claims(body + "." + _b64(TEST_KEY.sign(body.encode())), key) is None
+    head, payload, signature = sign({"sub": "a", "exp": 4102444800}).split(".")
+    for bad in (
+        None,
+        "",
+        "v2.only-two",
+        f"{head}.{payload}.{signature[:-4]}",
+        f"{head}.{payload}.!",
+    ):
+        assert identity.claims(bad, key) is None
+
+
+def test_a_name_or_email_that_is_not_text_is_left_out():
+    token = sign({"sub": "a", "exp": 4102444800, "aud": "mcp:lab", "email": ["x"], "name": 7})
+    assert identity.verify(token, TEST_KEY.public_key(), "mcp:lab") == identity.User(sub="a")
+
+
 def test_caller_without_login_is_the_local_user():
     assert identity.caller(None, None, "mcp:lab") == identity.LOCAL_USER
     assert identity.caller({}, PUBLIC_KEY, "mcp:lab") is None
