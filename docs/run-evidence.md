@@ -126,7 +126,10 @@ Admins can act on shared and archived Experiments. Everyone also needs membershi
 view on the Experiment's node, as for every Experiment.
 
 - `GET /experiments?deleted=1` lists the deleted Experiments the caller may restore, newest
-  deletion first, with `deletedAt` and who deleted it (from the audit log).
+  deletion first, with `deletedAt`, who deleted it (`deletedBy`, kept on the row from now on
+  and taken from the audit log for earlier deletes; null for one deleted with its node), and
+  `restorable` (false when its node is gone). `fileCount` there is the files a restore brings
+  back.
 - `POST /experiments/{id}/restore` clears `deleted_at` on the Experiment and on the files
   deleted with it: those whose `deleted_at` equals the Experiment's. Files deleted earlier stay
   deleted. It answers the Experiment, keeps its status (draft, shared, archived) and state,
@@ -145,8 +148,8 @@ view on the Experiment's node, as for every Experiment.
 ## Contract changes
 
 - `GET /files/{path}`: the `version` query parameter.
-- `GET /experiments`: the `deleted` query parameter; an Experiment answer gains `deletedAt`
-  and `deletedBy` (`{id, name}`) only in that list.
+- `GET /experiments`: the `deleted` query parameter; an Experiment answer gains `deletedAt`,
+  `deletedBy` (`{id, name}`) and `restorable` only in that list.
 - `POST /experiments/{id}/restore`.
 - `GET /experiments/{id}/reads`: the run's `run_reads` rows (path, version, `sha256`, via,
   first read), for whoever can see the run.
@@ -177,7 +180,7 @@ view on the Experiment's node, as for every Experiment.
 1. This spec (docs only).
 2. Backend: the past-version read, `run_reads` and the Rules record at finish, `version` on
    the Python agent's `read_file` (api-py, agent-py, contract). Done.
-3. Backend: Recently deleted and restore (migration, api-py, contract).
+3. Backend: Recently deleted and restore (migration, api-py, contract). Done.
 4. Screens: input drift, View recorded, and the Rules row in Provenance.
 5. Screens: Undo after delete, and Recently deleted.
 

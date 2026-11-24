@@ -541,7 +541,8 @@ For local setup, see [Development](development.md).
   only until restored. Its `state` (ready, running, done, failed) says how far the run got.
   `GET|POST /api/experiments` lists (optionally `?node=<id>`, or `?node=root`) and forks
   (`nodeId: null` for the root), `GET|PATCH|DELETE /api/experiments/<id>` reads, changes and deletes
-  one, and every `/api/files` route takes `?experiment=<id>`. In the Knowledge view,
+  one (`GET /api/experiments?deleted=1` and `POST /api/experiments/<id>/restore` undo a delete,
+  [Run evidence](run-evidence.md)), and every `/api/files` route takes `?experiment=<id>`. In the Knowledge view,
   experiments sit under their node (root ones under Workspace) with their status and state,
   and the Experiment tab holds the details and a comparison table. Its author brings its results to the node by proposing them (below).
 - **Proposed changes**: a change to a node's file can wait for review instead of landing at
