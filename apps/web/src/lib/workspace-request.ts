@@ -1,6 +1,6 @@
 /**
  * The one helper every browser call to this app's `/api/…` goes through, so
- * each one names the workspace the page is in (issue #226, docs/workspaces.md,
+ * each one names the workspace the page is in (docs/workspaces.md,
  * "How a request finds its workspace"). The page resolves its `/w/<slug>` to
  * an id once (src/app/w/[slug]/page.tsx) and sets it here; fetches then carry
  * it as the X-Knowledge-Workspace header, and plain links, images and
@@ -101,7 +101,7 @@ export interface WorkspaceInfo {
   slug: string;
   name: string;
   role: "owner" | "admin" | "member";
-  /** "archived" only in the list of archived workspaces an Owner may restore (issue #255). */
+  /** "archived" only in the list of archived workspaces an Owner may restore. */
   status?: "active" | "archived";
 }
 

@@ -187,7 +187,7 @@ def test_a_header_without_a_key_is_refused(client):
 
 
 def test_login_is_never_guessed_from_a_missing_key(claude):
-    """Issue #283: a setting left out must not turn login off."""
+    """A setting left out must not turn login off."""
     with pytest.raises(LoginConfigError, match="Login is not configured"):
         create_app(env={}, adapter=make_adapter({}, httpx.MockTransport(no_skills)))
     with pytest.raises(LoginConfigError, match="must not be set"):
@@ -272,7 +272,7 @@ def test_the_session_gets_the_workspace_tools_and_the_runs_token(claude):
 
 
 def test_the_runs_workspace_goes_with_its_storage_calls(claude):
-    """Without login there is no storage token: the app's workspace header names it (issue #226)."""
+    """Without login there is no storage token: the app's workspace header names it."""
     ws = "11111111-2222-4333-8444-555555555555"
     seen: list[httpx.Request] = []
 

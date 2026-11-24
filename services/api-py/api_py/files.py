@@ -143,7 +143,7 @@ class FileService:
     async def content(self, info: dict[str, Any]) -> bytes:
         """
         The bytes of a file stat() found. It takes no database connection, so a
-        slow object store doesn't hold one of the pool's (issue #296); a version's
+        slow object store doesn't hold one of the pool's; a version's
         bytes never change, so reading them after the transaction is the same read.
         """
         return await self.storage.require_blobs().get(info["sha256"])
@@ -151,7 +151,7 @@ class FileService:
     async def store(self, raw_path: str, data: bytes, mime: str | None = None) -> None:
         """
         Puts `data` in the blob store ahead of write(..., stored=True), without
-        a database connection (issue #296). Bytes go first anyway (see above):
+        a database connection. Bytes go first anyway (see above):
         a write that then fails leaves an unreferenced blob, never a dangling row.
         """
         path = normalize_path(raw_path)

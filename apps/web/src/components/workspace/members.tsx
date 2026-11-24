@@ -14,7 +14,7 @@ import { useWorkspace } from "./store";
 
 /**
  * A member's workspace role and removal, in the Admin panel's People tab
- * (issue #255, docs/workspaces.md, "Screens"): a menu with only the roles the
+ * (docs/workspaces.md, "Screens"): a menu with only the roles the
  * viewer may set, "Make Owner" asking how to hand over, and Remove confirming
  * from the server's preview of what goes.
  */

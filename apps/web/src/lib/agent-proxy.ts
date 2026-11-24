@@ -14,8 +14,8 @@ import { IDENTITY_HEADER, authSecret, identityHeader, sessionFrom } from "./auth
 const LOCAL_AGENT_URL = localAgentUrl();
 
 // x-knowledge-workspace: the workspace the page is in (src/lib/workspace-request.ts),
-// which the API server checks the user belongs to (issue #226).
-// if-match: a save names the version it replaces, so it can't overwrite someone else's (issue #293).
+// which the API server checks the user belongs to.
+// if-match: a save names the version it replaces, so it can't overwrite someone else's.
 const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "if-none-match", "if-match", "x-knowledge-workspace"];
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",

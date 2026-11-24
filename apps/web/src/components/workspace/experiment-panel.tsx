@@ -90,7 +90,7 @@ export function ExperimentPanel() {
   }
   const nodeName = placeName(ws.nodes, exp.nodeId);
   const canChange = exp.access === "writer";
-  // Anyone who can see it may rerun it as their own, where they can see the node (#187).
+  // Anyone who can see it may rerun it as their own, where they can see the node.
   const nodeRole = exp.nodeId === null ? ws.rootRole : (ws.nodes.find((n) => n.id === exp.nodeId)?.role ?? null);
   const canRerun = hasRole(nodeRole, "viewer");
   const reason = readOnlyReason({ experiment: exp, placeRole: ws.placeRole, placeName: nodeName, canRerun });
@@ -395,7 +395,7 @@ function Promote({ experiment, nodeName }: { experiment: Experiment; nodeName: s
 }
 
 /**
- * Uploads into this experiment (issue #114): files go to its uploads/ and,
+ * Uploads into this experiment: files go to its uploads/ and,
  * unless the run already finished, are also added as run inputs,
  * copies under inputs/ recorded in its provenance, so a rerun reads them too.
  */
@@ -800,7 +800,7 @@ function Compare({ current, nodeName }: { current: Experiment; nodeName: string 
  */
 export function RunsPanel() {
   const ws = useWorkspace();
-  // The same scope as the sidebar's list (#186).
+  // The same scope as the sidebar's list.
   const [listScope] = useListScope();
   const scope = shownScope(listScope, ws.nodes);
   const runs = experimentsIn(ws.experiments, ws.nodes, scope);

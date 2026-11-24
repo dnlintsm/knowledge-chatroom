@@ -39,7 +39,7 @@ def test_names_ids_and_cursors():
 
 
 def test_which_chats_read_outside_content():
-    """Issue #285: what a chat's saved messages say about where Claude's words may come from."""
+    """What a chat's saved messages say about where Claude's words may come from."""
 
     def used(name: str, arguments: str = "{}") -> dict:
         call = {"id": "c", "type": "function", "function": {"name": name, "arguments": arguments}}

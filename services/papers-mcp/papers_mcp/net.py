@@ -3,7 +3,7 @@
 Two kinds of address go out. get() asks the sources this server is configured
 with (OpenAlex, arXiv). get_public() fetches a link that came out of their
 answers, a paper's PDF, which could point anywhere: it only goes to https on a
-public address, checked again on every redirect (issue #289).
+public address, checked again on every redirect.
 """
 
 from __future__ import annotations

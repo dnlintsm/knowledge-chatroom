@@ -27,7 +27,7 @@ from . import stats
 
 # Must match the server's name in MCP_SERVERS: forwarded users are signed for it.
 SERVER_NAME = os.environ.get("LAB_TOOLS_NAME", "lab")
-# Whether callers must be signed in (issue #283). AUTH_MODE=local: no login.
+# Whether callers must be signed in. AUTH_MODE=local: no login.
 # With login, KNOWLEDGE_PUBLIC_KEY is the chatroom's public key (the API server's
 # GET /identity/public-key); never give this server AUTH_SECRET. Neither set is
 # an error at startup: a missing key must not turn login off.

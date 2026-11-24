@@ -92,7 +92,7 @@ async def test_passes_method_path_query_headers_and_body():
 
 
 async def test_without_login_a_signed_request_is_refused_not_made_the_local_user():
-    """Issue #283: login on in the app and no secret here must not make everyone the owner."""
+    """Login on in the app and no secret here must not make everyone the owner."""
     async with through(echo) as api:
         for header in ("x-knowledge-user", "X-Knowledge-Storage"):
             answer = await api.get("/files", headers={header: "v2.token.sig"})

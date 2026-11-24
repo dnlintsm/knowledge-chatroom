@@ -1,4 +1,4 @@
-"""Using the user's memory in the chat that calls this server (issue #93).
+"""Using the user's memory in the chat that calls this server.
 
 With "memoryAccess": true in MCP_SERVERS, runs where memory is on send this
 server an X-Knowledge-Memory token for that chat. Passed on unchanged to the

@@ -93,8 +93,8 @@ def auth_secret(env: Mapping[str, str]) -> str | None:
         raise ConfigError(f"AUTH_MODE=oidc needs AUTH_SECRET {_SECRET_HINT}")
     # Neither set. The app (auth-mode.ts) lets this through in development and
     # refuses it in a production build; this server has no such build, so it
-    # always refuses: a secret left out must not quietly turn login off (issue
-    # #283). `pnpm dev` passes AUTH_MODE=local for it (scripts/dev-py.mjs).
+    # always refuses: a secret left out must not quietly turn login off.
+    # `pnpm dev` passes AUTH_MODE=local for it (scripts/dev-py.mjs).
     raise ConfigError(
         "Login is not configured. Set AUTH_MODE=oidc with AUTH_SECRET (the app's) for sign-in, "
         "or AUTH_MODE=local to run without login (everyone is one user)"

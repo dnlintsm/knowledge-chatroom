@@ -1,4 +1,4 @@
-"""Revocation at tool boundaries (issue #255), the Python agent's side.
+"""Revocation at tool boundaries, the Python agent's side.
 
 The engine tests run the real Claude Code engine (the SDK's bundled CLI) against
 a scripted Messages API, so they can count model turns, and a storage API that

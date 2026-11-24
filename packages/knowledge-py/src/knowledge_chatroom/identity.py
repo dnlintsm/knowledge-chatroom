@@ -8,11 +8,11 @@ With login on, the agent sends each run's user to servers configured with
 
 It is checked with the chatroom's public key (KNOWLEDGE_PUBLIC_KEY, from the
 agent's GET /identity/public-key), not AUTH_SECRET: with only the public key,
-this server can check who is calling but can't sign for anyone (issue #88).
+this server can check who is calling but can't sign for anyone.
 
 Without login there is no header: everyone is the local user. Whether login
 is on is never guessed from a missing key: login_from_env() reads AUTH_MODE too,
-and refuses to choose when neither says (issue #283).
+and refuses to choose when neither says.
 """
 
 from __future__ import annotations

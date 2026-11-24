@@ -295,7 +295,7 @@ async def test_a_call_carries_the_users_tokens():
 
 
 async def test_a_calls_storage_token_is_bound_to_the_pages_workspace():
-    """Issue #297: a tool's writes landed in the default workspace, wherever the user was."""
+    """A tool's writes landed in the default workspace, wherever the user was."""
     recorder = Recorder(ToolAnswer({}, "{}", False))
     lab = "11111111-2222-4333-8444-555555555555"
     async with api(lab_tools(), call=recorder) as client:

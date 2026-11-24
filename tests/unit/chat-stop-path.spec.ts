@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { stopThreadId } from "../../apps/web/src/lib/chat-routes";
 
-/** Which requests the copilotkit route treats as "stop this thread" (issue #297). */
+/** Which requests the copilotkit route treats as "stop this thread". */
 
 test("a stop request names its thread, with or without a trailing slash", () => {
   expect(stopThreadId("/agent/default/stop/t-1")).toBe("t-1");

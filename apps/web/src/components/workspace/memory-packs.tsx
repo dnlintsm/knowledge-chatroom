@@ -20,7 +20,7 @@ import type { components } from "@knowledge-chatroom/contracts/generated/storage
 type Schema = components["schemas"];
 
 /**
- * Memory packs and import in the Memory view (issue #93, step 4).
+ * Memory packs and import in the Memory view.
  * - Import: another assistant's memory (pasted, or a file) or a .zip export
  *   becomes changes in your inbox, to accept one by one.
  * - Memory packs: a place's shared notes published to the hub, for other

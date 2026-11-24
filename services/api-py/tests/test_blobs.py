@@ -1,5 +1,5 @@
 """ensure_bucket against a fake S3 client: both servers create the bucket at
-startup, and the one that loses the race must still start (issue #243)."""
+startup, and the one that loses the race must still start."""
 
 from __future__ import annotations
 

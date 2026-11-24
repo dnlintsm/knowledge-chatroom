@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { safeReturnTo } from "../../apps/web/src/lib/auth";
 
-/** Where the app sends users after sign-in (apps/web/src/lib/auth.ts, issue #64). */
+/** Where the app sends users after sign-in (apps/web/src/lib/auth.ts). */
 
 const APP = "https://app.example";
 const landsOn = (value: string | null) => new URL(safeReturnTo(value), APP);
@@ -38,6 +38,6 @@ test("nothing can leave the app's origin", () => {
   for (const value of attempts) {
     expect(landsOn(value).origin, JSON.stringify(value)).toBe(APP);
   }
-  // The case reported in issue #64.
+  // A line break between the slashes: URL parsers drop it, which leaves //outside.example.
   expect(safeReturnTo("/\n/outside.example")).toBe("/");
 });

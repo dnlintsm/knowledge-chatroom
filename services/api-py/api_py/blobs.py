@@ -64,7 +64,7 @@ def is_bucket_taken(err: Exception) -> bool:
     """Whether CreateBucket failed because the bucket is already there.
 
     Both servers create the bucket at startup, so on an empty store one of them
-    can lose that race (issue #243). The bucket then exists, which is all that
+    can lose that race. The bucket then exists, which is all that
     startup needs.
     """
     response: dict[str, Any] = getattr(err, "response", None) or {}

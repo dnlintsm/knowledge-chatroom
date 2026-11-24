@@ -4,7 +4,7 @@ With "storageAccess": true in MCP_SERVERS, each run sends this server an
 X-Knowledge-Storage token. Passed on unchanged to the chatroom's storage API
 (api-py's /files, KNOWLEDGE_STORAGE_URL), it reads and writes
 files as Claude acting for the signed-in user: only what that user can
-reach, with writes in a knowledge node as proposals (issue #88). This server
+reach, with writes in a knowledge node as proposals. This server
 never connects to the chatroom's database or object store itself.
 
 Without login there is no token, and the storage API answers as the local user.

@@ -1,4 +1,4 @@
-// Decides which demo images a pull request can affect (issue #218).
+// Decides which demo images a pull request can affect.
 //
 //   node scripts/docker-changes.mjs            # in CI: writes `images` (JSON) and `compose` to $GITHUB_OUTPUT
 //   node scripts/docker-changes.mjs a.py b.ts  # locally: prints them for these paths

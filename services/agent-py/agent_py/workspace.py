@@ -5,7 +5,7 @@ goes to the storage API on LOCAL_AGENT_URL with the run's X-Knowledge-Storage
 token, which acts as Claude for the signed-in user: only what they can reach,
 writes in a knowledge node (and to skills) as proposals, no renaming, deleting
 or sharing (docs/remote-agent.md). Without login there is no token and the API
-answers as the local user. Each call also names the run's workspace (issue #226)
+answers as the local user. Each call also names the run's workspace
 with the X-Knowledge-Workspace header the app sent with the run, so a chat in
 one workspace never works on another's files, with or without login.
 

@@ -1,4 +1,4 @@
-"""Workspace memberships (issue #226): the backfill, the one-time owner bootstrap and selectors.
+"""Workspace memberships: the backfill, the one-time owner bootstrap and selectors.
 
 The isolation rules across two workspaces are in the conformance suite
 (packages/contracts/conformance/workspaces.test.ts); these need the database
@@ -758,7 +758,7 @@ async def test_a_collaborator_write_after_a_removal_finds_no_member(database, mo
 
 async def test_a_role_the_caller_no_longer_holds_changes_nothing(database):
     """
-    Issue #297: the route reads the caller's role before the workspace is locked.
+    The route reads the caller's role before the workspace is locked.
     A change that then gets the lock must go by the role the caller holds now,
     not the one they held when they asked.
     """

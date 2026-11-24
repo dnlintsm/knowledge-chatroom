@@ -32,7 +32,7 @@ def test_login_follows_the_typescript_rules():
         {"AUTH_MODE": "local", "AUTH_SECRET": SECRET},
         {"AUTH_SECRET": "short"},
         {"AUTH_MODE": "maybe"},
-        # Neither set: refused everywhere, not only in production (issue #283).
+        # Neither set: refused everywhere, not only in production.
         {},
         {"NODE_ENV": "development"},
         {"AUTH_SECRET": ""},

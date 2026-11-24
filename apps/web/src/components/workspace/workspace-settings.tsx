@@ -13,8 +13,7 @@ import { access } from "./sharing";
 import { useWorkspace } from "./store";
 
 /**
- * The current workspace's settings, from the switcher (issue #255,
- * docs/workspaces.md, "Renaming and archiving a workspace"): Owners and
+ * The current workspace's settings, from the switcher (* docs/workspaces.md, "Renaming and archiving a workspace"): Owners and
  * Admins rename it; Owners archive it, never the default workspace, after
  * typing its name. Archiving takes everyone out of it, so the page then goes
  * to the user's default workspace.

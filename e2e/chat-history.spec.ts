@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 
 /**
- * Chats are kept per user on the server (issue #91): with server storage, in
+ * Chats are kept per user on the server: with server storage, in
  * Postgres through the agent's /chats API, so they outlive the app process.
  * Runs with storage (pnpm test:e2e:storage); preview.spec.ts covers the
  * same flow with chats in memory.

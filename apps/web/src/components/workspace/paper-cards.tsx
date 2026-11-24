@@ -12,7 +12,7 @@ import { useToolMenu } from "./tool-menu";
 import { useWorkbench } from "./workbench";
 
 /**
- * Paper search results in the chat (issue #151): what search_papers,
+ * Paper search results in the chat: what search_papers,
  * related_papers and get_paper return, from any server that follows the paper
  * tool contract (services/papers-mcp). Each card can save the paper into the
  * workspace, put a question about it in the message box, or open it.
@@ -37,7 +37,7 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
 function PaperToolCard({ server, tool, name, status, parameters, result }: ToolCallView & { server: string; tool: string }) {
   const args = (parameters && typeof parameters === "object" ? parameters : {}) as Record<string, unknown>;
   const query = typeof args.query === "string" ? args.query : "";
-  // In a closed steps block, the block's header says it is searching (issue #154).
+  // In a closed steps block, the block's header says it is searching.
   const hidden = useStepHidden();
   if (status !== "complete") {
     if (hidden) return null;

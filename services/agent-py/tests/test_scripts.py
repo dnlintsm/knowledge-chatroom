@@ -1,4 +1,4 @@
-"""Skills' scripts: Bash in Claude Code's sandbox, with a stand-in key (issue #264, step 2)."""
+"""Skills' scripts: Bash in Claude Code's sandbox, with a stand-in key."""
 
 from __future__ import annotations
 

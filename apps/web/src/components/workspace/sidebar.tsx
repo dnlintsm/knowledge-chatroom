@@ -975,7 +975,7 @@ function RunList() {
       </p>
     );
   }
-  // The list shows its own scope (#186), not where the user is: opening an
+  // The list shows its own scope, not where the user is: opening an
   // experiment from it leaves it as it was. New ones still start where you are.
   const scope = shownScope(listScope, ws.nodes);
   const runs = experimentsIn(ws.experiments, ws.nodes, scope);

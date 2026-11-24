@@ -42,7 +42,7 @@ import {
 } from "./agent-steps";
 
 /**
- * Collapsed agent steps (issue #154), the React side of agent-steps.ts.
+ * Collapsed agent steps, the React side of agent-steps.ts.
  *
  * Each turn's thinking, tool calls and narration render inside a StepsBlock:
  * a "Worked for 14s · 5 steps" header (a live status line while it runs) that

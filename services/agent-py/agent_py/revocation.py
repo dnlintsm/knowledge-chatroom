@@ -1,4 +1,4 @@
-"""Ends a run whose user stops being a member of its workspace (issue #255).
+"""Ends a run whose user stops being a member of its workspace.
 
 The run's user may be
 removed from the workspace, leave it, or see it archived while Claude works

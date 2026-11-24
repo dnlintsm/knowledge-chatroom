@@ -5,7 +5,7 @@
  *
  * Changing part of a file this way keeps a chat's context small: rewriting a
  * whole page for each tweak puts the page into the history twice per change,
- * which fills a smaller model's window within a few rounds (issue #126).
+ * which fills a smaller model's window within a few rounds.
  */
 
 export interface TextEdit {

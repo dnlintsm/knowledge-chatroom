@@ -6,7 +6,7 @@ import { CreateWorkspaceForm } from "@/components/workspace/create-workspace";
 import { workspacePath } from "@/lib/workspace-choice";
 
 /**
- * A user who belongs to no workspace yet (issue #226, docs/workspaces.md,
+ * A user who belongs to no workspace yet (docs/workspaces.md,
  * "Screens"): they can create one, unless the server limits who may
  * (WORKSPACE_CREATORS), and learn how to join someone else's.
  */

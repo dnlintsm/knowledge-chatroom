@@ -11,7 +11,7 @@ word-based.
 Embedding happens in the background (SemanticIndex.start), so a new file is
 found by its words at once and by meaning a few seconds later. This server
 runs that loop; the TypeScript server behind it, started with
-SEARCH_INDEXER=off, only embeds queries (issue #190, step 5).
+SEARCH_INDEXER=off, only embeds queries.
 """
 
 from __future__ import annotations

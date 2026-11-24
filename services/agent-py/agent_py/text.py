@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 
 # About 15k tokens: well under the SDK's limit for one MCP tool result, and
-# small enough for models with smaller windows (issue #126).
+# small enough for models with smaller windows.
 MAX_READ_CHARS = 50_000
 
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")

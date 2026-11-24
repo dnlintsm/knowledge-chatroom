@@ -1,4 +1,4 @@
-"""The working folder: a read-only copy of the user's workspace for Read/Glob/Grep (issue #264, step 3)."""
+"""The working folder: a read-only copy of the user's workspace for Read/Glob/Grep."""
 
 from __future__ import annotations
 

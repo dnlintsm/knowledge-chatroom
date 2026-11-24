@@ -267,7 +267,7 @@ async def test_search_by_meaning(api, database, monkeypatch):
     assert await semantic.embed_all() == 3
     assert await semantic.embed_all() == 0
 
-    # The query is embedded before a database connection is taken (issue #296):
+    # The query is embedded before a database connection is taken:
     # the model may be a slow remote API, and the pool has ten connections.
     held: list[int] = []
     embed_query = semantic.query_vector
@@ -319,7 +319,7 @@ async def test_search_by_meaning(api, database, monkeypatch):
 
     # A server still running the earlier model, after one with another model of
     # the same size started the vectors over (a rolling change of EMBEDDING_MODEL):
-    # it writes none of its own among the new model's, and stops (issue #296).
+    # it writes none of its own among the new model's, and stops.
     newer = SemanticIndex(storage.pool, TopicEmbedder("topics-3", extra=2))
     await newer.prepare()
     with pytest.raises(ModelChangedError, match="now from topics-3, not topics-2"):

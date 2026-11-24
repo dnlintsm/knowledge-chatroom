@@ -667,7 +667,7 @@ async def serve(request: Request, raw: str, given: AgentRequest, read_json: Any)
         return _send(403, {"error": "Memory is off in this chat (incognito, or turned off)"})
     # Outside the chat: every change waits for the user. In it, they wait once
     # the run has used another tool (the agent says so with ?tainted=1), and
-    # also when the server can see a reason itself (issue #285), which a
+    # also when the server can see a reason itself, which a
     # client that forgets the flag can't undo:
     # - an earlier run of this chat read outside content, which is still in
     #   the conversation Claude is continuing;

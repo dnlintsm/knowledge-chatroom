@@ -1,5 +1,5 @@
 /**
- * Runs: a run is an experiment with a report (issue #82), the experiment's
+ * Runs: a run is an experiment with a report, the experiment's
  * `report.md`. The experiment the user is in lives in the URL as
  * `?experiment_id=<id>`, so links open a run and back/forward move between runs.
  */
@@ -60,7 +60,7 @@ export function searchWithExperiment(search: string, id: string | null): string 
 }
 
 /**
- * Which experiments a list shows (#186): those on `node` (null: every one you
+ * Which experiments a list shows: those on `node` (null: every one you
  * can see) and, with `descendants`, on the nodes under it. It lives in the URL
  * as `?list=<nodeId>` (and `&direct=1` without the sub-levels), apart from
  * where the user is, so opening an experiment doesn't change it. Without a

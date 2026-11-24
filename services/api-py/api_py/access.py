@@ -144,7 +144,7 @@ class AccessService:
 
         `from_app`: the claims are the app's own X-Knowledge-User, made from the
         login session. The app keeps an email only when the provider vouches for
-        it (issue #284), so an email it leaves out is cleared here too: admin
+        it, so an email it leaves out is cleared here too: admin
         lists and adding people match on the stored one. Other tokens may simply
         not carry an email, and leave it as it is.
         """
@@ -274,7 +274,7 @@ class AccessService:
         """
         The workspace's members (workspace_members), not everyone who has signed in:
         {id, name}, and the email only when `private` (for Owners and Admins).
-        Never the login subject (issue #287), as WorkspacesService.members().
+        Never the login subject, as WorkspacesService.members().
         """
         async with self.pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)

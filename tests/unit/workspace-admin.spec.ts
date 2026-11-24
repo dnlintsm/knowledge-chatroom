@@ -10,7 +10,7 @@ import {
   transferSteps,
 } from "../../apps/web/src/lib/workspace-admin";
 
-/** What the people and settings screens offer (issue #255, docs/workspaces.md, "Changing a role"). */
+/** What the people and settings screens offer (docs/workspaces.md, "Changing a role"). */
 
 test("Owners give any role; Admins promote Members and step down; Members change nothing", () => {
   for (const target of ["owner", "admin", "member"] as const) {

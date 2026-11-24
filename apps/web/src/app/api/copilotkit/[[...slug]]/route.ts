@@ -29,11 +29,11 @@ import type { NextRequest } from "next/server";
 // endpoints). With AGENT_URL set that server is a remote backend's
 // `/agent/report`, else this repo's agent (src/lib/agent-target.ts). Everything
 // else — runtime config, v2 endpoint wiring, MCP apps, openGenerativeUI —
-// mirrors the canonical demo. (The starter's A2UI demo is gone, #264.)
+// mirrors the canonical demo.
 const defaultAgent = createDefaultAgent();
 
 // Each user's chats, kept by the API server in Postgres when it has
-// storage, else in memory (issue #91, src/lib/chat-runner.ts). Not used with
+// storage, else in memory (src/lib/chat-runner.ts). Not used with
 // CopilotKit Intelligence, which keeps threads itself.
 const intelligence = Boolean(process.env.CPK_INTELLIGENCE_API_KEY);
 const chats = new AutoChatStore();
@@ -94,11 +94,11 @@ const handler = handle(app);
 // (never one the browser sent), and src/agent.ts copies that user into the
 // run's forwardedProps. With login on, chat needs a signed-in user. A remote
 // backend also gets an X-Knowledge-Storage token, to reach the user's files
-// through the storage API for the whole run (issue #88), and src/agent.ts
-// adds an X-Knowledge-Memory token for the run's chat (issue #176). The
+// through the storage API for the whole run, and src/agent.ts
+// adds an X-Knowledge-Memory token for the run's chat. The
 // page's X-Knowledge-Workspace header (src/lib/workspace-request.ts) goes on
 // to the agent too, which checks the user belongs to it, and both tokens are
-// bound to it (issue #226). Without Intelligence, the history routes come
+// bound to it. Without Intelligence, the history routes come
 // from the user's own chats in that workspace (src/lib/chat-routes.ts), and
 // only a run's own user may stop it.
 async function withUser(req: NextRequest) {

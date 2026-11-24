@@ -18,7 +18,7 @@ const reply = { timeout: 60_000 };
 async function send(page: Page, text: string) {
   // While a run is going, CopilotKit's send button is a stop button. A reply's
   // text shows before its run ends, so clicking right after it can stop that
-  // run instead of sending (issue #244). With the box empty and no run going,
+  // run instead of sending. With the box empty and no run going,
   // the button is disabled: wait for that before typing.
   await expect(page.getByTestId("copilot-send-button")).toBeDisabled(reply);
   await page.getByTestId("copilot-chat-textarea").fill(text);

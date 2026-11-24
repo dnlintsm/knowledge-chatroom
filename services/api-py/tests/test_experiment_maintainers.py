@@ -1,4 +1,4 @@
-"""Experiment maintainers and collaborators (issue #255, 025_experiment_maintainers.sql).
+"""Experiment maintainers and collaborators (025_experiment_maintainers.sql).
 
 The rules through the API are in the conformance suite
 (packages/contracts/conformance/workspaces.test.ts, "Experiment handover");

@@ -435,7 +435,7 @@ async def update(
         status, node, state, results = before
         # A finished run stays as it ended, whoever asks and through whichever
         # route: checked here, under the row's lock, so neither a PATCH nor a
-        # second finish racing the first can rewrite it (issue #297).
+        # second finish racing the first can rewrite it.
         if state in ("done", "failed") and (
             fields.get("state", state) != state
             or ("results" in fields and not same_json(fields["results"], results))

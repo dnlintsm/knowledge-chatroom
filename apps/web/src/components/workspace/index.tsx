@@ -259,7 +259,7 @@ function PlaceBreadcrumb() {
   const { editor } = useWorkbench();
   const [listScope, setListScope] = useListScope();
   if (storageMode !== "server") return null;
-  // A step back to a node also points the experiment list there (#186).
+  // A step back to a node also points the experiment list there.
   const goTo = (id: string | null) => {
     setListScope(id === null ? ALL_EXPERIMENTS : { node: id, descendants: listScope.descendants });
     void enterNode(id);

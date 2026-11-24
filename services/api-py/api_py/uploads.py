@@ -162,7 +162,7 @@ class _Reader:
     def __init__(self, boundary: str, max_file_bytes: int, max_total_bytes: int) -> None:
         self.max_file_bytes = max_file_bytes
         # Every part is held in memory until the upload is checked and written,
-        # so the parts together are capped too, and how many there are (issue #288).
+        # so the parts together are capped too, and how many there are.
         self.max_total_bytes = max_total_bytes
         self.total = 0
         self.meta: str | None = None

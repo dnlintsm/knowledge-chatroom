@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Every workspace in the deployment, for its admins (PLATFORM_ADMINS on the
- * API server; issue #255, docs/workspaces.md, "Workspace inventory"). Anyone
+ * API server; docs/workspaces.md, "Workspace inventory"). Anyone
  * else is told the page isn't for them.
  */
 export default async function PlatformPage() {

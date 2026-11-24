@@ -16,7 +16,7 @@ import { ChatRunner } from "../../apps/web/src/lib/chat-runner";
 import { AgentChatStore, AutoChatStore, MemoryChatStore } from "../../apps/web/src/lib/chat-store";
 import { defaultWorkspacePath, findWorkspace, homeWorkspacePath } from "../../apps/web/src/lib/workspaces";
 
-/** Saved state, chats and the page's workspace, per workspace (issue #226, docs/workspaces.md). */
+/** Saved state, chats and the page's workspace, per workspace (docs/workspaces.md). */
 
 const WS1 = "11111111-2222-4333-8444-555555555555";
 const WS2 = "66666666-7777-4888-9999-aaaaaaaaaaaa";

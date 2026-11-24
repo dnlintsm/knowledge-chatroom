@@ -87,7 +87,7 @@ def _local_memory(token: str | None) -> dict[str, Any] | None:
     return {
         "thread": thread,
         "node": node if isinstance(node, str) else None,
-        # The run's workspace (issue #226) stays with the tokens made from it.
+        # The run's workspace stays with the tokens made from it.
         "ws": ws if isinstance(ws, str) else None,
     }
 
@@ -152,7 +152,7 @@ def mcp_tokens(
         and memory.get("ws") == storage.get("ws")
         else None
     )
-    # The run's workspace (issue #226) stays with every token made from its own:
+    # The run's workspace stays with every token made from its own:
     # the same `ws` claim, or none for a token minted without one.
     ws = {"ws": storage["ws"]} if isinstance(storage.get("ws"), str) else {}
     # { sub, email, name } from the storage token: missing ones are left out, as undefined is.

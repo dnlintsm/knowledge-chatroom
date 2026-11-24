@@ -296,7 +296,7 @@ async def propose(
 async def store(storage: Storage, path: str, content: bytes, mime: str | None = None) -> None:
     """
     Puts proposed bytes in the blob store ahead of propose(..., stored=True),
-    without a database connection (issue #296).
+    without a database connection.
     """
     mime = mime or mime_for_path(normalize_path(path))
     await storage.require_blobs().put(sha256_hex(content), content, mime)

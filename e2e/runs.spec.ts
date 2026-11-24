@@ -13,8 +13,8 @@ async function showView(page: Page, name: "Files" | "Experiments") {
 const showFiles = (page: Page) => showView(page, "Files");
 
 /**
- * Runs are experiments with a report (issue #82), shown as experiments
- * (#185). They need server storage,
+ * Runs are experiments with a report, shown as experiments.
+ * They need server storage,
  * so this runs with it (pnpm test:e2e:storage). Screenshots continue the
  * numbering of preview.spec.ts.
  */
@@ -232,7 +232,7 @@ test("an archived experiment says why it's read only, and a rerun reads its inpu
     data: { inputs: [{ path: "uploads/dose.csv", experiment: run.id }] },
   });
   expect(linked.ok()).toBe(true);
-  // Since #175 the copy under inputs/ is an ordinary file; someone edits it.
+  // The copy under inputs/ is an ordinary file; someone edits it.
   const edit = await request.put(`/api/files/inputs/dose.csv?experiment=${run.id}`, { data: "dose\n99\n", headers: md });
   expect(edit.ok()).toBe(true);
   expect((await request.patch(`/api/experiments/${run.id}`, { data: { status: "archived" } })).ok()).toBe(true);

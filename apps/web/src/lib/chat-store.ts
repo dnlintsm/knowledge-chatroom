@@ -3,13 +3,13 @@ import { IDENTITY_HEADER, authSecret, identityHeader, type SessionUser } from ".
 import { WORKSPACE_HEADER } from "./workspace-request";
 
 /**
- * Where each user's chat history is kept (issue #91). With server storage
+ * Where each user's chat history is kept. With server storage
  * (DATABASE_URL on the API server) that is its `/chats` API
  * (services/api-py/api_py/chats.py), in Postgres, so chats survive restarts.
  * Without it, this process's memory: lost on restart, but still one history
  * per user. src/lib/chat-runner.ts saves runs here and replays them.
  *
- * Chats belong to a workspace (issue #226): `inWorkspace(id)` is the store
+ * Chats belong to a workspace: `inWorkspace(id)` is the store
  * for the one a request names, and the store itself is the default
  * workspace's (requests that name none).
  */

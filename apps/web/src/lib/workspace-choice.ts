@@ -1,5 +1,5 @@
 /**
- * Choosing a workspace (issue #226, docs/workspaces.md, "Screens"): the
+ * Choosing a workspace (docs/workspaces.md, "Screens"): the
  * switcher's lists, the workspaces this browser opened last, and a new
  * workspace's address. Client-safe and without React, so the unit tests can
  * call it directly.

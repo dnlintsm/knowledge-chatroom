@@ -2,7 +2,7 @@
 
 Without login (AUTH_MODE=local) every request is the built-in local user,
 except one that carries a signed identity: that caller has login on, so it is
-refused rather than made the local user (RefuseSignedWithoutLogin, issue #283).
+refused rather than made the local user (RefuseSignedWithoutLogin).
 With AUTH_SECRET, the app signs the user into X-Knowledge-User, and a request
 without a valid one is refused. On the storage API a valid X-Knowledge-Storage
 token wins: Claude acting for its user through the outside service it names
