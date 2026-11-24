@@ -35,7 +35,7 @@ try:
     LOGIN = identity.login_from_env(os.environ)
 except identity.LoginConfigError as err:
     raise SystemExit(f"[lab-tools] {err}") from None
-# The chatroom's agent server (LOCAL_AGENT_URL): its storage API for workspace
+# The chatroom's API server, api-py (the app's LOCAL_AGENT_URL): its storage API for workspace
 # files, and /memory/agent for the user's memory.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 

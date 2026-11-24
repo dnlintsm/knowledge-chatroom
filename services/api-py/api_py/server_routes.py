@@ -1,4 +1,4 @@
-"""The agent server's own routes besides the chat (issue #190, step 9), as apps/agent/src/server.ts answers them.
+"""The routes that need no storage: the public key, MCP tokens and the chat's suggestions.
 
 - `GET /identity/public-key`: the Ed25519 key outside services verify identity
   and storage tokens with (docs/remote-agent.md).

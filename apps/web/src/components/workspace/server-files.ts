@@ -87,7 +87,7 @@ const deleteKey = (path: string, place: PlaceId) => `${place ?? ""}\n${path}`;
 const deleted = (path: string, place: PlaceId) => deleting.get(deleteKey(path, place));
 
 /**
- * The file list; "starting" when storage (or the agent server) may just not be
+ * The file list; "starting" when storage (or the API server) may just not be
  * up yet (503, 502, network error), so asking again shortly makes sense; null
  * when this session has no server storage (404 = not configured, 500 = failed).
  * A place you have no access to lists as empty.

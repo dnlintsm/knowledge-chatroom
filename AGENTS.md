@@ -78,8 +78,12 @@ uv run --locked --no-sync pyrefly check --error-stale-baseline
 ```
 
 ```bash
-uv run pytest -q
+cd services/api-py && uv run --locked pytest -q
 ```
+
+Each Python project has its own suite; run pytest in the folder of the one you changed
+(`services/api-py`, `services/agent-py`, `services/papers-mcp`, `services/lab-tools`,
+`packages/knowledge-py`). From the repository root it finds none of their modules.
 
 api-py's storage tests skip without `TEST_DATABASE_URL` and `S3_ENDPOINT`. A change to
 storage, access, memory or skills is not checked until they have run with both set, along

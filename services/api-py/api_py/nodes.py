@@ -1,4 +1,4 @@
-"""The knowledge tree of one workspace, as apps/agent/src/storage/nodes.ts.
+"""The knowledge tree of one workspace.
 
 Levels come from node_types (seeded as tech > module > loop > process), and
 every node sits exactly one level below its parent; the database enforces

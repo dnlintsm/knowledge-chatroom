@@ -1,6 +1,6 @@
-"""The run's working folder (issue #264, step 3).
+"""The run's working folder.
 
-The Python twin of apps/agent/src/storage/workdir.ts. Claude Code's built-in
+Claude Code's built-in
 Read, Glob and Grep (and Bash, for skills' scripts) work on real files under
 the run's folder, but the workspace lives behind the storage API. So each
 user's run folder (skills.py) gets `workspace/`, a copy of every file that user

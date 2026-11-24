@@ -1,6 +1,6 @@
-"""Keeps this server's Anthropic credentials away from skills' scripts (issue #264, step 2).
+"""Keeps this server's Anthropic credentials away from skills' scripts.
 
-The Python twin of apps/agent/src/skills/keyproxy.ts. Claude Code's Bash
+Claude Code's Bash
 inherits Claude Code's environment, so a run with scripts gets a stand-in key
 instead: it talks to Anthropic through this proxy on 127.0.0.1, which swaps the
 stand-in for the real key (ANTHROPIC_API_KEY, else ANTHROPIC_AUTH_TOKEN). Scripts

@@ -11,8 +11,8 @@
  * arrives after the switch is dropped (it throws an AbortError), so nothing
  * from the old workspace lands in the new one.
  *
- * Without a workspace (no workspaces API: the agent server alone, without
- * api-py) requests name none, which means the default workspace.
+ * Without a workspace (no workspaces API: the e2e mock, or api-py without
+ * storage) requests name none, which means the default workspace.
  */
 
 export const WORKSPACE_HEADER = "X-Knowledge-Workspace";

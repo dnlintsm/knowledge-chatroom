@@ -10,7 +10,7 @@ test.describe("agentProxy", () => {
     globalThis.fetch = originalFetch;
   });
 
-  test("returns 502 with error message when agent server is unreachable", async () => {
+  test("returns 502 with error message when the API server is unreachable", async () => {
     globalThis.fetch = async () => {
       throw new TypeError("fetch failed");
     };
@@ -20,7 +20,7 @@ test.describe("agentProxy", () => {
     const res = await proxy(req, { params: Promise.resolve({ path: ["doc.md"] }) });
 
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: "Agent server unreachable" });
+    expect(await res.json()).toEqual({ error: "API server unreachable" });
   });
 
   test("forwards GET request with target URL, query params, and forwarded headers", async () => {

@@ -1,7 +1,6 @@
 """The built-in skills shipped with the app (DEFAULT_BUILTIN_SKILLS_DIR), and the analysis skill's script.
 
-Moved from apps/agent/src/skills/skills.test.ts (issue #264, step 5): the
-Python chat agent's image has no Node, so the script is Python now.
+The chat agent's image has no Node, so the script is Python.
 """
 
 from __future__ import annotations

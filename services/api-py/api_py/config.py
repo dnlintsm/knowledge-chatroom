@@ -186,7 +186,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
 
 
 def idle_minutes(value: str | None) -> float:
-    """MEMORY_IDLE_MINUTES as learn.ts reads it: Number(value), finite and >= 0, else 10."""
+    """MEMORY_IDLE_MINUTES: a finite number >= 0 (read as JavaScript's Number(value) reads it), else 10."""
     if value is None:
         return 10.0
     text = value.strip()
@@ -209,7 +209,7 @@ def _tools(env: Mapping[str, str]) -> ToolsSettings | None:
 
 
 def max_upload_bytes(env: Mapping[str, str]) -> int:
-    """MAX_UPLOAD_BYTES as config.ts reads it: a positive whole number of bytes."""
+    """MAX_UPLOAD_BYTES: a positive whole number of bytes."""
     raw = env.get("MAX_UPLOAD_BYTES") or str(DEFAULT_MAX_UPLOAD_BYTES)
     match = re.match(rf"[{JS_SPACE}]*([+-]?\d+)", raw)  # Number.parseInt
     if not match or int(match.group(1)) <= 0:

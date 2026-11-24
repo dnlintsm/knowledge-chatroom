@@ -1,4 +1,4 @@
-"""Shared memory, as SharedMemoryService in apps/agent/src/storage/shared-memory.ts (issue #93, step 3; migration 020).
+"""Shared memory (migration 020).
 
 Notes like personal memory's, but for a whole workspace, a knowledge node (and
 everything below it) or a group of people. Who reads and edits each place

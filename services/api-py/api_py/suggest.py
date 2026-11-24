@@ -1,4 +1,4 @@
-"""Follow-up suggestions for the chat, as apps/agent/src/suggest.ts makes them (issue #190, step 9).
+"""Follow-up suggestions for the chat.
 
 CopilotKit's dynamic suggestions run a provider agent with a forced
 `copilotkitSuggest` tool call. `POST /suggest` answers it with one plain
@@ -70,7 +70,7 @@ def js_string(value: Any = _MISSING) -> str:
 
 def clip(text: str, most: int) -> str:
     """
-    clip in suggest.ts: at most `most` UTF-16 units, then "…". A character cut
+    At most `most` UTF-16 units of `text`, then "…". A character cut
     in two ends as U+FFFD, where JavaScript sends the API its lone half.
     """
     units = to_units(text)

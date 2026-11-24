@@ -1,6 +1,6 @@
-"""The run's skills (issue #176, step 3).
+"""The run's skills.
 
-The Python twin of apps/agent/src/skills/run.ts. The agent server decides
+api-py decides
 which skills a run gets: built-in, hub and workspace skills that aren't off for
 the user in this chat (GET /skills/run, with the run's storage token). Claude
 Code loads skills from <cwd>/.claude/skills/, so each user gets a folder of
@@ -55,7 +55,7 @@ class RunSkill:
 
 
 async def fetch_skills(storage: Storage, thread: str) -> list[RunSkill]:
-    """The skills the agent server gives a run for this user in this chat."""
+    """The skills api-py gives a run for this user in this chat."""
     data = await storage.json("GET", "/skills/run", params={"thread": thread})
     skills = []
     for s in data.get("skills", []):

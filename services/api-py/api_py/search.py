@@ -1,4 +1,4 @@
-"""Search over workspace files, as SearchService in apps/agent/src/storage/search.ts.
+"""Search over workspace files.
 
 Full text (006_search.sql): each blob's text is indexed once, when a version
 holding it is written (text_index.py), and a search matches the current
@@ -53,7 +53,7 @@ class SearchError(Exception):
 
 
 def any_words(query: str) -> str:
-    """The query's wanted words joined with `or`, for finding passages that could match (anyWords in search.ts)."""
+    """The query's wanted words joined with `or`, for finding passages that could match."""
     words = []
     for token in _TOKENS.findall(query):
         if token.startswith("-"):

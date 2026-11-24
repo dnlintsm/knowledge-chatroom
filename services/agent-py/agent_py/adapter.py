@@ -16,10 +16,10 @@ the thread's first run. Three things change that for this app:
 - No built-in Claude Code tools (Bash, Read, Write, ...): the model works on
   the workspace through the browser's tools and this agent's workspace tools
   (workspace.py), which call the storage API with the run's storage token.
-- Skills (skills.py): each run asks the agent server for the user's skills in
+- Skills (skills.py): each run asks api-py for the user's skills in
   this chat, starts in the user's own folder holding them, and only /name for
   one of them stays a command. Each skill used goes to the chat as a
-  `skill_used` event after RUN_STARTED, as the TypeScript agent sends it.
+  `skill_used` event after RUN_STARTED.
   With SKILL_SCRIPTS=on, a run with a skill that ships scripts also gets Bash,
   sandboxed, with a stand-in API key (scripts.py, keyproxy.py).
 - Working folder (workdir.py): the user's folder holds a read-only copy of the
@@ -167,7 +167,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._swept_at: float | None = None
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
-        # Usage records on their way to the agent server.
+        # Usage records on their way to api-py.
         self._recording: set[asyncio.Task[Any]] = set()
         # thread_id -> the last <workspace> note the thread's session was given.
         self._notes: OrderedDict[str, str] = OrderedDict()
@@ -460,7 +460,7 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             ):
                 run.memory.tainted = True
         if self._servers:
-            # Memory tokens only for runs with memory, as the TypeScript agent sends them.
+            # Memory tokens only for runs with memory.
             tokens = (
                 await trade_tokens(
                     self._storage(thread_id), memory_token if run.memory else None, self._servers

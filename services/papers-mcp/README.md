@@ -53,7 +53,7 @@ docker compose --profile demo --profile papers up --build
 | `PAPERS_NAME` | Its name in `MCP_SERVERS` (default `papers`). Forwarded users are signed for that name. |
 | `AUTH_MODE` | `local`: no login, every call is the local user. `oidc`: login, with the key below. Required unless the key is set; with neither the server refuses to start. |
 | `KNOWLEDGE_PUBLIC_KEY` | The chatroom's public key, from the API server's `GET /identity/public-key`, when login is on. Never give this server `AUTH_SECRET`. |
-| `KNOWLEDGE_STORAGE_URL` | The chatroom's agent server, where `save_paper` writes (default `http://127.0.0.1:8000`). |
+| `KNOWLEDGE_STORAGE_URL` | The chatroom's API server (`services/api-py`), where `save_paper` writes (default `http://127.0.0.1:8000`). |
 | `OPENALEX_API_KEY`, `OPENALEX_MAILTO` | Optional. A key raises OpenAlex's daily budget; an email joins its "polite pool". |
 | `PAPERS_MAX_PDF_BYTES` | Largest PDF `read_paper` and `save_paper` download (default 30 MB). |
 | `PAPERS_MAX_PDF_PAGES` | How many pages of a PDF `read_paper` reads (default 500). |

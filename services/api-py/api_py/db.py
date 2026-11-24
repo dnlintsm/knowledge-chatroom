@@ -66,14 +66,14 @@ async def schema(pool: AsyncConnectionPool, directory: Path) -> Schema:
         return compare(known_migrations(directory), await applied_migrations(conn))
 
 
-# The advisory lock migrate() in db.ts takes: one process changes the schema at a time.
+# The advisory lock migrate() takes: one process changes the schema at a time.
 MIGRATE_LOCK = "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))"
 
 
 async def migrate(pool: AsyncConnectionPool, directory: Path) -> list[str]:
     """
     Applies the migrations not applied yet, in order, and records them in
-    schema_migrations, all in one transaction (as migrate() in db.ts does).
+    schema_migrations, all in one transaction.
     Returns the ones applied.
     """
     files = known_migrations(directory)

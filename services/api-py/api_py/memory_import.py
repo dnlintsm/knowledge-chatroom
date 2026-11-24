@@ -1,4 +1,4 @@
-"""Importing memory, as apps/agent/src/memory/import.ts does (issue #93, step 4; #190, step 8c).
+"""Importing memory into the inbox.
 
 Notes from another assistant (ChatGPT's or Claude's memory, pasted or exported
 as text), from Claude Code memory files, or from this app's own export (.zip of

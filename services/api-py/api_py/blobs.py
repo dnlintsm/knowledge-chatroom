@@ -1,9 +1,8 @@
-"""Content-addressed bytes in the S3-compatible store, as apps/agent/src/storage/blobs.ts keeps them.
+"""Content-addressed bytes in the S3-compatible store.
 
 A blob's key is the sha256 of its bytes (blobs/<first two hex>/<sha256>), so
-blobs never change once written and identical content is stored once. Both
-servers read and write the same bucket. boto3 is blocking, so each call runs
-in a worker thread.
+blobs never change once written and identical content is stored once.
+boto3 is blocking, so each call runs in a worker thread.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def sha256_hex(data: bytes) -> str:
 
 @dataclass(frozen=True)
 class S3Settings:
-    """The S3_* settings, read as config.ts in apps/agent reads them."""
+    """The S3_* settings."""
 
     endpoint: str | None = None
     region: str = "us-east-1"

@@ -1,4 +1,4 @@
-"""What one principal may do with the knowledge tree and access, as Session in apps/agent/src/storage/session.ts.
+"""What one principal may do with the knowledge tree and access.
 
 Every route goes through here, so access is checked and audited in one place.
 A node the principal can't see at all is reported as not found, so its
@@ -1237,7 +1237,7 @@ class Session:
 
 class FilesSession:
     """
-    One place's files, as one principal (FilesSession in session.ts). Reads need
+    One place's files, as one principal. Reads need
     viewer; writes and deletes need editor, like in a shared folder (a deleted
     file keeps its history, so nothing is lost).
     """

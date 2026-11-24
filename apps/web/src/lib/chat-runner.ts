@@ -20,7 +20,7 @@ import { workspaceFromHeaders } from "./workspace-request";
  *
  * - streams a live run from memory, so reconnecting mid-run works as before;
  * - saves every finished run (its compacted AG-UI events and the messages
- *   after it) to a ChatStore: Postgres through the agent server when it has
+ *   after it) to a ChatStore: Postgres through the API server when it has
  *   storage, else memory, per user either way (src/lib/chat-store.ts);
  * - replays a chat from the store when the browser connects to it, e.g. when
  *   it is picked from the history after a restart.

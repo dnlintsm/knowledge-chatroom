@@ -1,4 +1,4 @@
-"""The storage API's routes that have moved to Python (#190), as apps/agent/src/storage/http.ts serves them.
+"""The storage API's routes.
 
     GET    /access                  {me, rootRole}
     GET    /access/users            the workspace's members: names, and emails for Owners and Admins
@@ -194,7 +194,7 @@ def parse_int(value: str) -> int | None:
 
 
 async def read_body(request: Request, limit: int) -> bytes | None:
-    """The body, or None when it is over `limit` bytes (readBody in http.ts)."""
+    """The body, or None when it is over `limit` bytes."""
     chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
@@ -290,7 +290,7 @@ def optional_id(value: Any) -> str | None | bool:
 
 
 def agent_refusal(request: Request) -> str | None:
-    """Why Claude, through a storage token, may not make this request (agentRefusal in http.ts, for these routes)."""
+    """Why Claude, through a storage token, may not make this request."""
     method = request.method
     section, *rest = raw_path(request).split("/")[1:]
     sub = "/".join(rest)
@@ -428,7 +428,7 @@ async def files_route(request: Request) -> Response:
 
 
 def _experiment_path(request: Request) -> str:
-    """What follows /experiments/, decoded as a whole (decodeURIComponent in http.ts)."""
+    """What follows /experiments/, decoded as a whole (as JavaScript's decodeURIComponent would)."""
     return decode_component(re.sub(r"^/experiments/?", "", raw_path(request)))
 
 
@@ -815,7 +815,7 @@ _NOT_GIVEN = object()
 
 
 def experiment_input(body: dict[str, Any]) -> dict[str, Any] | None:
-    """The experiment fields in a request body, in the order http.ts reads them; None when one has the wrong type."""
+    """The experiment fields in a request body, in the order they are checked; None when one has the wrong type."""
     given: dict[str, Any] = {}
     for key in ("title", "hypothesis", "status", "state"):
         if key not in body:
@@ -938,7 +938,7 @@ UPLOAD_META = (
 
 async def read_upload(request: Request) -> dict[str, Any]:
     """
-    The parts of a POST /experiments/upload (readUpload in http.ts): its "meta"
+    The parts of a POST /experiments/upload: its "meta"
     JSON and its files, each named by its field. The form is read whole before
     anything is written, so a broken upload changes nothing.
     """

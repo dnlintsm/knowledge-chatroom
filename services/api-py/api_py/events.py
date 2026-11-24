@@ -1,9 +1,9 @@
-"""Change events for the workspace, heard through Postgres LISTEN/NOTIFY, as events.ts in apps/agent hears them.
+"""Change events for the workspace, heard through Postgres LISTEN/NOTIFY.
 
 Writers notify inside their transaction (Storage.notify), so nobody hears about
-a change that rolled back, and every process hears every change: a file the
-TypeScript server or Claude's tools write reaches this server's file watch, and
-the other way round. One connection listens for the whole server, opened by the
+a change that rolled back, and every process hears every change: a file
+another api-py process or Claude's tools write reaches this server's file watch.
+One connection listens for the whole server, opened by the
 first subscriber and opened again if it drops.
 """
 

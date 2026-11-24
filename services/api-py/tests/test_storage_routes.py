@@ -1,11 +1,10 @@
 """/access and /nodes served by api-py, against a real, migrated Postgres.
 
 Set TEST_DATABASE_URL to a Postgres this test may create databases on; each
-test module run gets a new database with the agent server's migrations
-applied, as the TypeScript server applies them. The TypeScript server is a
-stand-in here that fails the test if a ported route reaches it.
-The conformance suite (pnpm test:conformance) checks the same routes against
-the spec, through the real TypeScript server.
+test module run gets a new database with the migrations applied. The
+TS_AGENT_URL upstream is a stand-in here that fails the test if a route
+api-py serves reaches it. The conformance suite (pnpm test:conformance)
+checks the same routes against the spec.
 """
 
 from __future__ import annotations

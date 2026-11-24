@@ -1,7 +1,6 @@
 """POST /memory/import served by api-py (memory_import.py, llm.py), against a real, migrated Postgres.
 
-Mirrors the import tests in apps/agent/src/storage/memory-packs.test.ts, with a
-stand-in for the small model.
+The small model is a stand-in.
 """
 
 from __future__ import annotations

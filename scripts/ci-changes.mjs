@@ -32,8 +32,8 @@ export const RULES = [
   ["services/lab-tools/**", ["python"]],
   ["services/papers-mcp/**", ["python"]],
   ["examples/python-agent/**", ["python"]],
-  // The migrations and built-in skills api-py serves reach every suite, as they
-  // did from apps/agent (#264): the mock agent and the browser specs mirror them.
+  // The migrations and built-in skills api-py serves reach every suite: the mock
+  // agent and the browser specs mirror them.
   ["services/api-py/migrations/**", SUITES],
   ["services/api-py/skills/**", SUITES],
   // api-py sits in front of the agent in the storage and login E2E runs (#190).

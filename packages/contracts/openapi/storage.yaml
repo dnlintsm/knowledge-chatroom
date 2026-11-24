@@ -44,7 +44,7 @@ info:
     503 = starting (try again shortly), 500 = failed to start, 404 = not configured.
 servers:
   - url: http://localhost:8000
-    description: The agent server (LOCAL_AGENT_URL); the browser reaches it through /api/files on the Next.js app.
+    description: The API server, api-py (LOCAL_AGENT_URL); the browser reaches it through /api/files on the Next.js app.
 security:
   - {}
   - user: []
@@ -1885,7 +1885,7 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
-  # --- The rest of the agent server (issue #169, step 3) ---
+  # --- Health, identity tokens, suggestions, outside tools, skills, the hub and memory ---
 
   /health:
     get:

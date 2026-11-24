@@ -1,8 +1,8 @@
-"""Text helpers shared with the TypeScript agent: numbered reads and exact edits.
+"""Text helpers for the file tools: numbered reads and exact edits.
 
-Ports of apps/agent/src/storage/tools.ts readLines()/numberLines() and
-packages/contracts/src/text-edit.ts applyEdit(), with the same output, so the
-model reads and edits files the same way whichever agent serves the chat.
+apply_edit() is a port of applyEdit() in packages/contracts/src/text-edit.ts,
+with the same output, so an edit Claude makes on the server matches one the
+browser's file tools make.
 """
 
 from __future__ import annotations

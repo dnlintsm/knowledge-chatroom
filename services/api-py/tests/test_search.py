@@ -3,8 +3,7 @@
 The route tests need TEST_DATABASE_URL and S3_ENDPOINT, as test_files.py;
 search by meaning also needs pgvector in that Postgres (CI's has it), and
 runs with a small stand-in model. EMBEDDING_TEST=1 also checks the real
-model (downloaded on first use, about 120 MB), as embeddings.test.ts does
-for the TypeScript server.
+model (downloaded on first use, about 120 MB).
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
 # Python API server
 
-The app's HTTP API in Python, on FastAPI: storage, skills, memory, chat history and every
-route but the chat itself. It was ported from the TypeScript agent server one route group
-at a time (issue #190), and replaced it (issue #264).
+The app's HTTP API in Python, on FastAPI: storage, access, skills, memory, search, chat
+history and every route but the chat itself, which `services/agent-py` runs.
 
 api-py is the API at `LOCAL_AGENT_URL`. `pnpm dev` and the demo run it with the Python
 chat agent (`services/agent-py`). `GET /health` checks this API's storage readiness,
@@ -15,25 +14,25 @@ applies the SQL migrations itself. Without a database, the UI can still
 use browser-local files and chat, but skills and persisted history are unavailable.
 With no `MCP_SERVERS`, api-py serves an empty tools menu.
 
-What it serves, by the step of issue #190 that ported it:
+What it serves:
 
-| Step | Routes | Code |
+| Area | Routes | Code |
 | --- | --- | --- |
-| 1 | `GET /health`: `{"status":"ok"}` when the database and storage are ready, 503 with what isn't | `app.py` |
-| 2 | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
-| 3 | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
-| 4a | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`) | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
-| 4b | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
-| 5 | `GET /search` (words through Postgres full-text search, meaning through pgvector) and the search indexer: indexing files stored before search existed, and embedding passages with the local model (ONNX Runtime) or an `EMBEDDING_*` API | `storage_routes.py`, `search.py`, `semantic.py`, `app.py` |
-| 6 | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
-| 7a | `/skills` (lists, modes at three levels, `/skills/run` and `/skills/used` for outside agents, .zip export and import, delete) and the skill hub `/hub` (publish, install, fork, diff, verify, yank, reports) | `skills_routes.py`, `skills.py`, `skill_catalog.py` |
-| 7b | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
-| 8a | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
-| 8b | The memory overview (`GET /memory`), shared notes at the workspace, a node or a group (share, edit, delete, modes, proposals and their decisions), and memory packs (`/memory/packs`, `/memory/installs`: publish, install, fork, uninstall, verify, yank) | `memory_routes.py`, `shared_memory.py`, `memory_packs.py` |
-| 8c | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`). `/memory/agent` for a chat run or a remote backend's run: the prompt's memory section and the `memory_*` and `chats_*` tools, with search by meaning when the embedding model is set here | `memory_import.py`, `llm.py`, `memory_agent.py` |
-| 8d | The background learner: chats quiet for `MEMORY_IDLE_MINUTES` are read by the small model, which adds, updates or deletes notes (with Undo) or, in Ask first, proposes them | `memory_learn.py`, `app.py` |
-| #226 | `/workspaces` (list, create, members, exact-email lookup, add a member), served only here, and the workspace of every storage, memory and skills request: the `X-Knowledge-Workspace` header, `?workspace=` or a token's `ws` claim, with membership checked each time ([design](../../docs/workspaces.md)). | `workspaces.py`, `storage.py` |
-| 9a | `GET /identity/public-key` (the key outside services verify tokens with), `POST /identity/mcp-tokens` (a remote backend's run tokens traded for its MCP servers' tokens) and `POST /suggest` (the chat's follow-up chips: one small-model call, answered as AG-UI events) | `server_routes.py`, `mcp_tokens.py`, `suggest.py` |
+| Health | `GET /health`: `{"status":"ok"}` when the database and storage are ready, 503 with what isn't | `app.py` |
+| Access and the knowledge tree | `/access` (people, groups, grants, the admin panel's lists, the audit log) and `/nodes` (the knowledge tree) | `storage_routes.py`, `session.py`, `access.py`, `nodes.py` |
+| Files | `/files` at the workspace root and in nodes: list, read, versions, write, rename, delete, and `?watch` (server-sent change events). | `storage_routes.py`, `files.py`, `blobs.py`, `text_index.py`, `events.py`, `paths.py` |
+| Experiments | `/experiments` (create, fork, runs with inputs, finish, rerun, status, delete) and an experiment's files (`/files?experiment=`) | `storage_routes.py`, `experiments.py`, `run_report.py`, `session.py` |
+| Proposals and uploads | Proposals: `PUT /files/<path>?propose`, `/proposals` (list, content, accept, reject, withdraw, promote an experiment) and the multipart `POST /experiments/upload` | `storage_routes.py`, `proposals.py`, `uploads.py`, `session.py` |
+| Search | `GET /search` (words through Postgres full-text search, meaning through pgvector) and the search indexer: indexing files stored before search existed, and embedding passages with the local model (ONNX Runtime) or an `EMBEDDING_*` API | `storage_routes.py`, `search.py`, `semantic.py`, `app.py` |
+| Chat history | `/chats`: each user's chat history (list, open, replay a chat's runs, save a finished run, rename, archive, delete), theirs alone and out of storage tokens' reach | `storage_routes.py`, `chats.py`, `session.py` |
+| Skills and the skill hub | `/skills` (lists, modes at three levels, `/skills/run` and `/skills/used` for outside agents, .zip export and import, delete) and the skill hub `/hub` (publish, install, fork, diff, verify, yank, reports) | `skills_routes.py`, `skills.py`, `skill_catalog.py` |
+| Outside tools | `/tools`: the chat's "+" menu (`MCP_SERVERS` entries with a `ui` block) and the app's calls to their `ui.tools` as the signed-in user, while `MCP_SERVERS` is set here | `tools.py` |
+| Personal memory | `/memory`'s own notes (read, write, restore, archive, delete), `/memory/settings`, the inbox's accept and reject, `/memory/activity` with Undo, and `/memory/export`, with `MEMORY=on` | `memory_routes.py`, `memory.py` |
+| Shared memory and memory packs | The memory overview (`GET /memory`), shared notes at the workspace, a node or a group (share, edit, delete, modes, proposals and their decisions), and memory packs (`/memory/packs`, `/memory/installs`: publish, install, fork, uninstall, verify, yank) | `memory_routes.py`, `shared_memory.py`, `memory_packs.py` |
+| Memory import, and memory for chat runs | `/memory/import`: pasted memory, `.md` files and `.zip` exports into the inbox, with plain text sorted into notes by the small model (`llm.py`). `/memory/agent` for a chat run or a remote backend's run: the prompt's memory section and the `memory_*` and `chats_*` tools, with search by meaning when the embedding model is set here | `memory_import.py`, `llm.py`, `memory_agent.py` |
+| Learning from chats | The background learner: chats quiet for `MEMORY_IDLE_MINUTES` are read by the small model, which adds, updates or deletes notes (with Undo) or, in Ask first, proposes them | `memory_learn.py`, `app.py` |
+| Workspaces | `/workspaces` (list, create, members, exact-email lookup, add a member), and the workspace of every storage, memory and skills request: the `X-Knowledge-Workspace` header, `?workspace=` or a token's `ws` claim, with membership checked each time ([design](../../docs/workspaces.md)). | `workspaces.py`, `storage.py` |
+| Identity keys, MCP tokens and suggestions | `GET /identity/public-key` (the key outside services verify tokens with), `POST /identity/mcp-tokens` (a remote backend's run tokens traded for its MCP servers' tokens) and `POST /suggest` (the chat's follow-up chips: one small-model call, answered as AG-UI events) | `server_routes.py`, `mcp_tokens.py`, `suggest.py` |
 
 Behind them:
 

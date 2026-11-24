@@ -1,4 +1,4 @@
-"""Proposed versions of files, as ProposalService in apps/agent/src/storage/proposals.ts.
+"""Proposed versions of files.
 
 A proposal (008_proposals.sql) is a change to a file in a knowledge node, or at
 the workspace root, that someone who can edit there accepts or rejects.

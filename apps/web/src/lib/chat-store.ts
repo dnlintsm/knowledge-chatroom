@@ -75,7 +75,7 @@ export class ChatStoreError extends Error {}
 // Long enough for a big run to be written, short enough not to hold a reply.
 const TIMEOUT_MS = 15_000;
 
-/** The agent server's /chats API, which keeps chats in Postgres. */
+/** The API server's /chats API, which keeps chats in Postgres. */
 export class AgentChatStore implements ChatStore {
   constructor(
     private readonly base = localAgentUrl(),
@@ -294,8 +294,8 @@ const summary = ({ id, name, agentId, archived, createdAt, updatedAt, lastRunAt 
 });
 
 /**
- * The agent server's store when it has server storage, else memory. Which one
- * is asked of the agent server (its /chats answers 404 without DATABASE_URL,
+ * The API server's store when it has server storage, else memory. Which one
+ * is asked of the API server (its /chats answers 404 without DATABASE_URL,
  * 500 when storage failed to start) and remembered; until it answers (still
  * starting, or unreachable) memory stands in, and what it kept moves to the
  * server once that is ready.

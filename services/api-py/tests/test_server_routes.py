@@ -1,7 +1,6 @@
 """/identity/public-key, /identity/mcp-tokens and /suggest served by api-py (server_routes.py).
 
-Mirrors apps/agent/src/mcp-tokens.test.ts and suggest.test.ts, and checks the
-routes as server.ts answers them: statuses, headers and the event stream.
+Checks the routes' statuses, headers and the event stream.
 """
 
 from __future__ import annotations

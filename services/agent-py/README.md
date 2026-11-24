@@ -7,8 +7,7 @@ remote backend ([docs/remote-agent.md](../../docs/remote-agent.md)); this repo's
 Python API server (`services/api-py`) serves storage, skills and memory on
 `LOCAL_AGENT_URL`.
 
-It was phase 2 of moving the backend to Python (issue #169), built in steps under
-issue #176, and replaced the TypeScript agent in phase 4 (issue #264). It chats with
+It chats with
 the app's own tools (task board, workbench panes, and the browser's file tools while
 files live only in the browser), tells the model where the user is on every run, and
 works on the workspace's files on the server through the storage API, including

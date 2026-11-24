@@ -1,4 +1,4 @@
-"""The chat's "+" menu of outside tools and the app's calls to them (#190, step 7b), as apps/agent/src/tools-api.ts.
+"""The chat's "+" menu of outside tools and the app's calls to them.
 
     GET  /tools                   {tools: [{server, label, chip, description, icon,
                                   mode, callable}]}: the "+" menu
@@ -6,7 +6,7 @@
                                   call of a tool in that server's ui.tools, as the
                                   signed-in user
 
-The servers come from MCP_SERVERS, read as apps/agent/src/mcp.ts reads it; only
+The servers come from MCP_SERVERS, read as agent-py reads it (agent_py/mcp.py); only
 those with a `ui` block show up here. A call goes to the server as a chat run's
 would: with the user's identity (forwardIdentity, signed for "mcp:<server>") and
 a storage token (storageAccess), so the server sees the same person whether
@@ -275,7 +275,7 @@ def signer(
     workspace: str | None = None,
 ) -> Signer:
     """
-    The signed-in user, signed for one server (identityForTools in server.ts, without memory).
+    The signed-in user, signed for one server (without memory).
     `workspace` is the one the page is in: the storage token is bound to it
     (`ws`), as a chat run's is, so the server's writes land where the user is
     and not in the default workspace (issue #297).
@@ -307,7 +307,7 @@ def signer(
 
 
 def headers_for(name: str, server: ExternalServer, sign: Signer) -> dict[str, str]:
-    """The server's own headers, plus the user's tokens it asks for (serverConfigs in mcp.ts)."""
+    """The server's own headers, plus the user's tokens it asks for."""
     added = {}
     for header, on, kind in (
         (tokens.IDENTITY_HEADER, server.forward_identity, "identity"),
@@ -393,7 +393,7 @@ def _send(status: int, body: Any, cache: bool = True) -> Response:
 
 
 def _signed_in(request: Request, secret: str | None) -> tuple[bool, dict[str, Any] | None]:
-    """With login on, only requests the app signed for a user get through (signedIn in server.ts)."""
+    """With login on, only requests the app signed for a user get through."""
     if not secret:
         return True, None
     claims = tokens.verify(request.headers.get(tokens.IDENTITY_HEADER), secret)

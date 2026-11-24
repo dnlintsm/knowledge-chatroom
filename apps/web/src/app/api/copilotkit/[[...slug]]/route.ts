@@ -32,7 +32,7 @@ import type { NextRequest } from "next/server";
 // mirrors the canonical demo. (The starter's A2UI demo is gone, #264.)
 const defaultAgent = createDefaultAgent();
 
-// Each user's chats, kept by the agent server in Postgres when it has
+// Each user's chats, kept by the API server in Postgres when it has
 // storage, else in memory (issue #91, src/lib/chat-runner.ts). Not used with
 // CopilotKit Intelligence, which keeps threads itself.
 const intelligence = Boolean(process.env.CPK_INTELLIGENCE_API_KEY);
@@ -44,7 +44,7 @@ const BASE_PATH = "/api/copilotkit";
 // starter this app began from defaulted to https://mcp.excalidraw.com/mcp.
 const mcpAppUrl = process.env.MCP_SERVER_URL?.trim() || null;
 
-// "suggester" writes the chat's follow-up chips on this repo's agent server,
+// "suggester" writes the chat's follow-up chips on this repo's API server,
 // whichever agent serves the chat; without it (CHAT_SUGGESTIONS=static) the
 // browser keeps the first-round chips (src/components/workspace/use-chat-suggestions.ts).
 const runtime = new CopilotRuntime({
@@ -89,7 +89,7 @@ const app = createCopilotEndpoint({
 
 const handler = handle(app);
 
-// The runtime forwards x-* request headers to the agent, so the agent server
+// The runtime forwards x-* request headers to the agent, so the API server
 // learns who a run is for from the signed X-Knowledge-User header set here
 // (never one the browser sent), and src/agent.ts copies that user into the
 // run's forwardedProps. With login on, chat needs a signed-in user. A remote

@@ -16,7 +16,7 @@ import {
 } from "@knowledge-chatroom/contracts/identity-token";
 
 /**
- * Login, for deployments that set AUTH_SECRET (the agent server must have the
+ * Login, for deployments that set AUTH_SECRET (the API server must have the
  * same value). Users sign in with any OpenID Connect provider (Keycloak,
  * Authentik, Google, Entra ID, ...), and the app keeps who they are in a
  * signed cookie. Every request it forwards to the API server carries a
@@ -126,7 +126,7 @@ export function storageHeader(user: SessionUser, via: string, ws: string | null 
 /**
  * An X-Knowledge-Memory token for one run of a remote backend's chat agent
  * (`via` "remote"): the user's memory in chat `thread`, through the agent
- * server's /memory/agent, as Claude has it there. The agent server checks on
+ * server's /memory/agent, as Claude has it there. The API server checks on
  * each call that memory is on and the chat isn't incognito. Without login
  * (`user` null) it is the unsigned local form. With `ws`, the chat's
  * workspace (issue #226); without, the default one. docs/remote-agent.md.

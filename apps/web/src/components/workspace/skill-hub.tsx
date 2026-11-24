@@ -18,7 +18,7 @@ type Schema = components["schemas"];
  * update (after reviewing the diff) or fork installed ones, and move skills
  * in and out as .zip files. Each version shows what the publish check
  * flagged, whether a hub admin verified it, and whether it was yanked;
- * anyone can report a skill. The agent server checks every action.
+ * anyone can report a skill. The API server checks every action.
  */
 
 export interface Notice {

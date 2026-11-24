@@ -1,4 +1,4 @@
-"""Files at the workspace root or in a knowledge node, as FileService in apps/agent/src/storage/files.ts.
+"""Files at the workspace root or in a knowledge node.
 
 Every write adds an immutable version; reads return the current one. Bytes go
 to the blob store first, so a crash can leave an unreferenced blob (harmless,

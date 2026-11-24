@@ -1,9 +1,7 @@
 """/memory/agent served by api-py for a remote backend's run (memory_agent.py), against a real, migrated Postgres.
 
-Mirrors apps/agent/src/storage/memory-agent.test.ts and memory-recall.test.ts:
-a run's memory tools through X-Knowledge-Memory tokens `via` "remote", with a
-stand-in embedding model. Outside MCP servers' tokens still go to the
-TypeScript server.
+A run's memory tools through X-Knowledge-Memory tokens `via` "remote", with a
+stand-in embedding model.
 """
 
 from __future__ import annotations
@@ -106,8 +104,7 @@ class FakeSemantic:
 
 def test_the_tool_schemas_match_the_tools():
     # memory-tools.json is what remote backends get (and the Python chat agent
-    # passes on to Claude); these are the handlers that answer the calls. Moved
-    # from apps/agent/src/memory/run.test.ts, which checked it against run.ts (#264).
+    # passes on to Claude); these are the handlers that answer the calls.
     assert [t["name"] for t in TOOL_SPECS] == [*MEMORY_TOOLS, *CHAT_TOOLS]
     for spec in TOOL_SPECS:
         name, schema = spec["name"], spec["inputSchema"]
