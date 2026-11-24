@@ -28,7 +28,7 @@ type Schema = components["schemas"];
  * - under the chat input, a line says which notes Claude read or changed in
  *   the current turn (the agent sends a "memory" event for each), with Undo
  *   for its changes, and makes the chat incognito: no memory read or saved.
- * The agent server keeps the notes (/api/memory); it needs MEMORY=on and
+ * The API server keeps the notes (/api/memory); it needs MEMORY=on and
  * server storage, and without them memory doesn't show at all.
  */
 

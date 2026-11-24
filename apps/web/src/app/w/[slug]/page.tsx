@@ -49,7 +49,7 @@ export default async function WorkspacePage({
 
   const found = await findWorkspace(user, slug);
   if (found.status === "found") return <Home chatSteps={chatSteps} workspace={found.workspace} userKey={userKey} />;
-  // No workspaces on this server (the agent server alone), or no answer: the
+  // No workspaces on this server (it has no storage), or no answer: the
   // default workspace, as before them. Requests then name none, which means
   // the default workspace, and without any server the files stay in the browser.
   if (found.status === "unavailable" && slug.toLowerCase() === DEFAULT_SLUG) {

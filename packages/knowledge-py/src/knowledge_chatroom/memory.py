@@ -2,7 +2,7 @@
 
 With "memoryAccess": true in MCP_SERVERS, runs where memory is on send this
 server an X-Knowledge-Memory token for that chat. Passed on unchanged to the
-chatroom's /memory/agent API (on the agent server, KNOWLEDGE_STORAGE_URL),
+chatroom's /memory/agent API (on api-py, KNOWLEDGE_STORAGE_URL),
 it reads the user's notes and proposes changes to them, as Claude does in
 that chat: the same memory_* tools, and every change waits in the user's
 Memory inbox. Incognito chats and memory turned off send no token.

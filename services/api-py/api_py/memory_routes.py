@@ -1,4 +1,4 @@
-"""Personalized memory (#190, steps 8a to 8c), as apps/agent/src/memory/http.ts serves it.
+"""The routes of personalized memory.
 
     GET    /memory?thread=&node=         {mode, incognito, notes, inbox, shared,
                                          sharedProposals, targets, installs, types,
@@ -130,7 +130,7 @@ def send(status: int, body: Any) -> Response:
 
 
 async def read_json(request: Request, limit: int = MAX_JSON_BYTES) -> dict[str, Any] | None:
-    """The JSON object in the body (at most `limit` bytes, empty: {}), or None, as json() in http.ts."""
+    """The JSON object in the body (at most `limit` bytes, empty: {}), or None."""
     data = await read_body(request, limit)
     if data is None or (data and not declares_json(request)):
         return None

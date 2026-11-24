@@ -3,13 +3,13 @@
     uv run python -m agent_py.app    # http://127.0.0.1:9300, then AGENT_URL=http://127.0.0.1:9300
 
 Environment:
-    CLAUDE_MODEL / ANTHROPIC_MODEL  the model (model.py), as for the TypeScript agent
+    CLAUDE_MODEL / ANTHROPIC_MODEL  the model (model.py)
     CHAT_MODELS                    comma-separated additional models users can select
     ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ...  read by Claude Code itself
-    KNOWLEDGE_PUBLIC_KEY            the agent server's GET /identity/public-key; set it with login on
+    KNOWLEDGE_PUBLIC_KEY            api-py's GET /identity/public-key; set it with login on
     AGENT_RUN_TIMEOUT_SECONDS       stop a run after this long (default 1800, 0 = never)
-    LOCAL_AGENT_URL                 the agent server with the storage API (default http://localhost:8000)
-    MCP_SERVERS                     outside MCP servers and tool chips, as for the agent server (mcp.py)
+    LOCAL_AGENT_URL                 api-py, which serves the storage API (default http://localhost:8000)
+    MCP_SERVERS                     outside MCP servers and tool chips, the same value as api-py's (mcp.py)
     AGENT_PY_WORKDIR                where each user's working folder (with their skills) goes
                                     (default: a new empty temp folder)
     AGENT_WORKDIR                   off: no copy of the workspace in the working folder (workdir.py)

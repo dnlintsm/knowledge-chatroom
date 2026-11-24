@@ -1,8 +1,9 @@
-"""The route groups this server serves itself (issue #190), one router each.
+"""The route groups this server serves, one router each.
 
-Each step of #190 adds one here; every other request goes to the TypeScript
-server (proxy.py). A router added here takes its paths from that server, so
-it has to pass the conformance suite (packages/contracts/conformance) first.
+Every other request goes to proxy.forward, which answers 404 unless
+TS_AGENT_URL is set. A route added here is in the API's spec
+(packages/contracts/openapi/storage.yaml) and its conformance suite
+(packages/contracts/conformance).
 """
 
 from __future__ import annotations

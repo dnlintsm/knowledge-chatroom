@@ -1,4 +1,4 @@
-"""Chat history, as ChatService in apps/agent/src/storage/chats.ts (issue #91, migrations/017_chats.sql).
+"""Chat history (migrations/017_chats.sql).
 
 Each AG-UI thread the app's chat runs is a chat owned by the user who started
 it. The app's CopilotKit runner (apps/web/src/lib/chat-runner.ts) saves every
@@ -295,7 +295,7 @@ def _text_of(part: Any) -> str:
 
 
 def chat_lines(messages: Any) -> list[dict[str, str]]:
-    """What the user and Claude said in a chat's messages, in order (chatLines in chats.ts)."""
+    """What the user and Claude said in a chat's messages, in order."""
     lines: list[dict[str, str]] = []
     for message in messages if isinstance(messages, list) else []:
         if not isinstance(message, dict):

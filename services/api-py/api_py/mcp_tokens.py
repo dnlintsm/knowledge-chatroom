@@ -1,8 +1,8 @@
-"""Tokens for a remote backend's outside MCP servers, as apps/agent/src/mcp-tokens.ts makes them (#190, step 9).
+"""Tokens for a remote backend's outside MCP servers.
 
 A remote backend's chat agent (AGENT_URL, e.g. services/agent-py) connects to
-the servers in its own MCP_SERVERS and forwards the user to them as the agent
-server does: an identity token signed for "mcp:<name>" (forwardIdentity), a
+the servers in its own MCP_SERVERS and forwards the user to them with tokens
+signed for each: an identity token signed for "mcp:<name>" (forwardIdentity), a
 storage token via "mcp:<name>" (storageAccess) and a memory token via
 "mcp:<name>" for the chat (memoryAccess). It never holds AUTH_SECRET, so it
 trades the run's own tokens for them here:
@@ -34,7 +34,7 @@ KINDS = ("identity", "storage", "memory")
 _NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 MAX_SERVERS = 32
 MAX_BODY_BYTES = 16 * 1024
-# As long as the agent server's own identity tokens for MCP servers last.
+# As long as this API's own identity tokens for MCP servers last (TOOL_IDENTITY_SECONDS in tools.py).
 IDENTITY_SECONDS = 60 * 60
 BAD_REQUEST = 'Send {servers: {<name>: ["identity" | "storage" | "memory"]}}'
 NEEDS_STORAGE = (
@@ -60,7 +60,7 @@ def parse_request(body: Any) -> dict[str, set[str]] | None:
 
 
 def local_memory_token(via: str, thread: Any, node: Any, ws: str | None = None) -> str:
-    """localMemoryToken in identity-token.ts: `local.` and the claims' JSON, base64url."""
+    """localMemoryToken in packages/contracts/src/identity-token.ts: `local.` and the claims' JSON, base64url."""
     fields: dict[str, Any] = {"via": via, "thread": thread, "node": node}
     if ws is not None:
         fields["ws"] = ws

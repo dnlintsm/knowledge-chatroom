@@ -1,4 +1,4 @@
-"""Who a request is from, as identify() in apps/agent/src/storage/identity.ts.
+"""Who a request is from.
 
 Without login (AUTH_MODE=local) every request is the built-in local user,
 except one that carries a signed identity: that caller has login on, so it is
@@ -143,7 +143,7 @@ class MemoryGrant:
 async def memory_grant(
     access: AccessService, secret: str | None, claims: dict[str, Any]
 ) -> MemoryGrant:
-    """The grant for claims memory_claims read (identifyMemory in identity.ts)."""
+    """The grant for claims memory_claims read."""
     node = claims.get("node")
     user = await _user_for(access, claims) if secret else await access.local_user_id()
     return MemoryGrant(

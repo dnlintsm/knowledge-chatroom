@@ -1,18 +1,16 @@
-"""Outside MCP servers and the chat's tool chips (issue #176, step 5).
+"""Outside MCP servers and the chat's tool chips.
 
-The Python twin of apps/agent/src/mcp.ts. MCP_SERVERS is the same setting, in
-the same shape (Claude's .mcp.json: {"mcpServers": {"<name>": {...}}}, or the
-bare map; JSON or a path to a JSON file), so give this agent the agent server's
-value: the chat's "+" menu comes from the agent server's GET /tools, and the
-chips it shows name these servers.
+MCP_SERVERS is the setting api-py reads too, in the same shape (Claude's
+.mcp.json: {"mcpServers": {"<name>": {...}}}, or the bare map; JSON or a path
+to a JSON file), so give both the same value: the chat's "+" menu comes from
+api-py's GET /tools, and the chips it shows name these servers.
 
 - type "http" (default), "sse" or "stdio"; ${VAR} in headers and env comes
   from this agent's environment.
 - forwardIdentity, storageAccess, memoryAccess (http/sse): each run sends the
   server the user's identity signed for "mcp:<name>", a storage token and a
-  memory token for the chat, as the TypeScript agent does. This agent holds no
-  AUTH_SECRET, so it trades the run's own tokens for them at the agent server
-  (POST /identity/mcp-tokens, apps/agent/src/mcp-tokens.ts).
+  memory token for the chat. This agent holds no AUTH_SECRET, so it trades the
+  run's own tokens for them at api-py (POST /identity/mcp-tokens).
 - ui (http/sse): the server's chip. While it is on in this chat
   (knowledge_chatroom.tools), the prompt tells Claude to use its tools; a
   "manual" server is only in runs with its chip on.
@@ -202,7 +200,7 @@ def chips_from(input_data: RunAgentInput, servers: Mapping[str, McpServer]) -> l
 
 
 def chip_prompt(chips: Sequence[str], servers: Mapping[str, McpServer]) -> str:
-    """The prompt's line for each chip on, as the TypeScript agent words it."""
+    """The prompt's line for each chip on."""
     lines = []
     for name in chips:
         ui = servers[name].ui
@@ -217,7 +215,7 @@ def chip_prompt(chips: Sequence[str], servers: Mapping[str, McpServer]) -> str:
 async def trade_tokens(
     storage: Storage, memory_token: str | None, servers: Mapping[str, McpServer]
 ) -> dict[str, dict[str, str]]:
-    """The servers' tokens from the agent server, for the run's tokens; {} when it gives none."""
+    """The servers' tokens from api-py, for the run's tokens; {} when it gives none."""
     wanted = {name: list(s.kinds) for name, s in servers.items() if s.kinds}
     if not wanted or not (storage.token or memory_token):
         return {}

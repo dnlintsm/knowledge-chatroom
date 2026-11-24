@@ -281,7 +281,7 @@ async def test_claudes_changes_the_inbox_and_undo(memory_api, database):
     back = (await api.post(f"/memory/events/{archived['id']}/undo", headers=ALICE)).json()
     assert back["note"]["archived"] is False and back["note"]["version"] == 3
 
-    # Proposals, as the inbox holds them (written as the TypeScript server writes them).
+    # Proposals, as the inbox holds them.
     async def propose(op: str, name: str, base: int | None, **content) -> str:
         async with memory.scoped() as conn:
             cur = await conn.execute(

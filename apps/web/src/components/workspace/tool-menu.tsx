@@ -77,7 +77,7 @@ export function ToolMenuProvider({ children }: { children: ReactNode }) {
       .then((body: { tools?: ToolMenuItem[] }) => {
         if (live) setMenu(Array.isArray(body.tools) ? body.tools : []);
       })
-      // No agent server, or an older one: no "+" menu tools.
+      // No API server, or an older one: no "+" menu tools.
       .catch(() => {});
     return () => {
       live = false;

@@ -1,10 +1,9 @@
-"""The agent server's HTTP API in Python, in front of the TypeScript server (issue #190).
+"""The app's HTTP API: storage, access, skills, memory, search and chat history.
 
     uv run python -m api_py.app    # http://127.0.0.1:8000, the app's LOCAL_AGENT_URL
 
-It serves the route groups ported so far (routes.py) and passes every other
-request to the TypeScript agent server at TS_AGENT_URL (proxy.py), so the app,
-the Python chat agent and the MCP servers keep one address while routes move.
+It serves the route groups in routes.py. Any other request is answered 404, or
+forwarded to an older release's server while TS_AGENT_URL is set (proxy.py).
 Settings: config.py.
 """
 
@@ -43,10 +42,10 @@ WAITING_REMINDER_POLLS = 30
 
 async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settings) -> bool:
     """
-    Opens the storage routes moved to Python once the database has exactly the
-    migrations this server knows, applying them first (unless MIGRATIONS=off:
-    then the TypeScript server does). Returns whether they are served; until
-    then they pass through to the TypeScript server.
+    Opens the storage routes once the database has exactly the migrations this
+    server knows, applying them first (unless MIGRATIONS=off: then another
+    process does). Returns whether they are served; until then they answer 503,
+    or are forwarded while TS_AGENT_URL is set (proxy.forward).
     """
     if app.state.storage is not None:
         return True
@@ -97,9 +96,8 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
 
 def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
     """
-    The search indexer's background work, which runs here and not on the
-    TypeScript server (SEARCH_INDEXER=off there): indexing files written before
-    search existed, and with an embedding model, embedding passages.
+    The search indexer's background work: indexing files written before search
+    existed, and with an embedding model, embedding passages.
     """
     if settings.embedding:
         storage.semantic = SemanticIndex(
@@ -112,8 +110,7 @@ def _start_search(app: FastAPI, storage: Storage, settings: Settings) -> None:
 
 def _start_learner(app: FastAPI, settings: Settings) -> None:
     """
-    With memory, learning from quiet chats, which runs here and not on the
-    TypeScript server (MEMORY_LEARN=off there; memory_learn.py).
+    With memory, learning from quiet chats (memory_learn.py).
     """
     if not settings.memory or not settings.memory_learn:
         return
@@ -190,7 +187,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.state.row_security = None
         # ROW_SECURITY=required and it is off: storage requests are refused (503), also with a legacy upstream.
         app.state.row_security_refused = False
-        # The ported storage routes; None while they pass through (no database, or not ready yet).
+        # The storage behind the storage routes; None while it isn't open (no database, or not ready yet).
         app.state.storage = None
         app.state.storage_lock = asyncio.Lock()
         # Background work started with storage (the search indexer), stopped on shutdown.
@@ -198,7 +195,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
 
         async def storage_ready() -> bool:
             # A request in between polls checks too, so the first one after the
-            # TypeScript server has migrated is already served here.
+            # migrations are applied is already served.
             if app.state.storage is not None:
                 return True
             if not app.state.pool or (
@@ -229,7 +226,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 await pool.close()
                 raise RuntimeError(
                     f"The database has migrations this server doesn't know ({', '.join(found.unknown)}): "
-                    "update api-py to the TypeScript server's version"
+                    "update api-py to the release that applied them"
                 )
             app.state.schema = found
             if found and found.state is not db.SchemaState.READY:

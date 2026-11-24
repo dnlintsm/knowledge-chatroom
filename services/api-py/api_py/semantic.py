@@ -1,4 +1,4 @@
-"""Search by meaning, as apps/agent/src/storage/semantic.ts.
+"""Search by meaning.
 
 Every passage of indexed text (blob_chunks, 006_search.sql) gets an embedding
 from a small model that runs inside this server with ONNX Runtime (the same
@@ -207,7 +207,7 @@ class ApiEmbedder:
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
-    """EMBEDDING_* as the TypeScript server reads them (storage/config.ts)."""
+    """The EMBEDDING_* settings."""
 
     model: str
     cache_dir: str | None = None

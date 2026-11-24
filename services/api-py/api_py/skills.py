@@ -1,4 +1,4 @@
-"""Skills per user and the skill hub, as apps/agent/src/skills/service.ts and hub.ts (issue #7).
+"""Skills per user and the skill hub.
 
 SkillService: which skills exist for a user (built-in, installed from the hub,
 and the workspace's own; the latter two if they can read the workspace root)
@@ -15,8 +15,7 @@ handle reports; a publisher can yank a version. Skills also move in and out
 as .zip files in the Agent Skills layout (<name>/SKILL.md + files).
 
 Everything here is the user's own doing over HTTP: Claude has no tools for the
-hub, so a document can't talk it into installing a skill. The TypeScript
-server keeps its own SkillService for the chats it runs, reading the same tables.
+hub, so a document can't talk it into installing a skill.
 """
 
 from __future__ import annotations
@@ -926,7 +925,7 @@ _IGNORED = re.compile(r"(^|/)(__MACOSX/|\.DS_Store\Z|Thumbs\.db\Z)")
 
 
 def read_zip(data: bytes) -> list[SkillFile]:
-    """A zip's files, within the skill limits; directories and OS clutter left out (readZip in hub.ts)."""
+    """A zip's files, within the skill limits; directories and OS clutter left out."""
     too_big = f"A skill may be at most {MAX_SKILL_BYTES // _MB} MB, each file {MAX_SKILL_FILE_BYTES // _MB} MB"
     try:
         # Names without the UTF-8 flag read as Latin-1, as fflate reads them.

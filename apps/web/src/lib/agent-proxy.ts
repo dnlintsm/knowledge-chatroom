@@ -71,7 +71,7 @@ export function agentProxy(prefix: string) {
         signal: req.signal,
       });
     } catch {
-      return Response.json({ error: "Agent server unreachable" }, { status: 502 });
+      return Response.json({ error: "API server unreachable" }, { status: 502 });
     }
 
     const out = new Headers();

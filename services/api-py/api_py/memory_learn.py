@@ -1,4 +1,4 @@
-"""Learning from past chats, as apps/agent/src/memory/learn.ts does (issue #93, step 2; #190, step 8d).
+"""Learning from past chats.
 
 Once a chat has been quiet for MEMORY_IDLE_MINUTES (default 10), a small model
 reads it with the user's notes and says what to add, update or delete: new

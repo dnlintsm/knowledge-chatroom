@@ -1,9 +1,9 @@
-"""The workspace storage this server serves, once the database is ready (issue #190).
+"""The workspace storage this server serves, once the database is ready.
 
-It mirrors initStorage() in apps/agent/src/storage/index.ts: the default
-workspace, whether row-level security can be used, and the change events
-that every process hears through LISTEN/NOTIFY (events.ts). A request in
-another workspace (issue #226, workspaces.py) uses in_workspace(), the same
+It holds the default workspace, whether row-level security can be used, and
+the change events that every process hears through LISTEN/NOTIFY
+(events.py). A request in
+another workspace (workspaces.py) uses in_workspace(), the same
 storage bound to that workspace's id. It opens only
 once the database has exactly the migrations this server knows (db.py, which
 applies them), and until then the ported routes pass through to the
@@ -29,10 +29,10 @@ from .semantic import SemanticIndex
 
 logger = logging.getLogger("api_py")
 
-# The channel and payload of apps/agent/src/storage/events.ts.
+# The LISTEN/NOTIFY channel change events travel on (events.py reads the payload).
 EVENTS_CHANNEL = "workspace_files"
 
-# What prepareRowSecurity() in db.ts grants APP_ROLE.
+# What prepare_row_security() grants APP_ROLE.
 _READ = "workspaces, node_types, blobs, nodes, files, file_versions, experiments, users, blob_texts, blob_chunks, proposals"
 _WRITE = (
     "blobs, nodes, files, file_versions, experiments, audit_log, blob_texts, blob_chunks, proposals"
@@ -100,8 +100,8 @@ class Storage:
 
 async def prepare_row_security(conn: AsyncConnection) -> bool:
     """
-    Whether APP_ROLE can be used, after granting it what the services need,
-    as prepareRowSecurity() in db.ts does (both run it; the grants are idempotent).
+    Whether APP_ROLE can be used, after granting it what the services need.
+    Every start runs this; the grants are idempotent.
     """
     async with conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:migrate'))")

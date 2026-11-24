@@ -1,7 +1,7 @@
-"""Users, the org tree (groups), grants and the audit log, as apps/agent/src/storage/access.ts.
+"""Users, the org tree (groups), grants and the audit log.
 
 The role logic lives in SQL (effective_role in 003_access.sql); this is the
-Python side, with the same queries, so both servers answer alike.
+Python side, which asks it.
 """
 
 from __future__ import annotations
@@ -175,7 +175,7 @@ class AccessService:
             (user_id,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
             user_id = str(user_id)
             # The one-time owner bootstrap and the default workspace's open
-            # membership (023_workspace_members.sql), as userForSubject in access.ts.
+            # membership (sign_in_memberships in 023_workspace_members.sql).
             await conn.execute("SELECT sign_in_memberships(%s)", (user_id,))
         app_email = email if from_app else cached[2] if cached else _UNSYNCED
         self._subjects[subject] = (user_id, time.monotonic(), app_email)

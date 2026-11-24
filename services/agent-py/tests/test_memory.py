@@ -45,7 +45,7 @@ TOOLS = [
 
 
 class MemoryServer:
-    """The agent server's /skills/run (none) and /memory/agent, recording each request."""
+    """api-py's /skills/run (none) and /memory/agent, recording each request."""
 
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []

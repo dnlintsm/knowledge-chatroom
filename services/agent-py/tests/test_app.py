@@ -70,7 +70,7 @@ def types(evts: list[dict[str, Any]]) -> list[str]:
 
 
 def no_skills(request: httpx.Request) -> httpx.Response:
-    """The agent server, as far as a run without skills sees it."""
+    """api-py, as far as a run without skills sees it."""
     if request.url.path == "/skills/run":
         return httpx.Response(200, json={"skills": []})
     return httpx.Response(500, json={"error": f"unexpected {request.method} {request.url.path}"})

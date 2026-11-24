@@ -1,4 +1,4 @@
-"""Reading a POST /experiments/upload body, as readParts() in apps/agent/src/storage/http.ts reads it with busboy.
+"""Reading a POST /experiments/upload body, with the limits and rules of the busboy parser it replaced.
 
 The body is multipart/form-data: a "meta" part with the experiment's fields as
 JSON, and one part per file, named by its path in the experiment. It is read

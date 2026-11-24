@@ -1,5 +1,5 @@
 """/memory's shared notes, memory packs and overview served by api-py (shared_memory.py, memory_packs.py),
-against a real, migrated Postgres. Mirrors apps/agent/src/storage/shared-memory.test.ts and memory-packs.test.ts."""
+against a real, migrated Postgres."""
 
 from __future__ import annotations
 

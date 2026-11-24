@@ -1,4 +1,4 @@
-"""The model, chosen as apps/agent/src/model.ts does."""
+"""The model a run uses: CLAUDE_MODEL, else ANTHROPIC_MODEL, else the default."""
 
 from __future__ import annotations
 

@@ -1,6 +1,4 @@
-"""The background learner (memory_learn.py), as apps/agent/src/memory/learn.ts runs it.
-
-Mirrors apps/agent/src/memory/learn.test.ts (sweeps), and learns from chats in a
+"""The background learner (memory_learn.py): its sweeps, and learning from chats in a
 real, migrated Postgres with a stand-in for the small model.
 """
 

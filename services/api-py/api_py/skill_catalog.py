@@ -1,4 +1,4 @@
-"""Skills Claude can use (issue #7), as apps/agent/src/skills/catalog.ts and scan.ts read them.
+"""Skills Claude can use: how SKILL.md folders are read, limited and checked.
 
 SKILL.md folders in the Claude Code / Agent Skills layout, from three sources:
 built-in ones shipped with the agent (services/api-py/skills/), skills installed
@@ -6,10 +6,9 @@ from the hub (skills.py), and the workspace's own skills/<name>/ files. Each
 has a mode: auto (Claude may use it on its own, and /name runs it), manual
 (only /name runs it) or off.
 
-Both servers read the same skills and the hub keeps a fingerprint of each
-version's files in order, so the parsing, the limits and the sort order
-(JavaScript's localeCompare, collation.py) are the
-TypeScript server's.
+The hub keeps a fingerprint of each version's files in order, so the parsing,
+the limits and the sort order (JavaScript's localeCompare, collation.py) stay
+as they were when those versions were published.
 """
 
 from __future__ import annotations
@@ -260,7 +259,7 @@ def manifest_of(skill: Skill) -> dict[str, Any]:
     }
 
 
-# The check a hub version gets when it's published (scan.ts): what a person
+# The check a hub version gets when it's published: what a person
 # should look at before installing it. Flags warn; they don't stop publishing.
 
 # Files bigger than this are flagged (the hub takes up to 1 MB each).
@@ -292,7 +291,7 @@ _NETWORK = [
 
 
 def _js(pattern: str) -> re.Pattern[str]:
-    r"""A case-insensitive JavaScript pattern of scan.ts: \s as JavaScript's spaces, \b and case as ASCII."""
+    r"""A case-insensitive pattern with JavaScript's rules: \s as JavaScript's spaces, \b and case as ASCII."""
     return re.compile(
         pattern.replace(r"[\s_-]", f"[{JS_SPACE}_-]").replace(r"\s", _S), re.IGNORECASE | re.ASCII
     )

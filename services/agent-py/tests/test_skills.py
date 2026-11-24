@@ -1,4 +1,4 @@
-"""The run's skills: fetched from the agent server, written to the user's folder, used."""
+"""The run's skills: fetched from api-py, written to the user's folder, used."""
 
 from __future__ import annotations
 

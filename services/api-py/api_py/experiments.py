@@ -1,4 +1,4 @@
-"""Experiments: a user's sandbox on one knowledge node, or at the workspace root, as apps/agent/src/storage/experiments.ts.
+"""Experiments: a user's sandbox on one knowledge node, or at the workspace root.
 
 Forking copies the node's file list into the experiment (005_experiments.sql,
 015_runs.sql); the bytes are shared, since blobs are stored once by content.

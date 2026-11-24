@@ -35,7 +35,7 @@ type Schema = components["schemas"];
  * - under the chat input, a status bar says which skills are on and which
  *   ones the current turn used (the agent sends a "skill_used" event for
  *   each), and opens this chat's own choices.
- * The agent server keeps the modes (/api/skills); the most specific of
+ * The API server keeps the modes (/api/skills); the most specific of
  * chat › you › everyone › the skill's default applies.
  */
 

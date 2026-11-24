@@ -1,10 +1,10 @@
-"""The full-text index a write adds, as indexBlob() in apps/agent/src/storage/search.ts builds it.
+"""The full-text index a write adds.
 
 Each distinct content's text is cut into chunks of about a paragraph, once,
 inside the transaction that adds the version holding it. Search reads them,
 and the background indexer embeds them for search by meaning (semantic.py).
-Lengths count UTF-16 code units, as JavaScript does, so both servers
-cut a text into the same chunks.
+Lengths count UTF-16 code units, as JavaScript does, so a text is cut into
+the same chunks as the ones already indexed.
 """
 
 from __future__ import annotations

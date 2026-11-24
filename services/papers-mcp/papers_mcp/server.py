@@ -46,7 +46,7 @@ try:
     LOGIN = identity.login_from_env(os.environ)
 except identity.LoginConfigError as err:
     raise SystemExit(f"[papers-mcp] {err}") from None
-# The chatroom's agent server (LOCAL_AGENT_URL), whose storage API save_paper writes through.
+# The chatroom's API server, api-py (the app's LOCAL_AGENT_URL), whose storage API save_paper writes through.
 STORAGE_URL = os.environ.get("KNOWLEDGE_STORAGE_URL", "http://127.0.0.1:8000")
 
 INSTRUCTIONS = """Search academic papers (OpenAlex, with arXiv for new preprints).

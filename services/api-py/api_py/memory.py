@@ -1,4 +1,4 @@
-"""Each user's personalized memory, as MemoryService in apps/agent/src/storage/memory.ts (issue #93, migrations 018-021).
+"""Each user's personalized memory (migrations 018-021).
 
 Short markdown notes Claude keeps about each user across chats, in the format
 Claude Code's memory and SKILL.md use: a name, a one-line description, a type
@@ -12,8 +12,8 @@ shows and the user can undo; Claude's deletes only archive.
 
 Claude's proposals go to the user's inbox (`propose`): imports always do
 (memory_import.py). What a run uses (the index, reads, search, small edits)
-serves /memory/agent (memory_agent.py). The background learner stays on the
-TypeScript server until #190's step 8d.
+serves /memory/agent (memory_agent.py). The background learner is
+memory_learn.py.
 """
 
 from __future__ import annotations

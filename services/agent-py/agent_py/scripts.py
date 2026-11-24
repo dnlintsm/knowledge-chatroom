@@ -1,6 +1,6 @@
-"""Skills' scripts (issue #264, step 2).
+"""Skills' scripts.
 
-The Python twin of the script half of apps/agent/src/skills/run.ts. With
+With
 SKILL_SCRIPTS=on, a run that has a skill shipping scripts (`needsExecution`
 from GET /skills/run) also gets Bash, always inside Claude Code's sandbox
 (bubblewrap on Linux; the run fails rather than run commands unsandboxed):
@@ -47,8 +47,8 @@ RUN_ENV = re.compile(
 SECRET_MOUNTS = ("/run/secrets", "/var/run/secrets", "/etc/secrets")
 # Files in the run folder that Claude Code reads as project instructions or settings.
 PROJECT_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".mcp.json")
-# The workspace copy in the run folder (#264 step 3), as the TypeScript agent names
-# it, and the inputs of runs Claude starts, which this server writes outside the sandbox.
+# The workspace copy in the run folder (workdir.py), and the inputs of runs
+# Claude starts, which this server writes outside the sandbox.
 WORKSPACE_FILES = ("workspace", ".workspace-manifest.json", "run-inputs")
 
 

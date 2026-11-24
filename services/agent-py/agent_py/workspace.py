@@ -1,8 +1,6 @@
-"""Workspace file tools over the storage API (issue #176, step 2).
+"""Workspace file tools over the storage API.
 
-The Python twin of apps/agent/src/storage/tools.ts: the same tool names,
-descriptions and results, so the chat, its tool cards and the system prompt work
-the same whichever agent serves it. Instead of opening the database, each call
+The chat's tool cards and the system prompt know these tools by name. Each call
 goes to the storage API on LOCAL_AGENT_URL with the run's X-Knowledge-Storage
 token, which acts as Claude for the signed-in user: only what they can reach,
 writes in a knowledge node (and to skills) as proposals, no renaming, deleting
@@ -32,8 +30,8 @@ from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 
 from .text import MAX_READ_CHARS, EditError, apply_edit, read_lines
 
-# The TypeScript agent's server name, so tools have the same full names
-# (mcp__copilotkit__read_file, ...) with either agent.
+# The MCP server name the tools are under: the app's tool cards and saved chats
+# know them by their full names (mcp__copilotkit__read_file, ...).
 SERVER_NAME = "copilotkit"
 STORAGE_HEADER = "X-Knowledge-Storage"
 WORKSPACE_HEADER = "X-Knowledge-Workspace"
@@ -53,7 +51,7 @@ TEXT_EXTENSIONS = set(
 
 
 def storage_url(env: Mapping[str, str]) -> str:
-    """The agent server that serves storage, as the app finds it (apps/web/src/lib/agent-target.ts)."""
+    """Where api-py serves storage, as the app finds it (apps/web/src/lib/agent-target.ts)."""
     return (env.get("LOCAL_AGENT_URL") or DEFAULT_STORAGE_URL).rstrip("/")
 
 

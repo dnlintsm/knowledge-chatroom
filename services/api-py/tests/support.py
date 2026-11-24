@@ -22,7 +22,7 @@ SECRET = "0123456789abcdef0123456789abcdef"
 
 
 async def migrate(url: str) -> None:
-    """What migrate() in apps/agent/src/storage/db.ts does: every migration, recorded."""
+    """Applies every migration to a new test database and records it."""
     async with await psycopg.AsyncConnection.connect(url, autocommit=True) as conn:
         await conn.execute(
             "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz DEFAULT now())"
