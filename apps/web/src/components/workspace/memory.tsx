@@ -13,6 +13,10 @@ import { MEMORY_TAB } from "./types";
 import { useWorkbench } from "./workbench";
 import { workspaceUrl } from "@/lib/workspace-request";
 import { apiFetch } from "./server-files";
+import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
+
+/** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
+type Schema = components["schemas"];
 
 /**
  * Personalized memory (issue #93): notes Claude keeps about you across chats,
@@ -28,150 +32,47 @@ import { apiFetch } from "./server-files";
  * server storage, and without them memory doesn't show at all.
  */
 
-export type MemoryType = "preference" | "profile" | "project" | "reference" | "feedback";
+export type MemoryType = Schema["MemoryType"];
 
-export interface MemorySummary {
-  name: string;
-  description: string;
-  type: MemoryType;
-  version: number;
-  createdBy: "user" | "agent";
-  updatedBy: "user" | "agent";
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string | null;
-}
+export type MemorySummary = Schema["MemorySummary"];
 
-export interface MemoryNote extends MemorySummary {
-  body: string;
-}
+export type MemoryNote = Schema["MemoryNote"];
 
-export interface MemoryVersion {
-  version: number;
-  description: string;
-  type: MemoryType;
-  body: string;
-  changedBy: "user" | "agent";
-  createdAt: string;
-}
+export type MemoryVersion = Schema["MemoryVersion"];
 
 /** A change Claude proposed, waiting for you. */
-export interface InboxItem {
-  id: string;
-  op: "add" | "update" | "delete";
-  name: string;
-  description: string | null;
-  type: MemoryType | null;
-  body: string | null;
-  source: "chat" | "learn" | "import";
-  reason: string | null;
-  createdAt: string;
-}
+export type InboxItem = Schema["InboxItem"];
 
 /** One of Claude's changes, in the activity list. */
-export interface MemoryActivity {
-  id: string;
-  name: string;
-  kind: "create" | "update" | "archive";
-  source: "chat" | "learn" | "inbox";
-  at: string;
-  undone: boolean;
-  /** Still the note's latest change, so it can be undone. */
-  undoable: boolean;
-}
+export type MemoryActivity = Schema["MemoryActivity"];
 
 /** A note Claude read, changed or proposed a change to in this turn (the agent's "memory" event). */
-export interface MemoryEvent {
-  id: string;
-  name: string;
-  description: string;
-  kind: "read" | "create" | "update" | "archive" | "propose";
-  version: number;
-  /** A shared note's: which one, and where it lives. */
-  shared?: { id: string; label: string };
-  /** Set here once the user undid it. */
+export type MemoryEvent = Schema["MemoryEvent"] & {
+  /** Set here, not by the API, once the user undid it. */
   undone?: boolean;
-}
+};
 
-export type SharedScope = "workspace" | "node" | "group";
-export type SharedMode = "auto" | "manual" | "off";
+export type SharedScope = Schema["SharedScope"];
+export type SharedMode = Schema["SharedMode"];
 
 /** Where a shared note lives. */
-export interface SharedPlace {
-  scope: SharedScope;
-  nodeId: string | null;
-  groupId: string | null;
-  label: string;
-}
+export type SharedPlace = Schema["SharedPlace"];
 
 /** A note shared with you: by your workspace, a knowledge node or a group. */
-export interface SharedSummary {
-  id: string;
-  name: string;
-  description: string;
-  type: MemoryType;
-  version: number;
-  place: SharedPlace;
-  canEdit: boolean;
-  /** What applies to you: yours, else everyone's. */
-  mode: SharedMode;
-  myMode: SharedMode | null;
-  everyoneMode: SharedMode;
-  /** From an installed memory pack: read-only until the place forks it. */
-  pack: { installId: string; name: string; version: number } | null;
-  updatedAt: string;
-}
+export type SharedSummary = Schema["SharedSummary"];
 
-export interface SharedNote extends SharedSummary {
-  body: string;
-}
+export type SharedNote = Schema["SharedNote"];
 
-export interface SharedVersion {
-  version: number;
-  description: string;
-  type: MemoryType;
-  body: string;
-  changedBy: string | null;
-  changedAs: "user" | "agent";
-  createdAt: string;
-}
+export type SharedVersion = Schema["SharedVersion"];
 
 /** A change to shared memory waiting for its editors. */
-export interface SharedProposal {
-  id: string;
-  op: "add" | "update" | "delete";
-  place: SharedPlace;
-  memoryId: string | null;
-  name: string;
-  description: string | null;
-  type: MemoryType | null;
-  body: string | null;
-  author: string | null;
-  authorType: "user" | "agent";
-  mine: boolean;
-  canDecide: boolean;
-  reason: string | null;
-  createdAt: string;
-}
+export type SharedProposal = Schema["SharedProposal"];
 
 /** A place you can share a copy of a note to. */
-export interface SharedTarget extends SharedPlace {
-  canEdit: boolean;
-}
+export type SharedTarget = Schema["SharedTargetPlace"];
 
 /** A memory pack installed in a place you read (step 4). */
-export interface PackInstall {
-  id: string;
-  name: string;
-  version: number;
-  /** A newer version that isn't yanked. */
-  latest: number | null;
-  place: SharedPlace;
-  canEdit: boolean;
-  notes: number;
-  installedAt: string;
-}
+export type PackInstall = Schema["PackInstall"];
 
 /** In the editor, a shared note is `shared:<id>`. */
 export const sharedSelection = (id: string) => `shared:${id}`;
@@ -198,7 +99,7 @@ interface Turn {
   events: MemoryEvent[];
 }
 
-export type MemoryMode = "on" | "ask" | "off";
+export type MemoryMode = Schema["MemoryMode"];
 
 interface Memory {
   status: "loading" | "ready" | "unavailable";
@@ -588,7 +489,14 @@ function InboxRow({ item }: { item: InboxItem }) {
   );
 }
 
-const ACTIVITY_LABEL: Record<MemoryActivity["kind"], string> = { create: "saved", update: "updated", archive: "deleted" };
+// The activity list holds changes; the API's type also allows the two kinds a chat shows.
+const ACTIVITY_LABEL: Record<MemoryActivity["kind"], string> = {
+  create: "saved",
+  update: "updated",
+  archive: "deleted",
+  read: "used",
+  propose: "proposed",
+};
 const SOURCE_LABEL: Record<MemoryActivity["source"], string> = {
   chat: "in a chat",
   learn: "from a past chat",
