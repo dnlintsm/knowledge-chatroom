@@ -2,13 +2,29 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, FileDiff, FlaskConical, Lock, Plus, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
+import { workspaceUrl } from "@/lib/workspace-request";
 import { ExperimentPeople } from "./experiment-people";
 import { useListScope } from "./list-scope";
 import { readOnlyReason } from "./read-only";
 import { hasRole } from "./roles";
+import { RULES_FILE } from "./rules";
+import {
+  DRIFT_LABEL,
+  listRunReads,
+  listVersions,
+  reader,
+  rulesRecord,
+  versionUrl,
+  type FileVersion,
+  type RulesRecord,
+} from "./run-evidence";
+import { useInputEvidence, type InputEvidence } from "./use-input-evidence";
 import { experimentsIn, shownScope } from "./runs";
 import {
+  apiFetch,
+  experimentPlace,
   listPromotable,
   type Experiment,
   type ExperimentChange,
@@ -18,7 +34,7 @@ import {
   type Promotable,
 } from "./server-files";
 import { useWorkspace } from "./store";
-import { REVIEW_TAB } from "./types";
+import { isTextFile, REVIEW_TAB } from "./types";
 import { uploadFiles } from "./upload";
 
 const STATUS_LABEL: Record<ExperimentStatus, string> = {
@@ -508,9 +524,18 @@ function AddFiles({ experiment }: { experiment: Experiment }) {
   );
 }
 
+/** A version of one of the run's files, opened read only from its provenance. */
+interface Viewing {
+  path: string;
+  version: FileVersion;
+  label: string;
+}
+
 /** Where a run came from: who started it, from which chat, with what, and the exact inputs. */
 function Provenance({ experiment }: { experiment: Experiment }) {
   const ws = useWorkspace();
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  const inputs = useInputEvidence(experiment);
   const p = experiment.provenance;
   // Hand-made experiments have a record only once inputs are added to them.
   if (!p || !(p.startedAt || p.inputs?.length)) return null;
@@ -529,6 +554,7 @@ function Provenance({ experiment }: { experiment: Experiment }) {
           .join(" · "),
     ],
     ["Tools", p.tools && Object.entries(p.tools).map(([k, v]) => `${k} ${v}`).join(", ")],
+    ["Rules", p.startedAt && <RulesEvidence experiment={experiment} onView={setViewing} />],
     ["Chat", p.chat],
     [
       "Rerun of",
@@ -560,24 +586,195 @@ function Provenance({ experiment }: { experiment: Experiment }) {
       </dl>
       {p.inputs && p.inputs.length > 0 && (
         <ul aria-label="Inputs" className="flex flex-col gap-1 text-xs">
-          {p.inputs.map((input) => (
-            <li key={input.path} className="flex min-w-0 items-center gap-2">
-              <button
-                type="button"
-                className="cursor-pointer truncate text-left underline-offset-2 hover:underline"
-                onClick={() => ws.open(input.path)}
-                title={`Open ${input.path}`}
-              >
-                {input.path}
-              </button>
-              <span className="truncate text-[var(--muted-foreground)]" title={input.sha256}>
-                from {input.from.path} · {input.sha256.slice(0, 8)}
-              </span>
-            </li>
+          {inputs.map((evidence) => (
+            <RecordedInputRow key={evidence.input.path} evidence={evidence} onView={setViewing} />
           ))}
         </ul>
       )}
+      {viewing && <VersionView experiment={experiment} viewing={viewing} onClose={() => setViewing(null)} />}
     </Section>
+  );
+}
+
+/**
+ * One recorded input and whether its copy under inputs/ still has the
+ * recorded bytes (docs/run-evidence.md, "Input drift"). When it doesn't, the
+ * recorded content opens read only.
+ */
+function RecordedInputRow({ evidence, onView }: { evidence: InputEvidence; onView: (v: Viewing) => void }) {
+  const ws = useWorkspace();
+  const { input, drift, recorded } = evidence;
+  const label = DRIFT_LABEL[drift];
+  return (
+    <li className="flex min-w-0 flex-wrap items-center gap-x-2" data-testid="run-input" data-drift={drift}>
+      {drift !== "missing" ? (
+        <button
+          type="button"
+          className="cursor-pointer truncate text-left underline-offset-2 hover:underline"
+          onClick={() => ws.open(input.path)}
+          title={drift === "differs" ? `Open ${input.path} as it is now` : `Open ${input.path}`}
+        >
+          {input.path}
+        </button>
+      ) : (
+        <span className="truncate">{input.path}</span>
+      )}
+      <span className="truncate text-[var(--muted-foreground)]" title={input.sha256}>
+        from {input.from.path}
+        {input.sha256 && ` · ${input.sha256.slice(0, 8)}`}
+      </span>
+      {label && (
+        <span className={cn(drift === "differs" ? "text-amber-700 dark:text-amber-400" : "text-[var(--muted-foreground)]")}>
+          {label}
+        </span>
+      )}
+      {recorded && (
+        <button
+          type="button"
+          className="cursor-pointer text-brand-text underline-offset-2 hover:underline"
+          onClick={() => onView({ path: input.path, version: recorded, label: `${input.path} as recorded` })}
+        >
+          View recorded
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** A past version, read only, under the provenance it was opened from. */
+function VersionView({ experiment, viewing, onClose }: { experiment: Experiment; viewing: Viewing; onClose: () => void }) {
+  const url = versionUrl(viewing.path, experimentPlace(experiment.id), viewing.version.id);
+  const text = isTextFile({ path: viewing.path, mime: viewing.version.mime });
+  const [content, setContent] = useState<{ url: string; text: string | null } | null>(null);
+  useEffect(() => {
+    if (!text) return;
+    let live = true;
+    void apiFetch(url, { cache: "no-store" })
+      .then(async (res) => (res.ok ? res.text() : null))
+      .catch(() => null)
+      .then((body) => {
+        if (live) setContent({ url, text: body });
+      });
+    return () => {
+      live = false;
+    };
+  }, [text, url]);
+  const shown = content?.url === url ? content.text : undefined;
+  return (
+    <section
+      aria-label={viewing.label}
+      data-testid="version-view"
+      className="flex flex-col gap-1 rounded-md border border-[var(--border)] bg-surface-raised p-2 text-xs"
+    >
+      <div className="flex items-center gap-2">
+        <span className="font-medium">{viewing.label}</span>
+        <span className="text-[var(--muted-foreground)]" title={viewing.version.sha256}>
+          {viewing.version.sha256.slice(0, 8)} · {when(viewing.version.createdAt)} · read only
+        </span>
+        <IconButton aria-label="Close" className="ml-auto" onClick={onClose}>
+          <X />
+        </IconButton>
+      </div>
+      {!text ? (
+        <a className="text-brand-text underline-offset-2 hover:underline" href={workspaceUrl(url)} target="_blank" rel="noreferrer">
+          Open this version
+        </a>
+      ) : shown === undefined ? (
+        <p className="text-[var(--muted-foreground)]">Loading…</p>
+      ) : shown === null ? (
+        <p role="alert">This version can&apos;t be read now.</p>
+      ) : (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono">{shown}</pre>
+      )}
+    </section>
+  );
+}
+
+const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+
+/**
+ * The run's Rules (models/general_rules.md) in its provenance: the versions
+ * written while it ran, those an agent or tool read, and the one there when
+ * it finished. It says "read" only for reads the server recorded.
+ */
+function RulesEvidence({ experiment, onView }: { experiment: Experiment; onView: (v: Viewing) => void }) {
+  const ws = useWorkspace();
+  const place = experimentPlace(experiment.id);
+  const now = ws.serverHash(RULES_FILE);
+  const [found, setFound] = useState<{ versions: FileVersion[] | null; record: RulesRecord } | null>(null);
+  const { id, state, updatedAt, provenance } = experiment;
+  useEffect(() => {
+    let live = true;
+    void Promise.all([listVersions(RULES_FILE, place), listRunReads(id)])
+      .then(([versions, reads]) => {
+        if (live) setFound({ versions, record: rulesRecord(versions, reads ?? [], provenance ?? {}) });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // Again when the run changes (it finished) or its Rules do.
+  }, [id, place, state, updatedAt, provenance, now]);
+  if (!found) return <span className="text-[var(--muted-foreground)]">…</span>;
+  const { versions, record } = found;
+  const people = new Map<string, string | null>([
+    [experiment.authorId, experiment.authorName],
+    [experiment.maintainerId, experiment.maintainerName],
+    ...experiment.collaborators.map((c) => [c.id, c.name] as [string, string | null]),
+  ]);
+  const writer = (v: FileVersion) =>
+    v.author === "agent" ? "Claude" : ((v.authorId && people.get(v.authorId)) ?? "someone");
+  const version = (id: string, sha256: string, label: string) => {
+    const live = versions?.find((v) => v.id === id);
+    const short = sha256.slice(0, 8);
+    return live ? (
+      <button
+        key={id}
+        type="button"
+        className="cursor-pointer font-mono underline-offset-2 hover:underline"
+        title={`View this version (${sha256})`}
+        onClick={() => onView({ path: RULES_FILE, version: live, label })}
+      >
+        {short}
+      </button>
+    ) : (
+      <span key={id} className="font-mono" title={sha256}>
+        {short}
+      </span>
+    );
+  };
+  return (
+    <div data-testid="run-rules" className="flex flex-col gap-0.5">
+      {record.written.length > 0 && (
+        <span>
+          Written:{" "}
+          {record.written.map((v, i) => (
+            <span key={v.id}>
+              {i > 0 && "; "}
+              {version(v.id, v.sha256, "Rules as written")} by {writer(v)}, {when(v.createdAt)}
+            </span>
+          ))}
+        </span>
+      )}
+      {record.read.length > 0 ? (
+        <span data-testid="run-rules-read">
+          Read:{" "}
+          {record.read.map((r, i) => (
+            <span key={r.version}>
+              {i > 0 && "; "}
+              {version(r.version, r.sha256, "Rules as read")} by {reader(r.via)}, {when(r.readAt)}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="text-[var(--muted-foreground)]">Not read during the run</span>
+      )}
+      {record.atFinish !== undefined && (
+        <span>
+          At finish: {record.atFinish ? version(record.atFinish.version, record.atFinish.sha256, "Rules at finish") : "deleted"}
+        </span>
+      )}
+    </div>
   );
 }
 

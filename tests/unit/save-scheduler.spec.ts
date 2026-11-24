@@ -344,3 +344,25 @@ test("a conflict in one place doesn't hold up another, and outranks a plain fail
   await expect(sync.settle("node")).rejects.toThrow();
   expect(errors.at(-1)).toContain("notes/a.md was changed by someone else");
 });
+
+test("it says when a version it knows of a file changes", () => {
+  let told = 0;
+  const sync = new SaveScheduler({
+    getMode: () => "server", getPlace: () => null, getFile: () => undefined,
+    put: async () => ({ sha256: "x" }), onError: () => {},
+    onHashes: () => { told++; },
+  });
+  sync.remember("a.md", "1");
+  expect(told).toBe(1);
+  // The same version again is no change.
+  sync.remember("a.md", "1");
+  expect(told).toBe(1);
+  sync.remember("a.md", "2");
+  expect(told).toBe(2);
+  expect(sync.forget("a.md")).toBe(true);
+  expect(told).toBe(3);
+  // Forgetting what it didn't know changes nothing.
+  expect(sync.forget("a.md")).toBe(false);
+  sync.cancel("a.md");
+  expect(told).toBe(3);
+});

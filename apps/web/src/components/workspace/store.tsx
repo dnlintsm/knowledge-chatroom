@@ -126,6 +126,12 @@ interface WorkspaceValue {
   reveal: Reveal | null;
   getFile: (path: string) => WorkspaceFile | undefined;
   /**
+   * The version (sha256) this browser last knew the file in this place to be on
+   * the server, from its list, a change event or a save; undefined when it knows
+   * none. A new function whenever one of those changes.
+   */
+  serverHash: (path: string) => string | undefined;
+  /**
    * The file with its content, fetched first when it is only listed
    * (`unloaded`); undefined when there is no such file (any more).
    */
@@ -285,6 +291,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [storageMode, setStorageMode] = useState<StorageMode>("loading");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [saveConflicts, setSaveConflicts] = useState<SaveConflict[]>([]);
+  // Bumps whenever a version this browser knows a file to be on the server changes (serverHash).
+  const [hashRevision, setHashRevision] = useState(0);
   const [storageDown, setStorageDown] = useState(false);
   const mode = useRef<StorageMode>("loading");
   const files = useRef(state.files);
@@ -316,6 +324,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     onError: setSyncError,
     onConflict: setSaveConflicts,
+    onHashes: () => setHashRevision((n) => n + 1),
   }));
   // Moving to another place saves what is waiting; edits a conflict was holding go with the files.
   const leavePlace = useCallback(() => {
@@ -999,6 +1008,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [storageMode, place, tree, experiments],
   );
 
+  // A new function whenever a known version changes, so a consumer comparing versions renders again.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const serverHash = useCallback((path: string) => sync.hash(path), [sync, hashRevision]);
+
   const value = useMemo<WorkspaceValue>(() => {
     // While loading, the files are this browser's copy; none is shown as open
     // (or given to Claude as the open file) until the server's have arrived.
@@ -1013,6 +1026,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openCount,
       reveal,
       getFile,
+      serverHash,
       loadFile,
       open,
       close,
@@ -1055,7 +1069,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       promote,
     };
   }, [
-    state, selection, openCount, reveal, setSelection, getFile, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
+    state, selection, openCount, reveal, setSelection, getFile, serverHash, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, storageDown, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
     updateExperiment, changeExperimentPeople, deleteExperiment, addRunInputs, proposals, decideProposal, promote,

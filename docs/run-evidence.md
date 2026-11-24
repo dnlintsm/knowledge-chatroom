@@ -181,7 +181,10 @@ view on the Experiment's node, as for every Experiment.
 2. Backend: the past-version read, `run_reads` and the Rules record at finish, `version` on
    the Python agent's `read_file` (api-py, agent-py, contract). Done.
 3. Backend: Recently deleted and restore (migration, api-py, contract). Done.
-4. Screens: input drift, View recorded, and the Rules row in Provenance.
+4. Screens: input drift, View recorded, and the Rules row in Provenance. Done: the panel
+   follows the versions the browser knows of the run's files (the store's `serverHash`), so
+   drift shows as soon as a save lands, and Claude's `currentExperiment` lists the inputs with
+   their state and, for a changed one, the copy's `recordedVersion`.
 5. Screens: Undo after delete, and Recently deleted.
 
 ## Open points for review

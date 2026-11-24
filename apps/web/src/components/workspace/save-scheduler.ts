@@ -21,6 +21,8 @@ interface Options {
   onError: (error: string | null) => void;
   /** The files whose save was refused because someone else changed them, whenever that set changes. */
   onConflict?: (conflicts: SaveConflict[]) => void;
+  /** A version this browser knows a file to be on the server (`hash`) changed, or was forgotten. */
+  onHashes?: () => void;
   delay?: number;
   clock?: Clock;
 }
@@ -84,8 +86,15 @@ export class SaveScheduler {
   hash = (path: string, at = this.options.getPlace()) => this.hashes.get(this.key(path, at));
   remember = (path: string, hash: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
+    const changed = this.hashes.get(key) !== hash;
     this.hashes.set(key, hash);
     this.absent.delete(key);
+    if (changed) this.options.onHashes?.();
+  };
+  private dropHash = (key: string) => {
+    const had = this.hashes.delete(key);
+    if (had) this.options.onHashes?.();
+    return had;
   };
   beginWrite = (path: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
@@ -196,7 +205,7 @@ export class SaveScheduler {
     else {
       // Deleted there: a known absence, not an unknown version, so someone
       // making the file again before this save lands is a conflict too.
-      this.hashes.delete(key);
+      this.dropHash(key);
       this.absent.add(key);
     }
     this.reportConflicts();
@@ -277,7 +286,7 @@ export class SaveScheduler {
     const pending = this.pending.get(key);
     if (pending) this.clock.clearTimeout(pending.timer);
     this.pending.delete(key);
-    this.hashes.delete(key);
+    this.dropHash(key);
     this.absent.delete(key);
     const failed = this.failed.delete(key);
     if (this.conflicts.delete(key)) this.reportConflicts();
@@ -286,6 +295,6 @@ export class SaveScheduler {
   forget = (path: string, at = this.options.getPlace()) => {
     const key = this.key(path, at);
     this.absent.delete(key);
-    return this.hashes.delete(key);
+    return this.dropHash(key);
   };
 }

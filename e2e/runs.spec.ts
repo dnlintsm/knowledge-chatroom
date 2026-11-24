@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 // The agent's database client: provenance is only written by Claude's tools,
 // which the mock agent doesn't run, so this test writes one directly.
+import { createHash } from "node:crypto";
 import postgres from "postgres";
 import { showPlaces } from "./places";
 
@@ -26,6 +27,7 @@ async function shot(page: Page, name: string) {
 }
 
 const reply = { timeout: 90_000 };
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const md = { "Content-Type": "text/markdown" };
 const ETCH = "runs/etch-2026-10-01";
 
@@ -277,8 +279,8 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
           path: "inputs/wafers.csv",
           from: { node: null, experiment: null, path: "uploads/wafers.csv" },
           version: run.id,
-          sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-          size: 18,
+          sha256: sha256("wafer,dose\n1,30\n"),
+          size: 16,
         },
       ],
     };
@@ -293,7 +295,10 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   await expect(provenance).toContainText("claude-test");
   await expect(provenance).toContainText("analysis · ab12cd34");
   const inputs = page.getByRole("list", { name: "Inputs" });
-  await expect(inputs).toContainText("from uploads/wafers.csv · 9f86d081");
+  await expect(inputs).toContainText(`from uploads/wafers.csv · ${sha256("wafer,dose\n1,30\n").slice(0, 8)}`);
+  await expect(page.getByTestId("run-input")).toHaveAttribute("data-drift", "same");
+  // Nothing recorded a read of its Rules, so the row claims none.
+  await expect(provenance.getByTestId("run-rules")).toContainText("Not read during the run");
   await shot(page, "02d-run-provenance");
   await inputs.getByRole("button", { name: "inputs/wafers.csv" }).click();
   await expect(page.getByTestId("file-preview")).toContainText("dose");
@@ -303,6 +308,48 @@ test("a run Claude started shows where it came from", async ({ page, request }) 
   await provenance.getByRole("button", { name: first.title }).click();
   await expect(page).toHaveURL(new RegExp(`experiment_id=${first.id}$`));
   await expect(page.getByRole("navigation", { name: "Location" })).toContainText(first.title);
+});
+
+test("an edited input says it differs from the record, and the recorded content opens read only", async ({ page, request }) => {
+  const recorded = "wafer,dose\n1,30\n";
+  const run = await makeRun(request, "Dose check", { "inputs/wafers.csv": recorded, "report.md": "# Dose check\n" });
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    const inputs = [{
+      path: "inputs/wafers.csv",
+      from: { node: null, experiment: null, path: "uploads/wafers.csv" },
+      version: run.id,
+      sha256: sha256(recorded),
+      size: recorded.length,
+    }];
+    await sql`UPDATE experiments SET provenance = ${sql.json({ inputs })} WHERE id = ${run.id}`;
+  } finally {
+    await sql.end();
+  }
+  await gotoRun(page, run, "Dose check");
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
+  const input = page.getByTestId("run-input");
+  await expect(input).toHaveAttribute("data-drift", "same");
+  await expect(input.getByRole("button", { name: "View recorded" })).toHaveCount(0);
+
+  // Someone edits the copy: the record no longer matches it, as soon as it is saved.
+  const edit = (content: string) => request.put(`/api/files/inputs/wafers.csv?experiment=${run.id}`, { data: content, headers: md });
+  expect((await edit("wafer,dose\n1,45\n")).ok()).toBe(true);
+  await expect(input).toHaveAttribute("data-drift", "differs");
+  await expect(input).toContainText("Content differs from the recorded input");
+  await input.getByRole("button", { name: "View recorded" }).click();
+  const view = page.getByTestId("version-view");
+  await expect(view).toContainText("inputs/wafers.csv as recorded");
+  await expect(view).toContainText("1,30");
+  await expect(view).not.toContainText("1,45");
+  await shot(page, "02f-run-input-drift");
+  await view.getByRole("button", { name: "Close" }).click();
+  await expect(view).toHaveCount(0);
+
+  // The recorded bytes written back are the record again.
+  expect((await edit(recorded)).ok()).toBe(true);
+  await expect(input).toHaveAttribute("data-drift", "same");
+  await expect(input).not.toContainText("differs");
 });
 
 test("files can be uploaded into an existing run and added as its inputs", async ({ page, request }) => {

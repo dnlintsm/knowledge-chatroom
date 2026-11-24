@@ -8,11 +8,22 @@ import { applyEdit } from "@knowledge-chatroom/contracts/text-edit";
 import { numberLines } from "./file-refs";
 import { normalizePath, useWorkspace } from "./store";
 import { findReport, runsUnder } from "./runs";
+import type { InputDrift } from "./run-evidence";
+import { useInputEvidence } from "./use-input-evidence";
 import { isTextFile, TASKS_TAB } from "./types";
 import { useChatroomProps } from "./use-chatroom-props";
 import { useWorkbench } from "./workbench";
 
 const FILES_LOADING = "The workspace files are still loading; try again in a moment.";
+
+/** How a recorded input's copy compares, in Claude's words (run-evidence.ts). */
+const INPUT_STATE: Record<InputDrift, string> = {
+  same: "as recorded",
+  differs: "changed",
+  missing: "no longer in inputs/",
+  unrecorded: "not recorded",
+  unknown: "not known yet",
+};
 
 /** Keeps context small: the agent can always call readWorkspaceFile for more. */
 const MAX_CONTEXT_CHARS = 20_000;
@@ -59,9 +70,10 @@ export function useWorkspaceAgent() {
   }, [reportPath, reportUnloaded, loadFile]);
   // Only while files are browser-only; see the comment above.
   const browserFiles = ws.storageMode === "local";
+  const inputs = useInputEvidence(ws.experiment);
   useAgentContext({
     description:
-      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment the user is working in, on that node (or at the workspace root): a run, with its state (ready, running, done, failed) and its report (report.md) when it has one. Questions are about this run unless the user says otherwise, and `files` are its files. Without one, `files` are the files where the user is.",
+      "The user's knowledge workspace (shown beside the chat). `openFile` is the file in the middle pane, each line of its content starting with the line number and a tab (the numbers are not part of the file); `selection` is text the user highlighted in it. When the user says 'this', 'here' or 'the selection', they mean these. `currentNode` is where in the knowledge tree the user is (null = the workspace root); `currentExperiment`, when set, is the experiment the user is working in, on that node (or at the workspace root): a run, with its state (ready, running, done, failed) and its report (report.md) when it has one, and its recorded `inputs`: an input whose copy under inputs/ was edited since is `changed` and is no longer the evidence; `recordedVersion` is the copy's version with the recorded bytes, to read with read_file's `version`. Questions are about this run unless the user says otherwise, and `files` are its files. Without one, `files` are the files where the user is.",
     value: {
       currentNode: ws.node
         ? {
@@ -84,6 +96,12 @@ export function useWorkspaceAgent() {
             // Plain JSON from the server.
             params: ws.experiment.params as JsonSerializable,
             results: ws.experiment.results as JsonSerializable,
+            inputs: inputs.map(({ input, drift, recorded }) => ({
+              path: input.path,
+              from: input.from.path,
+              state: INPUT_STATE[drift],
+              ...(recorded ? { recordedVersion: recorded.id } : {}),
+            })),
             report: !report
               ? null
               : report.path === open?.path
