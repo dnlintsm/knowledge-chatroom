@@ -815,19 +815,21 @@ class Session:
         )
 
     async def finish_run(
-        self, experiment_id: str, results: dict[str, Any], state: str
+        self, experiment_id: str, results: dict[str, Any], state: str, run: str | None = None
     ) -> dict[str, Any]:
         """
         Records a run's results and how it ended (done or failed), and refreshes
-        the record in its report.md (creating the report if it has none). A
-        finished run stays as it ended: the same call again changes nothing,
-        and a different one is refused. Its maintainer and collaborators can.
+        the record in its report.md (creating the report if it has none). The
+        Run it ends is `run`, or without one the running Run you started
+        (experiments.finish_target). A finished run stays as it ended: the
+        same call again changes nothing, and a different one is refused. Its
+        maintainer and collaborators can.
         """
         current = await self.experiment(experiment_id)
         self._need_worker(current)
         if current["status"] == "archived":
             raise ForbiddenError(ARCHIVED)
-        if current["state"] in ("done", "failed"):
+        if run is None and current["state"] in ("done", "failed"):
             if current["state"] == state and same_json(current["results"], results):
                 return current
             raise ExperimentError(
@@ -839,11 +841,17 @@ class Session:
         # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
-                conn, self.storage, experiment_id, {"results": results, "state": state}, audit
+                conn,
+                self.storage,
+                experiment_id,
+                {"results": results, "state": state},
+                audit,
+                by=self.principal.user_id,
+                run=run,
             )
-        run = await self.experiment(experiment_id)
-        await self._refresh_report(run, create=True)
-        return run
+        finished = await self.experiment(experiment_id)
+        await self._refresh_report(finished, create=True)
+        return finished
 
     async def run_reads(self, experiment_id: str) -> list[dict[str, Any]]:
         """What agents read of the run's recorded files while it ran; for whoever can see it."""
@@ -970,7 +978,7 @@ class Session:
             raise ExperimentError(
                 f"This run already finished ({found['state']}); start a new run to try again"
             )
-        await self.finish_run(found["experimentId"], results, state)
+        await self.finish_run(found["experimentId"], results, state, run=run_id)
         return await self.run(run_id)
 
     async def rerun_run(self, run_id: str, into_same: bool) -> dict[str, Any]:
@@ -1130,7 +1138,9 @@ class Session:
             "experiment.update", {"experiment": experiment_id, "fields": list(given)}
         )
         async with self.scoped() as conn:
-            await experiments.update(conn, self.storage, experiment_id, given, audit)
+            await experiments.update(
+                conn, self.storage, experiment_id, given, audit, by=self.principal.user_id
+            )
         # The report's record follows edits made after the run started.
         updated = await self.experiment(experiment_id)
         await self._refresh_report(updated)

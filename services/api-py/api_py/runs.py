@@ -44,6 +44,20 @@ class RunStillRunningError(Exception):
     """A running Run can't be deleted (409)."""
 
 
+class RunNotYoursError(Exception):
+    """
+    A finish that names no Run, while someone else's Run is running (409):
+    it may be a late retry of an earlier finish, so it doesn't end theirs.
+    """
+
+    def __init__(self, number: int) -> None:
+        super().__init__(
+            f"Run {number} of this experiment was started by someone else and is still running; "
+            "finish it by its id (POST /runs/{id}/finish) to end it"
+        )
+        self.number = number
+
+
 _COLUMNS = """
     r.id, r.experiment_id, r.number, r.label, r.params, r.results, r.state, r.provenance,
     r.started_by, su.name, su.email, r.started_at, r.finished_at, r.record, r.record_taken,
@@ -209,13 +223,15 @@ async def finish_running(
     results: dict[str, Any],
     state: str,
     provenance: dict[str, Any],
+    run_id: str | None = None,
 ) -> str | None:
     """
-    Ends the Experiment's running Run with `results` and `state`, adding
-    `provenance` (finishedAt and the evidence) to its own, and takes its file
-    record. Called by experiments.update with the Experiment's row locked, so
-    no write lands between the record and the end. The Run's id, or None when
-    none was running.
+    Ends the Experiment's running Run (only if it is `run_id`, when given)
+    with `results` and `state`, adding `provenance` (finishedAt and the
+    evidence) to its own, and takes its file record. Called by
+    experiments.update with the Experiment's row locked, so no write lands
+    between the record and the end. The Run's id, or None when none was
+    running.
     """
     cur = await conn.execute(
         """
@@ -223,8 +239,9 @@ async def finish_running(
                         finished_at = now(), record = experiment_file_record(experiment_id),
                         record_taken = 'finish'
         WHERE experiment_id = %s AND state = 'running' AND deleted_at IS NULL
+          AND (%s::uuid IS NULL OR id = %s::uuid)
         RETURNING id""",
-        (Jsonb(results), state, Jsonb(provenance), experiment_id),
+        (Jsonb(results), state, Jsonb(provenance), experiment_id, run_id, run_id),
     )
     row = await cur.fetchone()
     return str(row[0]) if row else None

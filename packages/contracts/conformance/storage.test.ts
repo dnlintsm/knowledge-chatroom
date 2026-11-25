@@ -505,6 +505,10 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     const two = (await call<Schema["Run"]>("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: made.id }, expect: 201 })).data;
     assert.equal(two.number, 2);
     assert.deepEqual(two.provenance.rerunOf, { id: made.id, run: one.id });
+    // A late retry of Run 1's finish through the old route answers Run 1's end; Run 2 runs on.
+    await call("POST", `/experiments/${made.id}/finish`, { headers: alice, json: { results: { acc: 0.5 } }, expect: 200 });
+    assert.equal((await call<Schema["Run"]>("GET", `/runs/${two.id}`, { headers: alice, expect: 200 })).data.state, "running");
+    await call("POST", `/experiments/${made.id}/finish`, { headers: alice, json: { results: {}, run: "not-a-run" }, expect: 400 });
     await call("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: "elsewhere" }, expect: 400 });
     await call("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: made.id }, expect: 409 });
     await call("POST", `/runs/${two.id}/finish`, { headers: alice, json: { results: { acc: 0.7 }, state: "failed" }, expect: 200 });

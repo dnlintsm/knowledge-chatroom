@@ -63,7 +63,7 @@
     Deprecated for a release, acting on the latest Run:
     POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?, inputs?,
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
-    POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
+    POST   /experiments/<id>/finish {results, state?: done|failed, run?} -> the finished run
     POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
     GET    /experiments/<id>/reads  {reads}: the Rules versions its agents read while it ran
     PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?} -> {experiment|null}
@@ -127,7 +127,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import uploads
-from .access import ROLES, AccessError, ForbiddenError, LastOwnerError
+from .access import ROLES, AccessError, ForbiddenError, LastOwnerError, is_uuid
 from .chats import ChatError, ChatTakenError
 from .experiments import (
     ANYWHERE,
@@ -151,7 +151,7 @@ from .paths import (
 from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .proxy import forward
 from .run_report import js_json, js_number
-from .runs import RunError, RunRunningError, RunStillRunningError
+from .runs import RunError, RunNotYoursError, RunRunningError, RunStillRunningError
 from .search import SearchError
 from .session import NOT_SEEN, Session
 from .workspaces import WorkspaceError, resolve
@@ -451,6 +451,8 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(409, str(err), running=err.number)
     except RunStillRunningError as err:
         return error(409, str(err))
+    except RunNotYoursError as err:
+        return error(409, str(err), running=err.number)
     except (
         NodeError,
         AccessError,
@@ -1163,9 +1165,16 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         results = body.get("results") if body else None
         state = body.get("state") if body else None
         state = "done" if state is None else state
-        if not isinstance(results, dict) or state not in ("done", "failed"):
-            return error(400, "Expected {results: object, state?: done|failed}")
-        return json_response(200, await session.finish_run(finish_of.group(1), results, state))
+        run = body.get("run") if body else None
+        if (
+            not isinstance(results, dict)
+            or state not in ("done", "failed")
+            or not (run is None or (isinstance(run, str) and is_uuid(run)))
+        ):
+            return error(400, "Expected {results: object, state?: done|failed, run?: run id}")
+        return json_response(
+            200, await session.finish_run(finish_of.group(1), results, state, run=run)
+        )
 
     runs_of = re.fullmatch(r"([^/]+)/runs", experiment_id)
     if runs_of:

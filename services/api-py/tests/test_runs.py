@@ -293,6 +293,73 @@ async def test_the_routes_before_runs_act_on_the_latest(either):
 
 
 @needs_services
+async def test_a_late_retry_of_a_finish_doesnt_end_the_next_run(either):
+    api = either
+    bob = await user_id(api, "Bob")
+    await view_everything(api, bob)
+    # A run started the old way, by Alice; Bob works on it with her.
+    made = await api.post(
+        "/experiments/runs", headers=ALICE, json={"nodeId": None, "title": "Etch"}
+    )
+    assert made.status_code == 201, made.text
+    exp = made.json()["id"]
+    added = await api.put(f"/experiments/{exp}/collaborators/{bob}", headers=ALICE)
+    assert added.status_code == 200, added.text
+    (run1,) = await runs_of(api, exp)
+    finishing = {"results": {"rate": 410}}
+    first = await api.post(f"/experiments/{exp}/finish", headers=ALICE, json=finishing)
+    assert first.status_code == 200, first.text
+
+    # Alice's client never saw that answer; Bob starts Run 2, then her retry arrives.
+    run2 = await start(api, exp, headers=BOB)
+    retry = await api.post(f"/experiments/{exp}/finish", headers=ALICE, json=finishing)
+    assert retry.status_code == 200, retry.text
+    now = {r["number"]: r for r in await runs_of(api, exp)}
+    assert now[2]["state"] == "running" and now[2]["results"] == {}
+    assert now[1]["results"] == {"rate": 410}
+
+    # Another finish naming no run doesn't end Bob's either; naming it does.
+    other = await api.post(
+        f"/experiments/{exp}/finish", headers=ALICE, json={"results": {"rate": 455}}
+    )
+    assert other.status_code == 409 and other.json()["running"] == 2
+    patched = await api.patch(f"/experiments/{exp}", headers=ALICE, json={"state": "done"})
+    assert patched.status_code == 409
+    assert (await api.get(f"/runs/{run2['id']}", headers=ALICE)).json()["state"] == "running"
+    named = await api.post(
+        f"/experiments/{exp}/finish",
+        headers=ALICE,
+        json={"results": {"rate": 455}, "run": run2["id"]},
+    )
+    assert named.status_code == 200, named.text
+    assert (await api.get(f"/runs/{run2['id']}", headers=ALICE)).json()["results"] == {"rate": 455}
+    # Run 1 named again: the same finish is a retry, a different one is refused.
+    same = await api.post(
+        f"/experiments/{exp}/finish", headers=ALICE, json={**finishing, "run": run1["id"]}
+    )
+    assert same.status_code == 200
+    changed = await api.post(
+        f"/experiments/{exp}/finish",
+        headers=ALICE,
+        json={"results": {"rate": 1}, "run": run1["id"]},
+    )
+    assert changed.status_code == 400
+
+
+@needs_services
+async def test_a_finish_by_run_id_ends_only_that_run(either):
+    api = either
+    exp = (await experiment(api))["id"]
+    run1 = await start(api, exp)
+    await finish(api, run1["id"], {"rate": 410})
+    run2 = await start(api, exp)
+    # Run 1's finish again, by its id: answered as it ended, and Run 2 runs on.
+    again = await finish(api, run1["id"], {"rate": 410})
+    assert again["id"] == run1["id"]
+    assert (await api.get(f"/runs/{run2['id']}", headers=ALICE)).json()["state"] == "running"
+
+
+@needs_services
 async def test_claude_starts_and_finishes_but_doesnt_delete(either):
     api = either
     claude = storage_token("kc|alice", via="remote")

@@ -452,6 +452,54 @@ async def add_inputs(
         return True
 
 
+async def finish_target(
+    conn: AsyncConnection,
+    experiment_id: str,
+    results: dict[str, Any],
+    state: str,
+    *,
+    run: str | None,
+    by: str,
+) -> tuple[str, str | None]:
+    """
+    Which Run a finish ends, read with the Experiment's row locked. A named
+    `run` is that Run. Without one (clients from before Runs), a finish that
+    repeats how the latest finished Run of `by` ended is a retry of it, even
+    when a newer Run is running; otherwise it ends the running Run only when
+    `by` started it, so a late retry never ends someone else's.
+
+    ("finish", id) ends that running Run; ("same", id) it already ended so,
+    and nothing changes; ("add", None) none runs and none was named.
+    """
+    cur = await conn.execute(
+        """
+        SELECT id, number, state, results, started_by FROM runs
+        WHERE experiment_id = %s AND deleted_at IS NULL ORDER BY number DESC""",
+        (experiment_id,),
+    )
+    rows = [(str(r[0]), int(r[1]), r[2], r[3], str(r[4])) for r in await cur.fetchall()]
+    if run is not None:
+        named = next((r for r in rows if r[0] == run), None)
+        if named is None:
+            raise ExperimentError("That run isn't one of this experiment's")
+        if named[2] == "running":
+            return "finish", run
+        if named[2] == state and same_json(named[3], results):
+            return "same", run
+        raise ExperimentError(
+            f"Run {named[1]} already finished ({named[2]}); start a new run to try again"
+        )
+    running = next((r for r in rows if r[2] == "running"), None)
+    if running is None:
+        return "add", None
+    ended = next((r for r in rows if r[2] in runs.FINISHED), None)
+    if ended and ended[4] == by and ended[2] == state and same_json(ended[3], results):
+        return "same", ended[0]
+    if running[4] != by:
+        raise runs.RunNotYoursError(running[1])
+    return "finish", running[0]
+
+
 async def update(
     conn: AsyncConnection,
     storage: Storage,
@@ -459,14 +507,18 @@ async def update(
     given: dict[str, Any],
     in_tx: InTx | None = None,
     provenance: dict[str, Any] | None = None,
+    *,
+    by: str | None = None,
+    run: str | None = None,
 ) -> bool:
     """
-    Sets the given fields; False if the experiment is gone. `provenance` keys
-    are merged into the recorded ones. A run that ends here (its state becomes
-    done or failed), through a finish or a PATCH, also gets what it ended with
-    (`evidence_at_finish`), read under the row's lock, and so does its running
-    Run, with its file record; with none running, a finished Run is added.
-    Becoming running starts a Run.
+    Sets the given fields, as user `by`; False if the experiment is gone.
+    `provenance` keys are merged into the recorded ones. A run that ends here
+    (its state becomes done or failed), through a finish or a PATCH, also gets
+    what it ended with (`evidence_at_finish`), read under the row's lock, and
+    so does the Run it ends (`finish_target`: `run` when named), with its file
+    record; with none running, a finished Run is added. Becoming running
+    starts a Run.
     """
     fields = clean_input(given)
     if not is_uuid(experiment_id):
@@ -483,6 +535,18 @@ async def update(
         if not before:
             return False
         status, node, state, results, params = before
+        target: str | None = None
+        if fields.get("state") in runs.FINISHED and by is not None:
+            outcome, target = await finish_target(
+                conn,
+                experiment_id,
+                fields.get("results", results),
+                fields["state"],
+                run=run,
+                by=by,
+            )
+            if outcome == "same":
+                return True
         # A finished run stays as it ended, whoever asks and through whichever
         # route: checked here, under the row's lock, so neither a PATCH nor a
         # second finish racing the first can rewrite it.
@@ -517,7 +581,7 @@ async def update(
         if ends:
             final = fields.get("results", results)
             ended = await runs.finish_running(
-                conn, experiment_id, final, fields["state"], provenance or {}
+                conn, experiment_id, final, fields["state"], provenance or {}, target
             )
             if ended is None:
                 everything = await conn.execute(
@@ -528,7 +592,7 @@ async def update(
                     conn,
                     storage.workspace_id,
                     experiment_id,
-                    str(author),
+                    by or str(author),
                     fields.get("params", params),
                     final,
                     fields["state"],
@@ -543,7 +607,7 @@ async def update(
                 conn,
                 storage.workspace_id,
                 experiment_id,
-                str(author),
+                by or str(author),
                 params=fields.get("params", params),
                 provenance=recorded,
                 mirror=False,

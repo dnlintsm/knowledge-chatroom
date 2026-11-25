@@ -1160,6 +1160,10 @@ class StartRunRequest(BaseModel):
 class FinishRunRequest(BaseModel):
     results: dict[str, Any]
     state: Literal["done", "failed"] | None = "done"
+    run: UUID | None = None
+    """
+    The run it ends.
+    """
 
 
 class AddRunInputsRequest(BaseModel):

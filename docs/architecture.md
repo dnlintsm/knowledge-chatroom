@@ -253,6 +253,10 @@ record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
   and an upload marked finished, add a finished Run. Results typed into an Experiment before
   it ever ran become a finished Run 1, labelled "Recorded by hand", when its first Run starts,
   so the new Run doesn't replace them.
+- A finish ends the Run it was meant for (`experiments.finish_target`, under the Experiment's
+  row lock): the Run named by `run`, or without one the running Run the caller started. A
+  repeat of how the caller's latest finished Run ended is a retry, answered without change, so
+  a finish retried after someone starts the next Run doesn't end that one (409 `running`).
 - Run changes reach the event stream as `{op: "run", change, id, experiment, node}`, followed
   by the Experiment's update event, for whoever can see the Experiment.
 

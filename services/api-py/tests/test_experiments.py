@@ -298,7 +298,9 @@ async def test_bodies_and_methods(api):
     finish = await api.post(
         f"/experiments/{exp['id']}/finish", headers=ALICE, json={"results": [], "state": "done"}
     )
-    assert finish.json() == {"error": "Expected {results: object, state?: done|failed}"}
+    assert finish.json() == {
+        "error": "Expected {results: object, state?: done|failed, run?: run id}"
+    }
     inputs = await api.post(f"/experiments/{exp['id']}/inputs", headers=ALICE, json={"inputs": "x"})
     assert inputs.json() == {
         "error": "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}"

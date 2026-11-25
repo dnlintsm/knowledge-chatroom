@@ -261,7 +261,7 @@ export interface paths {
         head?: never;
         /**
          * Change an experiment (its maintainer and collaborators)
-         * @description Only its maintainer changes the status (shares, archives or restores it).
+         * @description Only its maintainer changes the status (shares, archives or restores it). A state of done or failed ends a run as POST /experiments/{id}/finish without `run` does, so it doesn't end a run someone else started (409).
          */
         patch: operations["updateExperiment"];
         trace?: never;
@@ -301,7 +301,7 @@ export interface paths {
         /**
          * Record a run's results and how it ended
          * @deprecated
-         * @description Deprecated: use POST /runs/{id}/finish. It still works for this release and finishes the experiment's running run. Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
+         * @description Deprecated: use POST /runs/{id}/finish. It still works for this release. Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused. The run it ends is `run` when given. Without it, a call that repeats how the caller's latest finished run ended is a retry, answered without change even while a newer run runs; otherwise it ends the running run only when the caller started it, and a 409 names a run someone else started, which keeps running. A PATCH to state done or failed follows the same rule.
          */
         post: operations["finishRun"];
         delete?: never;
@@ -4082,6 +4082,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
@@ -4149,11 +4150,16 @@ export interface operations {
                      * @enum {string}
                      */
                     state?: "done" | "failed";
+                    /**
+                     * Format: uuid
+                     * @description The run it ends.
+                     */
+                    run?: string;
                 };
             };
         };
         responses: {
-            /** @description The run, finished. */
+            /** @description The experiment, as it is after the finish. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4166,6 +4172,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
