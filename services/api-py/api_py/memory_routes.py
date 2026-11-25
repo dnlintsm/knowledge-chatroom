@@ -282,10 +282,13 @@ async def _route(request: Request, m: Memory, parts: list[str]) -> Response:
         proposals = await m.shared.proposals()
         targets = await m.shared.targets(first_param(request, "node"))
         installs = await m.packs.installs(m.user)
+        # Said in the panel: with an outside embedding API, search sends note text there.
+        host = memory_agent.sent_to(request.app.state.storage.semantic)
         return send(
             200,
             {
                 **settings,
+                **({"searchSentTo": host} if host else {}),
                 "notes": notes,
                 "inbox": inbox,
                 "shared": shared,

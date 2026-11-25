@@ -172,6 +172,14 @@ def _dot(a: list[float], b: list[float]) -> float:
 _recalls: weakref.WeakKeyDictionary[SemanticIndex, MemoryRecall] = weakref.WeakKeyDictionary()
 
 
+def sent_to(semantic: SemanticIndex | None) -> str | None:
+    """
+    The host memory_search sends note text to, when the embedding model is an
+    outside API (EMBEDDING_BASE_URL); None while it stays on this server.
+    """
+    return getattr(getattr(semantic, "embedder", None), "remote_host", None)
+
+
 def recall_for(semantic: SemanticIndex | None) -> MemoryRecall | None:
     """Search by meaning over notes, once the embedding model is ready."""
     if semantic is None or not semantic.ready:

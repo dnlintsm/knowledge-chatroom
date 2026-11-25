@@ -23,11 +23,12 @@ from psycopg_pool import AsyncConnectionPool
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
 from .identity import RefuseSignedWithoutLogin
+from .memory_agent import RECALL_TEXT
 from .memory_learn import MemoryLearner
 from .platform import Platform, parse_admins
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
-from .semantic import SemanticIndex
+from .semantic import SemanticIndex, remote_host
 from .storage import RowSecurityOffError, Storage, open_storage
 from .unserved import not_served
 from .workspaces import Workspaces
@@ -173,6 +174,18 @@ async def _serve_storage_when_ready(
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
 
 
+def remote_recall_warning(settings: Settings) -> str | None:
+    """What to tell the operator when memory notes' text leaves the server; None when it doesn't."""
+    if not settings.memory or not settings.embedding or not settings.embedding.base_url:
+        return None
+    return (
+        f"MEMORY=on with EMBEDDING_BASE_URL: Claude's memory_search sends the text of users' "
+        f"personal memory notes (up to {RECALL_TEXT} characters each) to "
+        f"{remote_host(settings.embedding.base_url)} to embed it. Unset EMBEDDING_BASE_URL to "
+        f"embed on this server."
+    )
+
+
 def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -302,6 +315,8 @@ def main(env: Mapping[str, str] = os.environ) -> None:
         settings = settings_from_env(env)
     except ConfigError as err:
         raise SystemExit(f"[api-py] {err}") from err
+    if warning := remote_recall_warning(settings):
+        logger.warning(warning)
     if settings.tools is not None:
         logger.info(
             "serving /tools for MCP_SERVERS: %s",

@@ -67,7 +67,7 @@ Storage, access, skills, memory and search (`services/api-py`).
 | `CLAUDE_MODEL` | `claude-sonnet-5` | Main model name; here it only decides which small model is used when `SUGGESTIONS_MODEL` is unset. |
 | `DATABASE_URL` | unset | Postgres connection string; unset means no storage, and `python -m api_py.migrate` refuses to run without it. |
 | `EMBEDDING_API_KEY` | unset | Bearer key for the embedding endpoint; read only when `EMBEDDING_BASE_URL` is set. |
-| `EMBEDDING_BASE_URL` | unset | OpenAI-style embedding endpoint to use instead of the local model; needs `EMBEDDING_MODEL` or startup is refused. |
+| `EMBEDDING_BASE_URL` | unset | OpenAI-style embedding endpoint to use instead of the local model; needs `EMBEDDING_MODEL` or startup is refused. Passages of workspace files are sent there, and with `MEMORY=on` so is the text of users' personal memory notes when Claude searches them; api-py logs a warning at startup and the Memory panel tells each user. |
 | `EMBEDDING_CACHE_DIR` | .cache/knowledge-chatroom/models under the user's home folder | Folder the local embedding model is downloaded to. |
 | `EMBEDDING_DIMENSIONS` | unset | Vector size asked of the embedding endpoint, a positive whole number; read only when `EMBEDDING_BASE_URL` is set. |
 | `EMBEDDING_MODEL` | `Xenova/multilingual-e5-small` | Model for search by meaning; `off` leaves search to words only. |

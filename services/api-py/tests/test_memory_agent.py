@@ -7,12 +7,14 @@ stand-in embedding model.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import inspect
 import json
 import math
 import re
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import psycopg
@@ -20,6 +22,8 @@ import pytest
 from support import ALICE, SECRET, URL, Client, user
 
 from api_py import tokens
+from api_py.app import remote_recall_warning
+from api_py.config import Settings
 from api_py.memory import MEMORY_TYPES
 from api_py.memory_agent import (
     CHAT_TOOLS,
@@ -29,6 +33,7 @@ from api_py.memory_agent import (
     MemoryTools,
     parse_args,
 )
+from api_py.semantic import ApiEmbedder, EmbeddingSettings
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -432,6 +437,30 @@ async def test_shared_notes_are_only_proposed(memory_api):
         in found["text"]
     )
     assert found["tainted"] is True
+
+
+@needs_database
+async def test_the_overview_says_where_search_sends_note_text(memory_api):
+    api, app = memory_api
+    # The embedding model runs on this server (or search by meaning is off): nothing to say.
+    assert "searchSentTo" not in (await api.get("/memory", headers=ALICE)).json()
+    app.state.storage.semantic = FakeSemantic()  # type: ignore[attr-defined]
+    assert "searchSentTo" not in (await api.get("/memory", headers=ALICE)).json()
+    # An outside embedding API: memory_search sends note text there, and the panel says so.
+    app.state.storage.semantic.embedder = ApiEmbedder("m", "https://embed.example/v1/")
+    assert (await api.get("/memory", headers=ALICE)).json()["searchSentTo"] == "embed.example"
+
+
+def test_the_operator_is_warned_when_note_text_leaves_the_server():
+    base = Settings(database_url=None, auth_secret=None, migrations_dir=Path("."))
+    remote = EmbeddingSettings(model="m", base_url="https://embed.example/v1")
+    warning = remote_recall_warning(dataclasses.replace(base, memory=True, embedding=remote))
+    assert warning and "embed.example" in warning and "EMBEDDING_BASE_URL" in warning
+    # Only when both hold: memory on, and an outside embedding API.
+    assert remote_recall_warning(dataclasses.replace(base, embedding=remote)) is None
+    local = EmbeddingSettings(model="m")
+    assert remote_recall_warning(dataclasses.replace(base, memory=True, embedding=local)) is None
+    assert remote_recall_warning(dataclasses.replace(base, memory=True)) is None
 
 
 @needs_database

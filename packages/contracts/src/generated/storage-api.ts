@@ -2830,6 +2830,12 @@ export interface components {
             /** @description Packs installed in places you read. */
             installs: components["schemas"]["PackInstall"][];
             types: components["schemas"]["MemoryType"][];
+            /**
+             * @description Present when the deployment embeds text with an outside API (`EMBEDDING_BASE_URL`):
+             *     that API's host. Claude's `memory_search` then sends the text of your notes there.
+             *     Absent when the embedding model runs on the server, or search by meaning is off.
+             */
+            searchSentTo?: string;
             limits: {
                 notes: number;
                 body: number;
