@@ -99,3 +99,31 @@ CREATE FUNCTION group_crossings(ws uuid, actor uuid, grp uuid)
   WHERE mg.id = grp AND mg.workspace_id = ws
     AND coalesce(path_role(ws, actor, r.path), '') <> 'owner'
 $$;
+
+-- Whether deleting the node at `p` would reach a restricted node below it that
+-- `uid` doesn't have Full access on: then nothing is deleted. It locks the
+-- subtree first, with the owner's rights (rows the caller can't see too), so a
+-- node restricted meanwhile waits for the delete or is seen by it.
+CREATE FUNCTION delete_blocked(ws uuid, uid uuid, p ltree) RETURNS boolean
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
+BEGIN
+  PERFORM 1 FROM nodes WHERE workspace_id = ws AND path <@ p AND deleted_at IS NULL FOR UPDATE;
+  RETURN EXISTS (
+    SELECT 1 FROM nodes r
+    WHERE r.workspace_id = ws AND r.restricted AND r.deleted_at IS NULL
+      AND r.path <@ p AND r.path <> p
+      AND coalesce(path_role(ws, uid, r.path), '') <> 'owner');
+END $$;
+
+-- A proposal is seen by whoever can view its node now, its author included:
+-- an author who loses access there loses the proposal too.
+DROP POLICY proposals_read ON proposals;
+CREATE POLICY proposals_read ON proposals FOR SELECT
+  USING (place_rank(workspace_id, app_user(), node_id, NULL) >= 1);
+DROP POLICY proposals_change ON proposals;
+CREATE POLICY proposals_change ON proposals FOR UPDATE
+  USING ((author_id = app_user() AND place_rank(workspace_id, app_user(), node_id, NULL) >= 1)
+         OR place_rank(workspace_id, app_user(), node_id, NULL) >= 2)
+  WITH CHECK (place_rank(workspace_id, app_user(), node_id, NULL) >= 2
+              OR (author_id = app_user() AND place_rank(workspace_id, app_user(), node_id, NULL) >= 1
+                  AND status IN ('open', 'withdrawn')));

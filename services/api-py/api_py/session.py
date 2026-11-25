@@ -193,7 +193,11 @@ class Session:
         await self.need(node_id, "owner")
         async with self.scoped() as conn:
             return await nodes.remove(
-                conn, self.storage, node_id, self._audit("node.delete", {"node": node_id})
+                conn,
+                self.storage,
+                node_id,
+                self._audit("node.delete", {"node": node_id}),
+                self.principal.user_id,
             )
 
     # Restricted nodes (docs/restricted-knowledge.md): turning restriction on or
@@ -1290,9 +1294,8 @@ class Session:
                 user_id, str(event.get("id")), str(event.get("change"))
             )
         if op == "proposal":
-            return (
-                event.get("authorId") == user_id or await self.role(event.get("node")) is not None
-            )
+            # Its author too only while they can view its node (docs/restricted-knowledge.md).
+            return await self.role(event.get("node")) is not None
         if event.get("experiment"):
             return (
                 await self.access.experiment_access(user_id, str(event["experiment"])) is not None

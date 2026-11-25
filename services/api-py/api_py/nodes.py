@@ -14,7 +14,7 @@ from typing import Any
 
 from psycopg import AsyncConnection, errors
 
-from .access import is_uuid, iso
+from .access import ForbiddenError, is_uuid, iso
 from .storage import Storage
 
 
@@ -217,8 +217,13 @@ async def remove(
     storage: Storage,
     node_id: str,
     in_tx: Callable[[AsyncConnection], Awaitable[Any]],
+    user_id: str,
 ) -> bool:
-    """Soft-deletes the node, everything below it, and their files. History stays."""
+    """
+    Soft-deletes the node, everything below it, and their files. History stays.
+    Refused as a whole when a restricted node below it lacks the user's Full
+    access (docs/restricted-knowledge.md, decision 10).
+    """
     if not is_uuid(node_id):
         return False
     ws = storage.workspace_id
@@ -230,6 +235,13 @@ async def remove(
         target = await cur.fetchone()
         if not target:
             return False
+        cur = await conn.execute(
+            "SELECT delete_blocked(%s, %s, %s::ltree)", (ws, user_id, str(target[0]))
+        )
+        if (await cur.fetchone() or (False,))[0]:
+            raise ForbiddenError(
+                "Part of this node is restricted, and deleting it needs Full access there too"
+            )
         await conn.execute(
             """
             WITH gone AS (

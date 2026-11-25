@@ -65,7 +65,7 @@ _SELECT = f"""
     LEFT JOIN files f ON {_TARGET_FILE}
     WHERE p.workspace_id = %(ws)s
       AND (p.node_id IS NULL OR n.deleted_at IS NULL)
-      AND (p.author_id = %(user)s OR place_rank(p.workspace_id, %(user)s, p.node_id, NULL) >= 1)"""
+      AND place_rank(p.workspace_id, %(user)s, p.node_id, NULL) >= 1"""
 
 
 def _uuid_or_none(value: Any) -> str | None:

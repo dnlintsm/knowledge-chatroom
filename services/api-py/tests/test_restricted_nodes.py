@@ -5,13 +5,15 @@ Needs TEST_DATABASE_URL and S3_ENDPOINT, as test_files.py.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
+import httpx
 import psycopg
 import pytest
 from support import ALICE, BOB, Client, storage_token, user
 from test_experiment_restore import user_id
-from test_files import S3_ENDPOINT, SECRET, URL, s3
+from test_files import S3_ENDPOINT, SECRET, URL, events, s3, served
 
 from api_py.storage import EVENTS_CHANNEL
 
@@ -29,6 +31,18 @@ async def api(database):
         for who in (ALICE, BOB, CAROL):
             await client.get("/access", headers=who)
         yield client
+
+
+@pytest.fixture(params=[True, False], ids=["row-security-on", "row-security-off"])
+async def either(database, request):
+    """The API with row security on, and with only the app's own checks."""
+    async with Client(database, SECRET, s3=s3()) as (client, app):
+        for who in (ALICE, BOB, CAROL):
+            await client.get("/access", headers=who)
+        assert await app.state.storage_ready()
+        assert app.state.storage.row_security is True
+        app.state.storage.row_security = request.param
+        yield client, app
 
 
 async def make_node(api, name: str, parent: str | None = None) -> str:
@@ -343,3 +357,124 @@ async def test_claude_doesnt_manage_restriction(api):
         assert answer.json() == refusal
     assert (await api.post(f"/nodes/{ids['secret']}/access", headers=ALICE)).status_code == 405
     assert (await api.get(f"/nodes/{ids['secret']}/nope", headers=ALICE)).status_code == 404
+
+
+async def still_there(database, etch: str) -> tuple[int, int]:
+    """Live nodes and files at or below Etch, counted with the owner's rights."""
+    async with await psycopg.AsyncConnection.connect(database) as conn:
+        cur = await conn.execute(
+            """
+            SELECT (SELECT count(*) FROM nodes n WHERE n.path <@ e.path AND n.deleted_at IS NULL),
+                   (SELECT count(*) FROM files f JOIN nodes n ON n.id = f.node_id
+                    WHERE n.path <@ e.path AND f.deleted_at IS NULL)
+            FROM nodes e WHERE e.id = %s""",
+            (etch,),
+        )
+        row = await cur.fetchone()
+        assert row is not None
+        return row[0], row[1]
+
+
+@needs_services
+async def test_deleting_cant_reach_past_a_restriction(either, database):
+    api, _app = either
+    ids = await setup(api)
+    etch, secret, inner = ids["etch"], ids["secret"], ids["inner"]
+    await api.put(f"/files/top.md?node={etch}", headers=ALICE, content=b"top")
+    await grant(api, etch, ids["Carol"], "owner")
+    assert (await restrict(api, secret)).status_code == 200
+    assert await still_there(database, etch) == (3, 3)
+
+    # Carol has Full access on Etch only: the whole delete is refused, naming nothing she can't see.
+    refused = await api.delete(f"/nodes/{etch}", headers=CAROL)
+    assert (refused.status_code, refused.json()) == (
+        403,
+        {"error": "Part of this node is restricted, and deleting it needs Full access there too"},
+    )
+    assert await still_there(database, etch) == (3, 3)
+    assert (await api.get(f"/files/top.md?node={etch}", headers=CAROL)).content == b"top"
+    for place, content in ((secret, b"secret"), (inner, b"inner")):
+        assert (await reads(api, place, ALICE)).content == content
+    assert set(await tree(api, ALICE)) == {"Etch", "Secret", "Inner"}
+
+    # Every restricted node below counts, a nested one too.
+    assert (await restrict(api, inner)).status_code == 200
+    await grant(api, secret, ids["Carol"], "owner")
+    assert (await api.delete(f"/nodes/{etch}", headers=CAROL)).status_code == 403
+    assert await still_there(database, etch) == (3, 3)
+
+    # With Full access on each of them, the same delete goes through.
+    await grant(api, inner, ids["Carol"], "owner")
+    assert (await api.delete(f"/nodes/{etch}", headers=CAROL)).status_code == 200
+    assert await still_there(database, etch) == (0, 0)
+    assert (await api.get(f"/nodes/{secret}", headers=ALICE)).status_code == 404
+
+
+@needs_services
+async def test_a_former_author_loses_their_proposal(either, database):
+    api, app = either
+    ids = await setup(api)
+    secret = ids["secret"]
+    made = await api.put(f"/files/notes.md?node={secret}&propose", headers=BOB, content=b"Bob's")
+    assert made.status_code == 201, made.text
+    proposal = made.json()["id"]
+    assert [p["id"] for p in (await api.get("/proposals", headers=BOB)).json()["proposals"]] == [
+        proposal
+    ]
+    assert (await restrict(api, secret)).status_code == 200
+
+    # Bob no longer finds it, reads it or its content, or withdraws it.
+    for status in ("open", "all"):
+        listed = await api.get(f"/proposals?status={status}", headers=BOB)
+        assert listed.json() == {"proposals": []}
+    for answer in (
+        await api.get(f"/proposals/{proposal}", headers=BOB),
+        await api.get(f"/proposals/{proposal}/content", headers=BOB),
+        await api.post(f"/proposals/{proposal}/withdraw", headers=BOB),
+    ):
+        assert answer.status_code == 404, answer.text
+    # Row security says the same without the app's query.
+    async with await psycopg.AsyncConnection.connect(database) as conn:
+        await conn.execute("SET ROLE knowledge_user")
+        for who, seen in ((ids["Bob"], 0), (ids["Alice"], 1)):
+            await conn.execute("SELECT set_config('app.user_id', %s, false)", (who,))
+            cur = await conn.execute("SELECT count(*) FROM proposals WHERE id = %s", (proposal,))
+            assert await cur.fetchone() == (seen,)
+        await conn.execute("SELECT set_config('app.user_id', %s, false)", (ids["Bob"],))
+        cur = await conn.execute(
+            "UPDATE proposals SET status = 'withdrawn' WHERE id = %s RETURNING id", (proposal,)
+        )
+        assert await cur.fetchall() == []
+        await conn.rollback()
+
+    # Someone who can view the node still sees it and decides it; Bob hears nothing of that.
+    async with served(app) as base, httpx.AsyncClient(base_url=base, timeout=10) as http:
+        alice: list[str] = []
+        bob: list[str] = []
+        async with (
+            http.stream("GET", "/files?watch", headers=ALICE) as a,
+            http.stream("GET", "/files?watch", headers=BOB) as b,
+        ):
+            readers = [asyncio.create_task(events(a, alice)), asyncio.create_task(events(b, bob))]
+            async with asyncio.timeout(10):
+                while not alice or not bob:
+                    await asyncio.sleep(0.02)
+            assert [
+                p["id"] for p in (await api.get("/proposals", headers=ALICE)).json()["proposals"]
+            ] == [proposal]
+            assert (
+                await api.get(f"/proposals/{proposal}/content", headers=ALICE)
+            ).content == b"Bob's"
+            decided = await api.post(f"/proposals/{proposal}/reject", headers=ALICE)
+            assert (decided.status_code, decided.json()["status"]) == (200, "rejected")
+            # A later change Bob may see, so his stream has caught up past the decision.
+            await api.put("/files/after.md", headers=ALICE, content=b"after")
+            async with asyncio.timeout(10):
+                while not any("after.md" in line for line in bob):
+                    await asyncio.sleep(0.02)
+                while not any("after.md" in line for line in alice):
+                    await asyncio.sleep(0.02)
+            for reader in readers:
+                reader.cancel()
+    assert any('"op":"proposal"' in line and proposal in line for line in alice)
+    assert not any('"op":"proposal"' in line for line in bob)
