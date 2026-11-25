@@ -436,14 +436,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (event.op === "node") {
         void refreshProposals();
         const now = await refreshTree();
-        // Deleted, or under a deleted node: go back to the root.
+        // Deleted, under a deleted node, or restricted without you: go back to the root.
         const here = placeRef.current;
         const gone =
           now &&
           here &&
           (experimentOf(here)
             ? !now.experiments.some((e) => e.id === experimentOf(here))
-            : !now.nodes.some((n) => n.id === here));
+            : !now.nodes.some((n) => n.id === here && n.role !== null));
         if (gone) void enterNode(null);
         return;
       }

@@ -474,3 +474,134 @@ test("the workspace inventory is for the deployment's admins, who add Owners but
   await alice.context().close();
   await bob.context().close();
 });
+
+test("restricting a node: the preview, the lock, and who keeps it", async ({ browser }) => {
+  const alice = await signIn(browser, "Alice Admin");
+  const bob = await signIn(browser, "Bob Builder");
+  // A workspace of Alice's (PLATFORM_ADMINS names her), with Bob a Member who can view everything.
+  const created = await alice.request.post("/api/workspaces", { data: { name: `Restricted lab ${Date.now()}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()) as { id: string; slug: string };
+  const inWs = { "X-Knowledge-Workspace": ws.id };
+  const bobId = ((await (await bob.request.get("/api/access")).json()) as { me: { id: string } }).me.id;
+  const joined = await alice.request.post(`/api/workspaces/${ws.id}/members`, {
+    data: { userId: bobId, role: "member", access: "viewer" },
+  });
+  expect(joined.status()).toBe(201);
+  const node = async (parentId: string | null, name: string) => {
+    const made = await alice.request.post("/api/nodes", { headers: inWs, data: { parentId, name } });
+    expect(made.status()).toBe(201);
+    return ((await made.json()) as { id: string }).id;
+  };
+  const processId = await node(null, "Process");
+  const recipes = await node(processId, "Customer recipes");
+  const wrote = await alice.request.put(`/api/files/recipe.md?node=${recipes}`, {
+    headers: { ...inWs, "Content-Type": "text/markdown" },
+    data: "# Recipe\n\nChamber pressure 4 mTorr.",
+  });
+  expect(wrote.status()).toBe(200);
+
+  // A group of Bob's can view Process too.
+  const group = await alice.request.post("/api/access/groups", { headers: inWs, data: { parentId: null, name: "Process team" } });
+  expect(group.status()).toBe(201);
+  const teamId = ((await group.json()) as { id: string }).id;
+  expect((await alice.request.put(`/api/access/groups/${teamId}/members/${bobId}`, { headers: inWs })).ok()).toBe(true);
+  const teamGrant = await alice.request.post("/api/access/grants", {
+    headers: inWs,
+    data: { node: processId, principalType: "group", principalId: teamId, role: "viewer" },
+  });
+  expect(teamGrant.ok()).toBe(true);
+
+  // Bob can open it, through the workspace.
+  await bob.goto(`/w/${ws.slug}`);
+  await showPlaces(bob);
+  const bobTree = bob.getByRole("tree", { name: "Knowledge tree" });
+  await expect(bobTree.getByTestId("knowledge-node").filter({ hasText: "Customer recipes" })).toBeVisible();
+
+  // Alice opens Sharing there: Who has access says why Bob can.
+  await alice.goto(`/w/${ws.slug}`);
+  await showPlaces(alice);
+  const aliceTree = alice.getByRole("tree", { name: "Knowledge tree" });
+  const recipesRow = aliceTree.getByTestId("knowledge-node").filter({ hasText: "Customer recipes" });
+  await recipesRow.click();
+  await expect(alice.getByRole("navigation", { name: "Location" })).toContainText("Customer recipes");
+  await alice.getByRole("button", { name: "Share", exact: true }).click();
+  const share = alice.getByRole("dialog", { name: "Share Customer recipes" });
+  const who = share.getByRole("region", { name: "Who has access" });
+  await expect(who).toContainText("Bob Builder");
+  await expect(who).toContainText("on the workspace");
+
+  // Restrict previews who loses access, with nobody kept unless ticked.
+  await share.getByRole("button", { name: "Restrict…" }).click();
+  const preview = share.getByRole("region", { name: "Restrict Customer recipes" });
+  await expect(preview).toContainText("These people will lose access");
+  await expect(preview.getByRole("list", { name: "Losing access", exact: true })).toContainText(
+    "Can view → No access, from access through Process team on Process",
+  );
+  await expect(preview).not.toContainText("Alice Admin");
+  await expect(preview.getByRole("checkbox", { name: "Keep Bob Builder at Can view" })).not.toBeChecked();
+  // Groups whose access from higher up stops are listed too, also unchecked.
+  await expect(preview.getByRole("list", { name: "Groups losing access" })).toContainText("Can view on Process");
+  await expect(preview.getByRole("checkbox", { name: "Keep Process team at Can view" })).not.toBeChecked();
+  await shot(alice, "36-restrict-preview");
+  await preview.getByRole("button", { name: "Restrict", exact: true }).click();
+  await expect(share).toContainText("Access from higher up stops here.");
+  await expect(who).toContainText("Inheritance stops here");
+  await expect(who).not.toContainText("Bob Builder");
+  await shot(alice, "37-restricted-sharing");
+  await share.getByRole("button", { name: "Close" }).click();
+
+  // The lock shows in the tree and the breadcrumb.
+  await expect(recipesRow.getByRole("img", { name: "Restricted" })).toBeVisible();
+  await expect(alice.getByRole("navigation", { name: "Location" }).getByRole("img", { name: "Restricted" })).toBeVisible();
+  await shot(alice, "38-restricted-lock");
+
+  // Bob loses it from his open tree, and a link to it finds nothing.
+  await expect(bobTree.getByTestId("knowledge-node").filter({ hasText: "Customer recipes" })).toHaveCount(0);
+  await expect(bobTree.getByTestId("knowledge-node").filter({ hasText: "Process" })).toBeVisible();
+  expect((await bob.request.get(`/api/files/recipe.md?node=${recipes}`, { headers: inWs })).status()).toBe(404);
+
+  // As an Admin he sees that it exists and who has access, not its content.
+  const promote = (role: string) =>
+    alice.request.patch(`/api/workspaces/${ws.id}/members/${bobId}`, { data: { role } });
+  expect((await promote("admin")).status()).toBe(200);
+  await bob.reload();
+  await showPlaces(bob);
+  const lockedRow = bobTree.getByTestId("knowledge-node").filter({ hasText: "Customer recipes" });
+  await expect(lockedRow.getByRole("img", { name: "Restricted" })).toBeVisible();
+  await lockedRow.click();
+  const view = bob.getByRole("dialog", { name: "Customer recipes" });
+  await expect(view).toContainText("Restricted. You can see who has access but not its content.");
+  await expect(view.getByRole("region", { name: "Who has access" })).toContainText("Alice Admin");
+  await expect(view.getByRole("button", { name: "Take over…" })).toHaveCount(0);
+  await bob.mouse.move(900, 600);
+  await shot(bob, "39-restricted-admin-view");
+  await view.getByRole("button", { name: "Close" }).click();
+
+  // As an Owner he can take it over, after a confirmation; Alice sees that he did.
+  expect((await promote("owner")).status()).toBe(200);
+  await bob.reload();
+  await showPlaces(bob);
+  await lockedRow.click();
+  await view.getByRole("button", { name: "Take over…" }).click();
+  await expect(view).toContainText("everyone who can open it will see that you took over");
+  await view.getByRole("button", { name: "Take over", exact: true }).click();
+  await expect(view).toHaveCount(0);
+  await expect(bob.getByRole("navigation", { name: "Location" })).toContainText("Customer recipes");
+  await showFiles(bob);
+  await bob.getByRole("treeitem", { name: /recipe\.md/ }).click();
+  await expect(bob.getByTestId("file-preview")).toContainText("Chamber pressure 4 mTorr.");
+  // Everyone inside sees it beside the breadcrumb, not only in Sharing.
+  const notice = alice.getByRole("navigation", { name: "Location" }).getByText("Taken over by Bob Builder");
+  await expect(notice).toBeVisible();
+  await expect(notice).toHaveAttribute("title", /^Bob Builder took over Customer recipes on /);
+  await shot(alice, "40-takeover-notice");
+  await alice.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(share).toContainText(/Bob Builder took over on/);
+  // A long list of who has access scrolls inside the dialog, so Restrict stays reachable.
+  await expect(share).toHaveCSS("overflow-y", "auto");
+  await expect(who).toContainText("took over on");
+
+  await alice.context().close();
+  await bob.context().close();
+});
