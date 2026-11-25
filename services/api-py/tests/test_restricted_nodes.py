@@ -402,11 +402,28 @@ async def test_deleting_cant_reach_past_a_restriction(either, database):
         assert (await reads(api, place, ALICE)).content == content
     assert set(await tree(api, ALICE)) == {"Etch", "Secret", "Inner"}
 
-    # Every restricted node below counts, a nested one too.
-    assert (await restrict(api, inner)).status_code == 200
+    # Every restricted node below counts, a nested one too, even one restricted while the
+    # delete starts: the delete waits for that change, then checks again.
     await grant(api, secret, ids["Carol"], "owner")
-    assert (await api.delete(f"/nodes/{etch}", headers=CAROL)).status_code == 403
+    async with await psycopg.AsyncConnection.connect(database) as racing:
+        # As PUT /nodes/{id}/restriction does it: Alice keeps Full access there.
+        await racing.execute(
+            "INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role, created_by)"
+            " SELECT workspace_id, id, 'user', %s, 'owner', %s FROM nodes WHERE id = %s",
+            (ids["Alice"], ids["Alice"], inner),
+        )
+        await racing.execute(
+            "UPDATE nodes SET restricted = true, restricted_at = now(), restricted_by = %s"
+            " WHERE id = %s",
+            (ids["Alice"], inner),
+        )
+        deleting = asyncio.create_task(api.delete(f"/nodes/{etch}", headers=CAROL))
+        await asyncio.sleep(0.5)
+        assert not deleting.done()
+        await racing.commit()
+    assert (await deleting).status_code == 403
     assert await still_there(database, etch) == (3, 3)
+    assert (await api.delete(f"/nodes/{etch}", headers=CAROL)).status_code == 403
 
     # With Full access on each of them, the same delete goes through.
     await grant(api, inner, ids["Carol"], "owner")
@@ -423,9 +440,13 @@ async def test_a_former_author_loses_their_proposal(either, database):
     made = await api.put(f"/files/notes.md?node={secret}&propose", headers=BOB, content=b"Bob's")
     assert made.status_code == 201, made.text
     proposal = made.json()["id"]
-    assert [p["id"] for p in (await api.get("/proposals", headers=BOB)).json()["proposals"]] == [
-        proposal
-    ]
+    early = await api.put(f"/files/early.md?node={secret}&propose", headers=BOB, content=b"e")
+    assert early.status_code == 201, early.text
+    listed = (await api.get("/proposals", headers=BOB)).json()["proposals"]
+    assert {p["id"] for p in listed} == {proposal, early.json()["id"]}
+    # While he can view the node, Bob, a viewer, withdraws his own open proposal.
+    withdrawn = await api.post(f"/proposals/{early.json()['id']}/withdraw", headers=BOB)
+    assert (withdrawn.status_code, withdrawn.json()["status"]) == (200, "withdrawn")
     assert (await restrict(api, secret)).status_code == 200
 
     # Bob no longer finds it, reads it or its content, or withdraws it.
