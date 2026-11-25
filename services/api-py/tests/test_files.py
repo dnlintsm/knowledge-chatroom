@@ -367,7 +367,7 @@ async def test_watch_tells_each_user_what_they_may_see(database):
                     asyncio.create_task(events(b, bob)),
                 ]
                 info = (await api.put("/files/notes/w.md", headers=ALICE, content=b"w")).json()
-                # A change another process makes (the TypeScript server, Claude's tools) arrives too.
+                # A change another process makes (another api-py, Claude's tools) arrives too.
                 async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
                     cur = await conn.execute("SELECT id FROM workspaces WHERE slug = 'default'")
                     (ws,) = await cur.fetchone()  # type: ignore[misc]

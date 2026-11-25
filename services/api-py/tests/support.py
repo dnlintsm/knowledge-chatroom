@@ -1,14 +1,9 @@
-"""What the tests of the routes api-py serves share: a migrated Postgres and a stand-in TypeScript server.
-
-The stand-in records what reaches it, and Client fails the test when a route
-api-py serves got there.
-"""
+"""What the tests of api-py's routes share: a migrated Postgres, a client and signed users."""
 
 from __future__ import annotations
 
 import os
 import time
-from collections.abc import AsyncIterator
 
 import httpx
 import psycopg
@@ -33,35 +28,20 @@ async def migrate(url: str) -> None:
                 await conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
 
 
-forwarded: list[str] = []
-
-
-async def typescript(request: httpx.Request) -> httpx.Response:
-    forwarded.append(f"{request.method} {request.url.raw_path.decode().split('?')[0]}")  # as sent
-
-    async def body() -> AsyncIterator[bytes]:  # streamed, as a real connection answers
-        yield b'{"from":"typescript"}'
-
-    return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
-
-
 class Client:
-    """api-py on a migrated database, with the stand-in TypeScript server behind it."""
+    """api-py on a migrated database."""
 
     def __init__(self, url: str, secret: str | None, **settings) -> None:
         self.app = create_app(
             Settings(
-                ts_agent_url="http://ts",
                 database_url=url,
                 auth_secret=secret,
                 migrations_dir=DEFAULT_MIGRATIONS_DIR,
                 **settings,
-            ),
-            transport=httpx.MockTransport(typescript),
+            )
         )
 
     async def __aenter__(self):
-        forwarded.clear()
         self._life = self.app.router.lifespan_context(self.app)
         await self._life.__aenter__()
         self._http = httpx.AsyncClient(
@@ -72,7 +52,6 @@ class Client:
     async def __aexit__(self, *exc):
         await self._http.aclose()
         await self._life.__aexit__(*exc)
-        assert not forwarded, f"ported routes reached the TypeScript server: {forwarded}"
 
 
 def user(sub: str, name: str) -> dict[str, str]:

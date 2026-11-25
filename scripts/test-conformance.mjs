@@ -1,7 +1,7 @@
 // Runs the storage API conformance suite (packages/contracts/conformance) against
 // the Python API server (services/api-py) alone, as `pnpm dev` and compose run it:
-// resets the test database, starts api-py on it with no TS_AGENT_URL upstream,
-// waits for storage, runs the suite and stops it.
+// resets the test database, starts api-py on it, waits for storage, runs the
+// suite and stops it.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -51,8 +51,6 @@ const api = spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
     S3_BUCKET: process.env.S3_BUCKET || "knowledge-conformance",
     AUTH_MODE: "oidc",
     AUTH_SECRET: authSecret,
-    // No legacy forwarding: everything the suite calls is served in Python.
-    TS_AGENT_URL: "",
     API_PY_PORT: String(apiPort),
     EMBEDDING_MODEL: "off",
     // The suite's owner moderates the skill hub (verify, dismiss reports).

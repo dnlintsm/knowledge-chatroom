@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 import pytest
-from support import ALICE, SECRET, forwarded, storage_token, typescript
+from support import ALICE, SECRET, storage_token
 
 from api_py import tokens
 from api_py.app import create_app
@@ -298,11 +298,8 @@ def test_the_content_type_follows_the_accept_header_as_the_ag_ui_encoder_picks_i
 
 @asynccontextmanager
 async def api(secret: str | None = SECRET, create: Any = None) -> AsyncIterator[httpx.AsyncClient]:
-    forwarded.clear()
-    settings = Settings(
-        ts_agent_url="http://ts", database_url=None, auth_secret=secret, migrations_dir=Path(".")
-    )
-    app = create_app(settings, transport=httpx.MockTransport(typescript))
+    settings = Settings(database_url=None, auth_secret=secret, migrations_dir=Path("."))
+    app = create_app(settings)
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client,
@@ -361,18 +358,11 @@ async def test_the_routes():
             'data: {"type":"RUN_STARTED"}\n\n'
             'data: {"type":"RUN_ERROR","message":"Expected a copilotkitSuggest request"}\n\n'
         )
-        assert not forwarded
 
-        # Other methods and spellings are the TypeScript server's.
-        await client.get("/suggest")
-        await client.head("/identity/public-key")
-        await client.post("/identity%2Fmcp-tokens", json=ALL)
-        assert forwarded == [
-            "GET /suggest",
-            "HEAD /identity/public-key",
-            "POST /identity%2Fmcp-tokens",
-        ]
-        forwarded.clear()
+        # Other methods and spellings are not served.
+        assert (await client.get("/suggest")).status_code == 404
+        assert (await client.head("/identity/public-key")).status_code == 404
+        assert (await client.post("/identity%2Fmcp-tokens", json=ALL)).status_code == 404
 
     async with api(secret=None) as client:
         key = await client.get("/identity/public-key")

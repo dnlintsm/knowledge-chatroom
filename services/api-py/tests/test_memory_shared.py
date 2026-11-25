@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-import support
 from support import ALICE, BOB, SECRET, URL, Client, user
 
 from api_py.memory import MEMORY_TYPES
@@ -421,14 +420,7 @@ async def test_memory_packs(place):
 
 
 @needs_database
-async def test_the_agent_api_stays_with_typescript(place):
+async def test_the_agent_api_needs_a_memory_token(place):
     api, _ids = place
-    for method, path in [
-        ("GET", "/memory/agent"),
-        ("GET", "/memory/%zz"),
-    ]:
-        assert (await api.request(method, path, headers=ALICE)).json() == {"from": "typescript"}, (
-            path
-        )
-    assert support.forwarded == ["GET /memory/agent", "GET /memory/%zz"]
-    support.forwarded.clear()
+    assert (await api.get("/memory/agent", headers=ALICE)).status_code == 401
+    assert (await api.get("/memory/%zz", headers=ALICE)).status_code == 404

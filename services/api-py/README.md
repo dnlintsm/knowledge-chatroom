@@ -6,8 +6,6 @@ history and every route but the chat itself, which `services/agent-py` runs.
 api-py is the API at `LOCAL_AGENT_URL`. `pnpm dev` and the demo run it with the Python
 chat agent (`services/agent-py`). `GET /health` checks this API's storage readiness,
 unknown routes return 404, and storage that is still starting returns 503.
-`TS_AGENT_URL` (unset by default) forwards unknown routes to an older release's
-TypeScript server instead, for comparisons while upgrading.
 
 PostgreSQL and S3 are required for storage, skills and persisted history. api-py
 applies the SQL migrations itself. Without a database, the UI can still
@@ -102,7 +100,6 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `TS_AGENT_URL` | unset | An older release's TypeScript server to forward unknown routes to. Unset disables forwarding. |
 | `API_PY_HOST`, `API_PY_PORT` | `127.0.0.1`, `8000` | Where it listens. |
 | `DATABASE_URL` | unset | Postgres. Only api-py connects to it. Unset means no storage. |
 | `AUTH_MODE`, `AUTH_SECRET` | | Login: `oidc` with the app's `AUTH_SECRET`, or `local` for none. One of them is required: with neither, api-py refuses to start (`pnpm dev` passes `local`). Without login, a request signed for a user is answered 401. |
@@ -115,7 +112,7 @@ uv run python -m api_py.app          # http://127.0.0.1:8000
 | `MEMORY` | unset | `on`: each user's memory. Off disables `/memory`. agent-py does not read it. |
 | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `MEMORY_MODEL`, `SUGGESTIONS_MODEL`, `CLAUDE_MODEL` | unset | The small model that makes the chat's follow-up chips, sorts imported plain-text memory into notes and learns from chats. Without a key, the chips' request ends with an error (no chips), and imported text waits in the inbox as one note. |
 | `MEMORY_LEARN`, `MEMORY_IDLE_MINUTES` | unset, `10` | `MEMORY_LEARN=off` stops learning from chats, which otherwise runs here once a chat has been quiet that many minutes. |
-| `MCP_SERVERS` | unset | The outside MCP servers; give agent-py the same value. Unset serves an empty `/tools` menu (unless `TS_AGENT_URL` is set). |
+| `MCP_SERVERS` | unset | The outside MCP servers; give agent-py the same value. Unset serves an empty `/tools` menu. |
 | `TOOLS_CALL_TIMEOUT_MS`, `STORAGE_TOKEN_SECONDS` | `120000`, `3600` | How long a "+" menu call may take, and how long its storage token lasts. |
 
 `pnpm dev` reads the repository's `.env`. Keep its port private.

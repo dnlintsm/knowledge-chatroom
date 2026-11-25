@@ -26,9 +26,8 @@
     POST   /hub/<name>/reports  {reason, version?} (anyone who reads the workspace)
     DELETE /hub/<name>/reports?id=   dismisses a report (hub admins)
 
-Until storage is ready here (or without a blob store), these pass through to
-the TypeScript server, which also serves /skills without storage: the built-in
-skills for the local user.
+Until storage is ready (or without a blob store), these are not served: 503
+while storage starts, else 404.
 """
 
 from __future__ import annotations
@@ -44,7 +43,6 @@ from fastapi.responses import JSONResponse, Response
 
 from .identity import identify
 from .paths import js_trim, utf16_len
-from .proxy import forward
 from .run_report import js_number
 from .skills import (
     MAX_ZIP_BYTES,
@@ -70,6 +68,7 @@ from .storage_routes import (
     raw_path,
     read_body,
 )
+from .unserved import not_served
 from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
@@ -191,7 +190,7 @@ async def skills_route(request: Request) -> Response:
         or not await request.app.state.storage_ready()
         or request.app.state.storage.blobs is None
     ):
-        return await forward(request, request.app.state.http)
+        return not_served(request)
     is_hub = path == "/hub" or path.startswith("/hub/")
     try:
         storage = request.app.state.storage

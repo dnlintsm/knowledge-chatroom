@@ -76,7 +76,7 @@ const pythonAgent = [
 const storageServers = withStorage
   ? [{
       // With login, Alice runs the deployment (the workspace inventory, #255).
-      command: `cd services/api-py && ${mode === "python-storage" ? scripted : ""} TS_AGENT_URL= API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
+      command: `cd services/api-py && ${mode === "python-storage" ? scripted : ""} API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
       url: `http://localhost:${STORAGE_PORT}/health`,
     }]
   : [];

@@ -2,12 +2,10 @@
 
 It holds the default workspace, whether row-level security can be used, and
 the change events that every process hears through LISTEN/NOTIFY
-(events.py). A request in
-another workspace (workspaces.py) uses in_workspace(), the same
-storage bound to that workspace's id. It opens only
+(events.py). A request in another workspace (workspaces.py) uses
+in_workspace(), the same storage bound to that workspace's id. It opens only
 once the database has exactly the migrations this server knows (db.py, which
-applies them), and until then the ported routes pass through to the
-TypeScript server, which answers as it does while its storage starts.
+applies them); until then the storage routes answer 503.
 """
 
 from __future__ import annotations

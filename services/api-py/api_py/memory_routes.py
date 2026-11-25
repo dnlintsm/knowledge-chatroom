@@ -40,15 +40,14 @@
                                          {proposed, skipped, how}, all in the inbox
 
 A user's own notes are theirs alone; shared notes follow the grants
-(shared_memory_rank). These are served here only with MEMORY=on (as on the
-TypeScript server) once storage is ready.
+(shared_memory_rank). These are served only with MEMORY=on, once storage is
+ready.
 
     GET    /memory/agent                 {prompt, tools}, and
     POST   /memory/agent/tools/<name>    for a remote backend's run (memory_agent.py)
 
-/memory/agent is served here only for a memory token `via` "remote"; outside
-MCP servers' tokens, and missing or bad ones, pass through to the TypeScript
-server.
+/memory/agent is served for a memory token, a chat run's (`via` "remote") or
+an outside MCP server's; a missing or bad one is answered 401.
 """
 
 from __future__ import annotations
@@ -76,10 +75,8 @@ from .memory import (
     MemoryNotFoundError,
     MemoryService,
 )
-from .memory_agent import REMOTE_VIA
 from .memory_import import import_memory
 from .memory_packs import MemoryPackHub
-from .proxy import forward
 from .run_report import js_json
 from .session import Session
 from .shared_memory import SharedMemoryService
@@ -96,13 +93,14 @@ from .storage_routes import (
     read_body,
 )
 from .text_index import from_units, to_units
+from .unserved import not_served
 from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
 _OWN_PATH = re.compile(r"^/memory(/|$)")
 _AGENT_PATH = re.compile(r"^/memory/agent(/|$)")
-# The sections served here; the others go to the TypeScript server.
+# The sections served to the signed-in user; /memory/agent takes a memory token instead.
 OWN_SECTIONS = (
     "settings",
     "activity",
@@ -165,17 +163,12 @@ async def memory_route(request: Request) -> Response:
     secret = state.settings.auth_secret
     agent = _AGENT_PATH.match(raw_path(request)) is not None
     claims = memory_claims(request, secret) if agent else None
-    # A remote backend's run is served here; outside MCP servers' tokens (and
-    # bad ones, for the TypeScript server's 401) go through.
-    here = (
-        claims is not None and (claims["via"] == REMOTE_VIA or state.http is None)
-        if agent
-        else _served_here(request)
-    )
-    if agent and state.http is None and state.settings.memory and claims is None:
+    # /memory/agent takes a memory token; the rest is the signed-in user's own.
+    here = claims is not None if agent else _served_here(request)
+    if agent and state.settings.memory and claims is None:
         return send(401, {"error": "Sign in first"})
     if not state.settings.memory or not here or not await state.storage_ready():
-        return await forward(request, state.http)
+        return not_served(request)
     storage = state.storage
     try:
         if claims is not None:
