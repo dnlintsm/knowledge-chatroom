@@ -95,8 +95,11 @@ or Can edit on the root. Full access is given only through Share, by someone who
 access on that node. The membership and the starting grant are written in one transaction,
 with one audit entry each.
 
-Once restricted Knowledge nodes exist (later), this model has to be revisited, because group
+Once restricted Knowledge nodes exist, this model has to be revisited, because group
 administration would then cross a boundary that is meant to hold.
+[Restricted Knowledge nodes](restricted-knowledge.md) (decisions 7 and 8) proposes how: group
+changes that reach inside a restricted node need Full access there, and only an Owner can
+take a restricted node over, loudly.
 
 ## Operation matrix
 
