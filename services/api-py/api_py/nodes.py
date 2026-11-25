@@ -28,11 +28,12 @@ class NodeNotFoundError(NodeError):
 
 _NODE_COLUMNS = """
     n.id, n.parent_id, t.name AS type, t.depth, n.name, n.updated_at,
-    (SELECT count(*) FROM files f WHERE f.node_id = n.id AND f.deleted_at IS NULL) AS file_count"""
+    (SELECT count(*) FROM files f WHERE f.node_id = n.id AND f.deleted_at IS NULL) AS file_count,
+    n.restricted"""
 
 
 def _to_node(row: tuple[Any, ...]) -> dict[str, Any]:
-    node_id, parent, type_, depth, name, updated, files = row
+    node_id, parent, type_, depth, name, updated, files, restricted = row
     return {
         "id": str(node_id),
         "parentId": str(parent) if parent else None,
@@ -41,6 +42,7 @@ def _to_node(row: tuple[Any, ...]) -> dict[str, Any]:
         "name": name,
         "fileCount": int(files),
         "updatedAt": iso(updated),
+        "restricted": restricted,
     }
 
 
@@ -117,7 +119,8 @@ async def lineage(
     cur = await conn.execute(
         """
         SELECT a.id, a.parent_id, t.name AS type, t.depth, a.name, a.updated_at,
-               (SELECT count(*) FROM files f WHERE f.node_id = a.id AND f.deleted_at IS NULL) AS file_count
+               (SELECT count(*) FROM files f WHERE f.node_id = a.id AND f.deleted_at IS NULL) AS file_count,
+               a.restricted
         FROM nodes n
         JOIN nodes a ON a.path @> n.path AND a.workspace_id = n.workspace_id
         JOIN node_types t ON t.id = a.type_id

@@ -299,6 +299,23 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/nodes", { headers: bob, expect: 200 });
   });
 
+  step("restricted nodes", async () => {
+    const secret = (await call<Schema["KnowledgeNode"]>("POST", "/nodes", { headers: alice, json: { parentId: tech.id, name: "Secret" }, expect: 201 })).data;
+    const at = `/nodes/${secret.id}`;
+    const preview = (await call<Schema["Restriction"]>("GET", `${at}/restriction`, { headers: alice, expect: 200 })).data;
+    assert.ok(preview.changes.some((c) => c.user.id === bobId && c.becomes === null));
+    await call("PUT", `${at}/restriction`, { headers: alice, json: { restricted: "yes" }, expect: 400 });
+    await call("PUT", `${at}/restriction`, { headers: bob, json: { restricted: true }, expect: 403 });
+    await call("PUT", `${at}/restriction`, { headers: alice, json: { restricted: true, keep: [] }, expect: 200 });
+    await call("GET", `${at}/access`, { headers: alice, expect: 200 });
+    await call("GET", `${at}/access`, { headers: bob, expect: 404 });
+    await call("GET", `${at}/restriction`, { headers: storageToken("conformance|alice"), expect: 403 });
+    await call("POST", `${at}/takeover`, { headers: alice, expect: 200 });
+    await call("POST", `/nodes/${tech.id}/takeover`, { headers: alice, expect: 400 });
+    await call("PUT", `${at}/restriction`, { headers: alice, json: { restricted: false }, expect: 200 });
+    await call("DELETE", at, { headers: alice, expect: 200 });
+  });
+
   step("files", async () => {
     await call("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "Content-Type": "text/markdown" }, body: "# A\nhello conformance", expect: 200 });
     await call("PUT", `/files/notes/a.md${q}`, { headers: { ...alice, "If-None-Match": "*" }, body: "again", expect: 412 });

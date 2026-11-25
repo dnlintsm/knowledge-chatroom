@@ -530,7 +530,10 @@ For local setup, see [Development](development.md).
   Postgres `ltree`, and the database checks that each node sits exactly one level below its
   parent. Each node has its own files. `GET|POST /api/nodes` lists and adds nodes,
   `GET|PATCH|DELETE /api/nodes/<id>` reads (with its ancestors), renames and deletes one
-  (with everything below it), and every `/api/files` route takes `?node=<id>`.
+  (with everything below it), and every `/api/files` route takes `?node=<id>`. A node can be
+  restricted (`/api/nodes/<id>/restriction`), which stops grants above it from reaching it;
+  `/api/nodes/<id>/access` says who can open a node and why
+  ([Restricted Knowledge nodes](restricted-knowledge.md)).
 - **Experiments**: anyone who can view a node (usually a process) can fork it into an
   experiment. The experiment gets its own copy of the node's file list, pointing at the same
   stored bytes, and from then on every change, by the user or by Claude, stays in the

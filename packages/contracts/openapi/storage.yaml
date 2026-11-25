@@ -376,6 +376,111 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /nodes/{id}/access:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [nodes]
+      operationId: getNodeAccess
+      summary: Who can open a node, and why
+      description: >-
+        Everyone who can open the node, with their role and every source of it: a grant here,
+        on an ancestor or on the root, directly or through a group. Sources above a restricted
+        node don't count. Needs Full access on the node, or an Owner or Admin who sees it in
+        the tree (docs/restricted-knowledge.md). Storage tokens can't ask (403).
+      responses:
+        "200":
+          description: The people, strongest source first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeAccess" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /nodes/{id}/restriction:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [nodes]
+      operationId: getNodeRestriction
+      summary: Whether a node is restricted, and what switching it would change
+      description: >-
+        For an open node, who would lose access (or keep less) if it were restricted; for a
+        restricted one, who would gain access if it were lifted. Needs Full access on the node.
+        Storage tokens can't ask (403).
+      responses:
+        "200":
+          description: The node's restriction and the preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Restriction" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    put:
+      tags: [nodes]
+      operationId: setNodeRestriction
+      summary: Restrict a node, or lift it (Full access)
+      description: >-
+        Restricting stops grants on its ancestors and on the root from reaching it. Each user in
+        `keep` (from the preview) gets a grant at the role they had, and the caller gets Full
+        access, in the same transaction. Audited as node.restrict or node.unrestrict, and sent
+        as a node event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [restricted]
+              properties:
+                restricted: { type: boolean }
+                keep:
+                  type: array
+                  items: { type: string }
+                  description: Users who would lose access and keep their role there.
+      responses:
+        "200":
+          description: The node's restriction now, and what switching it back would change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Restriction" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /nodes/{id}/takeover:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [nodes]
+      operationId: takeOverNode
+      summary: Take a restricted node over (workspace Owners)
+      description: >-
+        Gives the calling Owner Full access on a restricted node, marked as a takeover so
+        everyone with access sees it. Audited as node.takeover. 400 for a node that isn't
+        restricted.
+      responses:
+        "200":
+          description: Who can open the node now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeAccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /experiments:
     get:
       tags: [experiments]
@@ -3972,8 +4077,14 @@ components:
       required: [op, change, id]
       properties:
         op: { type: string, const: node }
-        change: { type: string, enum: [create, rename, delete] }
+        change: { type: string, enum: [create, rename, delete, restrict, unrestrict, takeover] }
         id: { type: string }
+        left:
+          type: array
+          items: { type: string }
+          description: >-
+            On restrict, the users who just lost access. They hear this change even though
+            they can't see the node any more, so it closes for them.
 
     ExperimentEvent:
       type: object
@@ -4020,7 +4131,7 @@ components:
 
     KnowledgeNode:
       type: object
-      required: [id, parentId, type, depth, name, fileCount, updatedAt]
+      required: [id, parentId, type, depth, name, fileCount, updatedAt, restricted]
       properties:
         id: { type: string, format: uuid }
         parentId: { type: [string, "null"] }
@@ -4029,6 +4140,96 @@ components:
         name: { type: string }
         fileCount: { type: integer, minimum: 0, description: Live files attached directly to this node. }
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        restricted:
+          type: boolean
+          description: >-
+            Grants above it don't reach it (docs/restricted-knowledge.md). Owners and Admins
+            see restricted nodes they can't open, with role null and no files.
+
+    AccessSource:
+      type: object
+      required: [role, node, group, takeover, since]
+      properties:
+        role: { $ref: "#/components/schemas/Role" }
+        node:
+          description: The node the grant is on; null for the workspace root.
+          oneOf:
+            - $ref: "#/components/schemas/NamedNode"
+            - type: "null"
+        group:
+          description: The group the grant goes through; null for a grant to the person.
+          oneOf:
+            - $ref: "#/components/schemas/Collaborator"
+            - type: "null"
+        takeover: { type: boolean, description: An Owner took the node over with this grant. }
+        since: { $ref: "#/components/schemas/Timestamp" }
+
+    NamedNode:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+
+    NodeAccess:
+      type: object
+      required: [nodeId, restricted, inheritanceStopsAt, people]
+      properties:
+        nodeId: { type: string }
+        restricted: { type: boolean }
+        inheritanceStopsAt:
+          description: The nearest restricted node at or above it; grants above that don't count.
+          oneOf:
+            - $ref: "#/components/schemas/NamedNode"
+            - type: "null"
+        people:
+          type: array
+          items:
+            type: object
+            required: [user, role, sources]
+            properties:
+              user: { $ref: "#/components/schemas/Collaborator" }
+              role: { $ref: "#/components/schemas/Role" }
+              sources:
+                type: array
+                items: { $ref: "#/components/schemas/AccessSource" }
+                description: Strongest first; the first decides the role.
+
+    Restriction:
+      type: object
+      required: [nodeId, restricted, restrictedAt, restrictedBy, changes]
+      properties:
+        nodeId: { type: string }
+        restricted: { type: boolean }
+        restrictedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        restrictedBy:
+          oneOf:
+            - $ref: "#/components/schemas/Collaborator"
+            - type: "null"
+        changes:
+          type: array
+          description: >-
+            What switching it would change, for each person whose role would: restricting an
+            open node, or lifting a restricted one.
+          items:
+            type: object
+            required: [user, role, becomes, through, experiments]
+            properties:
+              user: { $ref: "#/components/schemas/Collaborator" }
+              role: { $ref: "#/components/schemas/RoleOrNull" }
+              becomes: { $ref: "#/components/schemas/RoleOrNull" }
+              through:
+                description: The grant that gives the role being lost, or the one being gained.
+                oneOf:
+                  - $ref: "#/components/schemas/AccessSource"
+                  - type: "null"
+              experiments:
+                type: integer
+                minimum: 0
+                description: Their Experiments below the node that would close to them.
 
     VisibleNode:
       allOf:

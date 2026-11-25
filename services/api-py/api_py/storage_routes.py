@@ -20,6 +20,10 @@
     GET    /nodes/<id>              {node, lineage}, lineage top level first
     PATCH  /nodes/<id>              {name} -> rename
     DELETE /nodes/<id>              soft delete, with everything below it
+    GET    /nodes/<id>/access       who can open it, their role and every source of it
+    GET    /nodes/<id>/restriction  whether it is restricted, and what switching would change
+    PUT    /nodes/<id>/restriction  {restricted, keep?: userIds} restrict it, or lift it
+    POST   /nodes/<id>/takeover     an Owner gives themselves Full access on a restricted node
 
     GET    /files?node=             the files at the root or in a node (?experiment=<id>:
                                     an experiment's)
@@ -307,6 +311,8 @@ def agent_refusal(request: Request) -> str | None:
         return "Chat history stays with its user: storage tokens can't reach it"
     if section == "experiments" and sub == "" and "deleted" in request.query_params:
         return DELETED_REFUSED
+    if section == "nodes" and re.fullmatch(r"[^/]+/(access|restriction|takeover)", sub):
+        return "Claude doesn't manage access"
     if method in ("GET", "HEAD"):
         return "Claude doesn't manage access" if section == "access" and sub != "" else None
     if section == "files":
@@ -582,7 +588,9 @@ async def proposals_route(request: Request) -> Response:
 
 
 async def handle_nodes(request: Request, session: Session) -> Response:
-    node_id = decode_component(re.sub(r"^/nodes/?", "", raw_path(request)))
+    # The id is decoded on its own, so a %2F stays part of it.
+    raw_id, _, sub = re.sub(r"^/nodes/?", "", raw_path(request)).partition("/")
+    node_id = decode_component(raw_id)
     method = request.method
     if not node_id:
         if method == "GET":
@@ -595,6 +603,33 @@ async def handle_nodes(request: Request, session: Session) -> Response:
             return json_response(201, await session.create_node(parent_id, body["name"]))  # pyrefly: ignore[bad-argument-type]
         return error(405, "Method not allowed")
 
+    if sub == "access":
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.node_access(node_id))
+    if sub == "restriction":
+        if method == "GET":
+            return json_response(200, await session.restriction(node_id))
+        if method == "PUT":
+            body = await read_json(request)
+            keep = body.get("keep", []) if body else None
+            if (
+                not body
+                or not isinstance(body.get("restricted"), bool)
+                or not isinstance(keep, list)
+                or not all(isinstance(k, str) for k in keep)
+            ):
+                return error(400, "Expected {restricted: boolean, keep?: string[]}")
+            return json_response(
+                200, await session.set_restricted(node_id, body["restricted"], keep)
+            )
+        return error(405, "Method not allowed")
+    if sub == "takeover":
+        if method != "POST":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.take_over(node_id))
+    if sub:
+        return error(404, "Not found")
     if method == "GET":
         lineage = await session.lineage(node_id)
         return json_response(200, {"node": lineage[-1], "lineage": lineage})

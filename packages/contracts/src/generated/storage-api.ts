@@ -117,6 +117,76 @@ export interface paths {
         patch: operations["renameNode"];
         trace?: never;
     };
+    "/nodes/{id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Who can open a node, and why
+         * @description Everyone who can open the node, with their role and every source of it: a grant here, on an ancestor or on the root, directly or through a group. Sources above a restricted node don't count. Needs Full access on the node, or an Owner or Admin who sees it in the tree (docs/restricted-knowledge.md). Storage tokens can't ask (403).
+         */
+        get: operations["getNodeAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{id}/restriction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Whether a node is restricted, and what switching it would change
+         * @description For an open node, who would lose access (or keep less) if it were restricted; for a restricted one, who would gain access if it were lifted. Needs Full access on the node. Storage tokens can't ask (403).
+         */
+        get: operations["getNodeRestriction"];
+        /**
+         * Restrict a node, or lift it (Full access)
+         * @description Restricting stops grants on its ancestors and on the root from reaching it. Each user in `keep` (from the preview) gets a grant at the role they had, and the caller gets Full access, in the same transaction. Audited as node.restrict or node.unrestrict, and sent as a node event.
+         */
+        put: operations["setNodeRestriction"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{id}/takeover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a restricted node over (workspace Owners)
+         * @description Gives the calling Owner Full access on a restricted node, marked as a takeover so everyone with access sees it. Audited as node.takeover. 400 for a node that isn't restricted.
+         */
+        post: operations["takeOverNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/experiments": {
         parameters: {
             query?: never;
@@ -2001,8 +2071,10 @@ export interface components {
             /** @constant */
             op: "node";
             /** @enum {string} */
-            change: "create" | "rename" | "delete";
+            change: "create" | "rename" | "delete" | "restrict" | "unrestrict" | "takeover";
             id: string;
+            /** @description On restrict, the users who just lost access. They hear this change even though they can't see the node any more, so it closes for them. */
+            left?: string[];
         };
         ExperimentEvent: {
             /** @constant */
@@ -2043,6 +2115,50 @@ export interface components {
             /** @description Live files attached directly to this node. */
             fileCount: number;
             updatedAt: components["schemas"]["Timestamp"];
+            /** @description Grants above it don't reach it (docs/restricted-knowledge.md). Owners and Admins see restricted nodes they can't open, with role null and no files. */
+            restricted: boolean;
+        };
+        AccessSource: {
+            role: components["schemas"]["Role"];
+            /** @description The node the grant is on; null for the workspace root. */
+            node: components["schemas"]["NamedNode"] | null;
+            /** @description The group the grant goes through; null for a grant to the person. */
+            group: components["schemas"]["Collaborator"] | null;
+            /** @description An Owner took the node over with this grant. */
+            takeover: boolean;
+            since: components["schemas"]["Timestamp"];
+        };
+        NamedNode: {
+            id: string;
+            name: string;
+        };
+        NodeAccess: {
+            nodeId: string;
+            restricted: boolean;
+            /** @description The nearest restricted node at or above it; grants above that don't count. */
+            inheritanceStopsAt: components["schemas"]["NamedNode"] | null;
+            people: {
+                user: components["schemas"]["Collaborator"];
+                role: components["schemas"]["Role"];
+                /** @description Strongest first; the first decides the role. */
+                sources: components["schemas"]["AccessSource"][];
+            }[];
+        };
+        Restriction: {
+            nodeId: string;
+            restricted: boolean;
+            restrictedAt: components["schemas"]["Timestamp"] | null;
+            restrictedBy: components["schemas"]["Collaborator"] | null;
+            /** @description What switching it would change, for each person whose role would: restricting an open node, or lifting a restricted one. */
+            changes: {
+                user: components["schemas"]["Collaborator"];
+                role: components["schemas"]["RoleOrNull"];
+                becomes: components["schemas"]["RoleOrNull"];
+                /** @description The grant that gives the role being lost, or the one being gained. */
+                through: components["schemas"]["AccessSource"] | null;
+                /** @description Their Experiments below the node that would close to them. */
+                experiments: number;
+            }[];
         };
         VisibleNode: components["schemas"]["KnowledgeNode"] & {
             /** @description The user's role; null for a node shown only because something below it is visible (its fileCount is then 0). */
@@ -3312,6 +3428,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeNode"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getNodeAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The people, strongest source first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeAccess"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getNodeRestriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The node's restriction and the preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Restriction"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    setNodeRestriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    restricted: boolean;
+                    /** @description Users who would lose access and keep their role there. */
+                    keep?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The node's restriction now, and what switching it back would change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Restriction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    takeOverNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Who can open the node now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeAccess"];
                 };
             };
             400: components["responses"]["BadRequest"];

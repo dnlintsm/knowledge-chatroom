@@ -130,8 +130,12 @@ class FileEvent(BaseModel):
 
 class NodeEvent(BaseModel):
     op: Literal["node"]
-    change: Literal["create", "rename", "delete"]
+    change: Literal["create", "rename", "delete", "restrict", "unrestrict", "takeover"]
     id: str
+    left: list[str] | None = None
+    """
+    On restrict, the users who just lost access. They hear this change even though they can't see the node any more, so it closes for them.
+    """
 
 
 class ExperimentEvent(BaseModel):
@@ -183,6 +187,15 @@ class KnowledgeNode(BaseModel):
     Live files attached directly to this node.
     """
     updatedAt: Timestamp
+    restricted: bool
+    """
+    Grants above it don't reach it (docs/restricted-knowledge.md). Owners and Admins see restricted nodes they can't open, with role null and no files.
+    """
+
+
+class NamedNode(BaseModel):
+    id: str
+    name: str
 
 
 class VisibleNode(KnowledgeNode):
@@ -388,7 +401,7 @@ class UserSummary(BaseModel):
     """
 
 
-class Person(User):
+class Person1(User):
     createdAt: Timestamp
     lastSeenAt: Timestamp | None
     role: RoleOrNull
@@ -1031,6 +1044,14 @@ class DeleteNodeResponse(BaseModel):
     """
 
 
+class SetNodeRestrictionRequest(BaseModel):
+    restricted: bool
+    keep: list[str] | None = None
+    """
+    Users who would lose access and keep their role there.
+    """
+
+
 class CreateExperimentRequest(ExperimentInput):
     nodeId: str | None
     title: Annotated[str, Field(max_length=200)]
@@ -1284,7 +1305,7 @@ class ListUsersResponse(BaseModel):
 
 
 class ListPeopleResponse(BaseModel):
-    people: list[Person]
+    people: list[Person1]
 
 
 class ListGroupsResponse(BaseModel):
@@ -1749,6 +1770,67 @@ class PlatformWorkspaceOwner(BaseModel):
     name: str | None
     email: str | None
     lastSeenAt: Timestamp | None
+
+
+class AccessSource(BaseModel):
+    role: Role
+    node: NamedNode | None
+    """
+    The node the grant is on; null for the workspace root.
+    """
+    group: Collaborator | None
+    """
+    The group the grant goes through; null for a grant to the person.
+    """
+    takeover: bool
+    """
+    An Owner took the node over with this grant.
+    """
+    since: Timestamp
+
+
+class Person(BaseModel):
+    user: Collaborator
+    role: Role
+    sources: list[AccessSource]
+    """
+    Strongest first; the first decides the role.
+    """
+
+
+class NodeAccess(BaseModel):
+    nodeId: str
+    restricted: bool
+    inheritanceStopsAt: NamedNode | None
+    """
+    The nearest restricted node at or above it; grants above that don't count.
+    """
+    people: list[Person]
+
+
+class Change(BaseModel):
+    user: Collaborator
+    role: RoleOrNull
+    becomes: RoleOrNull
+    through: AccessSource | None
+    """
+    The grant that gives the role being lost, or the one being gained.
+    """
+    experiments: Annotated[int, Field(ge=0)]
+    """
+    Their Experiments below the node that would close to them.
+    """
+
+
+class Restriction(BaseModel):
+    nodeId: str
+    restricted: bool
+    restrictedAt: Timestamp | None
+    restrictedBy: Collaborator | None
+    changes: list[Change]
+    """
+    What switching it would change, for each person whose role would: restricting an open node, or lifting a restricted one.
+    """
 
 
 class Experiment(BaseModel):

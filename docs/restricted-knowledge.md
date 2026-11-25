@@ -1,6 +1,6 @@
 # Restricted Knowledge nodes (design)
 
-Status: **proposed**, tracked in
+Status: **being built**, tracked in
 [#267](https://github.com/dnlintsm/knowledge-chatroom/issues/267) (batch B), the open
 "restricted access" criterion of
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178).
@@ -102,7 +102,7 @@ can open it, and makes the boundary hold for Owners and Admins too.
 | --- | --- | --- | --- | --- |
 | The node in the tree | ✓ with a lock mark | Its name, as the path to what they can open | Its name and the path to it, with a lock and no file count | ✗ hidden |
 | Its files, Experiments, search hits, proposals | ✓ | Only below, where their grant is | ✗ | ✗ |
-| Who has access (names, roles, sources) | With Full access there | ✗ | ✓ names and roles only | ✗ |
+| Who has access (names, roles, sources) | With Full access there | ✗ | ✓ | ✗ |
 | Nodes below it | As their roles allow | The path to their grant | ✗ | ✗ |
 
 A hidden node leaves no trace for other members: no placeholder, no count, and a link to it
@@ -116,9 +116,9 @@ shown where you can open the node.
   through: an ancestor's or the root's, directly or through a group), and how many of their
   Experiments there would close to them. For a restricted node it previews the reverse: who
   would gain access if it were lifted.
-- `PUT /nodes/{id}/restriction` with `{"restricted": true, "keep": [{"principalType",
-  "principalId"}]}` turns it on. Each kept user or group gets an explicit grant at the role
-  they had, and the caller gets Full access. `{"restricted": false}` lifts it. Both need Full
+- `PUT /nodes/{id}/restriction` with `{"restricted": true, "keep": [userId, ...]}` turns it
+  on. Each kept person (one the preview lists) gets an explicit grant at the role they had,
+  and the caller gets Full access. `{"restricted": false}` lifts it. Both need Full
   access on the node, are audited as `node.restrict` and `node.unrestrict` with who kept or
   gained access, and send a `node` event so open trees refresh.
 - The preview is advisory. The `PUT` recomputes who loses access inside its transaction.
@@ -135,8 +135,9 @@ each either **direct** or **through a group** (named). The strongest source deci
 and the rest are listed under it. For a restricted node, sources above it are left out, and
 the answer says where inheritance stops.
 
-It needs Full access on the node, or Owner or Admin membership (names and roles only, as in
-the table above). The Sharing panel shows it under the grants made here, as "Who has access".
+It needs Full access on the node, or an Owner or Admin who sees the node in the tree. The
+built-in local user is left out of it and of the preview once people sign in, as in the
+member list. The Sharing panel shows it under the grants made here, as "Who has access".
 
 ## Data changes
 
@@ -226,6 +227,7 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
    pointing to it.
 2. Backend: the migration, the boundary in the three functions, restriction and preview
    routes, the group check, the last-owner check, takeover, `GET /nodes/{id}/access`, contract.
+   Done.
 3. Screens: Restrict with its preview, lock marks, Who has access, the Owner and Admin view.
 
 ## Open points for review
