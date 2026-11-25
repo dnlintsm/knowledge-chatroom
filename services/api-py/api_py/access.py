@@ -84,6 +84,10 @@ class AccessError(Exception):
     """The request names something invalid: a bad name, an unknown user (400)."""
 
 
+class LastOwnerError(AccessError):
+    """Taking away the last Full access grant on a restricted node (409)."""
+
+
 def _clean_name(name: str, what: str) -> str:
     trimmed = re.sub(r"\s+", " ", name.strip())
     if not trimmed:
@@ -592,7 +596,7 @@ class AccessService:
         )
         theirs, others = await cur.fetchone() or (None, None)  # pyrefly: ignore[not-iterable]
         if theirs and not others:
-            raise AccessError(
+            raise LastOwnerError(
                 "A restricted node needs someone with Full access: give someone else Full access first"
             )
 

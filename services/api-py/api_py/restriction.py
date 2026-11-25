@@ -217,3 +217,29 @@ async def changes(
         for change in changed:
             change["experiments"] = int(counts.get(change["user"]["id"], 0))
     return changed
+
+
+async def groups_cut(
+    conn: AsyncConnection, ws: str, node: dict[str, Any], me: str
+) -> list[dict[str, Any]]:
+    """
+    For an open node, the groups whose grants above it would stop reaching it if
+    it were restricted, each with the strongest such grant: keeping one gives
+    the group that role on the node. None for a restricted node.
+    """
+    if node["restricted"]:
+        return []
+    found: dict[str, dict[str, Any]] = {}
+    for row in await sources(conn, ws, node["path"], node["boundary"], me):
+        if row["group"] is None or row["nodeId"] == node["id"]:
+            continue
+        best = found.get(row["group"]["id"])
+        if best is None or rank(row["role"]) > rank(best["role"]):
+            found[row["group"]["id"]] = {
+                "group": row["group"],
+                "role": row["role"],
+                "node": {"id": row["nodeId"], "name": row["nodeName"]} if row["nodeId"] else None,
+            }
+    return sorted(
+        found.values(), key=lambda g: (str(g["group"]["name"] or "").lower(), g["group"]["id"])
+    )

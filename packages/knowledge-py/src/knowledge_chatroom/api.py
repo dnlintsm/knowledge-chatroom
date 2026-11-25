@@ -403,7 +403,7 @@ class Person1(User):
     groupIds: list[str]
 
 
-class Group(BaseModel):
+class Group1(BaseModel):
     id: str
     parentId: str | None
     name: str
@@ -1031,11 +1031,16 @@ class DeleteNodeResponse(BaseModel):
     """
 
 
+class KeepItem(BaseModel):
+    principalType: Literal["user", "group"]
+    principalId: str
+
+
 class SetNodeRestrictionRequest(BaseModel):
     restricted: bool
-    keep: list[str] | None = None
+    keep: list[KeepItem] | None = None
     """
-    Users who would lose access and keep their role there.
+    Users and groups who would lose access and keep their role there.
     """
 
 
@@ -1296,7 +1301,7 @@ class ListPeopleResponse(BaseModel):
 
 
 class ListGroupsResponse(BaseModel):
-    groups: list[Group]
+    groups: list[Group1]
 
 
 class CreateGroupRequest(BaseModel):
@@ -1781,7 +1786,7 @@ class Person(BaseModel):
     role: Role
     sources: list[AccessSource]
     """
-    Strongest first; the first decides the role.
+    Strongest first; the first decides the role. Empty for an Owner or Admin without Full access on the node, who gets names and roles only.
     """
 
 
@@ -1809,6 +1814,15 @@ class Change(BaseModel):
     """
 
 
+class Group(BaseModel):
+    group: Collaborator
+    role: Role
+    node: NamedNode | None
+    """
+    Where the grant is; null for the workspace root.
+    """
+
+
 class Restriction(BaseModel):
     nodeId: str
     restricted: bool
@@ -1817,6 +1831,10 @@ class Restriction(BaseModel):
     changes: list[Change]
     """
     What switching it would change, for each person whose role would: restricting an open node, or lifting a restricted one.
+    """
+    groups: list[Group]
+    """
+    For an open node, the groups whose grants above it would stop reaching it if it were restricted, each with its strongest such grant; empty for a restricted node.
     """
 
 

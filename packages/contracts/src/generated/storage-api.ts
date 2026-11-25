@@ -155,7 +155,7 @@ export interface paths {
         get: operations["getNodeRestriction"];
         /**
          * Restrict a node, or lift it (Full access)
-         * @description Restricting stops grants on its ancestors and on the root from reaching it. Each user in `keep` (from the preview) gets a grant at the role they had, and the caller gets Full access, in the same transaction. Audited as node.restrict or node.unrestrict, and sent as a node event.
+         * @description Restricting stops grants on its ancestors and on the root from reaching it. Each user or group in `keep` (from the preview's changes or groups) gets a grant on the node at the role they had, and the caller gets Full access, in the same transaction. Nobody else is kept. Audited as node.restrict or node.unrestrict, and sent as a node event.
          */
         put: operations["setNodeRestriction"];
         post?: never;
@@ -2140,7 +2140,7 @@ export interface components {
             people: {
                 user: components["schemas"]["Collaborator"];
                 role: components["schemas"]["Role"];
-                /** @description Strongest first; the first decides the role. */
+                /** @description Strongest first; the first decides the role. Empty for an Owner or Admin without Full access on the node, who gets names and roles only. */
                 sources: components["schemas"]["AccessSource"][];
             }[];
         };
@@ -2158,6 +2158,13 @@ export interface components {
                 through: components["schemas"]["AccessSource"] | null;
                 /** @description Their Experiments below the node that would close to them. */
                 experiments: number;
+            }[];
+            /** @description For an open node, the groups whose grants above it would stop reaching it if it were restricted, each with its strongest such grant; empty for a restricted node. */
+            groups: {
+                group: components["schemas"]["Collaborator"];
+                role: components["schemas"]["Role"];
+                /** @description Where the grant is; null for the workspace root. */
+                node: components["schemas"]["NamedNode"] | null;
             }[];
         };
         VisibleNode: components["schemas"]["KnowledgeNode"] & {
@@ -3511,8 +3518,12 @@ export interface operations {
             content: {
                 "application/json": {
                     restricted: boolean;
-                    /** @description Users who would lose access and keep their role there. */
-                    keep?: string[];
+                    /** @description Users and groups who would lose access and keep their role there. */
+                    keep?: {
+                        /** @enum {string} */
+                        principalType: "user" | "group";
+                        principalId: string;
+                    }[];
                 };
             };
         };
@@ -5201,6 +5212,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
@@ -5221,6 +5233,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

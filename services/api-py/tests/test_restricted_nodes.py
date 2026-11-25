@@ -63,9 +63,14 @@ async def grant(
     return made.json()["id"]
 
 
-async def restrict(api, node: str, on: bool = True, keep: list[str] | None = None, headers=ALICE):
+async def restrict(
+    api, node: str, on: bool = True, keep: list[str] | None = None, groups=(), headers=ALICE
+):
+    """Restricts (or lifts) the node, keeping the users in `keep` and the `groups`."""
+    principals = [{"principalType": "user", "principalId": k} for k in keep or []]
+    principals += [{"principalType": "group", "principalId": g} for g in groups]
     return await api.put(
-        f"/nodes/{node}/restriction", headers=headers, json={"restricted": on, "keep": keep or []}
+        f"/nodes/{node}/restriction", headers=headers, json={"restricted": on, "keep": principals}
     )
 
 
@@ -124,6 +129,10 @@ async def test_restricting_a_node_stops_inherited_access(api):
     assert (await restrict(api, secret, headers=BOB)).status_code == 403
     assert (await restrict(api, secret, keep=[ids["Bob"], "nope"])).status_code == 400
     assert (await restrict(api, secret, on="yes")).status_code == 400  # type: ignore[arg-type]
+    as_text = await api.put(
+        f"/nodes/{secret}/restriction", headers=ALICE, json={"restricted": True, "keep": ["x"]}
+    )
+    assert as_text.status_code == 400
 
     done = await restrict(api, secret, keep=[ids["Carol"]])
     assert done.status_code == 200, done.text
@@ -169,7 +178,8 @@ async def test_restricting_a_node_stops_inherited_access(api):
     by_action = {e["action"]: e["target"] for e in entries}
     assert by_action["node.unrestrict"] == {"node": secret, "gained": [ids["Bob"]]}
     first = [e for e in entries if e["action"] == "node.restrict"][-1]["target"]
-    assert first["kept"] == [ids["Carol"]] and first["lost"] == [ids["Bob"]]
+    assert first["kept"] == [{"principalType": "user", "principalId": ids["Carol"]}]
+    assert first["lost"] == [ids["Bob"]]
 
 
 @needs_services
@@ -243,7 +253,10 @@ async def test_owners_and_admins_manage_around_it(api):
     assert (await reads(api, secret, BOB)).status_code == 404
     who = await api.get(f"/nodes/{secret}/access", headers=BOB)
     assert who.status_code == 200, who.text
-    assert [(p["user"]["name"], p["role"]) for p in who.json()["people"]] == [("Alice", "owner")]
+    # Names and roles only: not where their access comes from.
+    assert [(p["user"]["name"], p["role"], p["sources"]) for p in who.json()["people"]] == [
+        ("Alice", "owner", [])
+    ]
     # A member without access sees nothing of it.
     assert "Secret" not in await tree(api, CAROL)
     assert (await api.get(f"/nodes/{secret}/access", headers=CAROL)).status_code == 404
@@ -275,7 +288,7 @@ async def test_owners_and_admins_manage_around_it(api):
         if g["principalId"] == ids["Alice"]
     ]
     last = await api.delete(f"/access/grants/{mine['id']}", headers=ALICE)
-    assert last.status_code == 400
+    assert last.status_code == 409
     assert "needs someone with Full access" in last.json()["error"]
     lowered = await api.post(
         "/access/grants",
@@ -287,7 +300,7 @@ async def test_owners_and_admins_manage_around_it(api):
             "role": "editor",
         },
     )
-    assert lowered.status_code == 400
+    assert lowered.status_code == 409
 
     # Once someone else has it, Alice can go; then, as an Owner, take it back over.
     await grant(api, secret, ids["Carol"], "owner")
@@ -504,3 +517,45 @@ async def test_a_former_author_loses_their_proposal(either, database):
                 reader.cancel()
     assert any('"op":"proposal"' in line and proposal in line for line in alice)
     assert not any('"op":"proposal"' in line for line in bob)
+
+
+@needs_services
+async def test_keeping_a_group(api):
+    ids = await setup(api)
+    etch, secret = ids["etch"], ids["secret"]
+    team = (
+        await api.post("/access/groups", headers=ALICE, json={"parentId": None, "name": "Team"})
+    ).json()["id"]
+    await api.put(f"/access/groups/{team}/members/{ids['Bob']}", headers=ALICE)
+    await grant(api, etch, team, "editor", kind="group")
+
+    # The preview names the group whose grant above would stop, with its role and place.
+    preview = (await api.get(f"/nodes/{secret}/restriction", headers=ALICE)).json()
+    assert preview["groups"] == [
+        {
+            "group": {"id": team, "name": "Team"},
+            "role": "editor",
+            "node": {"id": etch, "name": "Etch"},
+        }
+    ]
+    # Only groups that would lose access can be kept.
+    assert (await restrict(api, secret, groups=[ids["Carol"]])).status_code == 400
+
+    done = await restrict(api, secret, groups=[team])
+    assert done.status_code == 200, done.text
+    assert done.json()["groups"] == []
+    # Bob keeps editing through the group, now with a grant on the node; Carol, not kept, loses it.
+    assert (await api.put(f"/files/b.md?node={secret}", headers=BOB, content=b"b")).status_code in (
+        200,
+        201,
+    )
+    assert (await reads(api, secret, CAROL)).status_code == 404
+    grants = (await api.get(f"/access/grants?node={secret}", headers=ALICE)).json()["grants"]
+    assert {(g["principalType"], g["principalId"], g["role"]) for g in grants} == {
+        ("group", team, "editor"),
+        ("user", ids["Alice"], "owner"),
+    }
+    entries = (await api.get("/access/audit?kind=node", headers=ALICE)).json()["entries"]
+    restricted = next(e for e in entries if e["action"] == "node.restrict")["target"]
+    assert restricted["kept"] == [{"principalType": "group", "principalId": team}]
+    assert restricted["lost"] == [ids["Carol"]]

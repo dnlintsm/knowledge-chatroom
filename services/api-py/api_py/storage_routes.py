@@ -22,7 +22,8 @@
     DELETE /nodes/<id>              soft delete, with everything below it
     GET    /nodes/<id>/access       who can open it, their role and every source of it
     GET    /nodes/<id>/restriction  whether it is restricted, and what switching would change
-    PUT    /nodes/<id>/restriction  {restricted, keep?: userIds} restrict it, or lift it
+    PUT    /nodes/<id>/restriction  {restricted, keep?: [{principalType, principalId}]} restrict
+                                    it, keeping those users and groups, or lift it
     POST   /nodes/<id>/takeover     an Owner gives themselves Full access on a restricted node
 
     GET    /files?node=             the files at the root or in a node (?experiment=<id>:
@@ -113,7 +114,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import uploads
-from .access import ROLES, AccessError, ForbiddenError
+from .access import ROLES, AccessError, ForbiddenError, LastOwnerError
 from .chats import ChatError, ChatTakenError
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, ExperimentPlaceGoneError
 from .files import ANY_VERSION, FileChangedError, FileExistsError_
@@ -410,6 +411,8 @@ async def _serve(request: Request, handler, typescript_serves=None) -> Response:
         return error(412, str(err), changed=True, sha256=err.sha256)
     except ProposalChangedError as err:
         return error(409, str(err), changed=True)
+    except LastOwnerError as err:
+        return error(409, str(err))
     except (
         NodeError,
         AccessError,
@@ -617,9 +620,18 @@ async def handle_nodes(request: Request, session: Session) -> Response:
                 not body
                 or not isinstance(body.get("restricted"), bool)
                 or not isinstance(keep, list)
-                or not all(isinstance(k, str) for k in keep)
+                or not all(
+                    isinstance(k, dict)
+                    and k.get("principalType") in ("user", "group")
+                    and isinstance(k.get("principalId"), str)
+                    for k in keep
+                )
             ):
-                return error(400, "Expected {restricted: boolean, keep?: string[]}")
+                return error(
+                    400,
+                    "Expected {restricted: boolean, keep?: [{principalType: user|group, principalId}]}",
+                )
+            keep = [(k["principalType"], k["principalId"]) for k in keep]
             return json_response(
                 200, await session.set_restricted(node_id, body["restricted"], keep)
             )

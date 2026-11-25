@@ -427,10 +427,10 @@ paths:
       operationId: setNodeRestriction
       summary: Restrict a node, or lift it (Full access)
       description: >-
-        Restricting stops grants on its ancestors and on the root from reaching it. Each user in
-        `keep` (from the preview) gets a grant at the role they had, and the caller gets Full
-        access, in the same transaction. Audited as node.restrict or node.unrestrict, and sent
-        as a node event.
+        Restricting stops grants on its ancestors and on the root from reaching it. Each user or
+        group in `keep` (from the preview's changes or groups) gets a grant on the node at the
+        role they had, and the caller gets Full access, in the same transaction. Nobody else is
+        kept. Audited as node.restrict or node.unrestrict, and sent as a node event.
       requestBody:
         required: true
         content:
@@ -442,8 +442,13 @@ paths:
                 restricted: { type: boolean }
                 keep:
                   type: array
-                  items: { type: string }
-                  description: Users who would lose access and keep their role there.
+                  description: Users and groups who would lose access and keep their role there.
+                  items:
+                    type: object
+                    required: [principalType, principalId]
+                    properties:
+                      principalType: { type: string, enum: [user, group] }
+                      principalId: { type: string }
       responses:
         "200":
           description: The node's restriction now, and what switching it back would change.
@@ -2010,6 +2015,7 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -2026,6 +2032,7 @@ paths:
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
@@ -4193,11 +4200,13 @@ components:
               sources:
                 type: array
                 items: { $ref: "#/components/schemas/AccessSource" }
-                description: Strongest first; the first decides the role.
+                description: >-
+                  Strongest first; the first decides the role. Empty for an Owner or Admin
+                  without Full access on the node, who gets names and roles only.
 
     Restriction:
       type: object
-      required: [nodeId, restricted, restrictedAt, restrictedBy, changes]
+      required: [nodeId, restricted, restrictedAt, restrictedBy, changes, groups]
       properties:
         nodeId: { type: string }
         restricted: { type: boolean }
@@ -4230,6 +4239,22 @@ components:
                 type: integer
                 minimum: 0
                 description: Their Experiments below the node that would close to them.
+        groups:
+          type: array
+          description: >-
+            For an open node, the groups whose grants above it would stop reaching it if it were
+            restricted, each with its strongest such grant; empty for a restricted node.
+          items:
+            type: object
+            required: [group, role, node]
+            properties:
+              group: { $ref: "#/components/schemas/Collaborator" }
+              role: { $ref: "#/components/schemas/Role" }
+              node:
+                description: Where the grant is; null for the workspace root.
+                oneOf:
+                  - $ref: "#/components/schemas/NamedNode"
+                  - type: "null"
 
     VisibleNode:
       allOf:

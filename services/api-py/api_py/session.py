@@ -247,23 +247,33 @@ class Session:
         await self.need(node_id, "owner")
 
     async def node_access(self, node_id: str) -> dict[str, Any]:
-        """Who can open the node, with their role and every source of it."""
+        """
+        Who can open the node, with their role and every source of it. An Owner
+        or Admin without Full access there gets names and roles only.
+        """
         await self._restricted_or_owned(node_id)
+        full = await self.role(node_id) == "owner"
         async with self.storage.pool.connection() as conn:
             node = await restriction.node_row(conn, self.ws, node_id)
             if node is None:
                 raise NodeNotFoundError("Node not found")
-            return await restriction.explain(conn, self.ws, node, self.principal.user_id)
+            answer = await restriction.explain(conn, self.ws, node, self.principal.user_id)
+        if not full:
+            answer["people"] = [{**p, "sources": []} for p in answer["people"]]
+        return answer
 
-    def _restriction_answer(
-        self, node: dict[str, Any], changes: list[dict[str, Any]]
+    async def _restriction_answer(
+        self, conn: AsyncConnection, node: dict[str, Any]
     ) -> dict[str, Any]:
+        """The node's restriction, and what switching it would change."""
+        me = self.principal.user_id
         return {
             "nodeId": node["id"],
             "restricted": node["restricted"],
             "restrictedAt": node["restrictedAt"],
             "restrictedBy": node["restrictedBy"],
-            "changes": changes,
+            "changes": await restriction.changes(conn, self.ws, node, me),
+            "groups": await restriction.groups_cut(conn, self.ws, node, me),
         }
 
     async def restriction(self, node_id: str) -> dict[str, Any]:
@@ -273,16 +283,15 @@ class Session:
             node = await restriction.node_row(conn, self.ws, node_id)
             if node is None:
                 raise NodeNotFoundError("Node not found")
-            return self._restriction_answer(
-                node, await restriction.changes(conn, self.ws, node, self.principal.user_id)
-            )
+            return await self._restriction_answer(conn, node)
 
     async def set_restricted(
-        self, node_id: str, restricted: bool, keep: list[str]
+        self, node_id: str, restricted: bool, keep: list[tuple[str, str]]
     ) -> dict[str, Any]:
         """
-        Restricts the node, keeping the people in `keep` (each at the role they
-        had) and the caller (Full access), or lifts it. Audited and announced.
+        Restricts the node, keeping the users and groups in `keep` (each at the
+        role they had) and the caller (Full access), or lifts it. Audited and
+        announced.
         """
         await self.need(node_id, "owner")
         user_id = self.principal.user_id
@@ -297,34 +306,55 @@ class Session:
             if role != "owner":
                 raise ForbiddenError("Only someone with Full access can restrict this node")
             if node["restricted"] == restricted:
-                return self._restriction_answer(
-                    node, await restriction.changes(conn, self.ws, node, self.principal.user_id)
-                )
-            changed = await restriction.changes(conn, self.ws, node, self.principal.user_id)
+                return await self._restriction_answer(conn, node)
+            changed = await restriction.changes(conn, self.ws, node, user_id)
             if restricted:
-                losing = {c["user"]["id"]: c for c in changed}
-                unknown = [k for k in keep if k not in losing and k != user_id]
-                if unknown:
-                    raise AccessError("Only people who would lose access can be kept")
-                kept = [k for k in dict.fromkeys(keep) if k in losing and losing[k]["role"]]
-                for uid, role in [(k, losing[k]["role"]) for k in kept] + [(user_id, "owner")]:
+                # Who and which groups would lose access: only those can be kept.
+                losing = {("user", c["user"]["id"]): c["role"] for c in changed if c["role"]}
+                losing |= {
+                    ("group", g["group"]["id"]): g["role"]
+                    for g in await restriction.groups_cut(conn, self.ws, node, user_id)
+                }
+                kept = list(dict.fromkeys(k for k in keep if k != ("user", user_id)))
+                if any(k not in losing for k in kept):
+                    raise AccessError("Only people and groups who would lose access can be kept")
+                for (ptype, pid), role in [(k, losing[k]) for k in kept] + [
+                    (("user", user_id), "owner")
+                ]:
                     await conn.execute(
                         """
                         INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role, created_by)
-                        VALUES (%(ws)s, %(node)s, 'user', %(user)s, %(role)s, %(by)s)
+                        VALUES (%(ws)s, %(node)s, %(ptype)s, %(pid)s, %(role)s, %(by)s)
                         ON CONFLICT (workspace_id, node_id, principal_type, principal_id)
                         DO UPDATE SET role = CASE WHEN role_rank(EXCLUDED.role) > role_rank(grants.role)
                                                   THEN EXCLUDED.role ELSE grants.role END""",
-                        {"ws": self.ws, "node": node_id, "user": uid, "role": role, "by": user_id},
+                        {
+                            "ws": self.ws,
+                            "node": node_id,
+                            "ptype": ptype,
+                            "pid": pid,
+                            "role": role,
+                            "by": user_id,
+                        },
                     )
-                lost = [k for k in losing if k not in kept and k != user_id]
                 await conn.execute(
                     "UPDATE nodes SET restricted = true, restricted_at = now(), restricted_by = %s WHERE id = %s",
                     (user_id, node_id),
                 )
-                await self._audit("node.restrict", {"node": node_id, "kept": kept, "lost": lost})(
-                    conn
+                # Who can't open it now, once the kept grants are in.
+                cur = await conn.execute(
+                    "SELECT u FROM unnest(%s::uuid[]) u WHERE path_role(%s, u, %s::ltree) IS NULL",
+                    ([c["user"]["id"] for c in changed], self.ws, node["path"]),
                 )
+                lost = [str(u) for (u,) in await cur.fetchall()]
+                await self._audit(
+                    "node.restrict",
+                    {
+                        "node": node_id,
+                        "kept": [{"principalType": t, "principalId": i} for t, i in kept],
+                        "lost": lost,
+                    },
+                )(conn)
                 await self.storage.notify(
                     conn, {"op": "node", "change": "restrict", "id": node_id, "left": lost}
                 )
@@ -344,9 +374,7 @@ class Session:
                 )
             node = await restriction.node_row(conn, self.ws, node_id)
             assert node is not None
-            return self._restriction_answer(
-                node, await restriction.changes(conn, self.ws, node, self.principal.user_id)
-            )
+            return await self._restriction_answer(conn, node)
 
     async def take_over(self, node_id: str) -> dict[str, Any]:
         """An Owner gives themselves Full access on a restricted node, audited and shown on it."""

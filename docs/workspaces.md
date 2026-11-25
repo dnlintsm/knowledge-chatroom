@@ -99,8 +99,8 @@ Once restricted Knowledge nodes exist, this model has to be revisited, because g
 administration would then cross a boundary that is meant to hold.
 [Restricted Knowledge nodes](restricted-knowledge.md) (decisions 7 and 8) says how: group
 changes that reach inside a restricted node need Full access there, and only an Owner can
-take a restricted node over, loudly. Owners and Admins see a restricted node's name and who
-has access, never its content.
+take a restricted node over, loudly. Owners and Admins see a restricted node's name and the
+names and roles of who has access, never its content.
 
 ## Operation matrix
 
