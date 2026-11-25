@@ -242,6 +242,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/experiments/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make an experiment of a folder already in the workspace
+         * @description Copies the folder's files into a new experiment at `destination` (default: the folder's node), at their paths relative to the folder, sharing their stored bytes, so nothing is sent again; each starts a history of its own. Its planned parameters come from a params.json at the folder's top. Reading the folder needs view access where it is, and the experiment needs view access at the destination. `move` also deletes the folder's files (soft delete, in the same transaction) and `pointer` leaves an EXPERIMENT.md in it naming the experiment and linking to it: both need edit access where the folder is. A folder in a restricted node imported to outside that node needs Full access on it. Files larger than an upload may be are left out (`skipped`). With `preview`, answers what it would do and changes nothing. Storage tokens can't.
+         */
+        post: operations["importFolderAsExperiment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/experiments/{id}": {
         parameters: {
             query?: never;
@@ -2479,6 +2499,34 @@ export interface components {
             /** @description Only in the ?deleted list, false when its node was deleted too (restore answers 409). */
             restorable?: boolean;
         };
+        FolderImport: {
+            title: string;
+            destination: string | null;
+            /** @description From the folder's params.json; {} without one. */
+            params: {
+                [key: string]: unknown;
+            };
+            files: {
+                /** @description Relative to the folder */
+                path: string;
+                size: number;
+            }[];
+            /** @description Files left out, larger than an upload may be. */
+            skipped: string[];
+            /** @description The restricted node the folder is in, when the destination is outside it. */
+            restricted: {
+                id: string;
+                name: string;
+                /** @description Whether you have Full access there */
+                fullAccess: boolean;
+            } | null;
+            /** @description Edit access where the folder is. */
+            canMove: boolean;
+            /** @description Edit access where the folder is. */
+            canPoint: boolean;
+            /** @description Only once imported. */
+            experiment?: components["schemas"]["Experiment"];
+        };
         /** @enum {string} */
         RunState: "running" | "done" | "failed";
         /**
@@ -4010,6 +4058,66 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    importFolderAsExperiment: {
+        parameters: {
+            query?: {
+                /** @description 1 (or true, or empty) to see what it would do. */
+                preview?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The folder's node; null for the workspace root. */
+                    node: string | null;
+                    folder: string;
+                    /** @description Where the experiment goes; the folder's node when left out. */
+                    destination?: string | null;
+                    /** @description The folder's name when left out. */
+                    title?: string;
+                    hypothesis?: string;
+                    /**
+                     * @default draft
+                     * @enum {string}
+                     */
+                    status?: "draft" | "shared";
+                    /** @default false */
+                    move?: boolean;
+                    /** @default false */
+                    pointer?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderImport"];
+                };
+            };
+            /** @description The experiment, with what was imported. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderImport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

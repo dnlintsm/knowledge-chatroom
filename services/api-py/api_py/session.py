@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import builtins
 import re
+import uuid
 from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -18,7 +19,7 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import chats, experiments, nodes, proposals, restriction, runs
+from . import chats, experiments, imports, nodes, proposals, restriction, runs
 from .access import (
     AccessError,
     AccessService,
@@ -439,6 +440,144 @@ class Session:
             return await experiments.create(
                 conn, self.storage, self.principal.user_id, node_id, given, in_tx
             )
+
+    async def import_folder(
+        self,
+        node_id: str | None,
+        folder: str,
+        *,
+        destination: str | None,
+        given: dict[str, Any],
+        shared: bool = False,
+        move: bool = False,
+        pointer: bool = False,
+        preview: bool = False,
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        """
+        Makes an Experiment of a folder already in the workspace (POST
+        /experiments/import): its files are copied in at their paths relative
+        to the folder, sharing their stored bytes, so nothing is sent again.
+        Reading the folder needs view access where it is, and the Experiment
+        needs view access at `destination`. Moving the folder (deleting its
+        files afterwards) or leaving an EXPERIMENT.md pointer in it needs edit
+        access there. A folder inside a restricted node imported to outside it
+        needs Full access on that node. With `preview`, answers what it would
+        do and changes nothing.
+        """
+        folder = normalize_path(folder)
+        source_role = await self.need(node_id, "viewer")
+        await self.need(destination, "viewer")
+        can_edit_source = at_least(source_role, "editor")
+        async with self.scoped() as conn:
+            found = await imports.folder_files(conn, self.ws, node_id, folder)
+        async with self.storage.pool.connection() as conn:
+            restricted = await imports.restriction(conn, self.ws, node_id, destination)
+        if not found:
+            raise ExperimentError(f"No files in {folder}")
+        copied = [f for f in found if f["size"] <= max_bytes]
+        skipped = [f["relative"] for f in found if f["size"] > max_bytes]
+        params_file = next((f for f in copied if f["relative"] == imports.PARAMS_FILE), None)
+        params = None
+        if params_file is not None:
+            params = imports.planned_params(
+                await self.storage.require_blobs().get(params_file["sha256"])
+            )
+        fields = clean_input(
+            {
+                "title": given.get("title") or folder.split("/")[-1],
+                **({"hypothesis": given["hypothesis"]} if "hypothesis" in given else {}),
+                **({"params": params} if params is not None else {}),
+            }
+        )
+        full_access = True
+        if restricted is not None:
+            full_access = at_least(await self.role(restricted["id"]), "owner")
+        answer: dict[str, Any] = {
+            "title": fields["title"],
+            "destination": destination,
+            "params": fields.get("params", {}),
+            "files": [{"path": f["relative"], "size": f["size"]} for f in copied],
+            "skipped": skipped,
+            "restricted": None if restricted is None else {**restricted, "fullAccess": full_access},
+            "canMove": can_edit_source,
+            "canPoint": can_edit_source,
+        }
+        if preview:
+            return answer
+        if restricted is not None and not full_access:
+            raise ForbiddenError(
+                f"{folder} is in {restricted['name']}, which is restricted: importing it outside "
+                f"needs Full access on {restricted['name']}"
+            )
+        if (move or pointer) and not can_edit_source:
+            raise ForbiddenError(
+                "Moving the folder or leaving a pointer in it needs edit access where it is"
+            )
+
+        principal = self.principal
+        experiment_id = str(uuid.uuid4())
+        pointer_path = f"{folder}/{imports.POINTER_FILE}"
+        pointer_bytes = imports.pointer_text(fields["title"], experiment_id)
+        async with self.storage.pool.connection() as conn:
+            here = await FileService(self.storage).in_node(conn, node_id)
+        if here is None:
+            raise NodeNotFoundError("Node not found")
+        if pointer:
+            # Bytes go first, outside the transaction.
+            await here.store(pointer_path, pointer_bytes)
+        target = {
+            "experiment": experiment_id,
+            "node": destination,
+            "title": fields["title"],
+            "from": {"node": node_id, "folder": folder},
+            "files": len(copied),
+            "move": move,
+            "pointer": pointer,
+        }
+
+        async def in_tx(tx: AsyncConnection, _new_id: str) -> None:
+            await self._audit("experiment.import", target)(tx)
+
+        async with self.scoped() as conn:
+            await experiments.create(
+                conn,
+                self.storage,
+                principal.user_id,
+                destination,
+                fields,
+                in_tx,
+                chosen_id=experiment_id,
+                fork=False,
+            )
+            await imports.copy_into(
+                conn, self.ws, experiment_id, copied, principal.actor, principal.user_id
+            )
+            if shared:
+                await conn.execute(
+                    "UPDATE experiments SET status = 'shared' WHERE id = %s", (experiment_id,)
+                )
+            if move:
+                for f in copied:
+                    await here.remove(
+                        conn,
+                        f["path"],
+                        self._audit(
+                            "file.delete",
+                            {"node": node_id, "path": f["path"], "import": experiment_id},
+                        ),
+                    )
+            if pointer:
+                await here.write(
+                    conn,
+                    pointer_path,
+                    pointer_bytes,
+                    author=principal.actor,
+                    author_id=principal.user_id,
+                    stored=True,
+                    in_tx=self._audit("file.write", {"node": node_id, "path": pointer_path}),
+                )
+        return {**answer, "experiment": await self.experiment(experiment_id)}
 
     async def upload_experiment(
         self, raw_id: str, path: list[str], given: dict[str, Any], files: list[dict[str, Any]]
