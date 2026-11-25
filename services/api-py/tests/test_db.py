@@ -21,6 +21,7 @@ from psycopg import conninfo
 from api_py import db
 from api_py.app import create_app
 from api_py.config import DEFAULT_MIGRATIONS_DIR, Settings
+from knowledge_chatroom import api as contract
 
 URL = os.environ.get("TEST_DATABASE_URL")
 needs_postgres = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -228,6 +229,8 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
             503,
             {"status": "degraded", "database": "ready", "rowSecurity": "off"},
         )
+        # The answer the spec describes for a server that isn't serving storage.
+        contract.GetHealthResponse1.model_validate(health.json())
         # Everything in the database is refused, memory too; the rest is simply not found.
         for path in ("/files", "/files/a.md", "/memory", "/skills", "/workspaces"):
             refused = await api.get(path)
@@ -262,6 +265,7 @@ async def test_migrations_off_is_served_once_the_migrate_command_ran(database, m
         assert app.state.schema.state is db.SchemaState.BEHIND
         waiting = await api.get("/health")
         assert (waiting.status_code, waiting.json()["database"]) == (503, "behind")
+        contract.GetHealthResponse1.model_validate(waiting.json())
 
         # The deploy step: `python -m api_py.migrate` (run here in a thread; it has its own loop).
         env = {"DATABASE_URL": database}
