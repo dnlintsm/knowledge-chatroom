@@ -429,7 +429,9 @@ async def test_runs_record_inputs_finish_and_rerun(api):
         etch,
         {"temp": 70},
     )
-    assert second["provenance"]["rerunOf"] == {"id": run["id"]}
+    # It names the experiment it reran, and that experiment's Run it reran (its latest).
+    (ran,) = (await api.get(f"/experiments/{run['id']}/runs", headers=ALICE)).json()["runs"]
+    assert second["provenance"]["rerunOf"] == {"id": run["id"], "run": ran["id"]}
     pinned = (
         await api.get(f"/files/inputs/a.csv?experiment={second['id']}", headers=ALICE)
     ).content

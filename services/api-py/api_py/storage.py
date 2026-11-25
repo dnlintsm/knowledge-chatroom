@@ -122,6 +122,8 @@ async def prepare_row_security(conn: AsyncConnection) -> bool:
             f"GRANT SELECT ON {_READ} TO {role}",
             f"GRANT INSERT ON {_WRITE} TO {role}",
             f"GRANT UPDATE ON nodes, files, experiments, proposals TO {role}",
+            # An Experiment's Runs (029_runs.sql).
+            f"GRANT SELECT, INSERT, UPDATE ON runs TO {role}",
             # Who works on an experiment (025_experiment_maintainers.sql).
             f"GRANT SELECT, INSERT, DELETE ON experiment_collaborators TO {role}",
             f"GRANT USAGE ON SEQUENCE audit_log_id_seq TO {role}",
