@@ -114,6 +114,10 @@ the workspace like on a local project:
   A run folder that no run has used for `AGENT_WORKDIR_IDLE_HOURS` (default 24) is removed
   when another run starts, so a copy doesn't stay on disk long after its user stopped
   chatting, or lost access. The next run makes a fresh one.
+  One run at a time works in a run folder: a run in a second chat of the same user and
+  workspace waits for the first to end (Stop in the waiting chat ends the wait), because
+  each run rewrites the folder's skills, copy and `run-inputs/`. Runs of other users, and
+  of the same user in another workspace, are in other folders and don't wait.
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.

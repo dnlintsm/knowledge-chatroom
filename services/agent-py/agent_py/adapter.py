@@ -44,7 +44,7 @@ import logging
 import time
 from collections import Counter, OrderedDict
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -165,6 +165,10 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._idle_seconds = idle_seconds
         self._in_use: Counter[Path] = Counter()
         self._swept_at: float | None = None
+        # One run at a time in a run folder: a run rewrites its skills, its
+        # workspace copy and run-inputs/, which another chat's run of the same
+        # user and workspace would be reading.
+        self._folders: WeakValueDictionary[Path, asyncio.Lock] = WeakValueDictionary()
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
         # Usage records on their way to api-py.
@@ -315,7 +319,11 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         workspace: str | None,
         model: str | None,
     ) -> AsyncGenerator[BaseEvent, None]:
-        """The run, with its run folder held for as long as it lasts (it is not removed as idle meanwhile)."""
+        """
+        The run, alone in its run folder for as long as it lasts. A user's run in
+        another chat of the same workspace waits for it to end (Stop ends the
+        wait). The folder is not removed as idle meanwhile, waiting included.
+        """
         cwd = (
             run_folder(self._skills_root, _folder_name(user, workspace))
             if self._skills_root is not None
@@ -324,10 +332,14 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         if cwd is not None:
             self._in_use[cwd] += 1
         try:
-            await self._remove_idle_folders()
-            async with aclosing(
-                self._run_in_folder(input_data, storage_token, user, memory_token, workspace, model)
-            ) as stream:
+            async with (
+                self._alone_in(cwd),
+                aclosing(
+                    self._run_in_folder(
+                        input_data, storage_token, user, memory_token, workspace, model
+                    )
+                ) as stream,
+            ):
                 async for event in stream:
                     yield event
         finally:
@@ -340,6 +352,19 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                     # moment it finishes, while its Claude Code session is still kept.
                     with contextlib.suppress(OSError):
                         mark_used(cwd)
+
+    @asynccontextmanager
+    async def _alone_in(self, cwd: Path | None) -> AsyncIterator[None]:
+        """Holds the run folder's lock (none without run folders), then looks for idle folders."""
+        if cwd is None:
+            yield
+            return
+        lock = self._folders.setdefault(cwd, asyncio.Lock())
+        if lock.locked():
+            logger.info("a run waits for the user's run in another chat to finish")
+        async with lock:
+            await self._remove_idle_folders()
+            yield
 
     async def _remove_idle_folders(self) -> None:
         if self._skills_root is None or self._idle_seconds is None:
