@@ -275,4 +275,6 @@ def test_a_mode_changed_mid_chat_reaches_the_next_run(client, claude, agent_serv
     assert (before, after) == ("on", "user-invocable-only")
     assert claude.created[1].options.resume == "11111111-2222-3333-4444-555555555555"
     # ...found in the same user folder the first run used.
-    assert sessions == [("11111111-2222-3333-4444-555555555555", claude.created[0].options.cwd)]
+    assert set(sessions) == {
+        ("11111111-2222-3333-4444-555555555555", claude.created[0].options.cwd)
+    }

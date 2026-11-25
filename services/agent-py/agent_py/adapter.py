@@ -71,6 +71,7 @@ from .memory import RunMemory, fetch_memory, memory_tools, taint_hook
 from .place import carries_content, chatroom_props, workspace_note
 from .revocation import membership_hooks
 from .scripts import Scripts, needs_scripts, script_options
+from .sessions import SessionStore, no_profile
 from .skills import (
     RunSkill,
     Trigger,
@@ -173,9 +174,14 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         scripts: Scripts | None = None,
         workdir: Limits | None = None,
         idle_seconds: float | None = None,
+        sessions: SessionStore | None = None,
         **kwargs: Any,
     ) -> None:
+        if sessions is not None:
+            # Each chat's link to its Claude Code session, kept on disk (sessions.py).
+            kwargs = {**kwargs, "session_binding_store": sessions, "resolve_profile": no_profile}
         super().__init__(*args, **kwargs)
+        self._sessions = sessions
         self._system_prompt = system_prompt
         self._models = models
         # Serialize preparation with the SDK query so a model change can't race a run on this thread.
@@ -369,6 +375,9 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         )
         if cwd is not None:
             self._in_use[cwd] += 1
+            if self._sessions is not None:
+                # Whose chat this is and where its session works, for the saved link.
+                self._sessions.place(input_data.thread_id, cwd.name, cwd)
         try:
             async with (
                 self._alone_in(cwd, patience(storage_token, memory_token)),
@@ -466,19 +475,9 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                 message="Couldn't start the run. Please try again.",
             )
             return
+        # The run's model goes into its options (build_options): every run starts
+        # its own engine process, resuming the chat's session (sessions.py).
         remember(self._runs, thread_id, run, self._max_workers)
-        try:
-            if model and len(self._models) > 1:
-                await self._switch_cached_model(input_data, model)
-        except Exception as error:
-            logger.warning("couldn't switch chat model: %s", error)
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                thread_id=thread_id,
-                run_id=input_data.run_id,
-                message="Couldn't switch the chat model. Please try again.",
-            )
-            return
         prepared, slash = self.prepare(input_data, run.skills)
         if slash:
             self._used(thread_id, slash.name, "slash")
@@ -554,31 +553,6 @@ class ChatroomAdapter(ClaudeAgentAdapter):
             )
             run.servers = run_servers(self._servers, chips_from(input_data, self._servers), tokens)
         return run
-
-    async def _switch_cached_model(self, input_data: RunAgentInput, model: str) -> None:
-        # The pinned adapter rebuilds the worker for recovery and frontend tools.
-        # A plain chat can reuse a worker; its SDK client switches in place.
-        thread = input_data.thread_id
-        entry = self._workers.get(thread)
-        if (
-            not entry
-            or input_data.tools
-            or thread in self._memory_bindings
-            or self._session_binding_store is not None
-            or self._defer_tools
-            or getattr(input_data, "resume", None)
-            or (input_data.messages and isinstance(input_data.messages[-1], ToolMessage))
-        ):
-            return
-        worker = entry["worker"]
-        client = worker._client
-        if (
-            worker.is_alive()
-            and client
-            and entry.get("chatroom_model", worker._options.model) != model
-        ):
-            await client.set_model(model)
-            entry["chatroom_model"] = model
 
     async def _keys(self) -> KeyRoute | None:
         """The key proxy for runs with scripts, started on first use; None if it can't start."""
@@ -669,8 +643,14 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         if isinstance(last, UserMessage):
             last, slash = guard_slash(last, skills)
             messages[-1] = last
-        # A session that's new (first run, evicted or restarted) has seen no note.
-        fresh = thread_id not in self._workers
+        # A session that's new has seen no note. A chat with a saved session
+        # resumes it (sessions.py); without that store, a session lasts as long
+        # as its worker.
+        fresh = (
+            not self._sessions.continues(thread_id)
+            if self._sessions is not None
+            else thread_id not in self._workers
+        )
         # After a browser tool, only the result it answers with: earlier ones
         # are history the adapter checks against the session's transcript.
         carrier = isinstance(last, UserMessage) or (
