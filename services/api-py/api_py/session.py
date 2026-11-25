@@ -540,6 +540,10 @@ class Session:
             await self._audit("experiment.import", target)(tx)
 
         async with self.scoped() as conn:
+            if move:
+                # Only what is copied is deleted: files left out stay, and one
+                # changed since the listing stops the import.
+                await imports.lock_as_listed(conn, self.ws, node_id, copied)
             await experiments.create(
                 conn,
                 self.storage,

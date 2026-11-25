@@ -270,7 +270,8 @@ record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
   Experiment of a folder already in the workspace without sending its bytes again: each file
   is copied in at its path relative to the folder, sharing its stored bytes and starting a
   history of its own; a `params.json` at the folder's top gives the planned parameters.
-  `?preview` answers what it would do. **Move** also deletes the folder's files, and a
+  `?preview` answers what it would do. **Move** also deletes the files it imported (never
+  ones left out; a file changed since the listing stops the import, 412), and a
   **pointer** leaves an `EXPERIMENT.md` there naming the Experiment; both need edit access
   where the folder is. A folder in a restricted node imported to outside it needs Full access
   on that node. Storage tokens can't import. In Files, a folder's **Import as Experiment**

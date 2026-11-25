@@ -12,6 +12,7 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
+from .files import FileChangedError
 from .paths import kind_for_path
 
 # The planned parameters, when the folder has them at its top.
@@ -50,6 +51,31 @@ async def folder_files(
         }
         for row in await cur.fetchall()
     ]
+
+
+async def lock_as_listed(
+    conn: AsyncConnection, workspace_id: str, node_id: str | None, files: list[dict[str, Any]]
+) -> None:
+    """
+    Before a Move: locks the folder's files that are being imported and checks
+    each is still at the version listed, so only what was copied is deleted.
+    FileChangedError for one that changed or went since, and nothing happens.
+    """
+    paths = [f["path"] for f in files]
+    cur = await conn.execute(
+        """
+        SELECT f.path, f.current_version_id, v.blob_sha256
+        FROM files f JOIN file_versions v ON v.id = f.current_version_id
+        WHERE f.workspace_id = %s AND f.experiment_id IS NULL AND f.deleted_at IS NULL
+          AND f.node_id IS NOT DISTINCT FROM %s::uuid AND f.path = ANY(%s)
+        FOR UPDATE OF f""",
+        (workspace_id, node_id, paths),
+    )
+    now = {row[0]: (str(row[1]), row[2]) for row in await cur.fetchall()}
+    for f in files:
+        found = now.get(f["path"])
+        if found is None or found[0] != f["version"]:
+            raise FileChangedError(f["path"], found[1] if found else None)
 
 
 def planned_params(data: bytes) -> dict[str, Any] | None:

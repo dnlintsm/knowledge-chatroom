@@ -253,7 +253,7 @@ export interface paths {
         put?: never;
         /**
          * Make an experiment of a folder already in the workspace
-         * @description Copies the folder's files into a new experiment at `destination` (default: the folder's node), at their paths relative to the folder, sharing their stored bytes, so nothing is sent again; each starts a history of its own. Its planned parameters come from a params.json at the folder's top. Reading the folder needs view access where it is, and the experiment needs view access at the destination. `move` also deletes the folder's files (soft delete, in the same transaction) and `pointer` leaves an EXPERIMENT.md in it naming the experiment and linking to it: both need edit access where the folder is. A folder in a restricted node imported to outside that node needs Full access on it. Files larger than an upload may be are left out (`skipped`). With `preview`, answers what it would do and changes nothing. Storage tokens can't.
+         * @description Copies the folder's files into a new experiment at `destination` (default: the folder's node), at their paths relative to the folder, sharing their stored bytes, so nothing is sent again; each starts a history of its own. Its planned parameters come from a params.json at the folder's top. Reading the folder needs view access where it is, and the experiment needs view access at the destination. `move` also deletes the files it imported (soft delete, in the same transaction), and only those: files left out stay, and one changed since the folder was listed stops the import (412, `changed`), so nothing is imported or deleted. `pointer` leaves an EXPERIMENT.md in it naming the experiment and linking to it: both need edit access where the folder is. A folder in a restricted node imported to outside that node needs Full access on it. Files larger than an upload may be are left out (`skipped`). With `preview`, answers what it would do and changes nothing. Storage tokens can't.
          */
         post: operations["importFolderAsExperiment"];
         delete?: never;
@@ -4118,6 +4118,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            412: components["responses"]["ExistsOrChanged"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };

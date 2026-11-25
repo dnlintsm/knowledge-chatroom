@@ -240,7 +240,7 @@ export function ImportFolderDialog({
               <span className="block text-xs text-[var(--muted-foreground)]">
                 {preview && !preview.canMove
                   ? "Needs Can edit where the folder is."
-                  : "Its files leave the folder; Recently deleted keeps their history."}
+                  : "The files it imports leave the folder, keeping their history; files left out stay."}
               </span>
             </span>
           </label>

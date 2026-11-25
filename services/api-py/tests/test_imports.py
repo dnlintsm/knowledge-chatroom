@@ -5,12 +5,17 @@ Needs TEST_DATABASE_URL and S3_ENDPOINT, as test_files.py.
 
 from __future__ import annotations
 
+import dataclasses
+import uuid
+
 import psycopg
 import pytest
 from support import ALICE, BOB, Client, storage_token, user
 from test_experiment_restore import user_id
 from test_files import S3_ENDPOINT, SECRET, URL, s3
 from test_restricted_nodes import grant, make_node, restrict
+
+from api_py import imports
 
 pytestmark = [pytest.mark.anyio]
 CAROL = user("kc|carol", "Carol")
@@ -20,11 +25,16 @@ needs_services = pytest.mark.skipif(
 
 
 @pytest.fixture
-async def api(database):
-    async with Client(database, SECRET, s3=s3()) as (client, _app):
+async def api_and_app(database):
+    async with Client(database, SECRET, s3=s3()) as (client, app):
         for who in (ALICE, BOB, CAROL):
             await client.get("/access", headers=who)
-        yield client
+        yield client, app
+
+
+@pytest.fixture
+def api(api_and_app):
+    return api_and_app[0]
 
 
 async def put(api, node: str | None, path: str, data: bytes) -> None:
@@ -98,6 +108,57 @@ async def test_move_removes_the_folder_and_keeps_its_history(api, database):
     assert f"?experiment_id={exp['id']}" in pointer.text and "oct" in pointer.text
     beside = await api.get(f"/files/runs/octave.md?node={etch}", headers=ALICE)
     assert beside.status_code == 200
+
+
+@needs_services
+async def test_move_leaves_the_files_it_cant_import(api_and_app):
+    api, app = api_and_app
+    etch = await folder(api)
+    await put(api, etch, "runs/oct/raw/scan.bin", b"x" * 200)
+    # Uploads above 100 bytes are refused from here on, so the scan can't be imported.
+    app.state.settings = dataclasses.replace(app.state.settings, max_upload_bytes=100)
+    body = {"node": etch, "folder": "runs/oct", "move": True}
+    seen = (await importing(api, body, preview=True)).json()
+    assert seen["skipped"] == ["raw/scan.bin"]
+    made = await importing(api, body)
+    assert made.status_code == 201, made.text
+    exp = made.json()["experiment"]
+    listed = await api.get(f"/files?experiment={exp['id']}", headers=ALICE)
+    assert [f["path"] for f in listed.json()["files"]] == [
+        "data/out.csv",
+        "params.json",
+        "report.md",
+    ]
+    # Moved files leave the folder; the one left out stays where it was.
+    assert (
+        await api.get(f"/files/runs/oct/report.md?node={etch}", headers=ALICE)
+    ).status_code == 404
+    kept = await api.get(f"/files/runs/oct/raw/scan.bin?node={etch}", headers=ALICE)
+    assert kept.status_code == 200 and kept.content == b"x" * 200
+
+
+@needs_services
+async def test_move_stops_when_a_file_changed_since_the_listing(api, monkeypatch):
+    etch = await folder(api)
+    listing = imports.folder_files
+
+    async def stale(*args, **kwargs):
+        # As if report.md was saved again between the listing and the import.
+        found = await listing(*args, **kwargs)
+        return [
+            {**f, "version": str(uuid.uuid4())} if f["relative"] == "report.md" else f
+            for f in found
+        ]
+
+    monkeypatch.setattr(imports, "folder_files", stale)
+    made = await importing(api, {"node": etch, "folder": "runs/oct", "move": True})
+    assert made.status_code == 412, made.text
+    assert "runs/oct/report.md changed" in made.json()["error"]
+    # Nothing happened: no experiment, and the folder is whole.
+    assert (await api.get("/experiments", headers=ALICE)).json()["experiments"] == []
+    for path in ("report.md", "data/out.csv", "params.json"):
+        left = await api.get(f"/files/runs/oct/{path}?node={etch}", headers=ALICE)
+        assert left.status_code == 200, path
 
 
 @needs_services
