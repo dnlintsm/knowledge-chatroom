@@ -223,9 +223,79 @@ test("runs: a new run at the root starts empty and tracks its state", async ({ p
   const panel = page.getByTestId("experiment-panel");
   await expect(panel).toContainText("Experiment in the workspace");
   await expect(panel).toContainText("It started empty");
-  await panel.getByRole("combobox", { name: "Experiment state" }).selectOption("running");
+  await panel.getByRole("button", { name: "New run" }).click();
+  await panel.getByRole("form", { name: "New run" }).getByRole("button", { name: "Start run" }).click();
   await expect(page.getByTestId("run-list").locator('[data-state="running"]')).toBeVisible();
+  await expect(panel.getByTestId("run")).toHaveAttribute("data-state", "running");
   await shot(page, "02c-run-state");
+});
+
+test("an experiment runs more than once: two runs, compared, and one archived", async ({ page, request }) => {
+  const res = await request.post("/api/experiments", { data: { nodeId: null, title: "Chamber sweep", params: { rf_W: 300 } } });
+  const exp = (await res.json()) as Experiment;
+  const out = (text: string) => request.put(`/api/files/data/out.csv?experiment=${exp.id}`, { data: text, headers: md });
+  expect((await out("rate\n410\n")).ok()).toBe(true);
+  await page.goto(`/?experiment_id=${exp.id}`);
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Chamber sweep", exact: true }).click();
+  const panel = page.getByTestId("experiment-panel");
+  const runs = panel.getByRole("list", { name: "Runs" });
+
+  // Run 1 with the planned parameters; its results are recorded when it finishes.
+  await panel.getByRole("button", { name: "New run" }).click();
+  await panel.getByRole("form", { name: "New run" }).getByRole("button", { name: "Start run" }).click();
+  const view = panel.getByTestId("run-view");
+  await expect(view).toContainText("Recorded when the run finishes.");
+  // Another can't start while it runs: runs share the working files.
+  await expect(panel.getByRole("button", { name: "New run" })).toBeDisabled();
+  const results = view.getByRole("group", { name: "Results" });
+  await results.getByRole("button", { name: "Add result" }).click();
+  await results.getByRole("textbox", { name: "result name" }).fill("etch_rate");
+  await results.getByRole("textbox", { name: "etch_rate value" }).fill("410");
+  await view.getByRole("button", { name: "Finish run" }).click();
+  await expect(runs.getByTestId("run").first()).toHaveAttribute("data-state", "done");
+  await expect(view.getByTestId("run-file").filter({ hasText: "data/out.csv" })).toBeVisible();
+
+  // Run 2 runs hotter, with a label; the working copy moves on, Run 1's record doesn't.
+  await panel.getByRole("button", { name: "New run" }).click();
+  const form = panel.getByRole("form", { name: "New run" });
+  await form.getByRole("textbox", { name: "Run label" }).fill("hotter");
+  await form.getByRole("textbox", { name: "rf_W value" }).fill("400");
+  await form.getByRole("button", { name: "Start run" }).click();
+  expect((await out("rate\n455\n")).ok()).toBe(true);
+  await results.getByRole("button", { name: "Add result" }).click();
+  await results.getByRole("textbox", { name: "result name" }).fill("etch_rate");
+  await results.getByRole("textbox", { name: "etch_rate value" }).fill("455");
+  await view.getByRole("button", { name: "Finish run" }).click();
+  await expect(runs.getByTestId("run")).toHaveCount(2);
+  await expect(runs.getByTestId("run").first()).toContainText("Run 2 · hotter");
+  await runs.getByRole("button", { name: /^Run 1/ }).click();
+  await expect(view.getByTestId("run-file").filter({ hasText: "data/out.csv" })).toContainText("differs from the working copy");
+  await view.getByRole("button", { name: "data/out.csv" }).click();
+  await expect(view.getByTestId("run-file-view")).toContainText("410");
+  await shot(page, "02f-runs");
+
+  // Compare: one row per run, grouped by experiment.
+  await showView(page, "Experiments");
+  await page.getByRole("button", { name: "Compare experiments" }).click();
+  const compared = page.getByTestId("runs-panel").getByTestId("compared-run");
+  await expect(compared.filter({ hasText: "Chamber sweep" })).toHaveCount(1);
+  const sweep = page.getByTestId("runs-panel").locator(`[data-experiment="${exp.id}"]`);
+  await expect(sweep).toHaveCount(2);
+  await expect(sweep.filter({ hasText: "hotter" })).toContainText("455");
+  await shot(page, "02g-compare-by-run");
+
+  // Archive Run 1: it leaves Compare unless archived runs are shown, and stays readable.
+  await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: "Chamber sweep", exact: true }).click();
+  await runs.getByRole("button", { name: /^Run 1/ }).click();
+  await view.getByRole("button", { name: "Archive" }).click();
+  await expect(runs.getByTestId("run")).toHaveCount(1);
+  await panel.getByRole("checkbox", { name: /Show archived/ }).check();
+  await expect(runs.getByTestId("run")).toHaveCount(2);
+  await expect(runs).toContainText("Archived");
+  await page.getByRole("button", { name: "Compare experiments" }).click();
+  await expect(sweep).toHaveCount(1);
+  await page.getByRole("checkbox", { name: "Show archived runs" }).check();
+  await expect(sweep).toHaveCount(2);
 });
 
 test("an archived experiment says why it's read only, and a rerun reads its inputs as recorded (#187)", async ({ page, request }) => {
@@ -419,7 +489,9 @@ test("files can be uploaded into an existing run and added as its inputs", async
 
   // A finished run keeps its inputs: uploads only.
   await page.getByRole("navigation", { name: "Location" }).getByRole("button", { name: run.title }).click();
-  await panel.getByRole("combobox", { name: "Experiment state" }).selectOption("done");
+  await panel.getByRole("button", { name: "New run" }).click();
+  await panel.getByRole("form", { name: "New run" }).getByRole("button", { name: "Start run" }).click();
+  await panel.getByTestId("run-view").getByRole("button", { name: "Finish run" }).click();
   await expect(add.getByRole("checkbox", { name: "Add as inputs" })).toBeDisabled();
   await page.getByTestId("add-files-input").setInputFiles([
     { name: "late.csv", mimeType: "text/csv", buffer: Buffer.from("x\n") },

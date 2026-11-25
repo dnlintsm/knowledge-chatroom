@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { parseWorkspaceEvent } from "@knowledge-chatroom/contracts/storage-contract";
+import { announceRunEvent, rerunRun } from "./run-records";
 import { DEFAULT_SLUG, workspaceUrl } from "@/lib/workspace-request";
 import { normalizePath } from "@knowledge-chatroom/contracts/files";
 export { normalizePath } from "@knowledge-chatroom/contracts/files";
@@ -232,6 +233,8 @@ interface WorkspaceValue {
   createExperiment: (nodeId: NodeId, title: string) => Promise<Experiment>;
   /** Runs experiment `id` again as a new one of yours and moves into it; throws with a message. */
   rerunExperiment: (id: string) => Promise<Experiment>;
+  /** Run `runId` again as Run 1 of a new draft Experiment of yours, and go there. */
+  rerunAsYourOwn: (runId: string) => Promise<void>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   /**
    * Hands experiment `id` over, or adds or removes a collaborator; moves to
@@ -447,8 +450,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (gone) void enterNode(null);
         return;
       }
-      // Its Experiment's update event follows, and refreshes what shows it.
-      if (event.op === "run") return;
+      // The Runs views refetch; its Experiment's update event follows.
+      if (event.op === "run") {
+        announceRunEvent(event);
+        return;
+      }
       if (event.op === "experiment") {
         const list = await refreshExperiments();
         // Deleted, or no longer shared with you: back to its node.
@@ -882,6 +888,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment, settleSaves],
   );
+  const rerunAsYourOwn = useCallback(
+    async (runId: string) => {
+      const run = await rerunRun(runId, null);
+      await refreshExperiments();
+      await enterExperiment(run.experimentId);
+    },
+    [refreshExperiments, enterExperiment],
+  );
   const updateExperiment = useCallback(
     async (id: string, change: ExperimentChange) => {
       // Archived is read only, so edits still on their way would be refused.
@@ -1077,6 +1091,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deleteNode,
       createExperiment,
       rerunExperiment,
+      rerunAsYourOwn,
       updateExperiment,
       changeExperimentPeople,
       deleteExperiment,
@@ -1089,7 +1104,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [
     state, selection, openCount, reveal, setSelection, getFile, serverHash, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, storageDown, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
-    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
+    enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment, rerunAsYourOwn,
     updateExperiment, changeExperimentPeople, deleteExperiment, restoreExperiment, addRunInputs, proposals, decideProposal,
     promote,
   ]);

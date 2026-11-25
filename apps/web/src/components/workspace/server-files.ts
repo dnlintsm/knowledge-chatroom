@@ -280,8 +280,8 @@ export interface RunProvenance {
   chat?: string | null;
   model?: string | null;
   skill?: { name: string; source?: string; version?: number; sha256?: string };
-  /** The run this one ran again. */
-  rerunOf?: { id: string };
+  /** The run this one ran again: its Experiment, and the Run in it. */
+  rerunOf?: { id: string; run?: string };
   tools?: Record<string, string>;
   inputs?: {
     path: string;
