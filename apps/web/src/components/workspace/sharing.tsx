@@ -5,6 +5,7 @@ import { LogOut, Share2, User, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch, type NodeId, type Role } from "./server-files";
 import { useWorkspace } from "./store";
+import { RestrictControl, WhoHasAccess } from "./restricted-access";
 import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
 
 /** The API's shapes, generated from packages/contracts/openapi/storage.yaml. */
@@ -12,8 +13,9 @@ type Schema = components["schemas"];
 
 /**
  * Who you are (with login on) and who a place is shared with. Sharing lists
- * the grants made on the current place; access granted higher up the tree
- * also reaches it, so that is said rather than repeated.
+ * the grants made on the current place; on a node, Who has access below them
+ * lists everyone who can open it and why, and Restrict stops access from
+ * higher up (restricted-access.tsx).
  */
 
 /**
@@ -117,7 +119,10 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
   const [error, setError] = useState<string | null>(null);
   const [pick, setPick] = useState("");
   const [role, setRole] = useState<Role>("viewer");
+  // Bumped after each change, so Who has access is read again.
+  const [revision, setRevision] = useState(0);
   const dialog = useRef<HTMLDivElement>(null);
+  const here = useWorkspace().nodes.find((n) => n.id === node);
 
   const load = useCallback(async () => {
     const query = node ? `?node=${encodeURIComponent(node)}` : "";
@@ -129,6 +134,7 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
     setPeople(u.users);
     setGroups(g.groups);
     setGrants(gr.grants);
+    setRevision((r) => r + 1);
   }, [node]);
 
   useEffect(() => {
@@ -190,9 +196,11 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
           </button>
         </header>
         <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-          {node
-            ? "Access applies to everything below this too. People with access higher up keep it here."
-            : "Access to the workspace applies to everything in it."}{" "}
+          {!node
+            ? "Access to the workspace applies to everything in it."
+            : here?.restricted
+              ? "Access applies to everything below this too. Access from higher up stops here."
+              : "Access applies to everything below this too. People with access higher up keep it here."}{" "}
           People appear here once they have signed in.
         </p>
 
@@ -264,6 +272,12 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
           <p role="alert" className="mt-2 text-xs text-red-500">
             {error}
           </p>
+        )}
+        {here && (
+          <>
+            <WhoHasAccess node={here.id} revision={revision} />
+            <RestrictControl node={here} name={name} onChanged={() => void load().catch(() => {})} />
+          </>
         )}
       </div>
     </div>

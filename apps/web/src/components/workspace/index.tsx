@@ -27,6 +27,7 @@ import { ChatModelProvider } from "./chat-model";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
+import { LockMark } from "./restricted-access";
 import { MemoryProvider } from "./memory";
 import { SkillsProvider } from "./skills";
 import { ToolMenuProvider } from "./tool-menu";
@@ -268,10 +269,10 @@ function PlaceBreadcrumb() {
   // With workspaces, the root is the switcher, named after the workspace.
   const switcher = workspace !== null;
   const steps = [
-    ...(switcher ? [] : [{ id: null as string | null, name: "Workspace", go: () => goTo(null) }]),
-    ...lineage.map((n) => ({ id: n.id, name: n.name, go: () => goTo(n.id) })),
+    ...(switcher ? [] : [{ id: null as string | null, name: "Workspace", restricted: false, go: () => goTo(null) }]),
+    ...lineage.map((n) => ({ id: n.id, name: n.name, restricted: n.restricted, go: () => goTo(n.id) })),
     ...(experiment
-      ? [{ id: `x:${experiment.id}`, name: experiment.title, go: () => editor.open(EXPERIMENT_TAB) }]
+      ? [{ id: `x:${experiment.id}`, name: experiment.title, restricted: false, go: () => editor.open(EXPERIMENT_TAB) }]
       : []),
   ];
   return (
@@ -297,6 +298,7 @@ function PlaceBreadcrumb() {
             >
               {experiment && last && <FlaskConical className="size-3 shrink-0" />}
               <span className="truncate">{step.name}</span>
+              {step.restricted && <LockMark />}
             </button>
           </span>
         );

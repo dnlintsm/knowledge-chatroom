@@ -10,6 +10,8 @@ import { useListScope } from "./list-scope";
 import { ALL_EXPERIMENTS } from "./runs";
 import { useWorkspace } from "./store";
 import { useCurrentWorkspace } from "./current-workspace";
+import { managesWorkspace } from "./admin";
+import { LockMark, RestrictedNodeDialog } from "./restricted-access";
 
 const RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const atLeast = (role: Role | null, min: Role) => role !== null && RANK[role] >= RANK[min];
@@ -33,6 +35,9 @@ export function KnowledgeTree() {
   const [editing, setEditing] = useState<Editing>(null);
   const [error, setError] = useState<string | null>(null);
   const [listScope, setListScope] = useListScope();
+  // A restricted node an Owner or Admin can't open, shown as who has access.
+  const [restrictedView, setRestrictedView] = useState<KnowledgeNode | null>(null);
+  const manages = managesWorkspace(workspace, ws.rootRole);
 
   const children = useMemo(() => {
     const map = new Map<string | null, KnowledgeNode[]>();
@@ -145,10 +150,12 @@ export function KnowledgeTree() {
       const exps = experimentsOn.get(n.id) ?? [];
       const current = ws.node === n.id && !ws.experiment;
       const isOpen = !collapsed.has(n.id);
-      // Nodes you can't open are shown only as the path to ones you can.
+      // Nodes you can't open are shown only as the path to ones you can, or,
+      // to Owners and Admins, as a restricted node they can see who opens.
       const open = n.role !== null;
+      const managed = !open && n.restricted && manages;
       const canAdd = atLeast(n.role, "editor") && Boolean(typeAt(n.depth + 1));
-      const go = () => (open ? enter(n.id) : toggle(n.id));
+      const go = () => (open ? enter(n.id) : managed ? setRestrictedView(n) : toggle(n.id));
       const Chevron = isOpen ? ChevronDown : ChevronRight;
       return (
         <div key={n.id} role="group">
@@ -166,7 +173,13 @@ export function KnowledgeTree() {
               aria-expanded={kids.length || exps.length || current ? isOpen : undefined}
               tabIndex={0}
               data-testid="knowledge-node"
-              title={open ? undefined : "You can't open this; it leads to something shared with you"}
+              title={
+                open
+                  ? undefined
+                  : managed
+                    ? "Restricted. You can see who has access but not its content."
+                    : "You can't open this; it leads to something shared with you"
+              }
               onClick={go}
               // Only the row itself: Enter on one of its buttons is that button's.
               onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && go()}
@@ -195,6 +208,7 @@ export function KnowledgeTree() {
               <span className={cn("min-w-0 flex-1 truncate font-medium", !open && "text-[var(--muted-foreground)]")}>
                 {n.name}
               </span>
+              {n.restricted && <LockMark className="text-[var(--muted-foreground)]" />}
               <span
                 className={cn(
                   "shrink-0 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]",
@@ -325,6 +339,17 @@ export function KnowledgeTree() {
         <p role="alert" className="px-3 py-2 text-xs text-red-500">
           {error}
         </p>
+      )}
+      {restrictedView && (
+        <RestrictedNodeDialog
+          node={restrictedView}
+          owner={workspace ? workspace.role === "owner" : ws.rootRole === "owner"}
+          onClose={() => setRestrictedView(null)}
+          onTookOver={() => {
+            setRestrictedView(null);
+            enter(restrictedView.id);
+          }}
+        />
       )}
     </div>
   );
