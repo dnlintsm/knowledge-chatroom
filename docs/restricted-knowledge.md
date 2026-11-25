@@ -62,7 +62,7 @@ can open it, and makes the boundary hold for Owners and Admins too.
 
 | | Can open it (a role there) | A grant only below it | Owner or Admin without a role | Other members |
 | --- | --- | --- | --- | --- |
-| The node in the tree | ✓ with a lock mark | Its name, as the path to what they can open | Its name, with a lock and no file count | ✗ hidden |
+| The node in the tree | ✓ with a lock mark | Its name, as the path to what they can open | Its name and the path to it, with a lock and no file count | ✗ hidden |
 | Its files, Experiments, search hits, proposals | ✓ | Only below, where their grant is | ✗ | ✗ |
 | Who has access (names, roles, sources) | With Full access there | ✗ | ✓ names and roles only | ✗ |
 | Nodes below it | As their roles allow | The path to their grant | ✗ | ✗ |
@@ -105,12 +105,16 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
 - `nodes.restricted boolean NOT NULL DEFAULT false`, with `restricted_at` and `restricted_by`.
 - `effective_role`, `path_role` and `sees_path` only count grants on nodes at or below the
   nearest restricted node on the target's path, and root grants only when there is none.
-  `sees_path` also returns true for an Owner or Admin on a restricted node itself (the name
-  only: file and Experiment policies use `effective_role`, which doesn't change for them).
-- A check on adding group members (in `AccessService.set_member`, and a trigger as the safety
-  net) for decision 7.
-- A trigger refuses removing the last direct Full access grant on a restricted node
-  (decision 6), except when the grant goes with a departing member's other grants.
+  `sees_path` also returns true for an Owner or Admin on a restricted node and the path to it
+  (the names only: file and Experiment policies use `effective_role`, which doesn't change
+  for them).
+- A check on adding group members (`AccessService.set_member`) for decision 7.
+- Revoking or lowering grants (`AccessService.revoke`, `set_grant`) refuses taking away the
+  last Full access grant on a restricted node (decision 6). A departing member's grants still
+  go with them.
+- A trigger refuses changing `restricted` for anyone without Full access on the node, as a
+  safety net under the routes' own check.
+- `grants.takeover` marks a grant an Owner gave themselves by taking over (decision 8).
 
 ## Contract changes
 
