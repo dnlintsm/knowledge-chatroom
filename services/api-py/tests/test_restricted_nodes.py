@@ -257,6 +257,18 @@ async def test_owners_and_admins_manage_around_it(api):
     assert [(p["user"]["name"], p["role"], p["sources"]) for p in who.json()["people"]] == [
         ("Alice", "owner", [])
     ]
+    # Nor does the audit log show what's in it: file paths there are redacted for him.
+    await api.put(f"/files/plan.md?node={secret}", headers=ALICE, content=b"plan")
+    [wrote] = [
+        e["target"]
+        for e in (await api.get("/access/audit?kind=file", headers=BOB)).json()["entries"]
+        if e["target"].get("node") == secret
+    ][:1]
+    assert wrote.get("redacted") is True and "path" not in wrote
+    written = (await api.get("/access/audit?kind=file", headers=ALICE)).json()["entries"]
+    assert next(e for e in written if e["target"].get("node") == secret)["target"]["path"] == (
+        "plan.md"
+    )
     # A member without access sees nothing of it.
     assert "Secret" not in await tree(api, CAROL)
     assert (await api.get(f"/nodes/{secret}/access", headers=CAROL)).status_code == 404

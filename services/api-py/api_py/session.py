@@ -49,6 +49,8 @@ NOT_A_MEMBER = "They aren't a member of this workspace; add them to it first"
 EMPTY_LEVEL_NAME = "None"
 # What an audit target says about content, hidden from a reader who can't see it.
 _AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "inputs", "note"})
+# The fields that name the node itself (create, rename), not something in it.
+_AUDIT_NODE_NAMES = frozenset({"name", "to"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
 # For decide: the reviewer didn't say which version of the file they compared with.
@@ -1473,7 +1475,11 @@ class Session:
                 node = target.get("node")
                 if "node" not in target or not (node is None or isinstance(node, str)):
                     return True
-                key = ("node", node)
+                # A node's own name shows wherever the tree shows the node; anything in
+                # it (file paths, notes) needs a role there. An Owner or Admin sees a
+                # restricted node's name, never what's in it.
+                names_only = _AUDIT_CONTENT.intersection(target) <= _AUDIT_NODE_NAMES
+                key = ("node-name" if names_only else "node", node)
             if key not in seen:
                 user = self.principal.user_id
                 if key[0] == "experiment":
@@ -1481,8 +1487,10 @@ class Session:
                     seen[key] = found is not None
                 elif key[1] is None:
                     seen[key] = await self.role(None) is not None
-                else:
+                elif key[0] == "node-name":
                     seen[key] = await self.access.sees_node(user, key[1])
+                else:
+                    seen[key] = await self.role(key[1]) is not None
             return seen[key]
 
         for entry in entries:
