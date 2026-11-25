@@ -4235,11 +4235,25 @@ components:
       allOf:
         - $ref: "#/components/schemas/KnowledgeNode"
         - type: object
-          required: [role]
+          required: [role, takenOver]
           properties:
             role:
               description: The user's role; null for a node shown only because something below it is visible (its fileCount is then 0).
               $ref: "#/components/schemas/RoleOrNull"
+            takenOver:
+              description: >-
+                On a restricted node the user can open, the latest Owner takeover there; else
+                null.
+              oneOf:
+                - $ref: "#/components/schemas/Takeover"
+                - type: "null"
+
+    Takeover:
+      type: object
+      required: [user, at]
+      properties:
+        user: { $ref: "#/components/schemas/Collaborator" }
+        at: { $ref: "#/components/schemas/Timestamp" }
 
     Tree:
       type: object

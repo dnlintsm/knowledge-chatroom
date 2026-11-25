@@ -198,19 +198,6 @@ class NamedNode(BaseModel):
     name: str
 
 
-class VisibleNode(KnowledgeNode):
-    role: RoleOrNull
-    """
-    The user's role; null for a node shown only because something below it is visible (its fileCount is then 0).
-    """
-
-
-class Tree(BaseModel):
-    types: list[NodeType]
-    rootRole: RoleOrNull
-    nodes: list[VisibleNode]
-
-
 ExperimentStatus = TypeAliasType("ExperimentStatus", Literal["draft", "shared", "archived"])
 """
 Who sees it. A draft only its maintainer and collaborators; shared or archived everyone who can view its node.
@@ -1833,6 +1820,11 @@ class Restriction(BaseModel):
     """
 
 
+class Takeover(BaseModel):
+    user: Collaborator
+    at: Timestamp
+
+
 class Experiment(BaseModel):
     id: str
     nodeId: str | None
@@ -1992,6 +1984,23 @@ class PlatformWorkspace(BaseModel):
     `fullAccess` when not.
 
     """
+
+
+class VisibleNode(KnowledgeNode):
+    role: RoleOrNull
+    """
+    The user's role; null for a node shown only because something below it is visible (its fileCount is then 0).
+    """
+    takenOver: Takeover | None
+    """
+    On a restricted node the user can open, the latest Owner takeover there; else null.
+    """
+
+
+class Tree(BaseModel):
+    types: list[NodeType]
+    rootRole: RoleOrNull
+    nodes: list[VisibleNode]
 
 
 class ListPlatformWorkspacesResponse(BaseModel):

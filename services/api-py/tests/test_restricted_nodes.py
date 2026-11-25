@@ -300,6 +300,11 @@ async def test_owners_and_admins_manage_around_it(api):
     alice = next(p for p in took.json()["people"] if p["user"]["name"] == "Alice")
     assert alice["role"] == "owner" and alice["sources"][0]["takeover"] is True
     assert (await reads(api, secret, ALICE)).content == b"secret"
+    # Everyone who can open it sees the takeover; an Admin who can't, doesn't.
+    taken = (await tree(api, CAROL))["Secret"]["takenOver"]
+    assert taken["user"] == {"id": ids["Alice"], "name": "Alice"} and taken["at"].endswith("Z")
+    assert (await tree(api, BOB))["Secret"]["takenOver"] is None
+    assert (await tree(api, ALICE))["Etch"]["takenOver"] is None
     entries = (await api.get("/access/audit?kind=node", headers=ALICE)).json()["entries"]
     assert entries[0]["action"] == "node.takeover" and entries[0]["target"] == {"node": secret}
     # Only a restricted node is taken over.

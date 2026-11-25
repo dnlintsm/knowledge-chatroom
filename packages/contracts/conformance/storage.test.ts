@@ -311,6 +311,8 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", `${at}/access`, { headers: bob, expect: 404 });
     await call("GET", `${at}/restriction`, { headers: storageToken("conformance|alice"), expect: 403 });
     await call("POST", `${at}/takeover`, { headers: alice, expect: 200 });
+    const tree = (await call<Schema["Tree"]>("GET", "/nodes", { headers: alice, expect: 200 })).data;
+    assert.equal(tree.nodes.find((n) => n.id === secret.id)?.takenOver?.user.id, aliceId);
     await call("POST", `/nodes/${tech.id}/takeover`, { headers: alice, expect: 400 });
     await call("PUT", `${at}/restriction`, { headers: alice, json: { restricted: false }, expect: 200 });
     await call("DELETE", at, { headers: alice, expect: 200 });

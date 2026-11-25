@@ -2163,6 +2163,12 @@ export interface components {
         VisibleNode: components["schemas"]["KnowledgeNode"] & {
             /** @description The user's role; null for a node shown only because something below it is visible (its fileCount is then 0). */
             role: components["schemas"]["RoleOrNull"];
+            /** @description On a restricted node the user can open, the latest Owner takeover there; else null. */
+            takenOver: components["schemas"]["Takeover"] | null;
+        };
+        Takeover: {
+            user: components["schemas"]["Collaborator"];
+            at: components["schemas"]["Timestamp"];
         };
         Tree: {
             types: components["schemas"]["NodeType"][];

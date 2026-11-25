@@ -148,13 +148,41 @@ class Session:
             while current and current["id"] not in shown:
                 shown.add(current["id"])
                 current = by_id.get(current["parentId"] or "")
+        taken = await self._takeovers() if any(n["restricted"] for n in every) else {}
         visible = []
         for node in every:
             if node["id"] not in shown:
                 continue
             role = roles.get(node["id"])
-            visible.append({**node, "role": role, "fileCount": node["fileCount"] if role else 0})
+            visible.append(
+                {
+                    **node,
+                    "role": role,
+                    "fileCount": node["fileCount"] if role else 0,
+                    # Shown to everyone who can open it (docs/restricted-knowledge.md, decision 8).
+                    "takenOver": taken.get(node["id"]) if role else None,
+                }
+            )
         return {"types": levels, "rootRole": root_role, "nodes": visible}
+
+    async def _takeovers(self) -> dict[str, dict[str, Any]]:
+        """The latest takeover on each restricted node: who, and when."""
+        async with self.storage.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT DISTINCT ON (g.node_id) g.node_id, u.id, u.name, g.created_at
+                FROM grants g
+                JOIN nodes n ON n.id = g.node_id AND n.restricted
+                JOIN users u ON u.id = g.principal_id
+                WHERE g.workspace_id = %s AND g.takeover AND g.principal_type = 'user'
+                ORDER BY g.node_id, g.created_at DESC""",
+                (self.ws,),
+            )
+            rows = await cur.fetchall()
+        return {
+            str(node): {"user": {"id": str(uid), "name": name}, "at": iso(at)}
+            for node, uid, name, at in rows
+        }
 
     async def lineage(self, node_id: str) -> list[dict[str, Any]]:
         await self.need(node_id, "viewer")

@@ -164,7 +164,8 @@ member list. The Sharing panel shows it under the grants made here, as "Who has 
 ## Contract changes
 
 - `VisibleNode` gains `restricted` (boolean) and, for Owners and Admins who can't open it,
-  `role: null` with `restricted: true`.
+  `role: null` with `restricted: true`. It also gains `takenOver` (who took it over, and
+  when), for people who can open it.
 - `GET /nodes/{id}/restriction`, `PUT /nodes/{id}/restriction`.
 - `POST /nodes/{id}/takeover` (Owners only).
 - `GET /nodes/{id}/access`.
