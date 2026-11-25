@@ -72,6 +72,18 @@ over, and adds "Import folder as Experiment".
    marked finished, so older clients still leave a record. Results typed into an Experiment
    before it ever ran become a finished Run 1, "Recorded by hand", when its first Run starts,
    so they aren't replaced by the new Run's.
+   **A finish ends the Run it was meant for, never a later one.** A finish whose answer was
+   lost may be retried after someone has started the next Run, so the old finish routes
+   decide which Run they end with the Experiment's row locked:
+   - `POST /experiments/{id}/finish` takes an optional `run` (the Run's id). With it, that Run
+     ends; if it already ended exactly so, the call is answered without change, and otherwise
+     it is refused. It never touches another Run.
+   - Without `run`, a finish that repeats how the caller's latest finished Run ended is a
+     retry of it, answered without change, while a newer Run keeps running. Otherwise it ends
+     the running Run only when the caller started it. A Run someone else started is left
+     running, and the call answers 409 with `running` naming it.
+   - A `PATCH` of the state to done or failed follows the same rule, and
+     `POST /runs/{id}/finish` always names its Run.
 10. **Claude starts and finishes Runs.** `create_experiment` (a new Experiment with Run 1)
     stays. `start_run` starts another Run in an Experiment the user can work on, and
     `finish_run` records its results. `set_experiment_results` stays as an alias for a release,
@@ -96,7 +108,11 @@ over, and adds "Import folder as Experiment".
   content to whoever can see the destination. The preview says so, and names the node.
 - **Copy by default.** The Experiment's files share the folder's stored bytes and start a new
   history, so the folder stays as it was. **Move** (needs Can edit where the folder is) also
-  deletes the folder's files afterwards, in the same transaction, so their history stays.
+  deletes the files it imported, in the same transaction, so their history stays. It deletes
+  only those: a file the preview listed as left out (too large, or a type storage refuses)
+  stays in the folder. A file that changed after the folder was listed stops the whole
+  import (412, `changed`), so nothing is imported or deleted and the preview can be read
+  again.
 - **An optional pointer**: a `EXPERIMENT.md` in the source folder that links to the new
   Experiment. It needs Can edit where the folder is; without it, the checkbox is off and says
   why. The pointer is an ordinary file and names only the Experiment's title and link, so
@@ -157,8 +173,12 @@ Experiment's events, followed by the Experiment's own update event.
   marked as taken at migration; a running one finishes as Run 1; a rerun chain stays separate
   Experiments with `rerun_of` mapped to Run 1 ids; old links (`/?experiment_id=`) open.
 - The deprecated routes and `set_experiment_results` still work and act on the latest Run.
-- Import: preview changes nothing; copy keeps the folder; move removes it and keeps its
-  history; pointer needs Can edit; a viewer at the source can copy to where they can view;
+- A retry of Run 1's finish through `POST /experiments/{id}/finish`, after a collaborator
+  starts Run 2, leaves Run 2 running with no results; a different finish naming no Run gets
+  409 with `running: 2`; naming Run 2 ends it.
+- Import: preview changes nothing; copy keeps the folder; move removes what it imported and
+  keeps its history, while a file left out of a mixed folder (one too large) stays in it; a
+  file changed after the listing stops a move and leaves everything as it was; pointer needs Can edit; a viewer at the source can copy to where they can view;
   copying out of a restricted node needs Full access on it; limits as upload; agent tokens
   get 403.
 - E2E: start two Runs, compare them, archive one; import a folder with the preview.
