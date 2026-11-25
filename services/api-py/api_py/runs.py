@@ -239,11 +239,12 @@ async def add_finished(
     results: dict[str, Any],
     state: str,
     provenance: dict[str, Any],
+    label: str = "",
 ) -> str:
     """
     A Run that starts and ends at once: an Experiment marked done or failed
-    through the routes that predate Runs, with none running. Its record is
-    taken now.
+    through the routes that predate Runs, with none running, or results
+    recorded by hand before its first Run. Its record is taken now.
     """
     cur = await conn.execute(
         "SELECT coalesce(max(number), 0) + 1 FROM runs WHERE experiment_id = %s", (experiment_id,)
@@ -252,14 +253,15 @@ async def add_finished(
     run_id = str(uuid.uuid4())
     await conn.execute(
         """
-        INSERT INTO runs (id, workspace_id, experiment_id, number, params, results, state, provenance,
-                          started_by, finished_at, record, record_taken)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), experiment_file_record(%s), 'finish')""",
+        INSERT INTO runs (id, workspace_id, experiment_id, number, label, params, results, state,
+                          provenance, started_by, finished_at, record, record_taken)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), experiment_file_record(%s), 'finish')""",
         (
             run_id,
             workspace_id,
             experiment_id,
             number,
+            label,
             Jsonb(params),
             Jsonb(results),
             state,
@@ -269,6 +271,18 @@ async def add_finished(
         ),
     )
     return run_id
+
+
+BY_HAND = "Recorded by hand"
+
+
+async def ever_ran(conn: AsyncConnection, experiment_id: str) -> bool:
+    """Whether the Experiment has had a Run, deleted ones included."""
+    cur = await conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM runs WHERE experiment_id = %s)", (experiment_id,)
+    )
+    row = await cur.fetchone()
+    return bool(row and row[0])
 
 
 async def add_inputs(

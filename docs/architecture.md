@@ -250,7 +250,9 @@ record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
 - For one release the routes before Runs (`POST /experiments/runs`, `/finish`, `/reads`,
   `/inputs`) keep working on the Experiment's latest Run, and an Experiment's `state`, `results`
   and `provenance` mirror its latest live Run's. A `PATCH` to done or failed with no running Run,
-  and an upload marked finished, add a finished Run.
+  and an upload marked finished, add a finished Run. Results typed into an Experiment before
+  it ever ran become a finished Run 1, labelled "Recorded by hand", when its first Run starts,
+  so the new Run doesn't replace them.
 - Run changes reach the event stream as `{op: "run", change, id, experiment, node}`, followed
   by the Experiment's update event, for whoever can see the Experiment.
 

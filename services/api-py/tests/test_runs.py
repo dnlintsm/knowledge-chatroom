@@ -465,3 +465,33 @@ async def test_moving_todays_records_over(before):
     assert await _one(conn, "SELECT count(*) FROM experiments") == 4
     # Running it again adds nothing.
     assert await _one(conn, "SELECT runs_backfill()") == 0
+
+
+@needs_services
+async def test_results_recorded_by_hand_become_run_1_when_a_run_starts(either):
+    api = either
+    exp = (await experiment(api, results={"yield": 0.5}))["id"]
+    # Recorded by hand, before anything ran: the Experiment has them, and no Run.
+    assert await runs_of(api, exp) == []
+    assert (await api.get(f"/experiments/{exp}", headers=ALICE)).json()["results"] == {"yield": 0.5}
+
+    run = await start(api, exp)
+    # Starting a run doesn't drop them: they are kept as a finished Run 1.
+    assert run["number"] == 2
+    (one,) = [r for r in await runs_of(api, exp) if r["number"] == 1]
+    assert (one["state"], one["results"], one["label"]) == (
+        "done",
+        {"yield": 0.5},
+        "Recorded by hand",
+    )
+    assert one["params"] == {"power": 300}
+
+    # Only the first time: once it has runs, results are theirs.
+    await finish(api, run["id"], {"yield": 0.7})
+    three = await start(api, exp)
+    assert three["number"] == 3
+    assert [r["number"] for r in await runs_of(api, exp)] == [3, 2, 1]
+
+    # Without hand-recorded results, the first run is Run 1.
+    bare = (await experiment(api))["id"]
+    assert (await start(api, bare))["number"] == 1

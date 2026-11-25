@@ -903,6 +903,20 @@ class Session:
             record["rerunOf"] = rerun_of
         async with self.scoped() as conn, conn.transaction():
             await experiments.lock_live_experiment(conn, self.ws, experiment_id, update=True)
+            # Results typed in before anything ran are kept as Run 1, not
+            # replaced by the new Run's.
+            if experiment["results"] and not await runs.ever_ran(conn, experiment_id):
+                await runs.add_finished(
+                    conn,
+                    self.ws,
+                    experiment_id,
+                    experiment["maintainerId"],
+                    experiment["params"],
+                    experiment["results"],
+                    "done",
+                    experiment["provenance"],
+                    label=runs.BY_HAND,
+                )
             if links:
                 await experiments.link_inputs(conn, self.ws, experiment_id, links)
             run_id = await runs.start(
