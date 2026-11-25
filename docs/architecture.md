@@ -273,7 +273,11 @@ record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
   `?preview` answers what it would do. **Move** also deletes the folder's files, and a
   **pointer** leaves an `EXPERIMENT.md` there naming the Experiment; both need edit access
   where the folder is. A folder in a restricted node imported to outside it needs Full access
-  on that node. Storage tokens can't import.
+  on that node. Storage tokens can't import. In Files, a folder's **Import as Experiment**
+  button opens the preview (`import-folder-dialog.tsx`): title, hypothesis, destination,
+  who sees it, the planned parameters, the files with their sizes and any left out, and a
+  note when a restriction travels; Move and the pointer are off, saying why, without edit
+  access. Importing moves you into the new Experiment.
 
 ### Actions
 
