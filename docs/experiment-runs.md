@@ -50,21 +50,26 @@ over, and adds "Import folder as Experiment".
 6. **A Run can be archived or deleted on its own.** Archiving hides it from Compare by default
    and keeps it readable. Deleting is a soft delete with Undo and **Recently deleted**, like an
    Experiment's (batch A), and nothing is purged. Both are audited (`run.archive`,
-   `run.delete`, `run.restore`). Deleting the last Run leaves the Experiment with none.
+   `run.delete`, `run.restore`). A running Run can't be deleted (409): finish it first.
+   Deleting the last Run leaves the Experiment with none.
 7. **Moving today's records over keeps every id and link working.** Each Experiment stays,
-   with the same id. One that ran (state running, done or failed, provenance recorded, or a
-   `report.md`) gets Run 1 holding its parameters, results, state, provenance and Rules reads.
+   with the same id. One whose state is running, done or failed gets Run 1 holding its
+   parameters, results, state, provenance and Rules reads. One that is still ready has no Run,
+   even with a `report.md`, since nothing says it ran.
    A finished one's file record is taken at migration and marked so ("recorded when runs
    were split, not at finish"), since nobody knows what changed after it finished. A running
-   one keeps running as Run 1. `rerun_of` points at the old Experiment's Run 1.
+   one keeps running as Run 1. A rerun's `rerunOf` keeps the old Experiment's id and adds its
+   Run 1 (`{id, run}`).
 8. **Rerun chains are not merged.** A `rerunOf` chain is evidence that one run followed
    another, not that they share a hypothesis (#267). Each Experiment in a chain stays its own,
    and its Run 1 says what it reran. Merging Experiments is not part of this batch.
 9. **The storage API names the Run.** New routes act on Runs (see below). The old run routes
    (`POST /experiments/runs`, `/experiments/{id}/finish`, `/reads`, `/inputs`) keep working
    for one release, acting on the Experiment's latest Run, and are marked deprecated in
-   `storage.yaml`. An Experiment's `results` and `state` fields stay for that release as its
-   latest Run's.
+   `storage.yaml`. An Experiment's `results`, `state` and `provenance` fields stay for that
+   release as its latest live Run's, and its `params` are its planned parameters. A `PATCH` of
+   its state to done or failed with no Run running adds a finished Run, and so does an upload
+   marked finished, so older clients still leave a record.
 10. **Claude starts and finishes Runs.** `create_experiment` (a new Experiment with Run 1)
     stays. `start_run` starts another Run in an Experiment the user can work on, and
     `finish_run` records its results. `set_experiment_results` stays as an alias for a release,
@@ -107,10 +112,10 @@ over, and adds "Import folder as Experiment".
 | Route | Does |
 | --- | --- |
 | `GET /experiments/{id}/runs` | Its Runs, newest first (`?archived=1`, `?deleted=1`). |
-| `POST /experiments/{id}/runs` | Starts a Run: `{label?, params?, inputs?, provenance?}`. 409 while one is running. |
+| `POST /experiments/{id}/runs` | Starts a Run: `{label?, params?, inputs?, provenance?}`. 409 while one is running, with the `running` Run's number. |
 | `GET /runs/{id}` | One Run. |
 | `POST /runs/{id}/finish` | `{results, state}`; the record is taken here. |
-| `POST /runs/{id}/rerun` | `{experiment?}`: in the same Experiment (needs work access there), or `null` for a new one of yours. |
+| `POST /runs/{id}/rerun` | `{experiment?}`: the Run's own Experiment for another Run there (needs work access), or `null` or nothing for a new one of yours. Any other Experiment is a 400. |
 | `PATCH /runs/{id}` | `{label?, archived?}`. |
 | `DELETE /runs/{id}`, `POST /runs/{id}/restore` | Soft delete and undo. |
 | `GET /runs/{id}/reads` | The Rules reads, as today's `/experiments/{id}/reads`. |
@@ -118,8 +123,9 @@ over, and adds "Import folder as Experiment".
 | `GET /runs?node=&descendants=&experiment=` | Runs to compare, with each one's Experiment. |
 | `POST /experiments/import` | Import a folder (above). |
 
-`RunEvent` (`op: "run"`, `change: create | finish | archive | delete | restore`) joins the
-event stream, with the same audience as its Experiment's events.
+`RunEvent` (`op: "run"`, `change: create | finish | update | archive | delete | restore`, with
+the Experiment's id and node) joins the event stream, with the same audience as its
+Experiment's events, followed by the Experiment's own update event.
 
 ## Screens
 
