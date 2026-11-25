@@ -35,6 +35,11 @@ can open it, and makes the boundary hold for Owners and Admins too.
 5. **Turning it on never locks out the person doing it.** It needs Full access on the node.
    The same transaction gives them an explicit Full access grant on it, and keeps anyone else
    they pick from the preview at their current role.
+   - **Nobody is kept unless picked.** Each "Keep access" box in the preview starts
+     unchecked. Ticking one creates an explicit grant on the node at that person's current
+     role, so it is a deliberate choice each time.
+   - With no box ticked, access from above stops at the node. Grants on the node or below it
+     still apply, and the person turning it on keeps Full access.
 6. **A restricted node always has someone with Full access.** Removing the last direct Full
    access grant on a restricted node is refused. If that person leaves the workspace, an Owner
    can take it over (decision 8).
@@ -64,13 +69,32 @@ can open it, and makes the boundary hold for Owners and Admins too.
     changes: not the node, not its restricted descendants, not any of their files. The check
     runs with the database owner's rights before anything is deleted, so it holds the same
     with row security on or off. It names no restricted node the caller can't see.
-11. **Proposals follow current access, for their author too.** A proposal is visible only to
-    people who can view its node now. Today its author always sees their own, wherever it
-    is; that exception goes, in the app's query and in row security alike. An author who
-    loses their last grant on the node (because it was restricted, or a grant was revoked)
-    no longer finds it in proposal listings; reading it, or its content, answers 404; and
-    proposal events about it stop reaching them. Withdrawing it needs that access too.
-    Someone who can view the node still sees it and can decide it as before.
+    - **A delete and a concurrent restriction change are ordered by row locks.** The delete
+      locks every live node in the subtree (`FOR UPDATE`) before it checks. Turning
+      restriction on or off locks the node it changes. Whichever commits first decides.
+    - If the restriction commits first, the delete waits for that lock, then checks again
+      with the restriction in place. Without Full access there, it is refused and the whole
+      subtree stays intact.
+    - If the delete commits first, the restriction change finds the node gone (404).
+11. **Proposals follow current access, for their author too.** Today its author always sees
+    their own proposal, wherever it is. That exception goes, in the app's query and in row
+    security alike. Three permissions, each on the proposal's node now:
+
+    | To | Needs | Row security |
+    | --- | --- | --- |
+    | Read it, list it, read its content, hear its events | Can view | `proposals_read` |
+    | Withdraw it (open only) | Its author, with Can view | `proposals_change`, author branch |
+    | Accept or reject it | Can edit or Full access | `proposals_change`, decider branch |
+
+    `proposals_change` keeps its author branch, with Can view added to it, so a viewer can
+    still withdraw their own open proposal with row security on. An author who loses their
+    last grant on the node (because it was restricted, or a grant was revoked):
+    - no longer finds it in proposal listings;
+    - gets 404 for reading it, or its content, and for withdrawing it;
+    - stops receiving proposal events about it.
+
+    Someone who can view the node still sees it, and someone with Can edit decides it, as
+    before.
 
 ## Who sees what
 
@@ -132,8 +156,9 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
 - `delete_blocked(ws, user, path)`, a security-definer function that says whether a
   restricted node below `path` lacks the user's Full access; `nodes.remove` asks it first,
   under the node's row lock (decision 10).
-- The proposal query, the `proposals_read` and `proposals_change` policies, and the
-  proposal event filter drop the author exception (decision 11).
+- The proposal query, `proposals_read` and the proposal event filter drop the author
+  exception. `proposals_change` keeps its author branch for withdrawing, with Can view
+  added to it (decision 11).
 
 ## Contract changes
 
@@ -170,9 +195,10 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
   events, Claude's `read_file` and `search`, and row security with the app's check skipped.
 - Visibility: other members don't see the node or a link to it (404); someone with a grant
   below sees only the path; an Admin sees its name, lock and who has access, but no files.
-- Turning it on: the preview lists who loses access and through what; keeping someone gives
-  them their role there; the caller keeps Full access; refusing it without Full access; agent
-  tokens get 403.
+- Turning it on: the preview lists who loses access and through what; with no one kept,
+  inherited access stops, grants on the node or below still work, and the caller keeps Full
+  access; keeping someone gives them their role there; refusing it without Full access; agent
+  tokens get 403. The Sharing E2E restricts with every box left unchecked.
 - Admins: adding someone to a group with a grant inside a restricted node is refused without
   Full access there, and allowed with it; a sub-group counts; removing members still works;
   an Admin can't take over, an Owner can, and it is audited and shown.
@@ -182,12 +208,15 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
   caller has Full access on a parent only, and a child below it is restricted without them.
   Deleting the parent answers 403, and the parent, the restricted child and the files in
   both are all still there, for the caller and for the child's own people. With Full access
-  on the child too, the same delete goes through.
+  on the child too, the same delete goes through. A race: the child is restricted in a
+  transaction still open when the delete starts; the delete waits, then answers 403 with
+  the subtree intact.
 - A former proposal author (decision 11), with row security on and with it off: Bob
   proposes a change in a node, then the node is restricted without him. The proposal is
   gone from his `GET /proposals`, `GET /proposals/{id}` and its content answer 404, and a
   later event about it (a decision) doesn't reach him. Someone with access there still sees
-  it and decides it.
+  it and decides it. Withdrawing: before losing access, Bob, a viewer, withdraws one of his
+  open proposals; after, withdrawing another answers 404 and it stays open.
 - E2E: restrict a node from Sharing with the preview, see the lock, and see another member
   lose it from their tree.
 
@@ -201,9 +230,6 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
 
 ## Open points for review
 
-- **Keep checkboxes default.** This spec leaves everyone unchecked, so restricting means
-  restricting. The other option is everyone checked, which makes the switch safe but easy to
-  turn on without changing who can open it.
 - **Owners and Admins seeing the name.** This spec shows them the name and who has access,
   so they can manage the workspace and find a node to take over. The stricter option hides
   restricted nodes from them too, and lists only "N restricted nodes" for takeover.
