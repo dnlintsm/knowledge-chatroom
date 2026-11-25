@@ -59,6 +59,21 @@ RUN_INPUTS_DIR = "run-inputs"
 LIST_CONCURRENCY = 8
 DOWNLOAD_CONCURRENCY = 8
 MB = 1024 * 1024
+# What Claude Code reads as instructions or settings wherever it finds it under
+# the folder it works in: memory files, MCP servers, and a .claude folder's
+# settings, skills and commands. In the copy these would be a member's file
+# (or a node's name) speaking as this server, so they are left out. Compared
+# without case: some file systems find CLAUDE.md under any spelling.
+INSTRUCTION_FILES = frozenset({"claude.md", "claude.local.md", ".mcp.json"})
+INSTRUCTION_FOLDERS = frozenset({".claude"})
+
+
+def read_as_instructions(rel: str) -> bool:
+    """Whether Claude Code would take the file at `rel` (a path in the copy) for its own instructions."""
+    *folders, name = rel.lower().split("/")
+    return name in INSTRUCTION_FILES or any(folder in INSTRUCTION_FOLDERS for folder in folders)
+
+
 # Read, Glob and Grep run outside the sandbox: they may only look inside the run folder.
 CONFINED_TOOLS = ("Read", "Glob", "Grep")
 _UNSAFE = re.compile(r"[/\\\x00-\x1f]")
@@ -349,6 +364,11 @@ async def _sync(storage: Storage, cwd: Path, limits: Limits) -> Summary:
             rel = f"{folder}/{info['path']}"
             if info["path"].split("/")[0] in children:
                 summary.skipped.append({"path": rel, "reason": "a child node has this name"})
+                continue
+            if read_as_instructions(rel):
+                summary.skipped.append(
+                    {"path": rel, "reason": "Claude Code reads files of this name as instructions"}
+                )
                 continue
             wanted[rel] = _Wanted(rel, info["sha256"], info["size"], info["path"], params)
 

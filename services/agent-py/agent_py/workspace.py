@@ -108,6 +108,8 @@ class WorkspaceError(Exception):
 
 # Seconds one call to the storage API may take.
 STORAGE_TIMEOUT = 60
+# The largest file save_file sends: api-py's default cap on one upload (MAX_UPLOAD_BYTES).
+MAX_SAVE_BYTES = 50 * 1024 * 1024
 
 
 @dataclass
@@ -1024,6 +1026,9 @@ def file_tools(
             return error("Skills can't be saved from here.")
         if not source.is_file():
             return error(f"No file at {given} in the working folder.")
+        # Checked before it is read: the whole file is held in memory to send it.
+        if source.stat().st_size > MAX_SAVE_BYTES:
+            return error(f"{given} is larger than {MAX_SAVE_BYTES // (1024 * 1024)} MB.")
         return await store(s, args["path"], source.read_bytes(), args)
 
     return [
