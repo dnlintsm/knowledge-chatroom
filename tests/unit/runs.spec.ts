@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   ALL_EXPERIMENTS,
+  deletedDetail,
   experimentFromSearch,
   experimentsIn,
   findReport,
@@ -11,7 +12,7 @@ import {
   searchWithListScope,
   shownScope,
 } from "../../apps/web/src/components/workspace/runs";
-import type { Experiment, KnowledgeNode } from "../../apps/web/src/components/workspace/server-files";
+import type { DeletedExperiment, Experiment, KnowledgeNode } from "../../apps/web/src/components/workspace/server-files";
 
 /** Runs are experiments (apps/web/src/components/workspace/runs.ts), no browser needed. */
 
@@ -91,4 +92,33 @@ test("a scope shows a node's experiments, with or without its sub-levels", () =>
   expect(ids({ node: "gone", descendants: true })).toEqual(["r-root", "r-tech", "r-loop"]);
   expect(shownScope({ node: "gone", descendants: false }, nodes)).toEqual(ALL_EXPERIMENTS);
   expect(shownScope({ node: "loop", descendants: false }, nodes)).toEqual({ node: "loop", descendants: false });
+});
+
+test("Recently deleted says where one was, who deleted it, and why it can't come back", () => {
+  const gone = (over: Partial<DeletedExperiment>) =>
+    ({
+      id: "e1",
+      title: "Etch rate",
+      mine: true,
+      fileCount: 3,
+      restorable: true,
+      maintainerIsMember: true,
+      maintainerName: "Bob",
+      deletedAt: "2026-11-24T09:00:00Z",
+      deletedBy: { id: "u1", name: "Alice" },
+      ...over,
+    }) as DeletedExperiment;
+  expect(deletedDetail(gone({}), "Etch")).toEqual({ detail: "in Etch · deleted by you · 3 files", note: null });
+  expect(deletedDetail(gone({ mine: false, fileCount: 1 }), "the workspace").detail).toBe(
+    "in the workspace · deleted by Alice · 1 file",
+  );
+  // Deleted with its node: nobody is named, and it stays deleted.
+  expect(deletedDetail(gone({ deletedBy: null, restorable: false }), "its node")).toEqual({
+    detail: "3 files",
+    note: "Its place was deleted",
+  });
+  // An Owner or Admin restoring a departed maintainer's becomes its maintainer.
+  expect(deletedDetail(gone({ mine: false, maintainerIsMember: false }), "Etch").note).toBe(
+    "Bob left; restoring makes it yours",
+  );
 });

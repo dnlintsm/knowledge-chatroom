@@ -35,6 +35,7 @@ import {
   decideProposal as decideServerProposal,
   addServerRunInputs,
   deleteServerExperiment,
+  restoreServerExperiment,
   deleteServerFile,
   deleteServerNode,
   changeServerExperimentPeople,
@@ -238,6 +239,11 @@ interface WorkspaceValue {
    */
   changeExperimentPeople: (id: string, change: ExperimentPeopleChange) => Promise<Experiment | null>;
   deleteExperiment: (id: string) => Promise<void>;
+  /**
+   * Brings back experiment `id`, deleted, with the files deleted with it, and
+   * moves into it with `enter`. Throws with the server's reason.
+   */
+  restoreExperiment: (id: string, enter?: boolean) => Promise<Experiment>;
   /**
    * Adds files of experiment `id` (by path) as its run inputs:
    * copies under inputs/, recorded in its provenance. Throws with a message.
@@ -922,6 +928,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [experiments, enterNode, refreshExperiments],
   );
+  const restoreExperiment = useCallback(
+    async (id: string, enter = false) => {
+      const restored = await restoreServerExperiment(id);
+      await refreshExperiments();
+      if (enter) await enterExperiment(id);
+      return restored;
+    },
+    [refreshExperiments, enterExperiment],
+  );
 
   const decideProposal = useCallback<WorkspaceValue["decideProposal"]>(
     async (id, decision, reviewed) => {
@@ -1063,6 +1078,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       updateExperiment,
       changeExperimentPeople,
       deleteExperiment,
+      restoreExperiment,
       addRunInputs,
       proposals,
       decideProposal,
@@ -1072,7 +1088,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     state, selection, openCount, reveal, setSelection, getFile, serverHash, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, storageDown, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment,
-    updateExperiment, changeExperimentPeople, deleteExperiment, addRunInputs, proposals, decideProposal, promote,
+    updateExperiment, changeExperimentPeople, deleteExperiment, restoreExperiment, addRunInputs, proposals, decideProposal,
+    promote,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

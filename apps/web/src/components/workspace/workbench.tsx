@@ -64,19 +64,28 @@ export interface Workbench {
     /** Shows the chat and puts the cursor in its input. */
     focus(): void;
   };
-  notify(message: string, level?: NoticeLevel): void;
+  /** Shows a notice for a few seconds; `action` adds a button to it (Undo), which also dismisses it. */
+  notify(message: string, level?: NoticeLevel, action?: NoticeAction): void;
 }
 
 export type NoticeLevel = "info" | "success" | "warning" | "error";
+
+export interface NoticeAction {
+  label: string;
+  run(): void;
+}
 
 interface Notice {
   id: number;
   message: string;
   level: NoticeLevel;
+  action?: NoticeAction;
 }
 
 const LAYOUT_KEY = "knowledge-chatroom.layout.v1";
 const NOTICE_MS = 5_000;
+/** A notice with a button stays longer, so there is time to reach it. */
+const ACTION_NOTICE_MS = 8_000;
 export const CHAT_INPUT_SELECTOR = '[data-pane="chat"] textarea';
 
 const WorkbenchContext = createContext<Workbench | null>(null);
@@ -122,10 +131,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const nextNotice = useRef(0);
   const dismiss = useCallback((id: number) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback(
-    (message: string, level: NoticeLevel = "info") => {
+    (message: string, level: NoticeLevel = "info", action?: NoticeAction) => {
       const id = ++nextNotice.current;
-      setNotices((n) => [...n.filter((x) => x.message !== message), { id, message, level }]);
-      setTimeout(() => dismiss(id), NOTICE_MS);
+      setNotices((n) => [...n.filter((x) => x.message !== message), { id, message, level, action }]);
+      setTimeout(() => dismiss(id), action ? ACTION_NOTICE_MS : NOTICE_MS);
     },
     [dismiss],
   );
@@ -278,7 +287,7 @@ function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: nu
       data-testid="notices"
       className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2 max-lg:bottom-20"
     >
-      {notices.map(({ id, message, level }) => {
+      {notices.map(({ id, message, level, action }) => {
         const Icon = NOTICE_ICONS[level];
         return (
           <div
@@ -296,6 +305,18 @@ function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: nu
               )}
             />
             <span className="min-w-0 flex-1">{message}</span>
+            {action && (
+              <button
+                type="button"
+                onClick={() => {
+                  onDismiss(id);
+                  action.run();
+                }}
+                className="shrink-0 rounded px-1 font-medium text-brand-text hover:underline cursor-pointer"
+              >
+                {action.label}
+              </button>
+            )}
             <button
               type="button"
               aria-label="Dismiss"

@@ -36,6 +36,7 @@ import {
 import { useWorkspace } from "./store";
 import { isTextFile, REVIEW_TAB } from "./types";
 import { uploadFiles } from "./upload";
+import { useWorkbench } from "./workbench";
 
 const STATUS_LABEL: Record<ExperimentStatus, string> = {
   draft: "Draft",
@@ -98,6 +99,7 @@ export function placeName(nodes: KnowledgeNode[], nodeId: string | null) {
  */
 export function ExperimentPanel() {
   const ws = useWorkspace();
+  const { notify } = useWorkbench();
   const exp = ws.experiment;
   const [error, setError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
@@ -130,13 +132,22 @@ export function ExperimentPanel() {
       setRerunning(false);
     }
   };
+  // No confirmation: the notice offers Undo, and Recently deleted keeps it after that.
   const remove = async () => {
-    if (!window.confirm(`Delete the experiment "${exp.title}" and its files?`)) return;
+    const { id, title } = exp;
     try {
-      await ws.deleteExperiment(exp.id);
+      await ws.deleteExperiment(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return;
     }
+    notify(`Deleted ${title}`, "info", {
+      label: "Undo",
+      run: () =>
+        void ws.restoreExperiment(id, true).catch((err: unknown) =>
+          notify(err instanceof Error ? err.message : String(err), "error"),
+        ),
+    });
   };
 
   return (
@@ -205,7 +216,7 @@ export function ExperimentPanel() {
                 <RotateCcw className="size-3.5" /> Restore
               </ActionButton>
             )}
-            <ActionButton onClick={remove} destructive>
+            <ActionButton onClick={() => void remove()} destructive>
               <Trash2 className="size-3.5" /> Delete
             </ActionButton>
               </>

@@ -352,6 +352,48 @@ test("an edited input says it differs from the record, and the recorded content 
   await expect(input).not.toContainText("differs");
 });
 
+test("a deleted experiment comes back with Undo, and later from Recently deleted", async ({ page, request }) => {
+  // Every test's experiments end up deleted, so this one's title is its own.
+  const title = `Etch to delete ${Date.now().toString(36)}`;
+  const run = await makeRun(request, title, { "report.md": "# Etch to delete\n\nKeep me.\n" });
+  await gotoRun(page, run, "Keep me.");
+  const location = page.getByRole("navigation", { name: "Location" });
+  const panel = page.getByTestId("experiment-panel");
+  const notice = page.getByTestId("notices").locator("[data-level]").filter({ hasText: `Deleted ${run.title}` });
+  const report = () => request.get(`/api/files/report.md?experiment=${run.id}`);
+
+  // No confirmation: the notice offers Undo instead.
+  await location.getByRole("button", { name: run.title }).click();
+  await panel.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(notice).toBeVisible();
+  await expect(page).not.toHaveURL(/experiment_id=/);
+  expect((await report()).status()).toBe(404);
+  await shot(page, "02g-run-deleted-undo");
+  await notice.getByRole("button", { name: "Undo" }).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`experiment_id=${run.id}$`));
+  await expect(location).toContainText(run.title);
+  expect(await (await report()).text()).toContain("Keep me.");
+
+  // Deleted again, it waits in Recently deleted at the end of the Experiments view.
+  await location.getByRole("button", { name: run.title }).click();
+  await panel.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page).not.toHaveURL(/experiment_id=/);
+  await showView(page, "Experiments");
+  await expect(page.getByTestId("run-list")).toHaveCount(0);
+  const recent = page.getByRole("region", { name: "Recently deleted" });
+  await recent.getByRole("button", { name: /Recently deleted/ }).click();
+  const row = recent.getByTestId("deleted-experiment").filter({ hasText: run.title });
+  await expect(row).toContainText("in the workspace · deleted by you · 1 file");
+  await shot(page, "02h-recently-deleted");
+  await row.getByRole("button", { name: `Restore ${run.title}` }).click();
+  await expect(page.getByTestId("run-list")).toContainText(run.title);
+  await expect(row).toHaveCount(0);
+  expect(await (await report()).text()).toContain("Keep me.");
+  await page.getByTestId("notices").getByRole("button", { name: "Open" }).click();
+  await expect(page).toHaveURL(new RegExp(`experiment_id=${run.id}$`));
+});
+
 test("files can be uploaded into an existing run and added as its inputs", async ({ page, request }) => {
   const run = await makeRun(request, "Wafer data", { "report.md": "# Wafer data\n" });
   await gotoRun(page, run, "Wafer data");
