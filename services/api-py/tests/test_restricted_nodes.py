@@ -113,7 +113,7 @@ async def test_restricting_a_node_stops_inherited_access(api):
     body = preview.json()
     assert body["restricted"] is False and body["restrictedBy"] is None
     lose = {c["user"]["name"]: c for c in body["changes"]}
-    assert set(lose) == {"Alice", "Bob", "Carol"}
+    assert set(lose) == {"Bob", "Carol"}  # Alice, restricting it, keeps Full access.
     assert (lose["Bob"]["role"], lose["Bob"]["becomes"], lose["Bob"]["through"]["node"]) == (
         "viewer", None, None,
     )  # fmt: skip

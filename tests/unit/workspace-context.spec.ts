@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { lineageOf, resolvePlaceContext } from "../../apps/web/src/components/workspace/workspace-context";
 import { experimentPlace, type Experiment, type KnowledgeNode, type KnowledgeTree } from "../../apps/web/src/components/workspace/server-files";
 
-const parent: KnowledgeNode = { id: "tech", parentId: null, name: "Tech", type: "tech", depth: 1, fileCount: 0, updatedAt: "2026-10-12", restricted: false, role: "owner" };
+const parent: KnowledgeNode = { id: "tech", parentId: null, name: "Tech", type: "tech", depth: 1, fileCount: 0, updatedAt: "2026-10-12", restricted: false, takenOver: null, role: "owner" };
 const child: KnowledgeNode = { ...parent, id: "module", parentId: "tech", name: "Module", type: "module", depth: 2, role: "viewer" };
 const tree: KnowledgeTree = { types: [], rootRole: "editor", nodes: [child, parent] };
 const experiment: Experiment = {

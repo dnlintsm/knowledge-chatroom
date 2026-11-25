@@ -151,7 +151,8 @@ async def changes(
     What switching the node's restriction would change: for an open node, who
     would lose access (or keep less) if it were restricted, through which grant,
     and how many of their Experiments below it would close to them; for a
-    restricted node, who would gain access if it were lifted.
+    restricted node, who would gain access if it were lifted. `me`, who asks,
+    isn't listed for restricting: they keep Full access.
     """
     path, node_id = node["path"], node["id"]
     if node["restricted"]:
@@ -176,6 +177,8 @@ async def changes(
     now, after = best(now_rows), best(after_rows)
     changed: list[dict[str, Any]] = []
     for uid in dict.fromkeys(r["userId"] for r in rows):
+        if uid == me and not node["restricted"]:
+            continue
         was, becomes = now.get(uid), after.get(uid)
         was_role: str | None = was["role"] if was else None
         becomes_role: str | None = becomes["role"] if becomes else None
