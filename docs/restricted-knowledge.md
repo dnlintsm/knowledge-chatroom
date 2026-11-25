@@ -1,6 +1,6 @@
 # Restricted Knowledge nodes (design)
 
-Status: **proposed**, tracked in
+Status: **being built**, tracked in
 [#267](https://github.com/dnlintsm/knowledge-chatroom/issues/267) (batch B), the open
 "restricted access" criterion of
 [#178](https://github.com/dnlintsm/knowledge-chatroom/issues/178).
@@ -163,7 +163,8 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
 ## Contract changes
 
 - `VisibleNode` gains `restricted` (boolean) and, for Owners and Admins who can't open it,
-  `role: null` with `restricted: true`.
+  `role: null` with `restricted: true`. It also gains `takenOver` (who took it over, and
+  when), for people who can open it.
 - `GET /nodes/{id}/restriction`, `PUT /nodes/{id}/restriction`.
 - `POST /nodes/{id}/takeover` (Owners only).
 - `GET /nodes/{id}/access`.

@@ -24,8 +24,10 @@ export interface FileEvent {
 
 export interface NodeEvent {
   op: "node";
-  change: "create" | "rename" | "delete";
+  change: "create" | "rename" | "delete" | "restrict" | "unrestrict" | "takeover";
   id: string;
+  /** On restrict: who lost access to it, so their open trees drop it too. */
+  left?: string[];
 }
 
 export interface ExperimentEvent {
@@ -97,7 +99,7 @@ export function parseWorkspaceEvent(value: unknown): WorkspaceEvent {
         (item.sha256 === undefined || hash(item.sha256)) &&
         (item.author === undefined || author(item.author))) return item as unknown as FileEvent;
   } else if (item.op === "node") {
-    if (text(item.id) && text(item.change) && ["create", "rename", "delete"].includes(item.change)) return item as unknown as NodeEvent;
+    if (text(item.id) && text(item.change) && ["create", "rename", "delete", "restrict", "unrestrict", "takeover"].includes(item.change)) return item as unknown as NodeEvent;
   } else if (item.op === "experiment") {
     if (text(item.id) && (item.node === null || text(item.node)) && text(item.change) && ["create", "update", "status", "delete"].includes(item.change)) return item as unknown as ExperimentEvent;
   }

@@ -65,6 +65,11 @@ statements is a vulnerability; a consequence of one is not.
 - **A workspace Owner or Admin** manages members, roles and groups, and sees members'
   emails and the audit log. They also hand over and restore deleted experiments that were
   shared or archived, never drafts, on nodes they can view.
+- **A restricted node** is open only to people given access on it or below it: grants above
+  it, including Owners' and Admins' root grants, stop there. Owners and Admins see its name
+  and the names and roles of who has access, not its content. Adding someone to a group that reaches inside one
+  needs Full access there. An Owner can take one over, which is audited and shown to everyone
+  with access. Claude can't restrict, lift or take over a node, or ask who has access.
 - **A hub admin** (`HUB_ADMINS`) verifies and yanks skills published to the hub. Skills are
   instructions Claude follows, and with `SKILL_SCRIPTS=on` they include scripts that run in
   the agent's sandbox, so publishing and installing a skill is a trusted act.

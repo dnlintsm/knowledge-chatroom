@@ -14,7 +14,7 @@ from typing import Any
 
 from psycopg import AsyncConnection, errors
 
-from .access import is_uuid, iso
+from .access import ForbiddenError, is_uuid, iso
 from .storage import Storage
 
 
@@ -28,11 +28,12 @@ class NodeNotFoundError(NodeError):
 
 _NODE_COLUMNS = """
     n.id, n.parent_id, t.name AS type, t.depth, n.name, n.updated_at,
-    (SELECT count(*) FROM files f WHERE f.node_id = n.id AND f.deleted_at IS NULL) AS file_count"""
+    (SELECT count(*) FROM files f WHERE f.node_id = n.id AND f.deleted_at IS NULL) AS file_count,
+    n.restricted"""
 
 
 def _to_node(row: tuple[Any, ...]) -> dict[str, Any]:
-    node_id, parent, type_, depth, name, updated, files = row
+    node_id, parent, type_, depth, name, updated, files, restricted = row
     return {
         "id": str(node_id),
         "parentId": str(parent) if parent else None,
@@ -41,6 +42,7 @@ def _to_node(row: tuple[Any, ...]) -> dict[str, Any]:
         "name": name,
         "fileCount": int(files),
         "updatedAt": iso(updated),
+        "restricted": restricted,
     }
 
 
@@ -117,7 +119,8 @@ async def lineage(
     cur = await conn.execute(
         """
         SELECT a.id, a.parent_id, t.name AS type, t.depth, a.name, a.updated_at,
-               (SELECT count(*) FROM files f WHERE f.node_id = a.id AND f.deleted_at IS NULL) AS file_count
+               (SELECT count(*) FROM files f WHERE f.node_id = a.id AND f.deleted_at IS NULL) AS file_count,
+               a.restricted
         FROM nodes n
         JOIN nodes a ON a.path @> n.path AND a.workspace_id = n.workspace_id
         JOIN node_types t ON t.id = a.type_id
@@ -214,8 +217,13 @@ async def remove(
     storage: Storage,
     node_id: str,
     in_tx: Callable[[AsyncConnection], Awaitable[Any]],
+    user_id: str,
 ) -> bool:
-    """Soft-deletes the node, everything below it, and their files. History stays."""
+    """
+    Soft-deletes the node, everything below it, and their files. History stays.
+    Refused as a whole when a restricted node below it lacks the user's Full
+    access (docs/restricted-knowledge.md, decision 10).
+    """
     if not is_uuid(node_id):
         return False
     ws = storage.workspace_id
@@ -227,6 +235,13 @@ async def remove(
         target = await cur.fetchone()
         if not target:
             return False
+        cur = await conn.execute(
+            "SELECT delete_blocked(%s, %s, %s::ltree)", (ws, user_id, str(target[0]))
+        )
+        if (await cur.fetchone() or (False,))[0]:
+            raise ForbiddenError(
+                "Part of this node is restricted, and deleting it needs Full access there too"
+            )
         await conn.execute(
             """
             WITH gone AS (

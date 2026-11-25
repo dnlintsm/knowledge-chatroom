@@ -54,6 +54,8 @@ test("event contracts cover scoped writes, node/experiment changes and proposals
   for (const event of [
     { op: "write", node: null, experiment: "x", path: info.path, sha256: info.sha256, author: "agent" },
     { op: "node", change: "rename", id: "n" },
+    { op: "node", change: "restrict", id: "n", left: ["u"] },
+    { op: "node", change: "takeover", id: "n" },
     { op: "experiment", change: "status", id: "x", node: "n" },
     { op: "proposal", change: "accepted", id: "p", node: "n", path: info.path, author: "user", authorId: "u" },
   ]) expect(parseWorkspaceEvent(event)).toEqual(event);

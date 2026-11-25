@@ -18,8 +18,17 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import chats, experiments, nodes, proposals
-from .access import AccessService, ForbiddenError, Principal, Role, at_least, is_uuid, iso
+from . import chats, experiments, nodes, proposals, restriction
+from .access import (
+    AccessError,
+    AccessService,
+    ForbiddenError,
+    Principal,
+    Role,
+    at_least,
+    is_uuid,
+    iso,
+)
 from .db import as_user
 from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, clean_input, same_json
 from .files import FileChangedError, FileExistsError_, FileService
@@ -40,6 +49,8 @@ NOT_A_MEMBER = "They aren't a member of this workspace; add them to it first"
 EMPTY_LEVEL_NAME = "None"
 # What an audit target says about content, hidden from a reader who can't see it.
 _AUDIT_CONTENT = frozenset({"name", "path", "to", "title", "files", "paths", "inputs", "note"})
+# The fields that name the node itself (create, rename), not something in it.
+_AUDIT_NODE_NAMES = frozenset({"name", "to"})
 # For rerun: no node given, so the earlier run's.
 _SAME_PLACE = object()
 # For decide: the reviewer didn't say which version of the file they compared with.
@@ -132,19 +143,48 @@ class Session:
         # Visible nodes, plus their ancestors so the path to them can be drawn.
         shown: set[str] = set()
         for node in every:
-            if not roles.get(node["id"]):
+            # Owners and Admins see restricted nodes they can't open, by name only.
+            if not roles.get(node["id"]) and not (self.manages and node["restricted"]):
                 continue
             current: dict[str, Any] | None = node
             while current and current["id"] not in shown:
                 shown.add(current["id"])
                 current = by_id.get(current["parentId"] or "")
+        taken = await self._takeovers() if any(n["restricted"] for n in every) else {}
         visible = []
         for node in every:
             if node["id"] not in shown:
                 continue
             role = roles.get(node["id"])
-            visible.append({**node, "role": role, "fileCount": node["fileCount"] if role else 0})
+            visible.append(
+                {
+                    **node,
+                    "role": role,
+                    "fileCount": node["fileCount"] if role else 0,
+                    # Shown to everyone who can open it (docs/restricted-knowledge.md, decision 8).
+                    "takenOver": taken.get(node["id"]) if role else None,
+                }
+            )
         return {"types": levels, "rootRole": root_role, "nodes": visible}
+
+    async def _takeovers(self) -> dict[str, dict[str, Any]]:
+        """The latest takeover on each restricted node: who, and when."""
+        async with self.storage.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT DISTINCT ON (g.node_id) g.node_id, u.id, u.name, g.created_at
+                FROM grants g
+                JOIN nodes n ON n.id = g.node_id AND n.restricted
+                JOIN users u ON u.id = g.principal_id
+                WHERE g.workspace_id = %s AND g.takeover AND g.principal_type = 'user'
+                ORDER BY g.node_id, g.created_at DESC""",
+                (self.ws,),
+            )
+            rows = await cur.fetchall()
+        return {
+            str(node): {"user": {"id": str(uid), "name": name}, "at": iso(at)}
+            for node, uid, name, at in rows
+        }
 
     async def lineage(self, node_id: str) -> list[dict[str, Any]]:
         await self.need(node_id, "viewer")
@@ -183,8 +223,188 @@ class Session:
         await self.need(node_id, "owner")
         async with self.scoped() as conn:
             return await nodes.remove(
-                conn, self.storage, node_id, self._audit("node.delete", {"node": node_id})
+                conn,
+                self.storage,
+                node_id,
+                self._audit("node.delete", {"node": node_id}),
+                self.principal.user_id,
             )
+
+    # Restricted nodes (docs/restricted-knowledge.md): turning restriction on or
+    # off needs Full access on the node; Owners and Admins also see who can open
+    # one, and an Owner can take one over.
+
+    @property
+    def manages(self) -> bool:
+        return self.membership in ("owner", "admin")
+
+    async def _restricted_or_owned(self, node_id: str) -> None:
+        """Full access on the node, or an Owner or Admin who sees it in the tree; else refused as need() does."""
+        if (
+            self.manages
+            and is_uuid(node_id)
+            and await self.access.sees_node(self.principal.user_id, node_id)
+        ):
+            return
+        await self.need(node_id, "owner")
+
+    async def node_access(self, node_id: str) -> dict[str, Any]:
+        """
+        Who can open the node, with their role and every source of it. An Owner
+        or Admin without Full access there gets names and roles only.
+        """
+        await self._restricted_or_owned(node_id)
+        full = await self.role(node_id) == "owner"
+        async with self.storage.pool.connection() as conn:
+            node = await restriction.node_row(conn, self.ws, node_id)
+            if node is None:
+                raise NodeNotFoundError("Node not found")
+            answer = await restriction.explain(conn, self.ws, node, self.principal.user_id)
+        if not full:
+            answer["people"] = [{**p, "sources": []} for p in answer["people"]]
+        return answer
+
+    async def _restriction_answer(
+        self, conn: AsyncConnection, node: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The node's restriction, and what switching it would change."""
+        me = self.principal.user_id
+        return {
+            "nodeId": node["id"],
+            "restricted": node["restricted"],
+            "restrictedAt": node["restrictedAt"],
+            "restrictedBy": node["restrictedBy"],
+            "changes": await restriction.changes(conn, self.ws, node, me),
+            "groups": await restriction.groups_cut(conn, self.ws, node, me),
+        }
+
+    async def restriction(self, node_id: str) -> dict[str, Any]:
+        """Whether the node is restricted, and what switching it would change."""
+        await self.need(node_id, "owner")
+        async with self.storage.pool.connection() as conn:
+            node = await restriction.node_row(conn, self.ws, node_id)
+            if node is None:
+                raise NodeNotFoundError("Node not found")
+            return await self._restriction_answer(conn, node)
+
+    async def set_restricted(
+        self, node_id: str, restricted: bool, keep: list[tuple[str, str]]
+    ) -> dict[str, Any]:
+        """
+        Restricts the node, keeping the users and groups in `keep` (each at the
+        role they had) and the caller (Full access), or lifts it. Audited and
+        announced.
+        """
+        await self.need(node_id, "owner")
+        user_id = self.principal.user_id
+        async with self.storage.pool.connection() as conn, conn.transaction():
+            node = await restriction.node_row(conn, self.ws, node_id, lock=True)
+            if node is None:
+                raise NodeNotFoundError("Node not found")
+            cur = await conn.execute(
+                "SELECT path_role(%s, %s, %s::ltree)", (self.ws, user_id, node["path"])
+            )
+            (role,) = await cur.fetchone()  # pyrefly: ignore[not-iterable]
+            if role != "owner":
+                raise ForbiddenError("Only someone with Full access can restrict this node")
+            if node["restricted"] == restricted:
+                return await self._restriction_answer(conn, node)
+            changed = await restriction.changes(conn, self.ws, node, user_id)
+            if restricted:
+                # Who and which groups would lose access: only those can be kept.
+                losing = {("user", c["user"]["id"]): c["role"] for c in changed if c["role"]}
+                losing |= {
+                    ("group", g["group"]["id"]): g["role"]
+                    for g in await restriction.groups_cut(conn, self.ws, node, user_id)
+                }
+                kept = list(dict.fromkeys(k for k in keep if k != ("user", user_id)))
+                if any(k not in losing for k in kept):
+                    raise AccessError("Only people and groups who would lose access can be kept")
+                for (ptype, pid), role in [(k, losing[k]) for k in kept] + [
+                    (("user", user_id), "owner")
+                ]:
+                    await conn.execute(
+                        """
+                        INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role, created_by)
+                        VALUES (%(ws)s, %(node)s, %(ptype)s, %(pid)s, %(role)s, %(by)s)
+                        ON CONFLICT (workspace_id, node_id, principal_type, principal_id)
+                        DO UPDATE SET role = CASE WHEN role_rank(EXCLUDED.role) > role_rank(grants.role)
+                                                  THEN EXCLUDED.role ELSE grants.role END""",
+                        {
+                            "ws": self.ws,
+                            "node": node_id,
+                            "ptype": ptype,
+                            "pid": pid,
+                            "role": role,
+                            "by": user_id,
+                        },
+                    )
+                await conn.execute(
+                    "UPDATE nodes SET restricted = true, restricted_at = now(), restricted_by = %s WHERE id = %s",
+                    (user_id, node_id),
+                )
+                # Who can't open it now, once the kept grants are in.
+                cur = await conn.execute(
+                    "SELECT u FROM unnest(%s::uuid[]) u WHERE path_role(%s, u, %s::ltree) IS NULL",
+                    ([c["user"]["id"] for c in changed], self.ws, node["path"]),
+                )
+                lost = [str(u) for (u,) in await cur.fetchall()]
+                await self._audit(
+                    "node.restrict",
+                    {
+                        "node": node_id,
+                        "kept": [{"principalType": t, "principalId": i} for t, i in kept],
+                        "lost": lost,
+                    },
+                )(conn)
+                await self.storage.notify(
+                    conn, {"op": "node", "change": "restrict", "id": node_id, "left": lost}
+                )
+            else:
+                gained = [
+                    c["user"]["id"]
+                    for c in changed
+                    if restriction.rank(c["becomes"]) > restriction.rank(c["role"])
+                ]
+                await conn.execute(
+                    "UPDATE nodes SET restricted = false, restricted_at = NULL, restricted_by = NULL WHERE id = %s",
+                    (node_id,),
+                )
+                await self._audit("node.unrestrict", {"node": node_id, "gained": gained})(conn)
+                await self.storage.notify(
+                    conn, {"op": "node", "change": "unrestrict", "id": node_id}
+                )
+            node = await restriction.node_row(conn, self.ws, node_id)
+            assert node is not None
+            return await self._restriction_answer(conn, node)
+
+    async def take_over(self, node_id: str) -> dict[str, Any]:
+        """An Owner gives themselves Full access on a restricted node, audited and shown on it."""
+        if self.membership != "owner":
+            if self.manages:
+                raise ForbiddenError("Only the workspace's Owners can take over a restricted node")
+            await self.need(node_id, "owner")
+            raise ForbiddenError("Only the workspace's Owners can take over a restricted node")
+        if not is_uuid(node_id) or not await self.access.sees_node(self.principal.user_id, node_id):
+            raise NodeNotFoundError("Node not found")
+        user_id = self.principal.user_id
+        async with self.storage.pool.connection() as conn, conn.transaction():
+            node = await restriction.node_row(conn, self.ws, node_id, lock=True)
+            if node is None:
+                raise NodeNotFoundError("Node not found")
+            if not node["restricted"]:
+                raise AccessError("Only a restricted node can be taken over")
+            await conn.execute(
+                """
+                INSERT INTO grants (workspace_id, node_id, principal_type, principal_id, role, created_by, takeover)
+                VALUES (%(ws)s, %(node)s, 'user', %(user)s, 'owner', %(user)s, true)
+                ON CONFLICT (workspace_id, node_id, principal_type, principal_id)
+                DO UPDATE SET role = 'owner', takeover = true, created_at = now()""",
+                {"ws": self.ws, "node": node_id, "user": user_id},
+            )
+            await self._audit("node.takeover", {"node": node_id})(conn)
+            await self.storage.notify(conn, {"op": "node", "change": "takeover", "id": node_id})
+            return await restriction.explain(conn, self.ws, node, self.principal.user_id)
 
     # Experiments: anyone who can view a node (or the workspace root) may start
     # their own experiment there; its maintainer and collaborators change it (see
@@ -1120,6 +1340,9 @@ class Session:
             return False
         # Hidden nodes stay hidden: not even their ids go out.
         if op == "node":
+            # Who just lost access to a restricted node hears that too, to close it.
+            if user_id in (event.get("left") or []):
+                return True
             return await self.access.sees_node(user_id, str(event.get("id")))
         if op == "experiment":
             # Who just stopped working on it hears that too, to close it.
@@ -1129,9 +1352,8 @@ class Session:
                 user_id, str(event.get("id")), str(event.get("change"))
             )
         if op == "proposal":
-            return (
-                event.get("authorId") == user_id or await self.role(event.get("node")) is not None
-            )
+            # Its author too only while they can view its node (docs/restricted-knowledge.md).
+            return await self.role(event.get("node")) is not None
         if event.get("experiment"):
             return (
                 await self.access.experiment_access(user_id, str(event["experiment"])) is not None
@@ -1186,7 +1408,11 @@ class Session:
         self.need_admin()
         action = "group.add_member" if member else "group.remove_member"
         return await self.access.set_member(
-            group_id, user_id, member, self._audit(action, {"group": group_id, "user": user_id})
+            group_id,
+            user_id,
+            member,
+            self._audit(action, {"group": group_id, "user": user_id}),
+            actor=self.principal.user_id,
         )
 
     async def grants(self, node_id: str | None) -> list[dict[str, Any]]:
@@ -1249,7 +1475,11 @@ class Session:
                 node = target.get("node")
                 if "node" not in target or not (node is None or isinstance(node, str)):
                     return True
-                key = ("node", node)
+                # A node's own name shows wherever the tree shows the node; anything in
+                # it (file paths, notes) needs a role there. An Owner or Admin sees a
+                # restricted node's name, never what's in it.
+                names_only = _AUDIT_CONTENT.intersection(target) <= _AUDIT_NODE_NAMES
+                key = ("node-name" if names_only else "node", node)
             if key not in seen:
                 user = self.principal.user_id
                 if key[0] == "experiment":
@@ -1257,8 +1487,10 @@ class Session:
                     seen[key] = found is not None
                 elif key[1] is None:
                     seen[key] = await self.role(None) is not None
-                else:
+                elif key[0] == "node-name":
                     seen[key] = await self.access.sees_node(user, key[1])
+                else:
+                    seen[key] = await self.role(key[1]) is not None
             return seen[key]
 
         for entry in entries:

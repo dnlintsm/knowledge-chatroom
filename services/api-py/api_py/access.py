@@ -84,6 +84,10 @@ class AccessError(Exception):
     """The request names something invalid: a bad name, an unknown user (400)."""
 
 
+class LastOwnerError(AccessError):
+    """Taking away the last Full access grant on a restricted node (409)."""
+
+
 def _clean_name(name: str, what: str) -> str:
     trimmed = re.sub(r"\s+", " ", name.strip())
     if not trimmed:
@@ -209,11 +213,11 @@ class AccessService:
         if not is_uuid(node_id):
             return False
         async with self.pool.connection() as conn:
+            # As the tree shows it (sees_path): a role on it, a grant below it, or
+            # an Owner or Admin and a restricted node.
             cur = await conn.execute(
-                """
-                SELECT bool_or(effective_role(%(ws)s, %(user)s, d.id) IS NOT NULL)
-                FROM nodes n JOIN nodes d ON d.path <@ n.path AND d.workspace_id = n.workspace_id
-                WHERE n.id = %(node)s AND n.workspace_id = %(ws)s""",
+                "SELECT sees_path(workspace_id, %(user)s, path) FROM nodes "
+                "WHERE id = %(node)s AND workspace_id = %(ws)s",
                 {"ws": self.workspace_id, "user": user_id, "node": node_id},
             )
             row = await cur.fetchone()
@@ -408,7 +412,14 @@ class AccessService:
             await in_tx(conn)
             return True
 
-    async def set_member(self, group_id: str, user_id: str, member: bool, in_tx: InTx) -> bool:
+    async def set_member(
+        self, group_id: str, user_id: str, member: bool, in_tx: InTx, actor: str | None = None
+    ) -> bool:
+        """
+        Adds or removes a group member. Adding one for `actor` is refused when the
+        group reaches inside a restricted node they don't have Full access on
+        (docs/restricted-knowledge.md, decision 7).
+        """
         if not is_uuid(group_id) or not is_uuid(user_id):
             return False
         try:
@@ -421,6 +432,8 @@ class AccessService:
                     return False
                 if member:
                     await self._need_member(conn, user_id)
+                    if actor is not None:
+                        await self._need_no_crossing(conn, actor, group_id)
                     cur = await conn.execute(
                         "INSERT INTO group_members (group_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                         (group_id, user_id),
@@ -543,6 +556,50 @@ class AccessService:
         if not (row and row[0]):
             raise AccessError("They aren't a member of this workspace; add them to it first")
 
+    async def _need_no_crossing(self, conn: AsyncConnection, actor: str, group_id: str) -> None:
+        cur = await conn.execute(
+            "SELECT name FROM group_crossings(%s, %s, %s) ORDER BY lower(name)",
+            (self.workspace_id, actor, group_id),
+        )
+        names = [name for (name,) in await cur.fetchall()]
+        if names:
+            raise ForbiddenError(
+                f"This group has access inside {', '.join(names)}, which "
+                f"{'is' if len(names) == 1 else 'are'} restricted: adding people to it "
+                "needs Full access there"
+            )
+
+    async def _keep_a_restricted_owner(
+        self,
+        conn: AsyncConnection,
+        node_id: str,
+        principal_type: str,
+        principal_id: str,
+        role: str | None,
+    ) -> None:
+        """Refuses taking away the last Full access grant on a restricted node."""
+        if role == "owner":
+            return
+        # The node's row lock serializes two people each taking away the other's.
+        cur = await conn.execute(
+            "SELECT 1 FROM nodes WHERE id = %s AND workspace_id = %s AND restricted FOR UPDATE",
+            (node_id, self.workspace_id),
+        )
+        if not await cur.fetchone():
+            return
+        cur = await conn.execute(
+            """
+            SELECT bool_or(principal_type = %(ptype)s AND principal_id = %(pid)s),
+                   bool_or(NOT (principal_type = %(ptype)s AND principal_id = %(pid)s))
+            FROM grants WHERE node_id = %(node)s AND role = 'owner'""",
+            {"node": node_id, "ptype": principal_type, "pid": principal_id},
+        )
+        theirs, others = await cur.fetchone() or (None, None)  # pyrefly: ignore[not-iterable]
+        if theirs and not others:
+            raise LastOwnerError(
+                "A restricted node needs someone with Full access: give someone else Full access first"
+            )
+
     async def _keep_an_owner(
         self,
         conn: AsyncConnection,
@@ -551,8 +608,11 @@ class AccessService:
         principal_id: str,
         role: str | None,
     ) -> None:
-        """Refuses a change that would leave the workspace without a user who owns it."""
-        if node_id is not None or role == "owner":
+        """Refuses a change that would leave the workspace, or a restricted node, without an owner."""
+        if node_id is not None:
+            await self._keep_a_restricted_owner(conn, node_id, principal_type, principal_id, role)
+            return
+        if role == "owner":
             return
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext('knowledge-chatroom:first-owner'))"
