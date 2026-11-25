@@ -60,13 +60,33 @@ export function sourceText(source: Source, here: string): string {
   return `${how}${where}${took}`;
 }
 
-/** "Alice took over on Nov 25, 2026", for everyone who can open the node. */
+const takeoverText = (node: KnowledgeNode, named: boolean) =>
+  node.takenOver
+    ? `${node.takenOver.user.name ?? "An Owner"} took over${named ? ` ${node.name}` : ""} on ${shortDate(node.takenOver.at)}`
+    : "";
+
+/** "Alice took over on Nov 25, 2026", in Sharing for a node that was taken over. */
 export function TakenOver({ node }: { node: KnowledgeNode }) {
   if (!node.takenOver) return null;
+  return <p className="text-xs text-[var(--muted-foreground)]">{takeoverText(node, false)}.</p>;
+}
+
+/**
+ * The takeover of the restricted node that bounds where you are, shown beside
+ * the breadcrumb so everyone who can open it sees it, not only those who
+ * manage access there.
+ */
+export function TakeoverNotice({ lineage }: { lineage: KnowledgeNode[] }) {
+  const boundary = lineage.findLast((n) => n.restricted);
+  if (!boundary?.takenOver) return null;
   return (
-    <p className="text-xs text-[var(--muted-foreground)]">
-      {node.takenOver.user.name ?? "An Owner"} took over on {shortDate(node.takenOver.at)}.
-    </p>
+    <span
+      title={`${takeoverText(boundary, true)}.`}
+      className="ml-2 flex shrink-0 items-center gap-1 rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[var(--muted-foreground)] max-sm:hidden"
+    >
+      <Lock className="size-3 shrink-0" />
+      Taken over by {boundary.takenOver.user.name ?? "an Owner"}
+    </span>
   );
 }
 
@@ -418,7 +438,7 @@ export function RestrictedNodeDialog({
         tabIndex={-1}
         ref={(el) => el?.focus()}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
-        className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-sm shadow-xl outline-none"
+        className="max-h-[calc(88vh-1rem)] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-sm shadow-xl outline-none"
       >
         <h2 className="flex items-center gap-1.5 font-semibold">
           <Lock className="size-4" />

@@ -27,7 +27,7 @@ import { ChatModelProvider } from "./chat-model";
 import { EditorPane } from "./editor-pane";
 import { ActivityBar, SidePanel } from "./sidebar";
 import { AccountMenu, ShareButton } from "./sharing";
-import { LockMark } from "./restricted-access";
+import { LockMark, TakeoverNotice } from "./restricted-access";
 import { MemoryProvider } from "./memory";
 import { SkillsProvider } from "./skills";
 import { ToolMenuProvider } from "./tool-menu";
@@ -303,6 +303,7 @@ function PlaceBreadcrumb() {
           </span>
         );
       })}
+      <TakeoverNotice lineage={lineage} />
       {toReview > 0 && (
         <button
           type="button"

@@ -591,8 +591,15 @@ test("restricting a node: the preview, the lock, and who keeps it", async ({ bro
   await showFiles(bob);
   await bob.getByRole("treeitem", { name: /recipe\.md/ }).click();
   await expect(bob.getByTestId("file-preview")).toContainText("Chamber pressure 4 mTorr.");
+  // Everyone inside sees it beside the breadcrumb, not only in Sharing.
+  const notice = alice.getByRole("navigation", { name: "Location" }).getByText("Taken over by Bob Builder");
+  await expect(notice).toBeVisible();
+  await expect(notice).toHaveAttribute("title", /^Bob Builder took over Customer recipes on /);
+  await shot(alice, "40-takeover-notice");
   await alice.getByRole("button", { name: "Share", exact: true }).click();
   await expect(share).toContainText(/Bob Builder took over on/);
+  // A long list of who has access scrolls inside the dialog, so Restrict stays reachable.
+  await expect(share).toHaveCSS("overflow-y", "auto");
   await expect(who).toContainText("took over on");
 
   await alice.context().close();

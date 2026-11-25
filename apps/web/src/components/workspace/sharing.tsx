@@ -182,7 +182,7 @@ function ShareDialog({ node, name, onClose }: { node: NodeId; name: string; onCl
         aria-label={`Share ${name}`}
         tabIndex={-1}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
-        className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-sm shadow-xl outline-none"
+        className="max-h-[calc(88vh-1rem)] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-sm shadow-xl outline-none"
       >
         <header className="mb-1 flex items-center justify-between">
           <h2 className="truncate font-semibold">Share {name}</h2>
