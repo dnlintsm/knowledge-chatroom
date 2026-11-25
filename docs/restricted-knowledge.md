@@ -57,6 +57,20 @@ can open it, and makes the boundary hold for Owners and Admins too.
 9. **Claude stays inside the user's rights.** An agent token acts with the user's current
    access, so it can't see a restricted node its user can't open. Turning restriction on or
    off and taking over are people's actions, refused to agent tokens, as managing access is.
+10. **Deleting a node can't reach past a restriction.** Deleting a node deletes everything
+    below it, so it needs Full access on the node *and* on every restricted node below it.
+    If the caller lacks Full access on any of them, the whole delete is refused (403, "Part
+    of this node is restricted, and deleting it needs Full access there too") and nothing
+    changes: not the node, not its restricted descendants, not any of their files. The check
+    runs with the database owner's rights before anything is deleted, so it holds the same
+    with row security on or off. It names no restricted node the caller can't see.
+11. **Proposals follow current access, for their author too.** A proposal is visible only to
+    people who can view its node now. Today its author always sees their own, wherever it
+    is; that exception goes, in the app's query and in row security alike. An author who
+    loses their last grant on the node (because it was restricted, or a grant was revoked)
+    no longer finds it in proposal listings; reading it, or its content, answers 404; and
+    proposal events about it stop reaching them. Withdrawing it needs that access too.
+    Someone who can view the node still sees it and can decide it as before.
 
 ## Who sees what
 
@@ -115,6 +129,11 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
 - A trigger refuses changing `restricted` for anyone without Full access on the node, as a
   safety net under the routes' own check.
 - `grants.takeover` marks a grant an Owner gave themselves by taking over (decision 8).
+- `delete_blocked(ws, user, path)`, a security-definer function that says whether a
+  restricted node below `path` lacks the user's Full access; `nodes.remove` asks it first,
+  under the node's row lock (decision 10).
+- The proposal query, the `proposals_read` and `proposals_change` policies, and the
+  proposal event filter drop the author exception (decision 11).
 
 ## Contract changes
 
@@ -159,6 +178,16 @@ the table above). The Sharing panel shows it under the grants made here, as "Who
   an Admin can't take over, an Owner can, and it is audited and shown.
 - The last Full access grant on a restricted node can't be revoked.
 - `GET /nodes/{id}/access` names each source, and stops at a restricted node.
+- Deleting across a boundary (decision 10), with row security on and with it off: the
+  caller has Full access on a parent only, and a child below it is restricted without them.
+  Deleting the parent answers 403, and the parent, the restricted child and the files in
+  both are all still there, for the caller and for the child's own people. With Full access
+  on the child too, the same delete goes through.
+- A former proposal author (decision 11), with row security on and with it off: Bob
+  proposes a change in a node, then the node is restricted without him. The proposal is
+  gone from his `GET /proposals`, `GET /proposals/{id}` and its content answer 404, and a
+  later event about it (a decision) doesn't reach him. Someone with access there still sees
+  it and decides it.
 - E2E: restrict a node from Sharing with the preview, see the lock, and see another member
   lose it from their tree.
 
