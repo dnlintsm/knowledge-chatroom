@@ -64,6 +64,10 @@ class Error(BaseModel):
     """
     With `changed` on a file write, the file's version now; null when it is gone.
     """
+    running: Annotated[int | None, Field(ge=1)] = None
+    """
+    On a 409 starting a run: the number of the run that is running.
+    """
 
 
 class IdOnly(BaseModel):
@@ -162,7 +166,22 @@ class ProposalEvent(BaseModel):
     authorId: str
 
 
-WorkspaceEvent = TypeAliasType("WorkspaceEvent", FileEvent | NodeEvent | ExperimentEvent | ProposalEvent)
+class RunEvent(BaseModel):
+    """
+    A run changed; its experiment's update event follows. Heard by whoever can see the experiment.
+    """
+
+    op: Literal["run"]
+    change: Literal["create", "finish", "update", "archive", "delete", "restore"]
+    id: str
+    experiment: str
+    node: str | None
+    """
+    The experiment's node; null at the workspace root.
+    """
+
+
+WorkspaceEvent = TypeAliasType("WorkspaceEvent", FileEvent | NodeEvent | ExperimentEvent | RunEvent | ProposalEvent)
 """
 One change on the /files?watch stream.
 """
@@ -217,6 +236,59 @@ class ExperimentInput(BaseModel):
     results: dict[str, Any] | None = None
     status: ExperimentStatus | None = None
     state: ExperimentState | None = None
+
+
+RunState = TypeAliasType("RunState", Literal["running", "done", "failed"])
+
+
+RunRecordTaken = TypeAliasType("RunRecordTaken", Literal["finish", "migration"] | None)
+"""
+When the file record was taken: at finish, or at migration for a run that finished before runs had records; null while it runs.
+"""
+
+
+class RunFile(BaseModel):
+    path: str
+    version: str
+    """
+    The file version it recorded.
+    """
+    sha256: Annotated[str, Field(pattern="^[a-f0-9]{64}$")]
+    size: Annotated[int, Field(ge=0)]
+
+
+class RunExperiment(BaseModel):
+    """
+    The experiment a compared run belongs to.
+    """
+
+    id: str
+    title: str
+    nodeId: str | None
+
+
+class Skill(BaseModel):
+    name: str
+    source: str | None = None
+    version: float | None = None
+    sha256: str | None = None
+
+
+class CallerProvenance(BaseModel):
+    """
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    chat: str | None = None
+    model: str | None = None
+    skill: Skill | None = None
+    tools: dict[str, Any] | None = None
+    """
+    Each tool's version, by name.
+    """
 
 
 class Collaborator(BaseModel):
@@ -1066,30 +1138,6 @@ class DeleteExperimentResponse(BaseModel):
     """
 
 
-class Skill(BaseModel):
-    name: str
-    source: str | None = None
-    version: float | None = None
-    sha256: str | None = None
-
-
-class Provenance(BaseModel):
-    """
-    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
-    """
-
-    model_config = ConfigDict(
-        extra="allow",
-    )
-    chat: str | None = None
-    model: str | None = None
-    skill: Skill | None = None
-    tools: dict[str, Any] | None = None
-    """
-    Each tool's version, by name.
-    """
-
-
 class StartRunRequest(BaseModel):
     nodeId: str | None = None
     """
@@ -1106,10 +1154,7 @@ class StartRunRequest(BaseModel):
     """
     The run to run again.
     """
-    provenance: Provenance | None = None
-    """
-    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
-    """
+    provenance: CallerProvenance | None = None
 
 
 class FinishRunRequest(BaseModel):
@@ -1124,6 +1169,51 @@ class AddRunInputsRequest(BaseModel):
 class HandOverExperimentRequest(BaseModel):
     userId: str
     keepAsCollaborator: bool | None = True
+
+
+class StartExperimentRunRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    label: Annotated[str | None, Field(max_length=200)] = None
+    params: dict[str, Any] | None = None
+    inputs: list[RunInputSource] | None = None
+    provenance: CallerProvenance | None = None
+
+
+class UpdateRunRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    label: Annotated[str | None, Field(max_length=200)] = None
+    archived: bool | None = None
+
+
+class DeleteRunResponse(BaseModel):
+    deleted: str
+    """
+    The id.
+    """
+
+
+class FinishRunByIdRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    results: dict[str, Any]
+    state: Literal["done", "failed"] | None = "done"
+
+
+class RerunRunRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    experiment: str | None = None
+
+
+class ListRunFilesResponse(BaseModel):
+    files: list[RunFile]
+    taken: RunRecordTaken
 
 
 class SearchResponse(BaseModel):
@@ -1857,15 +1947,24 @@ class Experiment(BaseModel):
     title: str
     hypothesis: str
     params: dict[str, Any]
+    """
+    The planned parameters; each run has the ones it ran with.
+    """
     results: dict[str, Any]
+    """
+    Deprecated, kept for one release as its latest live run's results ({} with none).
+    """
     status: ExperimentStatus
     state: ExperimentState
+    """
+    Deprecated, kept for one release as its latest live run's state (ready with none).
+    """
     forkedAt: Timestamp
     updatedAt: Timestamp
     fileCount: Annotated[int, Field(ge=0)]
     provenance: dict[str, Any]
     """
-    Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish or a PATCH of its state), `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`).
+    Deprecated, kept for one release as its latest live run's provenance (Run.provenance). Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish or a PATCH of its state), `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`).
     """
     access: Literal["writer", "reader"]
     """
@@ -1900,6 +1999,59 @@ class Experiment(BaseModel):
     """
     Only in the ?deleted list, false when its node was deleted too (restore answers 409).
     """
+
+
+class Run(BaseModel):
+    """
+    One execution of an experiment.
+    """
+
+    id: str
+    experimentId: str
+    number: Annotated[int, Field(ge=1)]
+    """
+    Its place in the experiment: Run 1, Run 2, ...
+    """
+    label: Annotated[str, Field(max_length=200)]
+    params: dict[str, Any]
+    """
+    The parameters it ran with.
+    """
+    results: dict[str, Any]
+    state: RunState
+    provenance: dict[str, Any]
+    """
+    Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the experiment and run it reran.
+    """
+    startedBy: Collaborator | None
+    """
+    Who started it; null once they are gone.
+    """
+    startedAt: Timestamp
+    finishedAt: Timestamp | None
+    fileCount: Annotated[int | None, Field(ge=0)]
+    """
+    Files in its record; null while it runs.
+    """
+    recordTaken: RunRecordTaken
+    archived: bool
+    archivedAt: Timestamp | None
+    record: list[RunFile] | None = None
+    """
+    Only on one run (GET /runs/{id} and the routes that change one); null while it runs.
+    """
+    deletedAt: Timestamp | None = None
+    """
+    Only on a deleted run.
+    """
+    deletedBy: Collaborator | None = None
+    """
+    Only on a deleted run, who deleted it; null once they are gone.
+    """
+
+
+class ComparedRun(Run):
+    experiment: RunExperiment
 
 
 class RunRead(BaseModel):
@@ -1972,6 +2124,18 @@ class AddExperimentCollaboratorResponse(BaseModel):
 
 class RemoveExperimentCollaboratorResponse(BaseModel):
     experiment: Experiment | None
+
+
+class ListExperimentRunsResponse(BaseModel):
+    runs: list[Run]
+
+
+class CompareRunsResponse(BaseModel):
+    runs: list[ComparedRun]
+
+
+class ListReadsOfRunResponse(BaseModel):
+    reads: list[RunRead]
 
 
 class ListWorkspaceMembersResponse(BaseModel):

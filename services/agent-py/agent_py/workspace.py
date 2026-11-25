@@ -867,7 +867,7 @@ def file_tools(
                 "experiment": {"type": "string", "description": "Experiment id"},
                 "params": {
                     "type": "object",
-                    "description": "What this run varies, e.g. {\"rfPower_W\": 50}; defaults to the experiment's.",
+                    "description": 'What this run varies, e.g. {"rfPower_W": 50}; defaults to the experiment\'s.',
                 },
                 "label": {
                     "type": "string",
@@ -907,11 +907,14 @@ def file_tools(
     @tool(
         "finish_run",
         "Record a run's results and finish it: state done, or failed when it couldn't be completed (say why in the "
-        "report). Results are numbers with units in the key where you can, e.g. {\"yield_pct\": 92.5}. The run "
+        'report). Results are numbers with units in the key where you can, e.g. {"yield_pct": 92.5}. The run '
         "keeps a record of every file of the experiment as it is now, and can't change after.",
         schema(
             {
-                "run": {"type": "string", "description": "Run id, from start_run or create_experiment"},
+                "run": {
+                    "type": "string",
+                    "description": "Run id, from start_run or create_experiment",
+                },
                 "results": {
                     "type": "object",
                     "description": 'e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}',

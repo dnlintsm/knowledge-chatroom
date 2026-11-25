@@ -48,6 +48,19 @@
     GET    /experiments?deleted=1   {experiments} deleted ones you may restore, with
                                     deletedAt, deletedBy and restorable
     POST   /experiments/<id>/restore undo a delete, with the files deleted with it
+    GET    /experiments/<id>/runs   {runs}: its Runs, newest first (?archived, ?deleted)
+    POST   /experiments/<id>/runs   {label?, params?, inputs?, provenance?} -> another Run
+                                    (201); 409 {running} while one runs
+    GET    /runs?node=&descendants=&experiment=&archived  {runs} to compare, with each
+                                    one's experiment {id, title, nodeId}
+    GET    /runs/<id>               one Run, with its file record
+    PATCH  /runs/<id>               {label?, archived?}
+    DELETE /runs/<id>               soft delete (not while it runs); POST /runs/<id>/restore
+    POST   /runs/<id>/finish        {results, state?: done|failed}; takes its file record
+    POST   /runs/<id>/rerun         {experiment?: <its experiment>|null} -> the new Run (201)
+    GET    /runs/<id>/reads         {reads}: the Rules versions its agents read
+    GET    /runs/<id>/files         {files, taken}; /runs/<id>/files/<path> a recorded file
+    Deprecated for a release, acting on the latest Run:
     POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?, inputs?,
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
     POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run

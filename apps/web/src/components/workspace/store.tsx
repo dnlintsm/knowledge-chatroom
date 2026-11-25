@@ -447,6 +447,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (gone) void enterNode(null);
         return;
       }
+      // Its Experiment's update event follows, and refreshes what shows it.
+      if (event.op === "run") return;
       if (event.op === "experiment") {
         const list = await refreshExperiments();
         // Deleted, or no longer shared with you: back to its node.

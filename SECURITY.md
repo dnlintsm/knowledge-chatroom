@@ -82,7 +82,9 @@ statements is a vulnerability; a consequence of one is not.
 
 - **Claude acts with the rights of the person chatting**, never more. In a knowledge node
   its edits are proposals that an editor accepts. It cannot accept proposals, share,
-  archive, delete or restore experiments, change roles, or delete files.
+  archive, delete or restore experiments or their runs, change roles, or delete files. It
+  can start and finish runs of experiments the user works on; a finished run can't be
+  changed by anyone.
 - **An outside MCP server** (`MCP_SERVERS`) receives the user's identity token and a
   short-lived storage token for the workspace the chat is in. With it, the server can read
   and propose what that user could. Only connect servers you would trust with that.

@@ -462,7 +462,76 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", `/experiments/${run.id}/finish`, { headers: alice, json: { results: { ok: 2 }, state: "failed" }, expect: 400 });
     const again = (await call<Schema["Experiment"]>("POST", "/experiments/runs", { headers: token, json: { rerunOf: run.id }, expect: 201 })).data;
     assert.equal(again.title, "Run it (rerun)");
-    assert.deepEqual(again.provenance.rerunOf, { id: run.id });
+    const first = (await call<{ runs: Schema["Run"][] }>("GET", `/experiments/${run.id}/runs`, { headers: alice, expect: 200 })).data.runs;
+    assert.deepEqual(again.provenance.rerunOf, { id: run.id, run: first[0].id });
+  });
+
+  step("runs of one experiment", async () => {
+    const token = storageToken("conformance|alice");
+    const made = (await call<Schema["Experiment"]>("POST", "/experiments", { headers: alice, json: { nodeId: mod.id, title: "Runs", params: { lr: 1 } }, expect: 201 })).data;
+    const runs = `/experiments/${made.id}/runs`;
+    assert.deepEqual((await call<{ runs: Schema["Run"][] }>("GET", runs, { headers: alice, expect: 200 })).data.runs, []);
+    await call("GET", "/experiments/00000000-0000-4000-8000-000000000000/runs", { headers: alice, expect: 404 });
+    await call("GET", `${runs}?archived=1&deleted=1`, { headers: alice, expect: 400 });
+    await call("POST", runs, { headers: alice, json: { colour: "red" }, expect: 400 });
+
+    const one = (await call<Schema["Run"]>("POST", runs, { headers: token, json: { label: "first", provenance: { chat: "chat-2" } }, expect: 201 })).data;
+    assert.equal(one.number, 1);
+    assert.equal(one.state, "running");
+    assert.deepEqual(one.params, { lr: 1 });
+    assert.equal(one.record, null);
+    // One run at a time: they share the working files.
+    const busy = await call<Schema["Error"]>("POST", runs, { headers: alice, json: {}, expect: 409 });
+    assert.equal(busy.data.running, 1);
+    await call("DELETE", `/runs/${one.id}`, { headers: alice, expect: 409 });
+    await call("PUT", `/files/notes/out.md?experiment=${made.id}`, { headers: alice, body: "one", expect: 200 });
+    await call("POST", `/runs/${one.id}/finish`, { headers: alice, json: { results: "x" }, expect: 400 });
+    const ended = (await call<Schema["Run"]>("POST", `/runs/${one.id}/finish`, { headers: token, json: { results: { acc: 0.5 } }, expect: 200 })).data;
+    assert.equal(ended.state, "done");
+    assert.equal(ended.recordTaken, "finish");
+    assert.ok(ended.record?.some((f) => f.path === "notes/out.md"));
+    assert.equal(ended.fileCount, ended.record?.length);
+    await call("POST", `/runs/${one.id}/finish`, { headers: alice, json: { results: { acc: 0.9 } }, expect: 400 });
+
+    // The working copy moves on; the record keeps what the run wrote.
+    await call("PUT", `/files/notes/out.md?experiment=${made.id}`, { headers: alice, body: "two", expect: 200 });
+    const recorded = await call("GET", `/runs/${one.id}/files/notes/out.md`, { headers: alice, expect: 200 });
+    assert.equal(recorded.text, "one");
+    await call("GET", `/runs/${one.id}/files/notes/none.md`, { headers: alice, expect: 404 });
+    const record = (await call<{ files: Schema["RunFile"][]; taken: string | null }>("GET", `/runs/${one.id}/files`, { headers: alice, expect: 200 })).data;
+    assert.equal(record.taken, "finish");
+    await call("GET", `/runs/${one.id}/reads`, { headers: alice, expect: 200 });
+
+    const two = (await call<Schema["Run"]>("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: made.id }, expect: 201 })).data;
+    assert.equal(two.number, 2);
+    assert.deepEqual(two.provenance.rerunOf, { id: made.id, run: one.id });
+    await call("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: "elsewhere" }, expect: 400 });
+    await call("POST", `/runs/${one.id}/rerun`, { headers: alice, json: { experiment: made.id }, expect: 409 });
+    await call("POST", `/runs/${two.id}/finish`, { headers: alice, json: { results: { acc: 0.7 }, state: "failed" }, expect: 200 });
+    const own = (await call<Schema["Run"]>("POST", `/runs/${one.id}/rerun`, { headers: alice, expect: 201 })).data;
+    assert.notEqual(own.experimentId, made.id);
+    assert.equal(own.number, 1);
+
+    await call("PATCH", `/runs/${one.id}`, { headers: alice, json: {}, expect: 400 });
+    await call("PATCH", `/runs/${one.id}`, { headers: token, json: { archived: true }, expect: 403 });
+    await call<Schema["Run"]>("PATCH", `/runs/${one.id}`, { headers: token, json: { label: "baseline" }, expect: 200 });
+    const archived = (await call<Schema["Run"]>("PATCH", `/runs/${one.id}`, { headers: alice, json: { archived: true }, expect: 200 })).data;
+    assert.equal(archived.archived, true);
+    const compared = (await call<{ runs: Schema["ComparedRun"][] }>("GET", `/runs?experiment=${made.id}`, { headers: alice, expect: 200 })).data.runs;
+    assert.deepEqual(compared.map((r) => r.number), [2]);
+    assert.equal(compared[0].experiment.title, "Runs");
+    await call("GET", `/runs?node=${mod.id}&descendants=1&archived=1`, { headers: alice, expect: 200 });
+    await call("GET", `${runs}?archived=1`, { headers: alice, expect: 200 });
+
+    await call("DELETE", `/runs/${two.id}`, { headers: token, expect: 403 });
+    await call("DELETE", `/runs/${two.id}`, { headers: alice, expect: 200 });
+    await call("GET", `/runs/${two.id}`, { headers: alice, expect: 404 });
+    const gone = (await call<{ runs: Schema["Run"][] }>("GET", `${runs}?deleted=1`, { headers: alice, expect: 200 })).data.runs;
+    assert.deepEqual(gone.map((r) => r.id), [two.id]);
+    await call("POST", `/runs/${two.id}/restore`, { headers: token, expect: 403 });
+    await call<Schema["Run"]>("POST", `/runs/${two.id}/restore`, { headers: alice, expect: 200 });
+    await call("POST", `/runs/${two.id}/restore`, { headers: alice, expect: 404 });
+    await call("GET", "/runs/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
   });
 
   step("experiment uploads", async () => {

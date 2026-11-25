@@ -227,7 +227,32 @@ Runs need server storage; a browser-only workspace has none.
 Input drift, reading past versions, recording which Rules a run read, and restoring deleted
 Experiments are specified in [run-evidence.md](run-evidence.md) (#267).
 Making a Run its own record under an Experiment, and importing a folder as an Experiment, are
-proposed in [experiment-runs.md](experiment-runs.md).
+specified in [experiment-runs.md](experiment-runs.md). In storage, a **Run** is now its own
+record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
+
+- Each Run has a number in its Experiment, an optional label, the parameters it ran with,
+  its results, state and provenance, and the Rules reads made while it ran (`run_reads.run_id`).
+  The Experiment's own `params` are its planned parameters.
+- When a Run finishes, it records every file of the Experiment as it is then (path, version,
+  SHA-256, size). File versions never change, so the record keeps pointing at what the run read
+  and wrote while the working files stay editable; nothing is copied. `GET /runs/<id>/files/<path>`
+  serves a recorded version.
+- A finished Run can't change, for anyone: a trigger refuses its parameters, results, state,
+  provenance and record. Its label, archiving and deletion can still change.
+- One Run of an Experiment runs at a time (a partial unique index); a second start answers 409
+  with the number of the one running, since runs share the working files.
+- Who sees and works on Runs follows the Experiment (row security through `experiment_access`).
+  Deleting is a soft delete with restore, refused while the run is running. Claude starts and
+  finishes Runs but doesn't archive, delete or restore them.
+- The migration gives every Experiment in state running, done or failed a Run 1 with its
+  parameters, results, provenance and reads; a finished one's record is taken then and marked
+  `migration`. A rerun's `rerunOf` also names the Run 1 it reran (`{id, run}`).
+- For one release the routes before Runs (`POST /experiments/runs`, `/finish`, `/reads`,
+  `/inputs`) keep working on the Experiment's latest Run, and an Experiment's `state`, `results`
+  and `provenance` mirror its latest live Run's. A `PATCH` to done or failed with no running Run,
+  and an upload marked finished, add a finished Run.
+- Run changes reach the event stream as `{op: "run", change, id, experiment, node}`, followed
+  by the Experiment's update event, for whoever can see the Experiment.
 
 ### Actions
 
@@ -638,8 +663,8 @@ For local setup, see [Development](development.md).
   browser can't load one (the store unreachable from the browser, or a format it can't
   show, like HEIC) it says so and offers Open and Download instead of a broken image.
 - **Claude** gets `list_nodes`, `create_node`, `list_files`, `read_file`, `search_files`,
-  `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `set_experiment_results`,
-  `update_experiment` and `propose_experiment` tools on the chat agent
+  `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `start_run`, `finish_run`,
+  `set_experiment_results` (an alias of `finish_run` for a release), `update_experiment` and `propose_experiment` tools on the chat agent
   (`services/agent-py/agent_py/workspace.py`), so it works with files even when no browser tab is open.
   The file tools take a `node` or an `experiment`; the chat context says where the user is,
   and inside an experiment Claude writes only there. `read_file` takes `offset`/`limit` in

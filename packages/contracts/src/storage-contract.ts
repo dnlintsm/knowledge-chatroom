@@ -32,7 +32,7 @@ export interface NodeEvent {
 
 export interface ExperimentEvent {
   op: "experiment";
-  change: "create" | "update" | "status" | "delete";
+  change: "create" | "update" | "status" | "delete" | "restore";
   id: string;
   /** null: an experiment at the workspace root. */
   node: string | null;
@@ -54,7 +54,17 @@ export interface ProposalEvent {
   authorId: string;
 }
 
-export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent | ProposalEvent;
+/** A Run changed. Its Experiment's update event follows it. */
+export interface RunEvent {
+  op: "run";
+  change: "create" | "finish" | "update" | "archive" | "delete" | "restore";
+  id: string;
+  experiment: string;
+  /** The Experiment's node; null at the workspace root. */
+  node: string | null;
+}
+
+export type WorkspaceEvent = FileEvent | NodeEvent | ExperimentEvent | RunEvent | ProposalEvent;
 
 export class StorageContractError extends TypeError {}
 
@@ -101,7 +111,10 @@ export function parseWorkspaceEvent(value: unknown): WorkspaceEvent {
   } else if (item.op === "node") {
     if (text(item.id) && text(item.change) && ["create", "rename", "delete", "restrict", "unrestrict", "takeover"].includes(item.change)) return item as unknown as NodeEvent;
   } else if (item.op === "experiment") {
-    if (text(item.id) && (item.node === null || text(item.node)) && text(item.change) && ["create", "update", "status", "delete"].includes(item.change)) return item as unknown as ExperimentEvent;
+    if (text(item.id) && (item.node === null || text(item.node)) && text(item.change) && ["create", "update", "status", "delete", "restore"].includes(item.change)) return item as unknown as ExperimentEvent;
+  } else if (item.op === "run") {
+    if (text(item.id) && text(item.experiment) && (item.node === null || text(item.node)) && text(item.change) &&
+        ["create", "finish", "update", "archive", "delete", "restore"].includes(item.change)) return item as unknown as RunEvent;
   }
   if (item.op === "proposal" && text(item.id) && (item.node === null || text(item.node)) &&
       canonicalPath(item.path) && author(item.author) && text(item.authorId) && text(item.change) &&
