@@ -637,6 +637,26 @@ class Session:
             await files.write(REPORT_PATH, new_report(run).encode())
         return await self.experiment(run["id"])
 
+    async def _inputs_still_there(self, experiment_id: str, before: Any) -> list[dict[str, Any]]:
+        """
+        The inputs an earlier Run linked under inputs/ that are still there,
+        recorded at their versions now: a new Run reads them as they are.
+        """
+        if not isinstance(before, list) or not before:
+            return []
+        files = await self.experiment_files(experiment_id)
+        kept: list[dict[str, Any]] = []
+        for entry in before:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                continue
+            versions = await files.history(entry["path"]) or []
+            if versions:
+                now = versions[0]
+                kept.append(
+                    {**entry, "version": now["id"], "sha256": now["sha256"], "size": now["size"]}
+                )
+        return kept
+
     async def _resolve_inputs(
         self, inputs: list[dict[str, Any]], taken: list[Any] | None = None
     ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
@@ -894,6 +914,7 @@ class Session:
         before = experiment["provenance"].get("inputs")
         taken = [i.get("path") if isinstance(i, dict) else None for i in before or []]
         links, recorded = await self._resolve_inputs(inputs or [], taken)
+        recorded = await self._inputs_still_there(experiment_id, before) + recorded
         user_id = self.principal.user_id
         who = await self.access.user(user_id)
         name = None if who is None else who["name"] if who["name"] is not None else who["email"]

@@ -495,3 +495,25 @@ async def test_results_recorded_by_hand_become_run_1_when_a_run_starts(either):
     # Without hand-recorded results, the first run is Run 1.
     bare = (await experiment(api))["id"]
     assert (await start(api, bare))["number"] == 1
+
+
+@needs_services
+async def test_a_new_run_records_the_inputs_already_linked(either):
+    api = either
+    source = (await experiment(api))["id"]
+    await write(api, source, "data/dose.csv", b"dose\n30\n")
+    exp = (await experiment(api))["id"]
+    one = await start(api, exp, inputs=[{"path": "data/dose.csv", "experiment": source}])
+    assert [i["path"] for i in one["provenance"]["inputs"]] == ["inputs/dose.csv"]
+    await finish(api, one["id"], {"ok": 1})
+
+    # Someone edits the linked copy; the next run reads it as it is now.
+    await write(api, exp, "inputs/dose.csv", b"dose\n99\n")
+    two = await start(api, exp)
+    (recorded,) = two["provenance"]["inputs"]
+    assert recorded["path"] == "inputs/dose.csv"
+    assert recorded["from"]["path"] == "data/dose.csv"
+    assert recorded["sha256"] != one["provenance"]["inputs"][0]["sha256"]
+    # The Experiment, answering as its latest run, still lists it.
+    now = (await api.get(f"/experiments/{exp}", headers=ALICE)).json()
+    assert [i["path"] for i in now["provenance"]["inputs"]] == ["inputs/dose.csv"]
