@@ -226,6 +226,8 @@ Runs need server storage; a browser-only workspace has none.
 
 Input drift, reading past versions, recording which Rules a run read, and restoring deleted
 Experiments are specified in [run-evidence.md](run-evidence.md) (#267).
+Making a Run its own record under an Experiment, and importing a folder as an Experiment, are
+proposed in [experiment-runs.md](experiment-runs.md).
 
 ### Actions
 
