@@ -69,7 +69,9 @@ over, and adds "Import folder as Experiment".
    `storage.yaml`. An Experiment's `results`, `state` and `provenance` fields stay for that
    release as its latest live Run's, and its `params` are its planned parameters. A `PATCH` of
    its state to done or failed with no Run running adds a finished Run, and so does an upload
-   marked finished, so older clients still leave a record.
+   marked finished, so older clients still leave a record. Results typed into an Experiment
+   before it ever ran become a finished Run 1, "Recorded by hand", when its first Run starts,
+   so they aren't replaced by the new Run's.
 10. **Claude starts and finishes Runs.** `create_experiment` (a new Experiment with Run 1)
     stays. `start_run` starts another Run in an Experiment the user can work on, and
     `finish_run` records its results. `set_experiment_results` stays as an alias for a release,
