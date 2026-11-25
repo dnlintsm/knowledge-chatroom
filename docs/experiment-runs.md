@@ -83,6 +83,10 @@ over, and adds "Import folder as Experiment".
   - **Visibility**: draft (only you) by default, or shared.
   - **Files**: every file it will hold, with sizes, and a count of any it can't copy
     (too large, or a type storage refuses). Paths are kept relative to the folder.
+- **A restriction travels with its content.** When the folder is inside a restricted node
+  ([restricted-knowledge.md](restricted-knowledge.md)) and the destination is outside that
+  node, importing needs Full access on the restricted node, since it opens the folder's
+  content to whoever can see the destination. The preview says so, and names the node.
 - **Copy by default.** The Experiment's files share the folder's stored bytes and start a new
   history, so the folder stays as it was. **Move** (needs Can edit where the folder is) also
   deletes the folder's files afterwards, in the same transaction, so their history stays.
@@ -147,7 +151,8 @@ event stream, with the same audience as its Experiment's events.
 - The deprecated routes and `set_experiment_results` still work and act on the latest Run.
 - Import: preview changes nothing; copy keeps the folder; move removes it and keeps its
   history; pointer needs Can edit; a viewer at the source can copy to where they can view;
-  limits as upload; agent tokens get 403.
+  copying out of a restricted node needs Full access on it; limits as upload; agent tokens
+  get 403.
 - E2E: start two Runs, compare them, archive one; import a folder with the preview.
 
 ## Rollout (#267, batch C)
@@ -164,5 +169,8 @@ event stream, with the same audience as its Experiment's events.
   the working files (`runs/2/`), so runs can overlap, at the cost of a less simple working
   copy.
 - **How long the deprecated routes stay.** This spec says one release.
+- **Importing out of a restricted node.** This spec asks for Full access on the restricted
+  node. The other option treats it like any copy a reader can make, since they could download
+  and upload the files.
 - **Move as an option at all.** Copy is the default; Move could be left out, and done by
   deleting the folder afterwards.
