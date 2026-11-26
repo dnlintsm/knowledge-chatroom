@@ -25,12 +25,15 @@ class FakeStorage:
         self.files: dict[str, tuple[bytes, str]] = {}
         self.requests: list[httpx.Request] = []
         self.proposals: list[dict[str, Any]] = []
+        self.experiments: list[dict[str, Any]] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
         if path == "/access":
             return httpx.Response(200, json={"me": {"id": "u1"}, "rootRole": "owner"})
+        if path == "/experiments" and request.method == "GET":
+            return httpx.Response(200, json={"experiments": self.experiments})
         if path == "/proposals" and request.method == "GET":
             return httpx.Response(200, json={"proposals": self.proposals})
         if path.startswith("/proposals/") and path.endswith("/content"):
@@ -379,3 +382,48 @@ def test_apply_edit_keeps_crlf_and_reports_lines():
     assert edit.content == "a\r\nB\r\nC" and edit.lines == (2, 3)
     with pytest.raises(EditError, match="line numbers"):
         apply_edit("abc", "1\tabc", "x")
+
+
+def test_list_experiments_says_what_each_latest_run_ran_as(api):
+    def experiment(id: str, execution: dict[str, Any] | None) -> dict[str, Any]:
+        base = {
+            "id": id,
+            "nodeId": "n1",
+            "title": id,
+            "status": "shared",
+            "state": "running",
+            "authorName": "Alice",
+            "access": "reader",
+            "hypothesis": "",
+            "params": {},
+            "results": {},
+            "fileCount": 0,
+            "forkedAt": None,
+        }
+        return {**base, "provenance": {"execution": execution} if execution else {}}
+
+    alice = {"id": "u1", "name": "Alice"}
+    api.experiments = [
+        experiment(
+            "by-pipeline",
+            {
+                "initiatedBy": alice,
+                "ranAs": {"kind": "pipeline", "id": "p1", "name": "Nightly import", "hint": "a1b2"},
+                "authorizedBy": {"kind": "pipeline-key"},
+            },
+        ),
+        experiment(
+            "by-claude", {"initiatedBy": alice, "ranAs": {"kind": "agent", "via": "remote"}}
+        ),
+        experiment("by-hand", {"initiatedBy": alice, "ranAs": {"kind": "user"}}),
+        experiment("before", None),
+    ]
+    out, error = call(api, "list_experiments")
+    assert not error
+    ran = {e["id"]: e["ranAs"] for e in json.loads(out)}
+    assert ran == {
+        "by-pipeline": "Pipeline Nightly import, key …a1b2, for Alice",
+        "by-claude": "Claude, for Alice",
+        "by-hand": "Alice",
+        "before": None,
+    }

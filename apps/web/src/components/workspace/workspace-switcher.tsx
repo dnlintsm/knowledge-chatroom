@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore, Check, ChevronDown, LayoutList, LogOut, Plus, Settings } from "lucide-react";
+import { ArchiveRestore, Check, ChevronDown, KeyRound, LayoutList, LogOut, Plus, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { isAborted, workspaceFetch, type WorkspaceInfo } from "@/lib/workspace-r
 import { CreateWorkspaceDialog, Dialog } from "./create-workspace";
 import { useCurrentWorkspace } from "./current-workspace";
 import { savedStateScope } from "./local-persistence";
+import { PipelinesDialog, usePipelinesServed } from "./pipelines";
 import { useWorkspace } from "./store";
 import { LeaveWorkspaceDialog, WorkspaceSettingsDialog } from "./workspace-settings";
 
@@ -21,7 +22,8 @@ import { LeaveWorkspaceDialog, WorkspaceSettingsDialog } from "./workspace-setti
  * server lets create one (WORKSPACE_CREATORS).
  *
  * It also opens the current workspace's settings (Owners and
- * Admins), leaving it (with login), and lists the archived workspaces the
+ * Admins), its pipelines (when the server serves them), leaving it (with
+ * login), and lists the archived workspaces the
  * user owns, to restore. The deployment's admins (PLATFORM_ADMINS) also get
  * the workspace inventory.
  */
@@ -29,9 +31,10 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
   const workspace = useCurrentWorkspace();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [dialog, setDialog] = useState<"settings" | "leave" | null>(null);
+  const [dialog, setDialog] = useState<"settings" | "leave" | "pipelines" | null>(null);
   const { account } = useWorkspace();
   const { leave, prompt } = useLeave();
+  const pipelines = usePipelinesServed(workspace?.id);
   if (!workspace) return null;
 
   return (
@@ -83,6 +86,14 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
                 }
               : undefined
           }
+          onPipelines={
+            pipelines
+              ? () => {
+                  setOpen(false);
+                  setDialog("pipelines");
+                }
+              : undefined
+          }
           onLeave={
             account.login
               ? () => {
@@ -104,6 +115,7 @@ export function WorkspaceSwitcher({ onRoot, current }: { onRoot: () => void; cur
       )}
       {dialog === "settings" && <WorkspaceSettingsDialog workspace={workspace} onClose={() => setDialog(null)} />}
       {dialog === "leave" && <LeaveWorkspaceDialog workspace={workspace} onClose={() => setDialog(null)} />}
+      {dialog === "pipelines" && <PipelinesDialog workspace={workspace} onClose={() => setDialog(null)} />}
       {prompt}
     </span>
   );
@@ -115,6 +127,7 @@ function SwitcherMenu({
   onCreate,
   onClose,
   onSettings,
+  onPipelines,
   onLeave,
   onInventory,
 }: {
@@ -126,6 +139,8 @@ function SwitcherMenu({
   onInventory: () => void;
   /** The current workspace's settings, for its Owners and Admins. */
   onSettings?: () => void;
+  /** The current workspace's pipelines, when the server serves them. */
+  onPipelines?: () => void;
   /** Leaving the current workspace, with login. */
   onLeave?: () => void;
 }) {
@@ -268,10 +283,15 @@ function SwitcherMenu({
           </ul>
         </>
       )}
-      {(onSettings || onLeave || canCreate || deploymentAdmin) && <div className="my-1 border-t border-[var(--border)]" />}
+      {(onSettings || onPipelines || onLeave || canCreate || deploymentAdmin) && <div className="my-1 border-t border-[var(--border)]" />}
       {onSettings && (
         <button type="button" role="menuitem" onClick={onSettings} className={action}>
           <Settings className="size-3.5" /> Workspace settings
+        </button>
+      )}
+      {onPipelines && (
+        <button type="button" role="menuitem" onClick={onPipelines} className={action}>
+          <KeyRound className="size-3.5" /> Pipelines
         </button>
       )}
       {onLeave && (

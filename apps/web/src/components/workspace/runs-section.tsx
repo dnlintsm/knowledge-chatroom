@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, ChevronRight, Play, Repeat, RotateCcw, Trash2, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
+import { authorizedByText, finishedByText, ranAsText, type Pipeline } from "@/lib/pipelines";
 import { cn } from "@/lib/utils";
 import { workspaceUrl } from "@/lib/workspace-request";
 import { StateBadge } from "./experiment-panel";
@@ -241,6 +242,25 @@ function RunView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { id, state, finishedAt } = run;
+  const execution = run.provenance.execution;
+  const pipelineId = execution?.ranAs.kind === "pipeline" ? execution.ranAs.id : undefined;
+  const [pipelineRevoked, setPipelineRevoked] = useState(false);
+
+  // A pipeline's Run left running after it was revoked: its key can't finish
+  // it, so the Run says so. Only its owner and the workspace's Owners and
+  // Admins can look the pipeline up; for anyone else nothing is said.
+  useEffect(() => {
+    setPipelineRevoked(false);
+    if (!pipelineId || state !== "running") return;
+    let live = true;
+    void apiFetch(`/api/pipelines/${encodeURIComponent(pipelineId)}`, { cache: "no-store" })
+      .then(async (res) => (res.ok ? ((await res.json()) as Pipeline) : null))
+      .then((found) => live && setPipelineRevoked(found?.status === "revoked"))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [pipelineId, state]);
 
   useEffect(() => {
     let live = true;
@@ -292,9 +312,16 @@ function RunView({
   const p = run.provenance;
   const source = p.rerunOf?.run && p.rerunOf.id === experiment.id ? runs.find((r) => r.id === p.rerunOf!.run) : undefined;
   const sourceExperiment = p.rerunOf && p.rerunOf.id !== experiment.id ? ws.experiments.find((e) => e.id === p.rerunOf!.id) : undefined;
+  const placeNames = {
+    node: (node: string) => ws.nodes.find((n) => n.id === node && n.role !== null)?.name,
+    experiment: (x: string) => ws.experiments.find((e) => e.id === x)?.title,
+  };
   const rows: [string, ReactNode][] = [
     ["Started", [run.startedBy?.name, when(run.startedAt)].filter(Boolean).join(", ")],
+    ["Ran as", ranAsText(execution) ?? <span className="text-[var(--muted-foreground)]">Not recorded</span>],
+    ["Authorized by", authorizedByText(execution, placeNames)],
     ["Finished", run.finishedAt && when(run.finishedAt)],
+    ["Finished by", finishedByText(execution)],
     ["Model", p.model],
     ["Skill", p.skill && [p.skill.name, p.skill.version && `v${p.skill.version}`].filter(Boolean).join(" · ")],
     ["Chat", p.chat],
@@ -325,6 +352,11 @@ function RunView({
 
   return (
     <div data-testid="run-view" className="flex flex-col gap-3 border-t border-[var(--border)] bg-surface-raised px-3 py-2 text-xs">
+      {pipelineRevoked && (
+        <p role="status" className="text-[var(--muted-foreground)]">
+          Its pipeline was revoked while it ran, so its key can&apos;t finish it. Its owner or the Experiment&apos;s maintainer can.
+        </p>
+      )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         {rows
           .filter(([, value]) => value)

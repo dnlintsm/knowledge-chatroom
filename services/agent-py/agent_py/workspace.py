@@ -262,6 +262,20 @@ def schema(properties: dict[str, Any], *required: str) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "required": list(required)}
 
 
+def ran_as(execution: dict[str, Any] | None) -> str | None:
+    """What a run ran as, in the app's words; None when it wasn't recorded."""
+    if not execution:
+        return None
+    person = (execution.get("initiatedBy") or {}).get("name") or "someone"
+    ran = execution.get("ranAs") or {}
+    if ran.get("kind") == "pipeline":
+        key = f", key …{ran['hint']}" if ran.get("hint") else ""
+        return f"Pipeline {ran.get('name') or '(unnamed)'}{key}, for {person}"
+    if ran.get("kind") == "agent":
+        return f"Claude, for {person}"
+    return person
+
+
 def tool_versions() -> dict[str, str]:
     """This agent's version and its SDKs', for the provenance of runs it starts."""
     versions = {}
@@ -674,7 +688,8 @@ def file_tools(
         "list_experiments",
         "List the experiments the user can see, on one knowledge node or (without node) anywhere: id, "
         "title, node (null = at the workspace root), status (draft = only its author sees it, shared, archived), "
-        "state (ready, running, done, failed), author, hypothesis, params and results. Use it to compare "
+        "state (ready, running, done, failed), author, hypothesis, params, results and ranAs (what its "
+        "latest run ran as: a person, Claude, or a pipeline acting for a person). Use it to compare "
         "experiments on a node.",
         schema({"node": NODE}),
     )
@@ -700,6 +715,7 @@ def file_tools(
                     "results": e["results"],
                     "files": e["fileCount"],
                     "forkedAt": e["forkedAt"],
+                    "ranAs": ran_as((e.get("provenance") or {}).get("execution")),
                 }
                 for e in found
             ]
