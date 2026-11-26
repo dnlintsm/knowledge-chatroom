@@ -176,8 +176,15 @@ is no separate run folder or mode (issue #82):
   the runs where you are and below it. At the
   workspace root that is every run you can see, so the app name in the title bar goes there.
   **+** starts a run where you are (a fork of the node's files, or an empty run at the root),
-  and **Compare** opens the **Runs** tab: one row per run with its state, place, author and
-  every parameter and result as a column.
+  and **Compare** opens the **Runs** tab: one row per Run, grouped by experiment, with its
+  state, place, who started it and every parameter and result as a column (an experiment
+  that hasn't run is one row). Archived Runs show only when asked for.
+- The experiment panel lists its **Runs**, newest first (`runs-section.tsx`). **New run**
+  starts one from the planned parameters, editable first, while none is running. Opening a
+  Run shows the parameters it ran with, its results (recorded with **Finish run** while it
+  runs), where it came from, and its files as recorded, each readable as it was and marked
+  when the working copy differs. From there: **Run again**, **Rerun as your own**,
+  **Archive** and **Delete** (with Undo, and **Recently deleted** under the list).
 - Opening a run moves the workspace into it and opens its report, unless one of its files is
   already open. Claude gets it as `currentExperiment`, with its state and report.
 - A run's **state** says how far it got (ready, running, done, failed), apart from its

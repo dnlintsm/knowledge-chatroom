@@ -381,7 +381,7 @@ test("login, sharing and read-only access", async ({ browser, request }) => {
   await expect(aliceFinding.getByRole("list", { name: "Collaborators" })).toHaveText("you");
   await expect(aliceFinding.getByTestId("read-only-reason")).toHaveCount(0);
   // Collaborators edit; only the maintainer shares, archives or chooses who works on it.
-  await expect(aliceFinding.getByLabel("Experiment state")).toBeVisible();
+  await expect(aliceFinding.getByRole("button", { name: "New run" })).toBeVisible();
   await expect(aliceFinding.getByRole("button", { name: "Archive" })).toHaveCount(0);
   await expect(aliceFinding.getByRole("button", { name: "Add collaborator" })).toHaveCount(0);
   await aliceFinding.getByRole("button", { name: "Stop collaborating" }).click();
