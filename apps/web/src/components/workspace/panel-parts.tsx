@@ -108,6 +108,11 @@ export function KeyValues({
         // Save once focus leaves the whole list, not on every field.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) commit(rows);
       }}
+      // Enter in a field submits its form without leaving the list: save first,
+      // so the form sends what the fields show.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target instanceof HTMLInputElement) commit(rows);
+      }}
     >
       {rows.map((row, i) => (
         <div key={i} className="flex items-center gap-2">

@@ -259,8 +259,9 @@ test("an experiment runs more than once: two runs, compared, and one archived", 
   await panel.getByRole("button", { name: "New run" }).click();
   const form = panel.getByRole("form", { name: "New run" });
   await form.getByRole("textbox", { name: "Run label" }).fill("hotter");
+  // Enter in a parameter starts it with what the field shows, before the field is left.
   await form.getByRole("textbox", { name: "rf_W value" }).fill("400");
-  await form.getByRole("button", { name: "Start run" }).click();
+  await form.getByRole("textbox", { name: "rf_W value" }).press("Enter");
   expect((await out("rate\n455\n")).ok()).toBe(true);
   await results.getByRole("button", { name: "Add result" }).click();
   await results.getByRole("textbox", { name: "result name" }).fill("etch_rate");
@@ -282,6 +283,7 @@ test("an experiment runs more than once: two runs, compared, and one archived", 
   const sweep = page.getByTestId("runs-panel").locator(`[data-experiment="${exp.id}"]`);
   await expect(sweep).toHaveCount(2);
   await expect(sweep.filter({ hasText: "hotter" })).toContainText("455");
+  await expect(sweep.filter({ hasText: "hotter" })).toContainText("400");
   await shot(page, "02g-compare-by-run");
 
   // Archive Run 1: it leaves Compare unless archived runs are shown, and stays readable.
@@ -296,6 +298,14 @@ test("an experiment runs more than once: two runs, compared, and one archived", 
   await expect(sweep).toHaveCount(1);
   await page.getByRole("checkbox", { name: "Show archived runs" }).check();
   await expect(sweep).toHaveCount(2);
+
+  // With every run archived, Compare shows none of their results.
+  const { runs: all } = (await (await request.get(`/api/experiments/${exp.id}/runs`)).json()) as { runs: { id: string }[] };
+  for (const run of all) expect((await request.patch(`/api/runs/${run.id}`, { data: { archived: true } })).ok()).toBe(true);
+  await page.getByRole("checkbox", { name: "Show archived runs" }).uncheck();
+  await expect(sweep).toHaveCount(1);
+  await expect(sweep).toContainText("Runs archived");
+  await expect(sweep).not.toContainText("455");
 });
 
 test("an archived experiment says why it's read only, and a rerun reads its inputs as recorded (#187)", async ({ page, request }) => {

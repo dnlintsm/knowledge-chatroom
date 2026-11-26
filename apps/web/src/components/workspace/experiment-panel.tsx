@@ -934,7 +934,10 @@ function RunsByExperiment({
   label: string;
 }) {
   const ws = useWorkspace();
-  // Each experiment's runs, or the experiment itself when it hasn't run.
+  // Each experiment's runs, or the experiment itself when none is shown: one
+  // that hasn't run (its planned parameters and any results typed by hand),
+  // or one whose runs are all archived (nothing, since its mirrored results
+  // are an archived run's).
   type Row = { experiment: Experiment; run: ComparedRun | null; first: boolean; span: number };
   const rows = experiments.flatMap((e): Row[] => {
     const its = runs.get(e.id) ?? [];
@@ -942,8 +945,9 @@ function RunsByExperiment({
       ? its.map((run, i) => ({ experiment: e, run, first: i === 0, span: its.length }))
       : [{ experiment: e, run: null, first: true, span: 1 }];
   });
-  const paramsOf = (r: Row) => r.run?.params ?? r.experiment.params;
-  const resultsOf = (r: Row) => r.run?.results ?? r.experiment.results;
+  const neverRan = (e: Experiment) => e.state === "ready";
+  const paramsOf = (r: Row) => r.run?.params ?? (neverRan(r.experiment) ? r.experiment.params : {});
+  const resultsOf = (r: Row) => r.run?.results ?? (neverRan(r.experiment) ? r.experiment.results : {});
   const paramKeys = [...new Set(rows.flatMap((r) => Object.keys(paramsOf(r))))];
   const resultKeys = [...new Set(rows.flatMap((r) => Object.keys(resultsOf(r))))];
   const cell = "border-b border-[var(--border)] px-2 py-1.5 text-left align-top";
@@ -997,7 +1001,9 @@ function RunsByExperiment({
                       {run.archived && <span className="text-[var(--muted-foreground)]">archived</span>}
                     </span>
                   ) : (
-                    <span className="text-[var(--muted-foreground)]">Not run</span>
+                    <span className="text-[var(--muted-foreground)]">
+                      {neverRan(e) ? "Not run" : "Runs archived"}
+                    </span>
                   )}
                 </td>
                 <td className={cell}>{placeName(ws.nodes, e.nodeId)}</td>
