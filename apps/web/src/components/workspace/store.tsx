@@ -21,6 +21,7 @@ export type { Reveal } from "./file-focus";
 import { useFileFocus } from "./use-file-focus";
 import { experimentFromSearch } from "./runs";
 import { usePlaceNavigation } from "./use-place-navigation";
+import { importFolder as importServerFolder, type FolderImport, type FolderImportRequest } from "./folder-import";
 import { useCurrentWorkspace } from "./current-workspace";
 import { useWorkspaceCatalog } from "./use-workspace-catalog";
 import { lineageOf, resolvePlaceContext } from "./workspace-context";
@@ -235,6 +236,8 @@ interface WorkspaceValue {
   rerunExperiment: (id: string) => Promise<Experiment>;
   /** Run `runId` again as Run 1 of a new draft Experiment of yours, and go there. */
   rerunAsYourOwn: (runId: string) => Promise<void>;
+  /** Imports a folder as a new Experiment and moves into it; throws with the server's reason. */
+  importFolder: (request: FolderImportRequest) => Promise<FolderImport>;
   updateExperiment: (id: string, change: ExperimentChange) => Promise<Experiment>;
   /**
    * Hands experiment `id` over, or adds or removes a collaborator; moves to
@@ -896,6 +899,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [refreshExperiments, enterExperiment],
   );
+  const importFolder = useCallback(
+    async (request: FolderImportRequest) => {
+      // The import copies what the server has, so recent edits go first.
+      if (placeRef.current === request.node) await settleSaves(request.node);
+      const imported = await importServerFolder(request, false);
+      await refreshExperiments();
+      if (imported.experiment) await enterExperiment(imported.experiment.id);
+      return imported;
+    },
+    [refreshExperiments, enterExperiment, settleSaves],
+  );
   const updateExperiment = useCallback(
     async (id: string, change: ExperimentChange) => {
       // Archived is read only, so edits still on their way would be refused.
@@ -1092,6 +1106,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       createExperiment,
       rerunExperiment,
       rerunAsYourOwn,
+      importFolder,
       updateExperiment,
       changeExperimentPeople,
       deleteExperiment,
@@ -1105,7 +1120,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     state, selection, openCount, reveal, setSelection, getFile, serverHash, loadFile, open, close, write, create, remove, rename, refresh, storageMode,
     syncError, storageDown, conflicts, resolveConflict, theirVersion, edits, node, experiment, lineage, tree, experiments, placeRole, canEdit, account,
     enterNode, enterExperiment, createNode, renameNode, deleteNode, createExperiment, rerunExperiment, rerunAsYourOwn,
-    updateExperiment, changeExperimentPeople, deleteExperiment, restoreExperiment, addRunInputs, proposals, decideProposal,
+    importFolder, updateExperiment, changeExperimentPeople, deleteExperiment, restoreExperiment, addRunInputs, proposals, decideProposal,
     promote,
   ]);
 

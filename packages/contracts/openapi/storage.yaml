@@ -612,6 +612,67 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /experiments/import:
+    post:
+      tags: [experiments]
+      operationId: importFolderAsExperiment
+      summary: Make an experiment of a folder already in the workspace
+      description: >-
+        Copies the folder's files into a new experiment at `destination` (default: the folder's
+        node), at their paths relative to the folder, sharing their stored bytes, so nothing is
+        sent again; each starts a history of its own. Its planned parameters come from a
+        params.json at the folder's top. Reading the folder needs view access where it is, and
+        the experiment needs view access at the destination. `move` also deletes the files it
+        imported (soft delete, in the same transaction), and only those: files left out stay, and
+        one changed since the folder was listed stops the import (412, `changed`), so nothing is
+        imported or deleted. `pointer` leaves an EXPERIMENT.md in it
+        naming the experiment and linking to it, never in place of one the folder keeps (412,
+        `exists`; with `move`, the folder's own goes into the experiment): both need edit access
+        where the folder is. A
+        folder in a restricted node imported to outside that node needs Full access on it.
+        Files larger than an upload may be are left out (`skipped`). With `preview`, answers
+        what it would do and changes nothing. Storage tokens can't.
+      parameters:
+        - name: preview
+          in: query
+          description: 1 (or true, or empty) to see what it would do.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [node, folder]
+              properties:
+                node: { type: [string, "null"], description: The folder's node; null for the workspace root. }
+                folder: { type: string, minLength: 1 }
+                destination: { type: [string, "null"], description: Where the experiment goes; the folder's node when left out. }
+                title: { type: string, maxLength: 200, description: The folder's name when left out. }
+                hypothesis: { type: string }
+                status: { type: string, enum: [draft, shared], default: draft }
+                move: { type: boolean, default: false }
+                pointer: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FolderImport" }
+        "201":
+          description: The experiment, with what was imported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FolderImport" }
+        "412": { $ref: "#/components/responses/ExistsOrChanged" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /experiments/{id}:
     parameters:
       - $ref: "#/components/parameters/Id"
@@ -4787,6 +4848,41 @@ components:
         restorable:
           type: boolean
           description: Only in the ?deleted list, false when its node was deleted too (restore answers 409).
+
+    FolderImport:
+      type: object
+      required: [title, destination, params, files, skipped, restricted, canMove, canPoint]
+      properties:
+        title: { type: string }
+        destination: { type: [string, "null"] }
+        params: { type: object, additionalProperties: true, description: "From the folder's params.json; {} without one." }
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, size]
+            properties:
+              path: { type: string, description: Relative to the folder, as in the experiment. }
+              size: { type: integer, minimum: 0 }
+        skipped:
+          type: array
+          items: { type: string }
+          description: Files left out, larger than an upload may be.
+        restricted:
+          description: The restricted node the folder is in, when the destination is outside it.
+          oneOf:
+            - type: object
+              required: [id, name, fullAccess]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                fullAccess: { type: boolean, description: Whether you have Full access there, which importing needs. }
+            - type: "null"
+        canMove: { type: boolean, description: Edit access where the folder is. }
+        canPoint: { type: boolean, description: Edit access where the folder is. }
+        experiment:
+          $ref: "#/components/schemas/Experiment"
+          description: Only once imported.
 
     RunState:
       type: string

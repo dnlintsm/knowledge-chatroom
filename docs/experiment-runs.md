@@ -115,7 +115,8 @@ over, and adds "Import folder as Experiment".
   again.
 - **An optional pointer**: a `EXPERIMENT.md` in the source folder that links to the new
   Experiment. It needs Can edit where the folder is; without it, the checkbox is off and says
-  why. The pointer is an ordinary file and names only the Experiment's title and link, so
+  why. It never replaces a file: when the folder has an `EXPERIMENT.md` of its own, Copy
+  keeps that one and the checkbox is off, saying Move takes it into the Experiment. The pointer is an ordinary file and names only the Experiment's title and link, so
   people who can't see a draft Experiment learn nothing from it but its name.
 - `POST /experiments/import {node, folder, destination?, title, hypothesis?, status?, move?,
   pointer?}` does it on the server, with the same checks and limits as

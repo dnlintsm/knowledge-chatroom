@@ -30,6 +30,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ActionsBlock } from "./actions";
 import { FileIcon } from "./file-icon";
+import { ImportFolderDialog } from "./import-folder-dialog";
 import {
   ancestorFolders,
   buildTree,
@@ -706,6 +707,10 @@ function ExplorerTools({ explorer }: { explorer: Explorer }) {
 
 /** The Files view: the filter and new-file boxes when open, then the tree. */
 function FilesView({ explorer, canEdit }: { explorer: Explorer; canEdit: boolean }) {
+  const { storageMode, experiment, node, placeRole } = useWorkspace();
+  // A folder of a node, or of the root, becomes an Experiment; one inside an Experiment doesn't.
+  const canImport = storageMode === "server" && !experiment && placeRole !== null;
+  const [importing, setImporting] = useState<{ node: string | null; folder: string } | null>(null);
   const shown = useMemo(
     () => (explorer.filtering ? filterFiles(explorer.files, explorer.query) : explorer.files),
     [explorer.files, explorer.filtering, explorer.query],
@@ -749,6 +754,7 @@ function FilesView({ explorer, canEdit }: { explorer: Explorer; canEdit: boolean
           reveal={explorer.reveal}
           onRevealed={explorer.revealed}
           onNewFileIn={canEdit ? (folder) => explorer.startNewFile(`${folder}/`) : undefined}
+          onImportFolder={canImport ? (folder) => setImporting({ node, folder }) : undefined}
           newFile={
             explorer.newFile !== null && canEdit
               ? {
@@ -766,6 +772,9 @@ function FilesView({ explorer, canEdit }: { explorer: Explorer; canEdit: boolean
               : null
           }
         />
+      )}
+      {importing && (
+        <ImportFolderDialog node={importing.node} folder={importing.folder} onClose={() => setImporting(null)} />
       )}
     </>
   );
@@ -874,6 +883,7 @@ function FileTreeView({
   reveal = null,
   onRevealed,
   onNewFileIn,
+  onImportFolder,
   newFile = null,
 }: {
   files: WorkspaceFile[];
@@ -886,6 +896,8 @@ function FileTreeView({
   onRevealed?: () => void;
   /** Adds a "new file here" button to each folder. */
   onNewFileIn?: (folder: string) => void;
+  /** Adds an "Import as Experiment" button to each folder. */
+  onImportFolder?: (folder: string) => void;
   /** The new-file box, shown first in its folder (at the top when that isn't here yet). */
   newFile?: { folder: string; input: (depth: number) => ReactNode } | null;
 }) {
@@ -938,6 +950,17 @@ function FileTreeView({
                   className="hidden size-5 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] group-hover:flex group-focus-within:flex cursor-pointer"
                 >
                   <Plus className="size-3.5" />
+                </button>
+              )}
+              {onImportFolder && (
+                <button
+                  type="button"
+                  aria-label={`Import ${sub.path} as Experiment`}
+                  title="Import as Experiment"
+                  onClick={() => onImportFolder(sub.path)}
+                  className="hidden size-5 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] group-hover:flex group-focus-within:flex cursor-pointer"
+                >
+                  <FlaskConical className="size-3.5" />
                 </button>
               )}
             </div>
