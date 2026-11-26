@@ -22,10 +22,13 @@ COPY services/agent-py/pyproject.toml ./services/agent-py/
 RUN uv sync --frozen --no-dev --package agent-py
 COPY services/agent-py/agent_py ./services/agent-py/agent_py
 
-# Claude Code keeps its settings in the user's home; each chat user's working
-# folder (with their skills) goes in AGENT_PY_WORKDIR.
+# Claude Code keeps its settings and each chat's session transcript in the
+# user's home; each chat user's working folder (with their skills) and each
+# chat's link to its session go in AGENT_PY_WORKDIR. Both exist here, owned by
+# the user, so a volume mounted on either starts out writable by it.
 RUN useradd --create-home --uid 10001 agent \
-  && mkdir -p /var/lib/agent-py && chown agent /var/lib/agent-py
+  && mkdir -p /var/lib/agent-py /home/agent/.claude \
+  && chown agent /var/lib/agent-py /home/agent/.claude
 WORKDIR /app/services/agent-py
 ENV PATH="/app/.venv/bin:$PATH" AGENT_PY_HOST=0.0.0.0 AGENT_PY_PORT=9300 AGENT_PY_WORKDIR=/var/lib/agent-py
 EXPOSE 9300

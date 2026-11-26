@@ -56,6 +56,8 @@ def run_input(
 
 
 LOCAL = {"id": "local", "signed_in": False}
+# The session id the fake engine gives every chat (conftest.py).
+SESSION = "11111111-2222-3333-4444-555555555555"
 OPEN_FILE = [{"description": "openFile", "value": '{"path": "notes/a.md", "content": "1\\thello"}'}]
 
 
@@ -114,9 +116,13 @@ def test_model_discovery_and_switching_in_one_thread(claude):
         for model in ("claude-haiku-4-5", None, "claude-haiku-4-5"):
             response = client.post("/agent/report", json=run_input(user=LOCAL, model=model))
             assert types(events(response))[-1] == "RUN_FINISHED"
-        (session,) = claude.created
-        assert session.options.model == "claude-haiku-4-5"
-        assert session.model_changes == ["claude-sonnet-5", "claude-haiku-4-5"]
+        # Each run starts the engine with its model, resuming the chat's session.
+        assert [c.options.model for c in claude.created] == [
+            "claude-haiku-4-5",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+        ]
+        assert [c.options.resume for c in claude.created] == [None, SESSION, SESSION]
 
 
 def test_the_session_has_the_chatrooms_options(client, claude):
@@ -142,8 +148,9 @@ def test_the_workspace_note_comes_with_the_message_when_it_changes(client, claud
     events(client.post("/agent/report", json=run_input("two", user=LOCAL, context=OPEN_FILE)))
     moved = [{"description": "openFile", "value": '{"path": "notes/b.md", "content": "1\\tbye"}'}]
     events(client.post("/agent/report", json=run_input("three", user=LOCAL, context=moved)))
-    (session,) = claude.created  # one session for the whole chat
-    first, second, third = session.prompts
+    # One session for the whole chat: each run's engine resumes it.
+    assert [c.options.resume for c in claude.created] == [None, SESSION, SESSION]
+    first, second, third = (prompt for c in claude.created for prompt in c.prompts)
     assert (
         first.startswith("<workspace>\nopenFile\n")
         and "notes/a.md" in first
@@ -529,6 +536,61 @@ def test_a_run_waits_no_longer_than_its_tokens_allow(claude, tmp_path, monkeypat
         assert not adapter._in_use and not any(lock.locked() for lock in adapter._folders.values())
 
     asyncio.run(waiting())
+
+
+def test_a_chat_keeps_its_session_when_the_server_restarts(claude, tmp_path, monkeypatch):
+    """Claude used to forget the chat: the link to its session was only in memory."""
+    import claude_agent_sdk
+
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+
+    def restarted() -> TestClient:
+        adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+        return TestClient(create_app(env=env, adapter=adapter))
+
+    with restarted() as c:
+        events(c.post("/agent/report", json=run_input("one", user=LOCAL)))
+    with restarted() as c:
+        events(c.post("/agent/report", json=run_input("two", user=LOCAL)))
+        # Another chat of the same user starts its own session.
+        events(c.post("/agent/report", json=run_input("hi", thread="t2", user=LOCAL)))
+    assert [c.options.resume for c in claude.created] == [None, SESSION, None]
+
+    # Claude Code's home was not kept: the transcript is gone, so the chat
+    # starts a new session instead of failing every run from now on.
+    monkeypatch.setattr(claude_agent_sdk, "get_session_info", lambda sid, directory=None: None)
+    with restarted() as c:
+        evts = events(c.post("/agent/report", json=run_input("three", user=LOCAL)))
+    assert types(evts)[-1] == "RUN_FINISHED"
+    assert claude.created[-1].options.resume is None
+
+
+def test_the_note_is_not_sent_again_to_a_session_that_has_it(claude, tmp_path):
+    """
+    With the browser's tools (every run of the real app) each run starts a new
+    engine process, which used to count as a new session: the note with the
+    open file went with every message.
+    """
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    tools = [{"name": "writeWorkspaceFile", "description": "Writes a file", "parameters": {}}]
+
+    def ask(c: TestClient, text: str, context: list[dict[str, str]]) -> None:
+        body = run_input(text, user=LOCAL, context=context)
+        body["tools"] = tools
+        events(c.post("/agent/report", json=body))
+
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        ask(c, "one", OPEN_FILE)
+        ask(c, "two", OPEN_FILE)
+    first, second = (prompt for c in claude.created for prompt in c.prompts)
+    assert first.startswith("<workspace>") and second == "two"
+    # After a restart the server no longer knows what the session was told: it says it again.
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    with TestClient(create_app(env=env, adapter=adapter)) as c:
+        ask(c, "three", OPEN_FILE)
+    assert claude.created[-1].options.resume == SESSION
+    assert claude.created[-1].prompts[0].startswith("<workspace>")
 
 
 def test_every_storage_call_of_the_server_goes_through_one_http_client(claude, monkeypatch):

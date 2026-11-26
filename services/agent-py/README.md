@@ -55,7 +55,7 @@ for a gateway) in this server's environment.
 | `LOCAL_AGENT_URL` | The API server, as for the app (default `http://localhost:8000`). |
 | `MCP_SERVERS` | Outside MCP servers and tool chips: give it the API server's value, so the chat's "+" menu (from the API server) names the servers this agent connects to. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | Stop a run after this long (default `1800`; `0` = never). |
-| `AGENT_PY_WORKDIR` | Where each user's working folder goes (one per user and workspace, with one run at a time in it: a second chat's run waits), holding their skills and the workspace copy (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
+| `AGENT_PY_WORKDIR` | Where each user's working folder goes (one per user and workspace, with one run at a time in it: a second chat's run waits), holding their skills and the workspace copy, and where each chat's link to its Claude Code session is kept (`.sessions/`). Set it to a folder that outlives the process, or Claude forgets every chat at a restart (default: a new empty temp folder). Keep it out of this repository: Claude Code describes its working folder to the model. |
 | `AGENT_WORKDIR` | `off`: no workspace copy in the working folder, and no Read/Glob/Grep or `save_file`. |
 | `AGENT_WORKDIR_MAX_MB`, `AGENT_WORKDIR_MAX_FILE_MB` | The copy's size caps (default 500 and 25): smallest files first, larger ones left out. |
 | `AGENT_WORKDIR_IDLE_HOURS` | A user's run folder is removed after this long without a run (default 24, at least 1; `0`: never). |
@@ -67,6 +67,10 @@ for a gateway) in this server's environment.
 
 - `agent_py/app.py`: `POST /agent/report` and `GET /health`. It checks who the run is
   for before the model starts.
+- `agent_py/sessions.py`: each chat's link to its Claude Code session, kept on disk so a
+  chat is resumed after a restart or a long pause. Useful only with the transcripts in
+  Claude Code's home (`~/.claude`): see
+  [what the chat agent keeps](../../docs/deployment.md#what-the-chat-agent-keeps-across-restarts).
 - `agent_py/adapter.py`: `ClaudeAgentAdapter` with the chatroom's per-run handling.
   The adapter keeps one Claude session per chat and builds its options once, so the
   system prompt stays fixed and each run's `context` (open file, selection, node,
