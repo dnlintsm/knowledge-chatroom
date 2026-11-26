@@ -59,16 +59,36 @@ def iso(value: datetime | None) -> str | None:
 
 
 @dataclass(frozen=True)
+class PipelineScope:
+    """What a pipeline's key reaches (docs/pipeline-identities.md): its places and operations."""
+
+    id: str
+    name: str
+    key_id: str
+    key_hint: str
+    # None for the whole workspace; otherwise the nodes (with their subtrees)
+    # and Experiments (with their Runs) it may reach.
+    nodes: tuple[str, ...] | None = None
+    experiments: tuple[str, ...] = ()
+    operations: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class Principal:
-    """Who is asking: a user, or Claude acting for that user (through `via`, a storage token's)."""
+    """
+    Who is asking: a user, Claude acting for that user (through `via`, a
+    storage token's), or a pipeline acting for its owner (`pipeline`, `via`
+    "pipeline:<id>").
+    """
 
     user_id: str
-    actor: Literal["user", "agent"] = "user"
+    actor: Literal["user", "agent", "pipeline"] = "user"
     via: str | None = None
     # The workspace a token is bound to: its `ws` claim, or LEGACY_TOKEN for a
     # token minted without one (the default workspace). None for a signed-in
     # user, whose request chooses (workspaces.py).
     bound_ws: str | None = None
+    pipeline: PipelineScope | None = None
 
 
 # A storage or memory token without a `ws` claim: bound to the default workspace
@@ -651,6 +671,12 @@ class AccessService:
         self, conn: AsyncConnection, principal: Principal, action: str, target: dict[str, Any]
     ) -> None:
         recorded = {**target, "via": principal.via} if principal.via else target
+        if principal.pipeline is not None:
+            recorded = {
+                **recorded,
+                "pipeline": principal.pipeline.id,
+                "key": principal.pipeline.key_id,
+            }
         await conn.execute(
             "INSERT INTO audit_log (workspace_id, actor_type, actor_id, action, target) VALUES (%s, %s, %s, %s, %s)",
             (self.workspace_id, principal.actor, principal.user_id, action, Jsonb(recorded)),

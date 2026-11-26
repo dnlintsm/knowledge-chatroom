@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from . import (
     memory_routes,
+    pipelines,
     platform,
     server_routes,
     skills_routes,
@@ -23,10 +24,11 @@ from . import (
 # step 7: /skills and /hub (skills_routes.py), and /tools (tools.py; no storage needed);
 # step 8: /memory (memory_routes.py, with MEMORY=on);
 # step 9: /identity/public-key, /identity/mcp-tokens and /suggest (server_routes.py; no storage needed);
-# /workspaces (workspaces.py) and /platform (platform.py), served here only.
+# /workspaces (workspaces.py), /platform (platform.py) and /pipelines (pipelines.py), served here only.
 ROUTERS: list[APIRouter] = [
     workspaces.router,
     platform.router,
+    pipelines.router,
     storage_routes.router,
     skills_routes.router,
     tools.router,
@@ -47,4 +49,5 @@ STORAGE_PREFIXES = (
     "/hub",
     "/workspaces",
     "/platform",
+    "/pipelines",
 )

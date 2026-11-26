@@ -37,6 +37,10 @@ MEMORY_LEARN, MEMORY_IDLE_MINUTES
                      (memory_learn.py)
 MCP_SERVERS, TOOLS_CALL_TIMEOUT_MS, STORAGE_TOKEN_SECONDS
                      the "+" menu's tool servers and their calls (tools.py)
+PIPELINES            on: Members make pipelines, and their keys reach the storage
+                     routes (pipelines.py); off, /pipelines answers 404
+PIPELINE_KEY_MAX_DAYS
+                     the longest a pipeline key may last (default 365)
 """
 
 from __future__ import annotations
@@ -139,6 +143,9 @@ class Settings:
     # With memory, learning from quiet chats (MEMORY_LEARN not off), and after how long (memory_learn.py).
     memory_learn: bool = True
     memory_idle_minutes: float = 10.0
+    # Pipelines (PIPELINES=on) and the longest one of their keys may last (pipelines.py).
+    pipelines: bool = False
+    pipeline_key_max_days: int = 365
     # The "+" menu's tool servers (MCP_SERVERS); unset in the environment is an empty menu.
     # None (a Settings made without them, in tests) answers /tools 404.
     tools: ToolsSettings | None = None
@@ -176,7 +183,21 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
             r"(off|0|false|no)", (env.get("MEMORY_LEARN") or "").strip(f"{JS_SPACE}"), re.IGNORECASE
         ),
         memory_idle_minutes=idle_minutes(env.get("MEMORY_IDLE_MINUTES")),
+        pipelines=(env.get("PIPELINES") or "").strip().lower() == "on",
+        pipeline_key_max_days=_pipeline_key_max_days(env),
     )
+
+
+def _pipeline_key_max_days(env: Mapping[str, str]) -> int:
+    """PIPELINE_KEY_MAX_DAYS: a whole number of days from 1 to 3650, else startup is refused."""
+    value = (env.get("PIPELINE_KEY_MAX_DAYS") or "").strip()
+    if not value:
+        return 365
+    if not value.isdigit() or not 1 <= int(value) <= 3650:
+        raise ConfigError(
+            f"PIPELINE_KEY_MAX_DAYS must be a whole number of days from 1 to 3650, not {value!r}"
+        )
+    return int(value)
 
 
 def idle_minutes(value: str | None) -> float:

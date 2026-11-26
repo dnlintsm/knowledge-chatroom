@@ -128,8 +128,8 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from . import uploads
-from .access import ROLES, AccessError, ForbiddenError, LastOwnerError, is_uuid
+from . import tokens, uploads
+from .access import ROLES, AccessError, ForbiddenError, LastOwnerError, PipelineScope, is_uuid
 from .chats import ChatError, ChatTakenError
 from .experiments import (
     ANYWHERE,
@@ -150,6 +150,7 @@ from .paths import (
     normalize_path,
     utf16_len,
 )
+from .pipelines import PIPELINE_HEADER, PipelineRefused
 from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .run_report import js_json, js_number
 from .runs import RunError, RunNotYoursError, RunRunningError, RunStillRunningError
@@ -396,16 +397,87 @@ def agent_refusal(request: Request) -> str | None:
     return "Claude can't do that with a storage token"
 
 
+# What each operation lets a pipeline do, for its refusals (docs/pipeline-identities.md, decision 3).
+OPERATION_VERBS = {
+    "read": "read here",
+    "write": "write files or propose changes",
+    "runs": "create experiments or start and finish runs",
+    "upload": "upload experiments or add nodes",
+}
+
+
+def operation_for(request: Request) -> str:
+    """The operation a request needs from a pipeline."""
+    method = request.method
+    section, *rest = raw_path(request).split("/")[1:]
+    sub = "/".join(rest)
+    if method in ("GET", "HEAD") or section in ("search", "access"):
+        return "read"
+    if section in ("files", "proposals"):
+        return "write"
+    if section == "nodes" or (section == "experiments" and sub == "upload"):
+        return "upload"
+    return "runs"
+
+
+def _as_pipeline(refusal: str) -> str:
+    """Claude's refusal, worded for a pipeline: it has the same limits."""
+    return (
+        refusal.replace("Claude's", "A pipeline's")
+        .replace("Claude doesn't", "A pipeline doesn't")
+        .replace("Claude can't", "A pipeline can't")
+        .replace("Claude never", "A pipeline never")
+        .replace("storage tokens can't", "pipeline keys can't")
+        .replace("with a storage token", "with its key")
+    )
+
+
+def pipeline_refusal(request: Request, scope: PipelineScope) -> str | None:
+    """
+    Why a pipeline may not make this request: Claude's limits (agent_refusal),
+    except an upload when it has that operation, then the operation it needs.
+    """
+    section, *rest = raw_path(request).split("/")[1:]
+    upload = request.method == "POST" and section == "experiments" and "/".join(rest) == "upload"
+    if not upload:
+        refusal = agent_refusal(request)
+        if refusal:
+            return _as_pipeline(refusal)
+    needed = operation_for(request)
+    if needed not in scope.operations:
+        return (
+            f"This pipeline can't {OPERATION_VERBS[needed]}: it doesn't have the {needed} operation"
+        )
+    return None
+
+
 async def _session(request: Request) -> Session | Response:
     """This request's Session, in its workspace (workspaces.resolve), or the answer when it is refused."""
     state = request.app.state
     storage = state.storage
-    principal = await identify(
-        request, storage.access, state.settings.auth_secret, storage_tokens=True
-    )
+    key = request.headers.get(PIPELINE_HEADER)
+    if key is not None:
+        if not state.settings.pipelines:
+            return error(401, "Pipelines are off on this server (PIPELINES)")
+        if request.headers.get(tokens.IDENTITY_HEADER) or request.headers.get(
+            tokens.STORAGE_HEADER
+        ):
+            return error(400, "Send a pipeline key or sign in, not both")
+        try:
+            principal, _ = await state.pipelines.authenticate(key)
+        except PipelineRefused as err:
+            return error(401, str(err))
+    else:
+        principal = await identify(
+            request, storage.access, state.settings.auth_secret, storage_tokens=True
+        )
     if principal is None:
         return error(401, "Sign in to use the workspace")
-    if principal.via:
+    if principal.pipeline is not None:
+        refusal = pipeline_refusal(request, principal.pipeline)
+        if refusal:
+            return error(403, refusal)
+    elif principal.via:
         refusal = agent_refusal(request)
         if refusal:
             return error(403, refusal)
@@ -930,7 +1002,16 @@ RUN_EXPECTED = (
     "skill?: {name, source?, version?: number, sha256?}, tools?: {[name]: version}, ...}}"
 )
 # Provenance only the server writes: who started it and when, its inputs, its source run, when it finished.
-SERVER_PROVENANCE = ("startedBy", "startedAt", "finishedAt", "inputs", "rerunOf", "files", "reads")
+SERVER_PROVENANCE = (
+    "startedBy",
+    "startedAt",
+    "finishedAt",
+    "inputs",
+    "rerunOf",
+    "files",
+    "reads",
+    "execution",
+)
 # A run request with no nodeId: rerun in the earlier run's place.
 _NOT_GIVEN = object()
 
