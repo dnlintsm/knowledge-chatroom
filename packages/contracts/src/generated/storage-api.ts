@@ -261,7 +261,7 @@ export interface paths {
         head?: never;
         /**
          * Change an experiment (its maintainer and collaborators)
-         * @description Only its maintainer changes the status (shares, archives or restores it).
+         * @description Only its maintainer changes the status (shares, archives or restores it). A state of done or failed ends a run as POST /experiments/{id}/finish without `run` does, so it doesn't end a run someone else started (409). A running experiment isn't marked ready (409): its run ends by finishing.
          */
         patch: operations["updateExperiment"];
         trace?: never;
@@ -277,7 +277,8 @@ export interface paths {
         put?: never;
         /**
          * Start a run, or run an earlier one again
-         * @description A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` copied under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis and params unless given here, and its inputs read from its inputs/ at the content its record names, even if they were edited since (400 when one is gone or the record doesn't say). `inputs` instead reads those files at their current versions. Finish it with /finish.
+         * @deprecated
+         * @description Deprecated: start a run with POST /experiments/{id}/runs (a new experiment with POST /experiments). It still works for this release and makes Run 1 of the new experiment. A new run: a draft experiment in state running, on a node with a copy of its files or at the root (nodeId null or left out) empty, with each of `inputs` copied under inputs/ at its current version, and a report.md whose front matter records where it came from. `provenance` is what the caller says about it (e.g. chat, model, skill, tools; 400 when one of these has another shape); who started it, when, the input versions, rerunOf and finishedAt are the server's. With `rerunOf`, that run again as a new one: its place, title, hypothesis and params unless given here, and its inputs read from its inputs/ at the content its record names, even if they were edited since (400 when one is gone or the record doesn't say). `inputs` instead reads those files at their current versions. Finish it with /finish.
          */
         post: operations["startRun"];
         delete?: never;
@@ -299,7 +300,8 @@ export interface paths {
         put?: never;
         /**
          * Record a run's results and how it ended
-         * @description Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused.
+         * @deprecated
+         * @description Deprecated: use POST /runs/{id}/finish. It still works for this release. Sets results (replacing the old ones whole) and state done or failed, and refreshes the record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished run stays as it ended: the same call again answers it unchanged, a different one is refused. The run it ends is `run` when given. Without it, a call that repeats how the caller's latest finished run ended is a retry, answered without change even while a newer run runs; otherwise it ends the running run only when the caller started it, and a 409 names a run someone else started, which keeps running. A PATCH to state done or failed follows the same rule.
          */
         post: operations["finishRun"];
         delete?: never;
@@ -341,7 +343,8 @@ export interface paths {
         };
         /**
          * The Rules versions a run's agents read while it ran
-         * @description Each version of the run's models/general_rules.md that an agent or tool of its maintainer or a collaborator read through a storage token while the run was running, first read first; one entry per version. For whoever can see the run.
+         * @deprecated
+         * @description Deprecated: use GET /runs/{id}/reads. It still works for this release and answers the latest live run's reads. Each version of the run's models/general_rules.md that an agent or tool of its maintainer or a collaborator read through a storage token while the run was running, first read first; one entry per version. For whoever can see the run.
          */
         get: operations["listRunReads"];
         put?: never;
@@ -365,7 +368,8 @@ export interface paths {
         put?: never;
         /**
          * Link files into an experiment as inputs
-         * @description Each file is linked under inputs/ and recorded in the experiment's provenance. Its maintainer and collaborators, while it isn't archived or a finished run.
+         * @deprecated
+         * @description Deprecated: pass inputs to POST /experiments/{id}/runs. It still works for this release and adds to the running run's inputs. Each file is linked under inputs/ and recorded in the experiment's provenance. Its maintainer and collaborators, while it isn't archived or a finished run.
          */
         post: operations["addRunInputs"];
         delete?: never;
@@ -424,6 +428,216 @@ export interface paths {
          * @description Storage tokens can't (403).
          */
         delete: operations["removeExperimentCollaborator"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/experiments/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * An experiment's runs, newest first
+         * @description Its live runs, for whoever can see it. With `archived`, the archived ones too. With `deleted`, only its deleted ones (with deletedAt and deletedBy), for its maintainer and collaborators; storage tokens can't ask for those. `archived` and `deleted` together are a 400.
+         */
+        get: operations["listExperimentRuns"];
+        put?: never;
+        /**
+         * Start another run of an experiment
+         * @description A new run, numbered after the experiment's last, with the experiment's planned parameters unless `params` is given. `inputs` are linked under inputs/ at their current versions and recorded in its provenance, as for /experiments/runs. Its maintainer and collaborators, while it isn't archived; storage tokens can. Only one run of an experiment runs at a time, since its runs share the working files: 409 names the one running.
+         */
+        post: operations["startExperimentRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Runs to compare, with each one's experiment
+         * @description Live runs of experiments you can see, newest first: on a node (`node=root` for the workspace root), with `descendants` also on the nodes under it, of one `experiment`, or anywhere when neither is given. Archived runs only with `archived`.
+         */
+        get: operations["compareRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * One run, with its file record
+         * @description For whoever can see its experiment; a deleted run is not found here.
+         */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a finished run (soft delete)
+         * @description Its experiment's maintainer and collaborators, while the experiment isn't archived; storage tokens can't. Restore brings it back. A running run can't be deleted (409): finish it first.
+         */
+        delete: operations["deleteRun"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a run's label, or archive it
+         * @description Its experiment's maintainer and collaborators, while the experiment isn't archived. A finished run's label and archiving can still change. Storage tokens can change the label but not archive.
+         */
+        patch: operations["updateRun"];
+        trace?: never;
+    };
+    "/runs/{id}/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a run's results and how it ended
+         * @description Sets its results and state done or failed, and takes its file record: every file of the experiment as it is now (path, version, sha256, size). Its experiment's maintainer and collaborators, while it isn't archived; storage tokens can. A finished run stays as it ended: the same call again answers it unchanged, a different one is a 400.
+         */
+        post: operations["finishRunById"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a run again
+         * @description With `experiment` set to the run's own experiment: another run of it, with this run's parameters and label (its maintainer and collaborators; 409 while one is running). With `experiment` null, left out, or no body: Run 1 of a new draft experiment of yours, for whoever can see this one, as /experiments/runs with rerunOf does. Either way the new run's provenance has rerunOf {id, run} naming this one. Any other experiment is a 400.
+         */
+        post: operations["rerunRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo a run's delete
+         * @description Its experiment's maintainer and collaborators, while it isn't archived; storage tokens can't.
+         */
+        post: operations["restoreRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The Rules versions a run's agents read while it ran
+         * @description As /experiments/{id}/reads, for this run. For whoever can see its experiment.
+         */
+        get: operations["listReadsOfRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A run's file record
+         * @description Every file of its experiment as it was when the run finished; empty while it runs. `taken` says when the record was taken: finish, or migration for a run that finished before runs had records (what changed after it ended can't be told apart).
+         */
+        get: operations["listRunFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept. */
+                path: components["parameters"]["FilePath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A file's bytes as the run recorded them
+         * @description The recorded version's bytes, with the checks of reading the experiment's files, served as /files/{path} serves them (sandboxed, nosniff). A recorded version never changes, so it may be cached for good, and stays readable after the working file is deleted, renamed or replaced. 404 when the record has no such path.
+         */
+        get: operations["readRunFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2015,6 +2229,8 @@ export interface components {
             changed?: true;
             /** @description With `changed` on a file write, the file's version now; null when it is gone. */
             sha256?: string | null;
+            /** @description On a 409 starting a run: the number of the run that is running. */
+            running?: number;
         };
         IdOnly: {
             id: string;
@@ -2098,8 +2314,19 @@ export interface components {
             author: components["schemas"]["AuthorType"];
             authorId: string;
         };
+        /** @description A run changed; its experiment's update event follows. Heard by whoever can see the experiment. */
+        RunEvent: {
+            /** @constant */
+            op: "run";
+            /** @enum {string} */
+            change: "create" | "finish" | "update" | "archive" | "delete" | "restore";
+            id: string;
+            experiment: string;
+            /** @description The experiment's node; null at the workspace root. */
+            node: string | null;
+        };
         /** @description One change on the /files?watch stream. */
-        WorkspaceEvent: components["schemas"]["FileEvent"] | components["schemas"]["NodeEvent"] | components["schemas"]["ExperimentEvent"] | components["schemas"]["ProposalEvent"];
+        WorkspaceEvent: components["schemas"]["FileEvent"] | components["schemas"]["NodeEvent"] | components["schemas"]["ExperimentEvent"] | components["schemas"]["RunEvent"] | components["schemas"]["ProposalEvent"];
         NodeType: {
             /** @description A level of the tree, such as tech (depth 1) or process (depth 4). */
             name: string;
@@ -2213,18 +2440,21 @@ export interface components {
             authorName: string | null;
             title: string;
             hypothesis: string;
+            /** @description The planned parameters; each run has the ones it ran with. */
             params: {
                 [key: string]: unknown;
             };
+            /** @description Deprecated, kept for one release as its latest live run's results ({} with none). */
             results: {
                 [key: string]: unknown;
             };
             status: components["schemas"]["ExperimentStatus"];
+            /** @description Deprecated, kept for one release as its latest live run's state (ready with none). */
             state: components["schemas"]["ExperimentState"];
             forkedAt: components["schemas"]["Timestamp"];
             updatedAt: components["schemas"]["Timestamp"];
             fileCount: number;
-            /** @description Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish or a PATCH of its state), `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`). */
+            /** @description Deprecated, kept for one release as its latest live run's provenance (Run.provenance). Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish or a PATCH of its state), `files` has the version of its models/general_rules.md at the end (null when there was none) and `reads` the reads recorded while it ran (RunRead, without `by`). */
             provenance: {
                 [key: string]: unknown;
             };
@@ -2248,6 +2478,81 @@ export interface components {
             deletedBy?: components["schemas"]["Collaborator"] | null;
             /** @description Only in the ?deleted list, false when its node was deleted too (restore answers 409). */
             restorable?: boolean;
+        };
+        /** @enum {string} */
+        RunState: "running" | "done" | "failed";
+        /**
+         * @description When the file record was taken: at finish, or at migration for a run that finished before runs had records; null while it runs.
+         * @enum {string|null}
+         */
+        RunRecordTaken: "finish" | "migration" | null;
+        RunFile: {
+            path: string;
+            /** @description The file version it recorded. */
+            version: string;
+            sha256: string;
+            size: number;
+        };
+        /** @description One execution of an experiment. */
+        Run: {
+            id: string;
+            experimentId: string;
+            /** @description Its place in the experiment: Run 1, Run 2, ... */
+            number: number;
+            label: string;
+            /** @description The parameters it ran with. */
+            params: {
+                [key: string]: unknown;
+            };
+            results: {
+                [key: string]: unknown;
+            };
+            state: components["schemas"]["RunState"];
+            /** @description Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the experiment and run it reran. */
+            provenance: {
+                [key: string]: unknown;
+            };
+            /** @description Who started it; null once they are gone. */
+            startedBy: components["schemas"]["Collaborator"] | null;
+            startedAt: components["schemas"]["Timestamp"];
+            finishedAt: components["schemas"]["Timestamp"] | null;
+            /** @description Files in its record; null while it runs. */
+            fileCount: number | null;
+            recordTaken: components["schemas"]["RunRecordTaken"];
+            archived: boolean;
+            archivedAt: components["schemas"]["Timestamp"] | null;
+            /** @description Only on one run (GET /runs/{id} and the routes that change one); null while it runs. */
+            record?: components["schemas"]["RunFile"][] | null;
+            /** @description Only on a deleted run. */
+            deletedAt?: components["schemas"]["Timestamp"];
+            /** @description Only on a deleted run, who deleted it; null once they are gone. */
+            deletedBy?: components["schemas"]["Collaborator"] | null;
+        };
+        ComparedRun: components["schemas"]["Run"] & {
+            experiment: components["schemas"]["RunExperiment"];
+        };
+        /** @description The experiment a compared run belongs to. */
+        RunExperiment: {
+            id: string;
+            title: string;
+            nodeId: string | null;
+        };
+        /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given. */
+        CallerProvenance: {
+            chat?: string | null;
+            model?: string | null;
+            skill?: {
+                name: string;
+                source?: string;
+                version?: number;
+                sha256?: string;
+            } | null;
+            /** @description Each tool's version, by name. */
+            tools?: {
+                [key: string]: string;
+            } | null;
+        } & {
+            [key: string]: unknown;
         };
         RunRead: {
             path: string;
@@ -2910,6 +3215,15 @@ export interface components {
                 };
             };
         };
+        /** @description Another run of this experiment is running; `running` is its number. */
+        RunRunning: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Something is in the way, such as a skill folder of that name. */
         Conflict: {
             headers: {
@@ -3071,6 +3385,8 @@ export interface components {
         MemoryName: string;
         /** @description A version number; leave out for the newest. */
         HubVersion: number;
+        /** @description 1 (or true, or empty) to take in archived runs too. */
+        Archived: string;
         /** @description An experiment's files, instead of a node's. */
         Experiment: string;
     };
@@ -3772,6 +4088,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
@@ -3797,23 +4114,7 @@ export interface operations {
                     inputs?: components["schemas"]["RunInputSource"][];
                     /** @description The run to run again. */
                     rerunOf?: string;
-                    /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given. */
-                    provenance?: {
-                        chat?: string | null;
-                        model?: string | null;
-                        skill?: {
-                            name: string;
-                            source?: string;
-                            version?: number;
-                            sha256?: string;
-                        } | null;
-                        /** @description Each tool's version, by name. */
-                        tools?: {
-                            [key: string]: string;
-                        } | null;
-                    } & {
-                        [key: string]: unknown;
-                    };
+                    provenance?: components["schemas"]["CallerProvenance"];
                 };
             };
         };
@@ -3855,11 +4156,16 @@ export interface operations {
                      * @enum {string}
                      */
                     state?: "done" | "failed";
+                    /**
+                     * Format: uuid
+                     * @description The run it ends.
+                     */
+                    run?: string;
                 };
             };
         };
         responses: {
-            /** @description The run, finished. */
+            /** @description The experiment, as it is after the finish. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3872,6 +4178,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
             500: components["responses"]["StorageError"];
             503: components["responses"]["Starting"];
         };
@@ -4037,6 +4344,412 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["ExperimentIfVisible"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listExperimentRuns: {
+        parameters: {
+            query?: {
+                /** @description 1 (or true, or empty) to take in archived runs too. */
+                archived?: components["parameters"]["Archived"];
+                /** @description 1 (or true, or empty) for the deleted runs. */
+                deleted?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runs, without their file records. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        runs: components["schemas"]["Run"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    startExperimentRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                    inputs?: components["schemas"]["RunInputSource"][];
+                    provenance?: components["schemas"]["CallerProvenance"];
+                };
+            };
+        };
+        responses: {
+            /** @description The run, running. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    compareRuns: {
+        parameters: {
+            query?: {
+                /** @description A node id, or root. */
+                node?: string;
+                /** @description 1 (or true, or empty) to take in the nodes under `node`. */
+                descendants?: string;
+                /** @description Only this experiment's runs. */
+                experiment?: string;
+                /** @description 1 (or true, or empty) to take in archived runs too. */
+                archived?: components["parameters"]["Archived"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        runs: components["schemas"]["ComparedRun"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    deleteRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["DeletedId"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The run is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    updateRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    archived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The run, changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    finishRunById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    results: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @default done
+                     * @enum {string}
+                     */
+                    state?: "done" | "failed";
+                };
+            };
+        };
+        responses: {
+            /** @description The run, finished, with its file record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    rerunRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    experiment?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The new run, running. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["RunRunning"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    restoreRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run, restored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listReadsOfRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reads. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        reads: components["schemas"]["RunRead"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listRunFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        files: components["schemas"]["RunFile"][];
+                        taken: components["schemas"]["RunRecordTaken"];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    readRunFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The ETag from an earlier read; a match answers 304. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                id: components["parameters"]["Id"];
+                /** @description The file's path in its place, such as notes/plan.md; each segment URL-encoded, slashes kept. */
+                path: components["parameters"]["FilePath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bytes. */
+            200: {
+                headers: {
+                    /** @description The version's sha256 in quotes. */
+                    ETag?: string;
+                    "X-File-Author"?: components["schemas"]["AuthorType"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Unchanged since the ETag sent. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

@@ -18,7 +18,7 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from . import chats, experiments, nodes, proposals, restriction
+from . import chats, experiments, nodes, proposals, restriction, runs
 from .access import (
     AccessError,
     AccessService,
@@ -529,6 +529,7 @@ class Session:
                 in_tx,
                 chosen_id=experiment_id,
                 fork=False,
+                record_run=False,
             )
             service = await FileService(self.storage).in_experiment(conn, experiment_id)
             assert service is not None
@@ -548,6 +549,18 @@ class Session:
                     in_tx=audit,
                 )
                 written.append(info)
+            # One uploaded as finished is Run 1, recorded with the files it came with.
+            if fields.get("state") in runs.FINISHED:
+                await runs.add_finished(
+                    conn,
+                    self.ws,
+                    experiment_id,
+                    principal.user_id,
+                    fields.get("params", {}),
+                    fields.get("results", {}),
+                    fields["state"],
+                    {},
+                )
 
         experiment = await self.experiment(experiment_id)
         lineage = await self.lineage(experiment["nodeId"]) if experiment["nodeId"] else []
@@ -623,6 +636,26 @@ class Session:
         if not await files.stat(REPORT_PATH):
             await files.write(REPORT_PATH, new_report(run).encode())
         return await self.experiment(run["id"])
+
+    async def _inputs_still_there(self, experiment_id: str, before: Any) -> list[dict[str, Any]]:
+        """
+        The inputs an earlier Run linked under inputs/ that are still there,
+        recorded at their versions now: a new Run reads them as they are.
+        """
+        if not isinstance(before, list) or not before:
+            return []
+        files = await self.experiment_files(experiment_id)
+        kept: list[dict[str, Any]] = []
+        for entry in before:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                continue
+            versions = await files.history(entry["path"]) or []
+            if versions:
+                now = versions[0]
+                kept.append(
+                    {**entry, "version": now["id"], "sha256": now["sha256"], "size": now["size"]}
+                )
+        return kept
 
     async def _resolve_inputs(
         self, inputs: list[dict[str, Any]], taken: list[Any] | None = None
@@ -727,19 +760,25 @@ class Session:
         inputs: list[dict[str, Any]] | None = None,
         node_id: str | None | object = _SAME_PLACE,
         provenance: dict[str, Any] | None = None,
+        run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Runs an experiment again as a new run: same place, parameters,
-        hypothesis and inputs unless told otherwise. The inputs are read from
-        the old run's inputs/ at the content its record names, even if
-        someone edited them since; `inputs` instead reads those files at their
-        current versions. The old run stays as it is; the new one's provenance
-        names it. You need to be able to see the old run.
+        Runs an experiment again as a new experiment of yours: same place,
+        parameters, hypothesis and inputs unless told otherwise. The inputs
+        are read from the old run's inputs/ at the content its record names,
+        even if someone edited them since; `inputs` instead reads those files
+        at their current versions. `run` is the Run to rerun, else the
+        experiment's latest. The old run stays as it is; the new one's
+        provenance names it. You need to be able to see the old run.
         """
         old = await self.experiment(experiment_id)
+        if run is None:
+            async with self.scoped() as conn:
+                run = await runs.latest(conn, self.ws, experiment_id)
+        ran = run["provenance"] if run is not None else old["provenance"]
         pinned: list[dict[str, Any]] = []
         if inputs is None:
-            found = old["provenance"].get("inputs")
+            found = ran.get("inputs")
             for item in found if found is not None else []:
                 sha256 = item.get("sha256")
                 if not isinstance(sha256, str) or not sha256:
@@ -765,27 +804,32 @@ class Session:
             {
                 "title": given_or("title", f"{old['title']} (rerun)"),
                 "hypothesis": given_or("hypothesis", old["hypothesis"]),
-                "params": given_or("params", old["params"]),
+                "params": given_or("params", run["params"] if run is not None else old["params"]),
             },
             inputs if inputs is not None else pinned,
-            # Only the id: the old run may be a draft that viewers of this one can't see.
-            {**(provenance or {}), "rerunOf": {"id": old["id"]}},
+            # Only ids: the old run may be a draft that viewers of this one can't see.
+            {
+                **(provenance or {}),
+                "rerunOf": {"id": old["id"], **({"run": run["id"]} if run is not None else {})},
+            },
         )
 
     async def finish_run(
-        self, experiment_id: str, results: dict[str, Any], state: str
+        self, experiment_id: str, results: dict[str, Any], state: str, run: str | None = None
     ) -> dict[str, Any]:
         """
         Records a run's results and how it ended (done or failed), and refreshes
-        the record in its report.md (creating the report if it has none). A
-        finished run stays as it ended: the same call again changes nothing,
-        and a different one is refused. Its maintainer and collaborators can.
+        the record in its report.md (creating the report if it has none). The
+        Run it ends is `run`, or without one the running Run you started
+        (experiments.finish_target). A finished run stays as it ended: the
+        same call again changes nothing, and a different one is refused. Its
+        maintainer and collaborators can.
         """
         current = await self.experiment(experiment_id)
         self._need_worker(current)
         if current["status"] == "archived":
             raise ForbiddenError(ARCHIVED)
-        if current["state"] in ("done", "failed"):
+        if run is None and current["state"] in ("done", "failed"):
             if current["state"] == state and same_json(current["results"], results):
                 return current
             raise ExperimentError(
@@ -797,17 +841,266 @@ class Session:
         # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
-                conn, self.storage, experiment_id, {"results": results, "state": state}, audit
+                conn,
+                self.storage,
+                experiment_id,
+                {"results": results, "state": state},
+                audit,
+                by=self.principal.user_id,
+                run=run,
             )
-        run = await self.experiment(experiment_id)
-        await self._refresh_report(run, create=True)
-        return run
+        finished = await self.experiment(experiment_id)
+        await self._refresh_report(finished, create=True)
+        return finished
 
     async def run_reads(self, experiment_id: str) -> list[dict[str, Any]]:
         """What agents read of the run's recorded files while it ran; for whoever can see it."""
         await self.experiment(experiment_id)
         async with self.scoped() as conn:
             return await experiments.reads(conn, self.ws, experiment_id)
+
+    # Runs (docs/experiment-runs.md): whoever sees an Experiment sees its Runs;
+    # its maintainer and collaborators start, finish, archive, delete and
+    # restore them while it isn't archived. Claude starts and finishes Runs but
+    # doesn't archive, delete or restore them.
+
+    async def runs(
+        self, experiment_id: str, *, archived: bool = False, deleted: bool = False
+    ) -> list[dict[str, Any]]:
+        """An Experiment's Runs, newest first; its deleted ones for whoever works on it."""
+        experiment = await self.experiment(experiment_id)
+        if deleted:
+            self._need_person_runs("list")
+            self._need_worker(experiment)
+        async with self.scoped() as conn:
+            return await runs.list_runs(
+                conn, self.ws, experiment_id, archived=archived, deleted=deleted
+            )
+
+    async def run(self, run_id: str, *, deleted: bool = False) -> dict[str, Any]:
+        """One Run with its file record, for whoever can see its Experiment."""
+        async with self.scoped() as conn:
+            found = await runs.get(conn, self.ws, run_id, deleted=deleted)
+        if found is None:
+            raise NodeNotFoundError("Run not found")
+        try:
+            await self.experiment(found["experimentId"])
+        except NodeNotFoundError:
+            raise NodeNotFoundError("Run not found") from None
+        return found
+
+    async def _run_and_experiment(
+        self, run_id: str, *, deleted: bool = False
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A Run you can change, and its Experiment: you work on it, and it isn't archived."""
+        found = await self.run(run_id, deleted=deleted)
+        experiment = await self.experiment(found["experimentId"])
+        self._need_worker(experiment)
+        if experiment["status"] == "archived":
+            raise ForbiddenError(ARCHIVED)
+        return found, experiment
+
+    async def start_run_in(
+        self,
+        experiment_id: str,
+        *,
+        params: dict[str, Any] | None = None,
+        label: str = "",
+        inputs: list[dict[str, Any]] | None = None,
+        provenance: dict[str, Any] | None = None,
+        rerun_of: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Starts another Run of an Experiment you work on, with its planned
+        parameters unless `params` says otherwise. `inputs` are linked into its
+        files under inputs/ as for a new run. 409 while one is running.
+        """
+        experiment = await self.experiment(experiment_id)
+        self._need_worker(experiment)
+        if experiment["status"] == "archived":
+            raise ForbiddenError(ARCHIVED)
+        before = experiment["provenance"].get("inputs")
+        taken = [i.get("path") if isinstance(i, dict) else None for i in before or []]
+        links, recorded = await self._resolve_inputs(inputs or [], taken)
+        recorded = await self._inputs_still_there(experiment_id, before) + recorded
+        user_id = self.principal.user_id
+        who = await self.access.user(user_id)
+        name = None if who is None else who["name"] if who["name"] is not None else who["email"]
+        record = {**(provenance or {}), "startedBy": {"id": user_id, "name": name},
+                  "startedAt": _now(), "inputs": recorded}  # fmt: skip
+        if rerun_of is not None:
+            record["rerunOf"] = rerun_of
+        async with self.scoped() as conn, conn.transaction():
+            await experiments.lock_live_experiment(conn, self.ws, experiment_id, update=True)
+            # Results typed in before anything ran are kept as Run 1, not
+            # replaced by the new Run's.
+            if experiment["results"] and not await runs.ever_ran(conn, experiment_id):
+                await runs.add_finished(
+                    conn,
+                    self.ws,
+                    experiment_id,
+                    experiment["maintainerId"],
+                    experiment["params"],
+                    experiment["results"],
+                    "done",
+                    experiment["provenance"],
+                    label=runs.BY_HAND,
+                )
+            if links:
+                await experiments.link_inputs(conn, self.ws, experiment_id, links)
+            run_id = await runs.start(
+                conn,
+                self.ws,
+                experiment_id,
+                user_id,
+                params=experiment["params"] if params is None else params,
+                provenance=record,
+                label=label,
+            )
+            await self._audit(
+                "run.start",
+                {"experiment": experiment_id, "run": run_id, "inputs": [x["path"] for x in links]},
+            )(conn)
+            await runs.notify(conn, self.storage, "create", run_id, experiment_id)
+        await self._refresh_report(await self.experiment(experiment_id))
+        return await self.run(run_id)
+
+    async def finish_run_by_id(
+        self, run_id: str, results: dict[str, Any], state: str
+    ) -> dict[str, Any]:
+        """Ends a running Run (finish_run). The same finish again changes nothing; another is refused."""
+        found = await self.run(run_id)
+        if found["state"] in runs.FINISHED:
+            experiment = await self.experiment(found["experimentId"])
+            self._need_worker(experiment)
+            if found["state"] == state and same_json(found["results"], results):
+                return found
+            raise ExperimentError(
+                f"This run already finished ({found['state']}); start a new run to try again"
+            )
+        await self.finish_run(found["experimentId"], results, state, run=run_id)
+        return await self.run(run_id)
+
+    async def rerun_run(self, run_id: str, into_same: bool) -> dict[str, Any]:
+        """
+        Reruns a Run: as another Run of the same Experiment (you work on it),
+        or as Run 1 of a new Experiment of yours. The new Run's provenance names
+        the one it reran. Answers the new Run.
+        """
+        found = await self.run(run_id)
+        rerun_of = {"id": found["experimentId"], "run": found["id"]}
+        if into_same:
+            return await self.start_run_in(
+                found["experimentId"],
+                params=found["params"],
+                label=found["label"],
+                rerun_of=rerun_of,
+            )
+        made = await self.rerun(found["experimentId"], {}, run=found)
+        async with self.scoped() as conn:
+            newest = await runs.latest(conn, self.ws, made["id"])
+        assert newest is not None
+        return newest
+
+    async def update_run(self, run_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Its label, or archiving it; archiving is the user's call, not Claude's."""
+        if "archived" in fields and self.principal.actor == "agent":
+            raise ForbiddenError("Claude doesn't archive runs")
+        found, experiment = await self._run_and_experiment(run_id)
+        action = "run.archive" if fields.get("archived") else "run.update"
+        async with self.scoped() as conn, conn.transaction():
+            await runs.set_fields(conn, self.ws, run_id, fields)
+            await self._audit(
+                action, {"experiment": experiment["id"], "run": run_id, "fields": list(fields)}
+            )(conn)
+            change = "archive" if "archived" in fields else "update"
+            await runs.notify(conn, self.storage, change, run_id, experiment["id"])
+        return await self.run(run_id)
+
+    def _need_person_runs(self, what: str) -> None:
+        if self.principal.actor == "agent":
+            raise ForbiddenError(f"Claude doesn't {what} runs")
+
+    async def delete_run(self, run_id: str) -> bool:
+        """Soft-deletes a finished Run; Undo or Recently deleted brings it back."""
+        self._need_person_runs("delete")
+        _found, experiment = await self._run_and_experiment(run_id)
+        async with self.scoped() as conn, conn.transaction():
+            gone = await runs.remove(conn, self.ws, run_id, self.principal.user_id)
+            if gone is None:
+                return False
+            await self._audit("run.delete", {"experiment": experiment["id"], "run": run_id})(conn)
+            await runs.notify(conn, self.storage, "delete", run_id, experiment["id"])
+        await self._refresh_report(await self.experiment(experiment["id"]))
+        return True
+
+    async def restore_run(self, run_id: str) -> dict[str, Any]:
+        """Undoes a Run's delete."""
+        self._need_person_runs("restore")
+        _found, experiment = await self._run_and_experiment(run_id, deleted=True)
+        async with self.scoped() as conn, conn.transaction():
+            back = await runs.restore(conn, self.ws, run_id)
+            if back is None:
+                raise NodeNotFoundError("Run not found")
+            await self._audit("run.restore", {"experiment": experiment["id"], "run": run_id})(conn)
+            await runs.notify(conn, self.storage, "restore", run_id, experiment["id"])
+        await self._refresh_report(await self.experiment(experiment["id"]))
+        return await self.run(run_id)
+
+    async def reads_of_run(self, run_id: str) -> list[dict[str, Any]]:
+        """What agents read of the Run's recorded files while it ran."""
+        await self.run(run_id)
+        async with self.scoped() as conn:
+            return await runs.reads(conn, self.ws, run_id)
+
+    async def run_file(self, run_id: str, path: str) -> tuple[dict[str, Any], bytes]:
+        """A file as the Run recorded it, with the checks of reading its Experiment's files."""
+        found = await self.run(run_id)
+        wanted = normalize_path(path)
+        entry = next((f for f in found.get("record") or [] if f["path"] == wanted), None)
+        if entry is None:
+            raise NodeNotFoundError(f"The run's record has no {wanted}")
+        files = await self.experiment_files(found["experimentId"])
+        async with self.scoped() as conn:
+            info = await files.service.stat_recorded(conn, wanted, entry["version"])
+        if info is None:
+            raise NodeNotFoundError(f"{wanted} as the run recorded it can't be read any more")
+        return info, await files.service.content(info)
+
+    async def compare_runs(
+        self,
+        node_id: str | None | object = ANYWHERE,
+        *,
+        descendants: bool = False,
+        experiment_id: str | None = None,
+        archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Runs to compare: of one Experiment, on a node (and below, with `descendants`), or anywhere you can see."""
+        node_ids: list[str | None] | None = None
+        if node_id is not ANYWHERE:
+            await self.need(node_id, "viewer")  # pyrefly: ignore[bad-argument-type]
+            here: list[str | None] = [node_id]  # pyrefly: ignore[bad-assignment]
+            node_ids = here
+            if descendants:
+                async with self.scoped() as conn:
+                    cur = await conn.execute(
+                        """
+                        SELECT d.id FROM nodes d
+                        WHERE d.workspace_id = %(ws)s AND d.deleted_at IS NULL
+                          AND (%(node)s::uuid IS NULL OR (d.id <> %(node)s::uuid AND d.path <@ (
+                                SELECT path FROM nodes WHERE id = %(node)s::uuid AND workspace_id = %(ws)s)))""",
+                        {"ws": self.ws, "node": node_id},
+                    )
+                    here += [str(row[0]) for row in await cur.fetchall()]
+        async with self.scoped() as conn:
+            return await runs.compare(
+                conn,
+                self.ws,
+                self.principal.user_id,
+                node_ids=node_ids,
+                experiment_id=experiment_id,
+                archived=archived,
+            )
 
     async def _refresh_report(self, run: dict[str, Any], create: bool = False) -> None:
         """
@@ -846,7 +1139,9 @@ class Session:
             "experiment.update", {"experiment": experiment_id, "fields": list(given)}
         )
         async with self.scoped() as conn:
-            await experiments.update(conn, self.storage, experiment_id, given, audit)
+            await experiments.update(
+                conn, self.storage, experiment_id, given, audit, by=self.principal.user_id
+            )
         # The report's record follows edits made after the run started.
         updated = await self.experiment(experiment_id)
         await self._refresh_report(updated)
