@@ -469,6 +469,68 @@ def test_a_waiting_run_that_is_stopped_frees_its_place(claude, tmp_path, monkeyp
     asyncio.run(stopped_while_waiting())
 
 
+def test_a_run_waits_no_longer_than_its_tokens_allow(claude, tmp_path, monkeypatch):
+    """
+    A run's storage and memory tokens are signed when it is sent. One that
+    waited behind another chat until they ran out started anyway, and every
+    call it made was refused.
+    """
+    import asyncio
+
+    from agent_py.adapter import patience, token_expiry
+
+    def token(expires_in: float) -> str:
+        claims = {"sub": "kc|alice", "aud": "storage", "exp": time.time() + expires_in}
+        body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        return f"v2.{body}.signature"
+
+    # Half of what the shortest-lived token has left; nothing to go by without one.
+    assert patience(None, None) is None and patience("local.e30") is None
+    assert token_expiry(token(100)) == pytest.approx(time.time() + 100, abs=1)
+    assert patience(token(3600), token(600)) == pytest.approx(300, abs=1)
+    assert patience(token(-5)) == 0
+
+    answer = claude.query
+
+    async def slowly(self, prompt, session_id="default"):
+        await asyncio.sleep(0.6)
+        await answer(self, prompt, session_id)
+
+    monkeypatch.setattr(claude, "query", slowly)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    app = create_app(env=env, adapter=adapter)
+
+    async def run(api: httpx.AsyncClient, thread: str, storage: str | None) -> list[dict]:
+        body = run_input(user=LOCAL)
+        body["threadId"] = thread
+        headers = {"X-Knowledge-Storage": storage} if storage else {}
+        return events(await api.post("/agent/report", json=body, headers=headers))
+
+    async def waiting() -> None:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://a") as api,
+        ):
+            first = asyncio.create_task(run(api, "chat-1", token(3600)))
+            await asyncio.sleep(0.1)  # chat-1's run is in the folder
+            # 0.4 s of token left: it may wait 0.2 s, and the folder is taken for longer.
+            short = await run(api, "chat-2", token(0.4))
+            assert types(short) == ["RUN_ERROR"]
+            assert "Send it again" in short[0]["message"]
+            assert len(claude.created) == 1  # it never started
+            # A token with life to spare waits and runs.
+            patient = await run(api, "chat-3", token(3600))
+            assert types(patient)[-1] == "RUN_FINISHED"
+            assert types(await first)[-1] == "RUN_FINISHED"
+            # Nobody ahead of it: a run starts whatever its token has left.
+            alone = await run(api, "chat-4", token(0.2))
+            assert types(alone)[-1] == "RUN_FINISHED"
+        assert not adapter._in_use and not any(lock.locked() for lock in adapter._folders.values())
+
+    asyncio.run(waiting())
+
+
 def test_every_storage_call_of_the_server_goes_through_one_http_client(claude, monkeypatch):
     """A client per call meant a new connection for each of the several calls a tool call makes."""
     made: list[httpx.AsyncClient] = []

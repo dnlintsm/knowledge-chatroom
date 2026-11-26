@@ -118,6 +118,9 @@ the workspace like on a local project:
   workspace waits for the first to end (Stop in the waiting chat ends the wait), because
   each run rewrites the folder's skills, copy and `run-inputs/`. Runs of other users, and
   of the same user in another workspace, are in other folders and don't wait.
+  With login, a run's tokens are signed when it is sent, so it waits for at most half of
+  the life they have left (30 minutes with the default `STORAGE_TOKEN_SECONDS`) and then
+  ends asking for the message to be sent again.
 - **Tools**: Claude gets Read, Glob and Grep, which a hook confines to the run folder (links out
   of it included), since they don't run in the sandbox. Bash still comes only with skill scripts,
   sandboxed as above; scripts can read `workspace/` but not change it.
