@@ -80,7 +80,7 @@ ISO 8601, UTC.
 """
 
 
-AuthorType = TypeAliasType("AuthorType", Literal["user", "agent"])
+AuthorType = TypeAliasType("AuthorType", Literal["user", "agent", "pipeline"])
 
 
 FileKind = TypeAliasType("FileKind", Literal["note", "skill", "upload", "artifact"])
@@ -297,7 +297,7 @@ class Skill(BaseModel):
 
 class CallerProvenance(BaseModel):
     """
-    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given.
+    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files, reads and execution are the server's and are dropped; other keys are kept as given.
     """
 
     model_config = ConfigDict(
@@ -310,6 +310,74 @@ class CallerProvenance(BaseModel):
     """
     Each tool's version, by name.
     """
+
+
+class ExecutionIdentity(BaseModel):
+    """
+    user: the person; agent: Claude, `via` remote or mcp:<name>; pipeline: its id, name, and key's id and hint.
+    """
+
+    kind: Literal["user", "agent", "pipeline"]
+    via: str | None = None
+    id: str | None = None
+    name: str | None = None
+    key: str | None = None
+    hint: str | None = None
+
+
+PipelineOperation = TypeAliasType("PipelineOperation", Literal["read", "write", "runs", "upload"])
+
+
+class PipelinePlace1(BaseModel):
+    """
+    A node (with its subtree) or an Experiment (with its Runs).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    node: str
+
+
+class PipelinePlace2(BaseModel):
+    """
+    A node (with its subtree) or an Experiment (with its Runs).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    experiment: str
+
+
+PipelinePlace = TypeAliasType("PipelinePlace", PipelinePlace1 | PipelinePlace2)
+"""
+A node (with its subtree) or an Experiment (with its Runs).
+"""
+
+
+class PipelineKey(BaseModel):
+    id: str
+    hint: str
+    """
+    The key's last 4 characters.
+    """
+    createdAt: Timestamp
+    expiresAt: Timestamp
+    lastUsedAt: Timestamp | None
+    """
+    Written at most once a minute.
+    """
+    revokedAt: Timestamp | None
+    status: Literal["active", "expired", "revoked"]
+
+
+class NewPipelineKey(PipelineKey):
+    """
+    A key as it is made. Its `secret` is in this answer only.
+    """
+
+    secret: Annotated[str, Field(pattern="^kcp_[A-Za-z0-9_-]{43}$")]
 
 
 class Collaborator(BaseModel):
@@ -520,7 +588,10 @@ class Grant(BaseModel):
 
 class AuditEntry(BaseModel):
     id: str
-    actorType: Literal["user", "agent"]
+    actorType: Literal["user", "agent", "pipeline"]
+    """
+    A pipeline's entries name it and its key in `target` (pipeline, key).
+    """
     actorId: str | None
     action: str
     """
@@ -1417,6 +1488,59 @@ class LookUpWorkspaceUserResponse(BaseModel):
     user: User1
 
 
+Places = TypeAliasType(
+    "Places", Annotated[list[PipelinePlace], Field(max_length=50, min_length=1)]
+)
+
+
+class CreatePipelineRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    name: Annotated[str, Field(max_length=200, min_length=1)]
+    places: Places | None
+    operations: Annotated[list[PipelineOperation], Field(min_length=1)]
+    expiresInDays: Annotated[int | None, Field(ge=1)] = None
+    """
+    Its key's lifetime; 90 by default, at most PIPELINE_KEY_MAX_DAYS (365).
+    """
+
+
+class UpdatePipelineRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    name: Annotated[str | None, Field(max_length=200, min_length=1)] = None
+    places: Places | None = None
+    operations: Annotated[list[PipelineOperation] | None, Field(min_length=1)] = None
+
+
+class RevokePipelineResponse(BaseModel):
+    revoked: Literal[True]
+
+
+class HandOverPipelineRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    userId: str
+
+
+class AddPipelineKeyRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    expiresInDays: Annotated[int | None, Field(ge=1)] = None
+
+
+class AddPipelineKeyResponse(BaseModel):
+    key: NewPipelineKey
+
+
+class RevokePipelineKeyResponse(BaseModel):
+    revoked: Literal[True]
+
+
 class User2(BaseModel):
     id: str
     name: str | None
@@ -2101,59 +2225,6 @@ class FolderImport(BaseModel):
     """
 
 
-class Run(BaseModel):
-    """
-    One execution of an experiment.
-    """
-
-    id: str
-    experimentId: str
-    number: Annotated[int, Field(ge=1)]
-    """
-    Its place in the experiment: Run 1, Run 2, ...
-    """
-    label: Annotated[str, Field(max_length=200)]
-    params: dict[str, Any]
-    """
-    The parameters it ran with.
-    """
-    results: dict[str, Any]
-    state: RunState
-    provenance: dict[str, Any]
-    """
-    Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the experiment and run it reran.
-    """
-    startedBy: Collaborator | None
-    """
-    Who started it; null once they are gone.
-    """
-    startedAt: Timestamp
-    finishedAt: Timestamp | None
-    fileCount: Annotated[int | None, Field(ge=0)]
-    """
-    Files in its record; null while it runs.
-    """
-    recordTaken: RunRecordTaken
-    archived: bool
-    archivedAt: Timestamp | None
-    record: list[RunFile] | None = None
-    """
-    Only on one run (GET /runs/{id} and the routes that change one); null while it runs.
-    """
-    deletedAt: Timestamp | None = None
-    """
-    Only on a deleted run.
-    """
-    deletedBy: Collaborator | None = None
-    """
-    Only on a deleted run, who deleted it; null once they are gone.
-    """
-
-
-class ComparedRun(Run):
-    experiment: RunExperiment
-
-
 class RunRead(BaseModel):
     path: str
     version: str
@@ -2173,6 +2244,40 @@ class RunRead(BaseModel):
     """
     The user the agent acted for; null once they are gone.
     """
+
+
+class ExecutionAuthority(BaseModel):
+    """
+    session: signed in; storage-token: a chat's token, `via`; pipeline-key: the key, with the places and operations it had then.
+    """
+
+    kind: Literal["session", "storage-token", "pipeline-key"]
+    via: str | None = None
+    key: str | None = None
+    places: list[PipelinePlace] | None = None
+    operations: list[PipelineOperation] | None = None
+
+
+class Pipeline(BaseModel):
+    id: str
+    name: Annotated[str, Field(max_length=200)]
+    owner: Collaborator | None
+    """
+    Who it acts for; null once they are gone.
+    """
+    createdBy: str | None
+    createdAt: Timestamp
+    places: list[PipelinePlace] | None
+    """
+    Null for the whole workspace. Ids only, so nothing the reader can't see is named.
+    """
+    operations: list[PipelineOperation]
+    status: Literal["active", "suspended", "revoked"]
+    """
+    Suspended while its owner isn't a member of the workspace, until it is handed over.
+    """
+    revokedAt: Timestamp | None
+    keys: list[PipelineKey]
 
 
 class ExperimentUpload(BaseModel):
@@ -2226,20 +2331,21 @@ class RemoveExperimentCollaboratorResponse(BaseModel):
     experiment: Experiment | None
 
 
-class ListExperimentRunsResponse(BaseModel):
-    runs: list[Run]
-
-
-class CompareRunsResponse(BaseModel):
-    runs: list[ComparedRun]
-
-
 class ListReadsOfRunResponse(BaseModel):
     reads: list[RunRead]
 
 
 class ListWorkspaceMembersResponse(BaseModel):
     members: list[WorkspaceMember]
+
+
+class ListPipelinesResponse(BaseModel):
+    pipelines: list[Pipeline]
+
+
+class CreatePipelineResponse(BaseModel):
+    pipeline: Pipeline
+    key: NewPipelineKey
 
 
 class RunSkillsResponse(BaseModel):
@@ -2285,9 +2391,98 @@ class Tree(BaseModel):
     nodes: list[VisibleNode]
 
 
+class FinishedBy(BaseModel):
+    user: Collaborator
+    ranAs: ExecutionIdentity
+    authorizedBy: ExecutionAuthority
+
+
+class RunExecution(BaseModel):
+    """
+    Who started a Run, what it ran as and what authorized it, written by the server when it starts (docs/pipeline-identities.md, decision 11), and who finished it.
+    """
+
+    initiatedBy: Collaborator
+    ranAs: ExecutionIdentity
+    authorizedBy: ExecutionAuthority
+    finishedBy: FinishedBy | None = None
+
+
 class ListPlatformWorkspacesResponse(BaseModel):
     workspaces: list[PlatformWorkspace]
 
 
 class AddPlatformWorkspaceOwnerResponse(BaseModel):
     workspace: PlatformWorkspace
+
+
+class Provenance(BaseModel):
+    """
+    Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, rerunOf {id, run} naming the experiment and run it reran, and `execution` (RunExecution): what it ran as, and what authorized it. A Run from before execution was recorded has none.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    execution: RunExecution | None = None
+
+
+class Run(BaseModel):
+    """
+    One execution of an experiment.
+    """
+
+    id: str
+    experimentId: str
+    number: Annotated[int, Field(ge=1)]
+    """
+    Its place in the experiment: Run 1, Run 2, ...
+    """
+    label: Annotated[str, Field(max_length=200)]
+    params: dict[str, Any]
+    """
+    The parameters it ran with.
+    """
+    results: dict[str, Any]
+    state: RunState
+    provenance: Provenance
+    """
+    Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, rerunOf {id, run} naming the experiment and run it reran, and `execution` (RunExecution): what it ran as, and what authorized it. A Run from before execution was recorded has none.
+    """
+    startedBy: Collaborator | None
+    """
+    Who started it; null once they are gone.
+    """
+    startedAt: Timestamp
+    finishedAt: Timestamp | None
+    fileCount: Annotated[int | None, Field(ge=0)]
+    """
+    Files in its record; null while it runs.
+    """
+    recordTaken: RunRecordTaken
+    archived: bool
+    archivedAt: Timestamp | None
+    record: list[RunFile] | None = None
+    """
+    Only on one run (GET /runs/{id} and the routes that change one); null while it runs.
+    """
+    deletedAt: Timestamp | None = None
+    """
+    Only on a deleted run.
+    """
+    deletedBy: Collaborator | None = None
+    """
+    Only on a deleted run, who deleted it; null once they are gone.
+    """
+
+
+class ComparedRun(Run):
+    experiment: RunExperiment
+
+
+class ListExperimentRunsResponse(BaseModel):
+    runs: list[Run]
+
+
+class CompareRunsResponse(BaseModel):
+    runs: list[ComparedRun]

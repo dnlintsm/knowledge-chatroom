@@ -33,14 +33,40 @@ const FORWARDED_RESPONSE_HEADERS = [
   "x-content-type-options",
 ];
 
-/** A route handler forwarding /api/<prefix>/* to LOCAL_AGENT_URL/<prefix>/*. */
-export function agentProxy(prefix: string) {
+// A pipeline's key (docs/pipeline-identities.md), forwarded to the API server, which looks it up.
+export const PIPELINE_HEADER = "x-knowledge-pipeline";
+const PIPELINE_KEY = /^Bearer\s+(kcp_\S+)$/i;
+
+/** The pipeline key a request carries as `Authorization: Bearer kcp_...`, if any. */
+export function pipelineKey(req: NextRequest): string | null {
+  return PIPELINE_KEY.exec(req.headers.get("authorization") ?? "")?.[1] ?? null;
+}
+
+/**
+ * A route handler forwarding /api/<prefix>/* to LOCAL_AGENT_URL/<prefix>/*.
+ * With `pipelineKeys`, a request may come from a pipeline instead of a
+ * session: its key goes on for the API server to check. A browser never
+ * sends an Authorization header by itself, so a key can't ride on someone's
+ * cookies. Elsewhere a key is refused.
+ */
+export function agentProxy(prefix: string, { pipelineKeys = false }: { pipelineKeys?: boolean } = {}) {
   return async function proxy(
     req: NextRequest,
     { params }: { params: Promise<{ path?: string[] }> },
   ) {
+    const key = pipelineKey(req);
     const user = authSecret() ? sessionFrom(req) : null;
-    if (authSecret() && !user) {
+    if (key !== null) {
+      if (!pipelineKeys) {
+        return Response.json(
+          { error: "Pipeline keys reach only /api/files, /api/nodes, /api/experiments, /api/runs, /api/search and /api/proposals" },
+          { status: 401 },
+        );
+      }
+      if (user) {
+        return Response.json({ error: "Send a pipeline key or sign in, not both" }, { status: 400 });
+      }
+    } else if (authSecret() && !user) {
       return Response.json({ error: "Sign in first" }, { status: 401 });
     }
     const { path = [] } = await params;
@@ -54,7 +80,8 @@ export function agentProxy(prefix: string) {
       const value = req.headers.get(name);
       if (value) headers.set(name, value);
     }
-    if (user) headers.set(IDENTITY_HEADER, identityHeader(user));
+    if (key !== null) headers.set(PIPELINE_HEADER, key);
+    else if (user) headers.set(IDENTITY_HEADER, identityHeader(user));
 
     let upstream: Response;
     try {

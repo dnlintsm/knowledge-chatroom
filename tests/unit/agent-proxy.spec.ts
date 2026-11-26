@@ -189,4 +189,50 @@ test.describe("agentProxy with authentication", () => {
     const idToken = headers.get(IDENTITY_HEADER);
     expect(typeof idToken).toBe("string");
   });
+
+  const KEY = `kcp_${"a".repeat(43)}`;
+
+  test("forwards a pipeline's key, without a session, to the storage routes", async () => {
+    let capturedInit: RequestInit | null = null;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedInit = init ?? null;
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+
+    const proxy = agentProxy("files", { pipelineKeys: true });
+    const req = new NextRequest("http://localhost:3000/api/files/out.csv", {
+      headers: { authorization: `Bearer ${KEY}` },
+    });
+    const res = await proxy(req, { params: Promise.resolve({ path: ["out.csv"] }) });
+    expect(res.status).toBe(200);
+    const headers = new Headers(capturedInit!.headers);
+    expect(headers.get("x-knowledge-pipeline")).toBe(KEY);
+    expect(headers.has(IDENTITY_HEADER)).toBe(false);
+    expect(headers.has("authorization")).toBe(false);
+  });
+
+  test("refuses a pipeline key elsewhere, and a key sent with a session", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("must not be forwarded");
+    }) as typeof fetch;
+
+    const elsewhere = agentProxy("memory");
+    const req = new NextRequest("http://localhost:3000/api/memory/notes", {
+      headers: { authorization: `Bearer ${KEY}` },
+    });
+    const refused = await elsewhere(req, { params: Promise.resolve({ path: ["notes"] }) });
+    expect(refused.status).toBe(401);
+
+    const cookie = sessionCookie(new NextRequest("http://localhost:3000"), {
+      sub: "https://login.example.com|alice",
+      email: "alice@example.com",
+      name: "Alice",
+    });
+    const both = new NextRequest("http://localhost:3000/api/files/out.csv", {
+      headers: { authorization: `Bearer ${KEY}`, cookie: `${SESSION_COOKIE}=${cookie.value}` },
+    });
+    const files = agentProxy("files", { pipelineKeys: true });
+    const answer = await files(both, { params: Promise.resolve({ path: ["out.csv"] }) });
+    expect(answer.status).toBe(400);
+  });
 });
