@@ -96,3 +96,34 @@ def test_a_disk_that_cant_be_written_doesnt_fail_the_run(tmp_path: Path, caplog)
     assert "won't survive a restart" in caplog.text
     # The chat goes on in this process: a browser tool's result still finds its call.
     assert asyncio.run(stuck.load("chat-1")) == binding
+
+
+def test_a_link_that_could_not_be_written_is_the_one_read(tmp_path: Path, monkeypatch):
+    """The file still holds the link before it, which lacks the run's pending tool call."""
+    cwd, theirs = tmp_path / "0123456789abcdef", tmp_path / "fedcba9876543210"
+    saved = store(tmp_path)
+    saved.place("chat-1", cwd.name, cwd)
+    before = SessionBinding(SESSION, "default")
+    asyncio.run(saved.save("chat-1", before))
+
+    def full(src, dst):
+        raise OSError(28, "No space left on device")
+
+    pending = {"id": "toolu_1", "name": "mcp__ag_ui__writeWorkspaceFile", "input": {"path": "a.md"}}
+    latest = SessionBinding(SESSION, "default", pending=pending)
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_py.sessions.os.replace", full)
+        asyncio.run(saved.save("chat-1", latest))
+    assert asyncio.run(saved.load("chat-1")) == latest
+
+    # It is the chat's in that run folder only: the same chat id elsewhere finds none.
+    saved.place("chat-1", theirs.name, theirs)
+    assert asyncio.run(saved.load("chat-1")) is None
+
+    # Once a write gets through, the file is the one read again.
+    saved.place("chat-1", cwd.name, cwd)
+    asyncio.run(saved.save("chat-1", before))
+    assert asyncio.run(saved.load("chat-1")) == before
+    again = store(tmp_path)
+    again.place("chat-1", cwd.name, cwd)
+    assert asyncio.run(again.load("chat-1")) == before

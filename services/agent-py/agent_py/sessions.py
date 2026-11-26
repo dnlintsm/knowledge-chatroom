@@ -38,7 +38,7 @@ logger = logging.getLogger("agent_py")
 # The folder under AGENT_PY_WORKDIR. Not a run folder's name, so removing idle
 # run folders (workdir.remove_idle) leaves it alone.
 SESSIONS = ".sessions"
-# How many chats' places are remembered at once (each is two short strings).
+# How many chats' places, and how many unwritten links, are remembered at once.
 MAX_PLACES = 10_000
 
 
@@ -68,9 +68,11 @@ class SessionStore:
         self._exists = exists
         # thread_id -> (run folder's name, run folder), of each chat's latest run.
         self._places: OrderedDict[str, tuple[str, Path]] = OrderedDict()
-        # The links saved by this process, for when the disk can't be written:
-        # a chat still continues until the server restarts.
-        self._saved: OrderedDict[str, SessionBinding] = OrderedDict()
+        # Link file -> the link that could not be written to it. Newer than
+        # whatever the file holds, so it is read first, and the chat continues
+        # until the server restarts. By file, so it is one user's in one
+        # workspace, as the file is.
+        self._unsaved: OrderedDict[Path, SessionBinding] = OrderedDict()
 
     def place(self, thread_id: str, folder: str, cwd: Path) -> None:
         """Says where `thread_id`'s runs work, before the adapter loads or saves its link."""
@@ -93,19 +95,19 @@ class SessionStore:
         if found is None:
             return None
         file, cwd = found
-        try:
-            binding = SessionBinding(**json.loads(file.read_text(encoding="utf-8")))
-        except FileNotFoundError:
-            binding = self._saved.get(thread_id)
-        except (OSError, ValueError, TypeError) as err:
-            logger.warning("[sessions] a chat's saved session can't be read: %s", err)
-            with contextlib.suppress(OSError):
-                file.unlink()
-            binding = self._saved.get(thread_id)
+        binding = self._unsaved.get(file)
         if binding is None:
-            return None
+            try:
+                binding = SessionBinding(**json.loads(file.read_text(encoding="utf-8")))
+            except FileNotFoundError:
+                return None
+            except (OSError, ValueError, TypeError) as err:
+                logger.warning("[sessions] a chat's saved session can't be read: %s", err)
+                with contextlib.suppress(OSError):
+                    file.unlink()
+                return None
         if not self._exists(binding.session_id, cwd):
-            self._saved.pop(thread_id, None)
+            self._unsaved.pop(file, None)
             logger.warning(
                 "[sessions] a chat's session transcript is gone (Claude Code's home was not kept, "
                 "or it removed an old one); the chat starts a new session"
@@ -127,10 +129,6 @@ class SessionStore:
         if found is None:
             return
         file, _cwd = found
-        self._saved[thread_id] = binding
-        self._saved.move_to_end(thread_id)
-        while len(self._saved) > MAX_PLACES:
-            self._saved.popitem(last=False)
         part = file.with_name(f"{file.name}.{os.getpid()}.part")
         try:
             # A pending tool call's input can hold a file's text: the owner's alone.
@@ -146,3 +144,9 @@ class SessionStore:
             )
             with contextlib.suppress(OSError):
                 part.unlink()
+            self._unsaved[file] = binding
+            self._unsaved.move_to_end(file)
+            while len(self._unsaved) > MAX_PLACES:
+                self._unsaved.popitem(last=False)
+        else:
+            self._unsaved.pop(file, None)
