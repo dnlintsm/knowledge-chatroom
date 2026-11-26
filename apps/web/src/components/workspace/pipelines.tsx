@@ -11,6 +11,7 @@ import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmente
 import {
   DEFAULT_KEY_DAYS,
   KEY_LIFETIMES,
+  keyLifetime,
   OPERATIONS,
   STATUS_LABEL,
   keyName,
@@ -18,6 +19,7 @@ import {
   operationsText,
   pipelineActions,
   placesText,
+  shownKeys,
   statusNote,
   type NewPipelineKey,
   type Pipeline,
@@ -163,7 +165,7 @@ export function PipelinesDialog({ workspace, onClose }: { workspace: WorkspaceIn
     act(async () => {
       const { key } = await pipelinesApi<{ key: NewPipelineKey }>(`/${encodeURIComponent(pipeline.id)}/keys`, {
         method: "POST",
-        body: JSON.stringify({ expiresInDays: DEFAULT_KEY_DAYS }),
+        body: JSON.stringify(keyLifetime(DEFAULT_KEY_DAYS)),
       });
       setRevealed({ name: pipeline.name, key });
     });
@@ -287,7 +289,7 @@ function PipelineCard({
   workspace: WorkspaceInfo;
 }) {
   const note = statusNote(pipeline);
-  const keys = pipeline.keys.filter((k) => k.status !== "revoked" || pipeline.status === "revoked").slice(-4);
+  const keys = shownKeys(pipeline);
   return (
     <li
       aria-label={pipeline.name}

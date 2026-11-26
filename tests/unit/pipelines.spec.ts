@@ -3,12 +3,14 @@ import { test, expect } from "@playwright/test";
 import {
   authorizedByText,
   finishedByText,
+  keyLifetime,
   newPipelineBody,
   operationsText,
   pipelineActions,
   pipelineActivity,
   placesText,
   ranAsText,
+  shownKeys,
   statusNote,
   type Pipeline,
   type RunExecution,
@@ -76,8 +78,12 @@ test("a suspended or revoked pipeline says why", () => {
 
 test("the form sends a name, its places or the whole workspace, and operations in order", () => {
   const form = { name: "  Nightly   import ", whole: true, places: [], operations: ["runs", "read"] as const, days: 90 };
+  // The default lifetime is the server's, which keeps it within its own limit.
   expect(newPipelineBody({ ...form, operations: [...form.operations] })).toEqual({
-    body: { name: "Nightly import", places: null, operations: ["read", "runs"], expiresInDays: 90 },
+    body: { name: "Nightly import", places: null, operations: ["read", "runs"] },
+  });
+  expect(newPipelineBody({ ...form, operations: ["read"], days: 30 })).toEqual({
+    body: { name: "Nightly import", places: null, operations: ["read"], expiresInDays: 30 },
   });
   expect(newPipelineBody({ ...form, operations: ["read"], name: " " })).toEqual({ problem: "Give it a name" });
   expect(newPipelineBody({ ...form, operations: ["read"], whole: false })).toEqual({
@@ -85,8 +91,24 @@ test("the form sends a name, its places or the whole workspace, and operations i
   });
   expect(newPipelineBody({ ...form, operations: [] })).toEqual({ problem: "Choose at least one operation" });
   expect(newPipelineBody({ ...form, operations: ["read"], whole: false, places: [{ node: "n1" }] })).toEqual({
-    body: { name: "Nightly import", places: [{ node: "n1" }], operations: ["read"], expiresInDays: 90 },
+    body: { name: "Nightly import", places: [{ node: "n1" }], operations: ["read"] },
   });
+});
+
+test("a new key with the default lifetime leaves it to the server, so a lower limit there still takes it", () => {
+  expect(keyLifetime(90)).toEqual({});
+  expect(keyLifetime(365)).toEqual({ expiresInDays: 365 });
+});
+
+test("a card lists every live key, however many older keys have expired since", () => {
+  const key = (id: string, status: "active" | "expired" | "revoked") => ({ ...pipeline().keys[0], id, hint: id, status });
+  const old = pipeline({ keys: [key("live", "active"), ...["e1", "e2", "e3", "e4"].map((id) => key(id, "expired"))] });
+  const shown = shownKeys(old).map((k) => k.id);
+  expect(shown).toEqual(["live", "e4", "e3"]);
+  // A revoked key shows only once the pipeline itself is revoked.
+  const revokedKey = pipeline({ keys: [key("r1", "revoked"), key("live", "active")] });
+  expect(shownKeys(revokedKey).map((k) => k.id)).toEqual(["live"]);
+  expect(shownKeys({ ...revokedKey, status: "revoked" }).map((k) => k.id)).toEqual(["live", "r1"]);
 });
 
 const byPipeline: RunExecution = {

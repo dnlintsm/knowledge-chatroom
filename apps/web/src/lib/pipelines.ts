@@ -74,6 +74,31 @@ export const keyName = (key: Pick<PipelineKey, "hint">) => `…${key.hint}`;
 /** The keys that still work, which count towards MAX_LIVE_KEYS. */
 export const liveKeys = (pipeline: Pick<Pipeline, "keys">) => pipeline.keys.filter((k) => k.status === "active");
 
+/** How many keys that no longer work a card lists, newest first, after every live one. */
+export const PAST_KEYS_SHOWN = 2;
+
+/**
+ * The keys a pipeline's card lists: every live key, so each keeps its revoke
+ * button and last use, then the newest few that stopped. A revoked key is
+ * left out while the pipeline still works; once it's revoked, they all are.
+ */
+export function shownKeys(pipeline: Pick<Pipeline, "keys" | "status">): PipelineKey[] {
+  const live = liveKeys(pipeline);
+  const past = pipeline.keys
+    .filter((k) => k.status !== "active" && (k.status !== "revoked" || pipeline.status === "revoked"))
+    .slice(-PAST_KEYS_SHOWN);
+  return [...live, ...past.reverse()];
+}
+
+/**
+ * A key's lifetime as a request sends it. The default is left to the server,
+ * which keeps it within its own limit (PIPELINE_KEY_MAX_DAYS), so a server
+ * with a lower limit still takes it.
+ */
+export function keyLifetime(days: number): { expiresInDays?: number } {
+  return days === DEFAULT_KEY_DAYS ? {} : { expiresInDays: days };
+}
+
 /** What the owner and the workspace's Owners and Admins may do with a pipeline. */
 export function pipelineActions(pipeline: Pipeline, me: string | null, manages: boolean) {
   const owns = !!me && pipeline.owner?.id === me;
@@ -97,7 +122,7 @@ export function newPipelineBody(form: {
   places: PipelinePlace[];
   operations: PipelineOperation[];
   days: number;
-}): { body: { name: string; places: PipelinePlace[] | null; operations: PipelineOperation[]; expiresInDays: number } } | { problem: string } {
+}): { body: { name: string; places: PipelinePlace[] | null; operations: PipelineOperation[]; expiresInDays?: number } } | { problem: string } {
   const name = form.name.replace(/\s+/g, " ").trim();
   if (!name) return { problem: "Give it a name" };
   if (!form.whole && form.places.length === 0) return { problem: "Choose at least one place, or the whole workspace" };
@@ -107,7 +132,7 @@ export function newPipelineBody(form: {
       name,
       places: form.whole ? null : form.places,
       operations: OPERATIONS.map((op) => op.id).filter((id) => form.operations.includes(id)),
-      expiresInDays: form.days,
+      ...keyLifetime(form.days),
     },
   };
 }
