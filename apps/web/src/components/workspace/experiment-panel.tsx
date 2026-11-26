@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, FileDiff, FlaskConical, Lock, Plus, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
+import { Archive, FileDiff, FlaskConical, Lock, Repeat, RotateCcw, Send, Share2, Trash2, Upload, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { workspaceUrl } from "@/lib/workspace-request";
 import { ExperimentPeople } from "./experiment-people";
+import { ActionButton, KeyValues, Section, show } from "./panel-parts";
+import { RunsSection } from "./runs-section";
+import { compareRuns, onRunEvent, runName, type ComparedRun } from "./run-records";
 import { useListScope } from "./list-scope";
 import { readOnlyReason } from "./read-only";
 import { hasRole } from "./roles";
@@ -66,7 +69,6 @@ const STATE_LABEL: Record<ExperimentState, string> = {
   done: "Done",
   failed: "Failed",
 };
-const STATES = Object.keys(STATE_LABEL) as ExperimentState[];
 
 /** How far a run got. Ready, the usual state of a hand-made experiment, shows nothing. */
 export function StateBadge({ state, className }: { state: ExperimentState; className?: string }) {
@@ -181,62 +183,46 @@ export function ExperimentPanel() {
             {reason.detail}
           </p>
         )}
-        {(exp.mine || canRerun) && (
+        {(exp.mine || (canRerun && !canChange)) && (
           <div className="flex flex-wrap items-center gap-2">
-            {canRerun && (
+            {/* Who works on it starts runs below; others rerun it as their own. */}
+            {canRerun && !canChange && (
               <ActionButton
                 onClick={() => void rerun()}
                 disabled={rerunning}
-                title="A new experiment of yours with the same parameters and the inputs as this one recorded them"
+                title="A new experiment of yours with the same parameters and the inputs as its latest run recorded them"
               >
                 <Repeat className="size-3.5" /> {exp.mine ? "Rerun" : "Rerun as your own"}
               </ActionButton>
             )}
             {exp.mine && (
               <>
-            {exp.status === "draft" && (
-              <ActionButton onClick={() => save({ status: "shared" })} title={`Everyone who can view ${nodeName} will see it`}>
-                <Share2 className="size-3.5" /> Share
-              </ActionButton>
-            )}
-            {exp.status === "shared" && (
-              <ActionButton onClick={() => save({ status: "draft" })}>
-                <Lock className="size-3.5" /> Make private
-              </ActionButton>
-            )}
-            {exp.status !== "archived" ? (
-              <ActionButton
-                onClick={() => save({ status: "archived" })}
-                title={`Read only from then on, and visible to everyone who can view ${nodeName}`}
-              >
-                <Archive className="size-3.5" /> Archive
-              </ActionButton>
-            ) : (
-              <ActionButton onClick={() => save({ status: "shared" })}>
-                <RotateCcw className="size-3.5" /> Restore
-              </ActionButton>
-            )}
-            <ActionButton onClick={() => void remove()} destructive>
-              <Trash2 className="size-3.5" /> Delete
-            </ActionButton>
+                {exp.status === "draft" && (
+                  <ActionButton onClick={() => save({ status: "shared" })} title={`Everyone who can view ${nodeName} will see it`}>
+                    <Share2 className="size-3.5" /> Share
+                  </ActionButton>
+                )}
+                {exp.status === "shared" && (
+                  <ActionButton onClick={() => save({ status: "draft" })}>
+                    <Lock className="size-3.5" /> Make private
+                  </ActionButton>
+                )}
+                {exp.status !== "archived" ? (
+                  <ActionButton
+                    onClick={() => save({ status: "archived" })}
+                    title={`Read only from then on, and visible to everyone who can view ${nodeName}`}
+                  >
+                    <Archive className="size-3.5" /> Archive
+                  </ActionButton>
+                ) : (
+                  <ActionButton onClick={() => save({ status: "shared" })}>
+                    <RotateCcw className="size-3.5" /> Restore
+                  </ActionButton>
+                )}
+                <ActionButton onClick={() => void remove()} destructive>
+                  <Trash2 className="size-3.5" /> Delete
+                </ActionButton>
               </>
-            )}
-            {canChange && (
-              <label className="ml-auto flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                State
-                <select
-                  aria-label="Experiment state"
-                  value={exp.state}
-                  onChange={(e) => void save({ state: e.target.value as ExperimentState })}
-                  className="h-7 rounded-md border border-[var(--border)] bg-transparent px-1 text-xs text-[var(--foreground)] cursor-pointer"
-                >
-                  {STATES.map((s) => (
-                    <option key={s} value={s}>
-                      {STATE_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
             )}
           </div>
         )}
@@ -271,6 +257,7 @@ export function ExperimentPanel() {
         />
       </Section>
       <Section title="Parameters">
+        {canChange && <p className="px-2 text-xs text-[var(--muted-foreground)]">Planned: each new run starts with these.</p>}
         <KeyValues
           key={`params-${exp.id}`}
           label="Parameters"
@@ -279,15 +266,24 @@ export function ExperimentPanel() {
           onSave={(params) => save({ params })}
         />
       </Section>
-      <Section title="Results">
-        <KeyValues
-          key={`results-${exp.id}`}
-          label="Results"
-          values={exp.results}
-          readOnly={!canChange}
-          onSave={(results) => save({ results })}
-        />
-      </Section>
+      {/* Before anything ran, results are typed in here; the first run keeps them as Run 1. */}
+      {exp.state === "ready" && (canChange || Object.keys(exp.results).length > 0) && (
+        <Section title="Results">
+          {canChange && (
+            <p className="px-2 text-xs text-[var(--muted-foreground)]">
+              Recorded by hand. When a run starts, these are kept as Run 1.
+            </p>
+          )}
+          <KeyValues
+            key={`results-${exp.id}`}
+            label="Results"
+            values={exp.results}
+            readOnly={!canChange}
+            onSave={(results) => save({ results })}
+          />
+        </Section>
+      )}
+      <RunsSection key={`runs-${exp.id}`} experiment={exp} canChange={canChange} canRerun={canRerun} />
       {canChange && <AddFiles key={`add-${exp.id}`} experiment={exp} />}
       <Provenance experiment={exp} />
       {canChange && <Promote experiment={exp} nodeName={nodeName} />}
@@ -584,7 +580,7 @@ function Provenance({ experiment }: { experiment: Experiment }) {
     ],
   ];
   return (
-    <Section title="Provenance">
+    <Section title={experiment.state === "ready" ? "Provenance" : "Provenance of the latest run"}>
       <dl data-testid="run-provenance" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         {rows
           .filter(([, value]) => value)
@@ -789,44 +785,6 @@ function RulesEvidence({ experiment, onView }: { experiment: Experiment; onView:
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function ActionButton({
-  onClick,
-  title,
-  destructive,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  title?: string;
-  destructive?: boolean;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs cursor-pointer hover:bg-[var(--secondary)] disabled:cursor-default disabled:opacity-50",
-        destructive && "hover:text-[var(--destructive)]",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 /** Text that saves when it loses focus (or on Enter, for one line). */
 function EditableText({
   label,
@@ -880,116 +838,6 @@ function EditableText({
   );
 }
 
-/** How a value shows in an input: plain for text and numbers, JSON otherwise. */
-const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
-/** The reverse: numbers, true/false, null, and JSON objects or arrays come back typed. */
-function parse(text: string): unknown {
-  const t = text.trim();
-  if (t !== "" && !Number.isNaN(Number(t))) return Number(t);
-  if (/^(true|false|null)$/.test(t) || /^[[{]/.test(t)) {
-    try {
-      return JSON.parse(t);
-    } catch {
-      // Not JSON after all: keep the text.
-    }
-  }
-  return text;
-}
-
-type Row = { key: string; value: string };
-
-/** Name and value rows, saved as one object when a row is left or removed. */
-function KeyValues({
-  label,
-  values,
-  readOnly,
-  onSave,
-}: {
-  label: string;
-  values: Record<string, unknown>;
-  readOnly: boolean;
-  onSave: (values: Record<string, unknown>) => void;
-}) {
-  const fromValues = () => Object.entries(values).map(([key, value]) => ({ key, value: show(value) }));
-  const [rows, setRows] = useState<Row[]>(fromValues);
-  const group = useRef<HTMLDivElement>(null);
-  const toObject = (list: Row[]) =>
-    Object.fromEntries(list.filter((r) => r.key.trim()).map((r) => [r.key.trim(), parse(r.value)]));
-  // Take in changes made elsewhere (Claude, another tab), unless you are
-  // editing these rows right now.
-  const saved = JSON.stringify(values);
-  useEffect(() => {
-    if (group.current?.contains(document.activeElement)) return;
-    setRows((current) => (JSON.stringify(toObject(current)) === saved ? current : fromValues()));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved]);
-  const commit = (list: Row[]) => {
-    const next = toObject(list);
-    if (JSON.stringify(next) !== JSON.stringify(values)) onSave(next);
-  };
-  const singular = label === "Parameters" ? "parameter" : "result";
-
-  if (readOnly && !rows.length) {
-    return <p className="px-2 text-[var(--muted-foreground)]">None recorded.</p>;
-  }
-  return (
-    <div
-      ref={group}
-      role="group"
-      aria-label={label}
-      className="flex flex-col gap-1"
-      onBlur={(e) => {
-        // Save once focus leaves the whole list, not on every field.
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) commit(rows);
-      }}
-    >
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            aria-label={`${singular} name`}
-            value={row.key}
-            readOnly={readOnly}
-            placeholder="name"
-            onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))}
-            className="w-1/3 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 font-[family-name:var(--font-code)] text-xs outline-none focus:border-[var(--ring)]"
-          />
-          <input
-            aria-label={`${row.key || singular} value`}
-            value={row.value}
-            readOnly={readOnly}
-            placeholder="value"
-            onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))}
-            className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 font-[family-name:var(--font-code)] text-xs outline-none focus:border-[var(--ring)]"
-          />
-          {!readOnly && (
-            <button
-              type="button"
-              aria-label={`Remove ${row.key || singular}`}
-              onClick={() => {
-                const next = rows.filter((_, j) => j !== i);
-                setRows(next);
-                commit(next);
-              }}
-              className="flex size-6 items-center justify-center rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </div>
-      ))}
-      {!readOnly && (
-        <button
-          type="button"
-          onClick={() => setRows([...rows, { key: "", value: "" }])}
-          className="flex w-fit items-center gap-1 rounded px-2 py-1 text-xs text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] cursor-pointer"
-        >
-          <Plus className="size-3.5" /> Add {singular}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** The experiments on the same node (or at the root), side by side. */
 function Compare({ current, nodeName }: { current: Experiment; nodeName: string }) {
   const ws = useWorkspace();
@@ -1003,35 +851,178 @@ function Compare({ current, nodeName }: { current: Experiment; nodeName: string 
 }
 
 /**
- * The Experiments tab: the experiments in the list's scope (all of them, or a
- * node's), one row each, with every param and result as a column.
+ * The Compare tab: the runs of the experiments in the list's scope (all of
+ * them, or a node's), one row each, grouped by experiment, with every param
+ * and result as a column. An experiment that hasn't run shows as one row.
  */
 export function RunsPanel() {
   const ws = useWorkspace();
   // The same scope as the sidebar's list.
   const [listScope] = useListScope();
   const scope = shownScope(listScope, ws.nodes);
-  const runs = experimentsIn(ws.experiments, ws.nodes, scope);
+  const [showArchived, setShowArchived] = useState(false);
+  const experiments = experimentsIn(ws.experiments, ws.nodes, scope);
+  const runs = useComparedRuns(scope, showArchived, ws.experiments);
   const here =
     scope.node === null
       ? "the workspace"
       : `${placeName(ws.nodes, scope.node)}${scope.descendants ? "" : " (not its sub-levels)"}`;
+  const runCount = runs ? experiments.reduce((n, e) => n + (runs.get(e.id)?.length ?? 0), 0) : 0;
   return (
     <div data-testid="runs-panel" className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-6 text-sm">
-      <header className="flex items-center gap-2">
+      <header className="flex flex-wrap items-center gap-2">
         <FlaskConical className="size-4 text-[var(--muted-foreground)]" />
-        <h2 className="text-base font-semibold">Experiments in {here}</h2>
+        <h2 className="text-base font-semibold">Runs in {here}</h2>
         <span className="text-xs text-[var(--muted-foreground)]">
-          {runs.length} {runs.length === 1 ? "experiment" : "experiments"}
+          {runCount} {runCount === 1 ? "run" : "runs"} of {experiments.length} {experiments.length === 1 ? "experiment" : "experiments"}
         </span>
+        <label className="ml-auto flex cursor-pointer items-center gap-1 text-xs text-[var(--muted-foreground)]">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived runs
+        </label>
       </header>
-      {runs.length ? (
-        <RunsTable runs={runs} current={ws.experiment?.id ?? null} label={`Experiments in ${here}`} showPlace />
-      ) : (
+      {!experiments.length ? (
         <p className="text-[var(--muted-foreground)]">
           No experiments here yet. Start one from the Experiments view, or ask Claude to run an analysis on your files.
         </p>
+      ) : runs === null ? (
+        <p className="text-xs text-[var(--muted-foreground)]">Loading runs…</p>
+      ) : (
+        <RunsByExperiment experiments={experiments} runs={runs} current={ws.experiment?.id ?? null} label={`Runs in ${here}`} />
       )}
+    </div>
+  );
+}
+
+/** The Runs in a scope, by experiment; loaded again when a run or an experiment changes. */
+function useComparedRuns(scope: { node: string | null; descendants: boolean }, archived: boolean, experiments: Experiment[]) {
+  const [found, setFound] = useState<{ key: string; runs: Map<string, ComparedRun[]> } | null>(null);
+  const key = `${scope.node ?? ""}|${scope.descendants}|${archived}`;
+  // Their states and results show on the experiments, which change when a run does.
+  const changed = experiments.map((e) => `${e.id}:${e.updatedAt}`).join(",");
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      void compareRuns(scope.node === null ? { archived } : { node: scope.node, descendants: scope.descendants, archived })
+        .then((list) => {
+          if (!live) return;
+          const by = new Map<string, ComparedRun[]>();
+          for (const run of list) by.set(run.experimentId, [...(by.get(run.experimentId) ?? []), run]);
+          for (const group of by.values()) group.sort((a, b) => b.number - a.number);
+          setFound({ key, runs: by });
+        })
+        .catch(() => {});
+    load();
+    const stop = onRunEvent(load);
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [key, scope.node, scope.descendants, archived, changed]);
+  return found?.key === key ? found.runs : null;
+}
+
+function RunsByExperiment({
+  experiments,
+  runs,
+  current,
+  label,
+}: {
+  experiments: Experiment[];
+  runs: Map<string, ComparedRun[]>;
+  current: string | null;
+  label: string;
+}) {
+  const ws = useWorkspace();
+  // Each experiment's runs, or the experiment itself when none is shown: one
+  // that hasn't run (its planned parameters and any results typed by hand),
+  // or one whose runs are all archived (nothing, since its mirrored results
+  // are an archived run's).
+  type Row = { experiment: Experiment; run: ComparedRun | null; first: boolean; span: number };
+  const rows = experiments.flatMap((e): Row[] => {
+    const its = runs.get(e.id) ?? [];
+    return its.length
+      ? its.map((run, i) => ({ experiment: e, run, first: i === 0, span: its.length }))
+      : [{ experiment: e, run: null, first: true, span: 1 }];
+  });
+  const neverRan = (e: Experiment) => e.state === "ready";
+  const paramsOf = (r: Row) => r.run?.params ?? (neverRan(r.experiment) ? r.experiment.params : {});
+  const resultsOf = (r: Row) => r.run?.results ?? (neverRan(r.experiment) ? r.experiment.results : {});
+  const paramKeys = [...new Set(rows.flatMap((r) => Object.keys(paramsOf(r))))];
+  const resultKeys = [...new Set(rows.flatMap((r) => Object.keys(resultsOf(r))))];
+  const cell = "border-b border-[var(--border)] px-2 py-1.5 text-left align-top";
+  return (
+    <div className="overflow-x-auto">
+      <table aria-label={label} className="w-full border-collapse text-xs">
+        <thead className="text-[var(--muted-foreground)]">
+          <tr>
+            <th className={cell}>Experiment</th>
+            <th className={cn(cell, "font-normal")}>Run</th>
+            <th className={cn(cell, "font-normal")}>Where</th>
+            <th className={cn(cell, "font-normal")}>By</th>
+            {paramKeys.map((k) => (
+              <th key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-normal")}>
+                {k}
+              </th>
+            ))}
+            {resultKeys.map((k) => (
+              <th key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
+                {k}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const { experiment: e, run } = r;
+            const params = paramsOf(r);
+            const results = resultsOf(r);
+            return (
+              <tr
+                key={run?.id ?? e.id}
+                data-testid="compared-run"
+                data-experiment={e.id}
+                onClick={() => void ws.enterExperiment(e.id)}
+                className={cn("cursor-pointer hover:bg-[var(--secondary)]", e.id === current && "bg-[var(--secondary)]")}
+              >
+                {r.first && (
+                  <td className={cell} rowSpan={r.span}>
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate font-medium">{e.title}</span>
+                      <StatusBadge status={e.status} />
+                    </span>
+                  </td>
+                )}
+                <td className={cell}>
+                  {run ? (
+                    <span className="flex items-center gap-1.5 whitespace-nowrap">
+                      {runName(run)}
+                      <StateBadge state={run.state} />
+                      {run.archived && <span className="text-[var(--muted-foreground)]">archived</span>}
+                    </span>
+                  ) : (
+                    <span className="text-[var(--muted-foreground)]">
+                      {neverRan(e) ? "Not run" : "Runs archived"}
+                    </span>
+                  )}
+                </td>
+                <td className={cell}>{placeName(ws.nodes, e.nodeId)}</td>
+                <td className={cell}>{run ? (run.startedBy?.name ?? "Someone") : e.mine ? "You" : (e.maintainerName ?? "Someone")}</td>
+                {paramKeys.map((k) => (
+                  <td key={`p-${k}`} className={cn(cell, "font-[family-name:var(--font-code)]")}>
+                    {k in params ? show(params[k]) : ""}
+                  </td>
+                ))}
+                {resultKeys.map((k) => (
+                  <td key={`r-${k}`} className={cn(cell, "font-[family-name:var(--font-code)] font-semibold")}>
+                    {k in results ? show(results[k]) : ""}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
