@@ -76,13 +76,97 @@ class Session:
         # The principal's role in the workspace (owner, admin, member), checked
         # for this request by workspaces.resolve().
         self.membership = membership
+        # A pipeline's places as node ids (their subtrees included), read once a request.
+        self._reached: set[str] | None = None
+        self._experiment_nodes: dict[str, str | None] = {}
 
     @property
     def ws(self) -> str:
         return self.storage.workspace_id
 
     async def role(self, node_id: str | None) -> Role | None:
-        return await self.access.role(self.principal.user_id, node_id)
+        role = await self.access.role(self.principal.user_id, node_id)
+        if role is not None and not await self.reaches(node_id):
+            return None
+        return role
+
+    # A pipeline reaches only its places (docs/pipeline-identities.md, decision 3):
+    # a node and its subtree, an Experiment and its Runs. Outside them it is as if
+    # its owner had no access. Everyone else reaches everything their access does.
+
+    def _narrowed(self) -> bool:
+        scope = self.principal.pipeline
+        return scope is not None and scope.nodes is not None
+
+    def _places(self) -> tuple[list[str], list[str]] | None:
+        """A narrowed pipeline's nodes and Experiments, for queries that filter on them; None for anyone else."""
+        scope = self.principal.pipeline
+        if scope is None or scope.nodes is None:
+            return None
+        return list(scope.nodes), list(scope.experiments)
+
+    async def _reached_nodes(self) -> set[str]:
+        if self._reached is None:
+            scope = self.principal.pipeline
+            assert scope is not None and scope.nodes is not None
+            async with self.storage.pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    SELECT n.id FROM nodes n JOIN nodes p ON n.path <@ p.path
+                    WHERE p.id = ANY(%(places)s::uuid[]) AND p.workspace_id = %(ws)s
+                      AND n.workspace_id = %(ws)s""",
+                    {"places": list(scope.nodes), "ws": self.ws},
+                )
+                self._reached = {str(row[0]) for row in await cur.fetchall()}
+        return self._reached
+
+    async def reaches(self, node_id: str | None, experiment_id: str | None = None) -> bool:
+        """Whether a pipeline's places include this node, or this Experiment; always for anyone else."""
+        if not self._narrowed():
+            return True
+        scope = self.principal.pipeline
+        assert scope is not None
+        if experiment_id is not None:
+            if not is_uuid(experiment_id):
+                return False
+            if experiment_id.lower() in scope.experiments:
+                return True
+            if experiment_id not in self._experiment_nodes:
+                async with self.storage.pool.connection() as conn:
+                    cur = await conn.execute(
+                        "SELECT node_id FROM experiments WHERE id = %s AND workspace_id = %s",
+                        (experiment_id, self.ws),
+                    )
+                    row = await cur.fetchone()
+                self._experiment_nodes[experiment_id] = str(row[0]) if row and row[0] else None
+            node_id = self._experiment_nodes[experiment_id]
+        if node_id is None:
+            return False
+        return node_id.lower() in await self._reached_nodes()
+
+    async def _within(
+        self, items: list[dict[str, Any]], node_key: str, experiment_key: str | None
+    ) -> list[dict[str, Any]]:
+        """The items of a list a pipeline reaches; all of them for anyone else."""
+        if not self._narrowed():
+            return items
+        kept = []
+        for item in items:
+            experiment = item.get(experiment_key) if experiment_key else None
+            node = item.get(node_key)
+            if await self.reaches(node if isinstance(node, str) else None, experiment):
+                kept.append(item)
+        return kept
+
+    async def _experiment_access(self, experiment_id: str) -> str | None:
+        if not await self.reaches(None, experiment_id):
+            return None
+        return await self.access.experiment_access(self.principal.user_id, experiment_id)
+
+    async def _sees_node(self, node_id: str) -> bool:
+        if not await self.reaches(node_id):
+            return False
+        return await self.access.sees_node(self.principal.user_id, node_id)
 
     async def still_member(self) -> bool:
         """
@@ -98,16 +182,80 @@ class Session:
             )
             return await cur.fetchone() is not None
 
+    async def execution(self) -> dict[str, Any]:
+        """
+        Who asks, what as, and what authorized it, for a Run's record
+        (docs/pipeline-identities.md, decision 11): the user, Claude in their
+        chat, or a pipeline acting for its owner.
+        """
+        principal = self.principal
+        who = await self.access.user(principal.user_id)
+        name = None if who is None else who["name"] if who["name"] is not None else who["email"]
+        scope = principal.pipeline
+        if scope is not None:
+            places = (
+                None
+                if scope.nodes is None
+                else [{"node": n} for n in scope.nodes]
+                + [{"experiment": e} for e in scope.experiments]
+            )
+            ran_as: dict[str, Any] = {
+                "kind": "pipeline",
+                "id": scope.id,
+                "name": scope.name,
+                "key": scope.key_id,
+                "hint": scope.key_hint,
+            }
+            authorized: dict[str, Any] = {
+                "kind": "pipeline-key",
+                "key": scope.key_id,
+                "places": places,
+                "operations": sorted(scope.operations),
+            }
+        elif principal.actor == "agent":
+            ran_as = {"kind": "agent", "via": principal.via}
+            authorized = {"kind": "storage-token", "via": principal.via}
+        else:
+            ran_as = {"kind": "user"}
+            authorized = {"kind": "session"}
+        return {
+            "initiatedBy": {"id": principal.user_id, "name": name},
+            "ranAs": ran_as,
+            "authorizedBy": authorized,
+        }
+
+    def _acting(self) -> str:
+        """Who acts for the user, in refusals: Claude, or a pipeline."""
+        return "A pipeline" if self.principal.actor == "pipeline" else "Claude"
+
     def need_admin(self) -> None:
         """People, groups and the audit log are for the workspace's Owners and Admins."""
         if self.membership not in ("owner", "admin"):
             raise ForbiddenError("Only the workspace's Owners and Admins can do this")
+
+    def _copies_from_a_source(self) -> None:
+        """
+        Copying files from another place (a Run's inputs, an imported folder)
+        reads them, so a pipeline needs `read` as well as `runs`. The source's
+        place is checked where it is opened (files, experiment_files), against
+        the pipeline's places; both happen before anything is created.
+        """
+        scope = self.principal.pipeline
+        if scope is not None and "read" not in scope.operations:
+            raise ForbiddenError(
+                "This pipeline can't read here: it doesn't have the read operation, "
+                "which copying files from another place needs"
+            )
 
     async def need(self, node_id: str | None, minimum: Role) -> Role:
         role = await self.role(node_id)
         if role is None:
             if node_id is not None:
                 raise NodeNotFoundError("Node not found")
+            if self._narrowed():
+                raise ForbiddenError(
+                    "This pipeline reaches only its places, not the workspace root"
+                )
             raise ForbiddenError("You have no access to this workspace")
         if not at_least(role, minimum):
             raise ForbiddenError(
@@ -139,13 +287,18 @@ class Session:
         async with self.scoped() as conn:
             every = await nodes.list_nodes(conn, self.ws)
         roles = await self.access.node_roles(self.principal.user_id)
+        if self._narrowed():
+            reached = await self._reached_nodes()
+            roles = {node: role if node in reached else None for node, role in roles.items()}
         root_role = await self.role(None)
         by_id = {n["id"]: n for n in every}
         # Visible nodes, plus their ancestors so the path to them can be drawn.
         shown: set[str] = set()
         for node in every:
             # Owners and Admins see restricted nodes they can't open, by name only.
-            if not roles.get(node["id"]) and not (self.manages and node["restricted"]):
+            if not roles.get(node["id"]) and not (
+                self.manages and node["restricted"] and not self._narrowed()
+            ):
                 continue
             current: dict[str, Any] | None = node
             while current and current["id"] not in shown:
@@ -241,11 +394,7 @@ class Session:
 
     async def _restricted_or_owned(self, node_id: str) -> None:
         """Full access on the node, or an Owner or Admin who sees it in the tree; else refused as need() does."""
-        if (
-            self.manages
-            and is_uuid(node_id)
-            and await self.access.sees_node(self.principal.user_id, node_id)
-        ):
+        if self.manages and is_uuid(node_id) and await self._sees_node(node_id):
             return
         await self.need(node_id, "owner")
 
@@ -386,7 +535,7 @@ class Session:
                 raise ForbiddenError("Only the workspace's Owners can take over a restricted node")
             await self.need(node_id, "owner")
             raise ForbiddenError("Only the workspace's Owners can take over a restricted node")
-        if not is_uuid(node_id) or not await self.access.sees_node(self.principal.user_id, node_id):
+        if not is_uuid(node_id) or not await self._sees_node(node_id):
             raise NodeNotFoundError("Node not found")
         user_id = self.principal.user_id
         async with self.storage.pool.connection() as conn, conn.transaction():
@@ -416,14 +565,15 @@ class Session:
         if node_id is not ANYWHERE:
             await self.need(node_id, "viewer")  # pyrefly: ignore[bad-argument-type]
         async with self.scoped() as conn:
-            return await experiments.list_experiments(
+            found = await experiments.list_experiments(
                 conn, self.ws, self.principal.user_id, node_id
             )
+        return await self._within(found, "nodeId", "id")
 
     async def experiment(self, experiment_id: str) -> dict[str, Any]:
         async with self.scoped() as conn:
             found = await experiments.get(conn, self.ws, self.principal.user_id, experiment_id)
-        if not found:
+        if not found or not await self.reaches(None, experiment_id):
             raise NodeNotFoundError("Experiment not found")
         return found
 
@@ -466,6 +616,7 @@ class Session:
         do and changes nothing.
         """
         folder = normalize_path(folder)
+        self._copies_from_a_source()
         source_role = await self.need(node_id, "viewer")
         await self.need(destination, "viewer")
         can_edit_source = at_least(source_role, "editor")
@@ -646,6 +797,7 @@ class Session:
         await self.need(existing[-1]["id"] if existing else None, "editor" if missing else "viewer")
 
         principal = self.principal
+        execution = await self.execution()
         created: list[dict[str, Any]] = []
         written: list[dict[str, Any]] = []
         async with self.scoped() as conn:
@@ -676,6 +828,8 @@ class Session:
                 chosen_id=experiment_id,
                 fork=False,
                 record_run=False,
+                # One uploaded as running starts Run 1 now, with this record.
+                provenance={"execution": execution},
             )
             service = await FileService(self.storage).in_experiment(conn, experiment_id)
             assert service is not None
@@ -705,7 +859,7 @@ class Session:
                     fields.get("params", {}),
                     fields.get("results", {}),
                     fields["state"],
-                    {},
+                    {"execution": {**execution, "finishedBy": experiments.finisher(execution)}},
                 )
 
         experiment = await self.experiment(experiment_id)
@@ -723,6 +877,8 @@ class Session:
         found = await nodes.find_child(conn, self.ws, parent_id, name)
         if found:
             return found, False
+        # A node added inside a pipeline's places is in them too: read them again.
+        self._reached = None
 
         async def in_tx(tx: AsyncConnection, node_id: str) -> None:
             # With row security a trigger makes you its owner (013_node_creator_owns.sql).
@@ -761,7 +917,7 @@ class Session:
         who = await self.access.user(user_id)
         name = None if who is None else who["name"] if who["name"] is not None else who["email"]
         record = {**(provenance or {}), "startedBy": {"id": user_id, "name": name}, "startedAt": _now(),
-                  "inputs": recorded}  # fmt: skip
+                  "inputs": recorded, "execution": await self.execution()}  # fmt: skip
         fields = {**given, "state": given["state"] if given.get("state") is not None else "running"}
         title = {"title": given["title"]} if "title" in given else {}
 
@@ -814,6 +970,8 @@ class Session:
         """
         links: list[dict[str, str]] = []
         recorded: list[dict[str, Any]] = []
+        if inputs:
+            self._copies_from_a_source()
         for source in inputs:
             origin = normalize_path(source["path"])
             place = (
@@ -984,6 +1142,8 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]}
         )
+        # Before the connection: execution() takes one of its own.
+        execution = await self.execution()
         # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
@@ -994,6 +1154,7 @@ class Session:
                 audit,
                 by=self.principal.user_id,
                 run=run,
+                execution=execution,
             )
         finished = await self.experiment(experiment_id)
         await self._refresh_report(finished, create=True)
@@ -1073,7 +1234,8 @@ class Session:
         who = await self.access.user(user_id)
         name = None if who is None else who["name"] if who["name"] is not None else who["email"]
         record = {**(provenance or {}), "startedBy": {"id": user_id, "name": name},
-                  "startedAt": _now(), "inputs": recorded}  # fmt: skip
+                  "startedAt": _now(), "inputs": recorded,
+                  "execution": await self.execution()}  # fmt: skip
         if rerun_of is not None:
             record["rerunOf"] = rerun_of
         async with self.scoped() as conn, conn.transaction():
@@ -1150,8 +1312,8 @@ class Session:
 
     async def update_run(self, run_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """Its label, or archiving it; archiving is the user's call, not Claude's."""
-        if "archived" in fields and self.principal.actor == "agent":
-            raise ForbiddenError("Claude doesn't archive runs")
+        if "archived" in fields and self.principal.actor != "user":
+            raise ForbiddenError(f"{self._acting()} doesn't archive runs")
         found, experiment = await self._run_and_experiment(run_id)
         action = "run.archive" if fields.get("archived") else "run.update"
         async with self.scoped() as conn, conn.transaction():
@@ -1164,8 +1326,8 @@ class Session:
         return await self.run(run_id)
 
     def _need_person_runs(self, what: str) -> None:
-        if self.principal.actor == "agent":
-            raise ForbiddenError(f"Claude doesn't {what} runs")
+        if self.principal.actor != "user":
+            raise ForbiddenError(f"{self._acting()} doesn't {what} runs")
 
     async def delete_run(self, run_id: str) -> bool:
         """Soft-deletes a finished Run; Undo or Recently deleted brings it back."""
@@ -1239,7 +1401,7 @@ class Session:
                     )
                     here += [str(row[0]) for row in await cur.fetchall()]
         async with self.scoped() as conn:
-            return await runs.compare(
+            found = await runs.compare(
                 conn,
                 self.ws,
                 self.principal.user_id,
@@ -1247,6 +1409,7 @@ class Session:
                 experiment_id=experiment_id,
                 archived=archived,
             )
+        return await self._within(found, "nodeId", "experimentId")
 
     async def _refresh_report(self, run: dict[str, Any], create: bool = False) -> None:
         """
@@ -1284,9 +1447,16 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": list(given)}
         )
+        execution = await self.execution()
         async with self.scoped() as conn:
             await experiments.update(
-                conn, self.storage, experiment_id, given, audit, by=self.principal.user_id
+                conn,
+                self.storage,
+                experiment_id,
+                given,
+                audit,
+                by=self.principal.user_id,
+                execution=execution,
             )
         # The report's record follows edits made after the run started.
         updated = await self.experiment(experiment_id)
@@ -1306,8 +1476,8 @@ class Session:
 
     def _need_person(self, what: str) -> None:
         """Claude never deletes experiments, so it doesn't list or restore deleted ones either."""
-        if self.principal.actor == "agent":
-            raise ForbiddenError(f"Claude doesn't {what} deleted experiments")
+        if self.principal.actor != "user":
+            raise ForbiddenError(f"{self._acting()} doesn't {what} deleted experiments")
 
     async def deleted_experiments(self) -> list[dict[str, Any]]:
         """
@@ -1477,7 +1647,8 @@ class Session:
     async def experiment_if_visible(self, experiment_id: str) -> dict[str, Any] | None:
         """The experiment, or None once the caller can't see it (say, a draft they handed over)."""
         async with self.scoped() as conn:
-            return await experiments.get(conn, self.ws, self.principal.user_id, experiment_id)
+            found = await experiments.get(conn, self.ws, self.principal.user_id, experiment_id)
+        return found if found and await self.reaches(None, experiment_id) else None
 
     # Files
 
@@ -1492,7 +1663,7 @@ class Session:
 
     async def experiment_files(self, experiment_id: str) -> FilesSession:
         """An experiment's files: its maintainer and collaborators edit them, others who may see it read them."""
-        access = await self.access.experiment_access(self.principal.user_id, experiment_id)
+        access = await self._experiment_access(experiment_id)
         service = None
         if access:
             async with self.storage.pool.connection() as conn:
@@ -1514,7 +1685,7 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Proposals you can see: on places you can read, and your own."""
         async with self.scoped() as conn:
-            return await proposals.list_proposals(
+            found = await proposals.list_proposals(
                 conn,
                 self.ws,
                 self.principal.user_id,
@@ -1523,11 +1694,12 @@ class Session:
                 status=status,
                 limit=limit,
             )
+        return await self._within(found, "node", "experiment")
 
     async def proposal(self, proposal_id: str) -> dict[str, Any]:
         async with self.scoped() as conn:
             found = await proposals.get(conn, self.ws, self.principal.user_id, proposal_id)
-        if not found:
+        if not found or not await self._within([found], "node", "experiment"):
             raise NodeNotFoundError("Proposal not found")
         return found
 
@@ -1761,7 +1933,7 @@ class Session:
         # Before the connection: the embedding model may be a slow remote API.
         vector = await search.meaning(query)
         async with self.scoped() as conn:
-            return await search.search(
+            found = await search.search(
                 conn,
                 self.principal.user_id,
                 query,
@@ -1770,7 +1942,9 @@ class Session:
                 near=near,
                 near_experiment=near_experiment,
                 limit=limit,
+                places=self._places(),
             )
+        return await self._within(found, "node", "experiment")
 
     async def can_see(self, event: dict[str, Any]) -> bool:
         """Whether this principal may hear about a change."""
@@ -1784,21 +1958,21 @@ class Session:
             # Who just lost access to a restricted node hears that too, to close it.
             if user_id in (event.get("left") or []):
                 return True
-            return await self.access.sees_node(user_id, str(event.get("id")))
+            return await self._sees_node(str(event.get("id")))
         if op == "experiment":
             # Who just stopped working on it hears that too, to close it.
             if user_id in (event.get("left") or []):
                 return True
-            return await self.access.hears_experiment(
+            return await self.reaches(
+                None, str(event.get("id"))
+            ) and await self.access.hears_experiment(
                 user_id, str(event.get("id")), str(event.get("change"))
             )
         if op == "proposal":
             # Its author too only while they can view its node (docs/restricted-knowledge.md).
             return await self.role(event.get("node")) is not None
         if event.get("experiment"):
-            return (
-                await self.access.experiment_access(user_id, str(event["experiment"])) is not None
-            )
+            return await self._experiment_access(str(event["experiment"])) is not None
         return await self.role(event.get("node")) is not None
 
     # The org tree and grants
@@ -2019,7 +2193,7 @@ class FilesSession:
         """
         principal = self.session.principal
         if (
-            principal.actor != "agent"
+            principal.actor == "user"
             or not principal.via
             or self.experiment_id is None
             or info["path"] not in experiments.RECORDED_READS

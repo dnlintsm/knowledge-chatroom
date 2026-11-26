@@ -25,6 +25,7 @@ from .config import ConfigError, Settings, settings_from_env
 from .identity import RefuseSignedWithoutLogin
 from .memory_agent import RECALL_TEXT
 from .memory_learn import MemoryLearner
+from .pipelines import Pipelines
 from .platform import Platform, parse_admins
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
@@ -219,12 +220,14 @@ def create_app(settings: Settings) -> FastAPI:
         watcher = None
         # The workspaces and memberships (workspaces.py); None without a database.
         app.state.workspaces = None
+        app.state.pipelines = None
         app.state.platform = None
         if settings.database_url:
             pool = db.open_pool(settings.database_url)
             await pool.open(wait=False)
             app.state.pool = pool
             app.state.workspaces = Workspaces(pool)
+            app.state.pipelines = Pipelines(pool)
             app.state.platform = Platform(
                 pool, parse_admins(settings.platform_admins), settings.recovery_idle_days
             )

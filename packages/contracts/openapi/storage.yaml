@@ -25,6 +25,16 @@ info:
       share or archive experiments, or upload them. Such requests answer 403 with the reason.
       Storage tokens only reach the storage routes: the skills, hub, tools, memory and
       follow-up routes take `X-Knowledge-User` alone (or nothing without login).
+    - A pipeline (docs/pipeline-identities.md, with PIPELINES=on) sends its key as
+      `X-Knowledge-Pipeline` (the app forwards `Authorization: Bearer kcp_...`). It acts for
+      its owner, narrowed to its places and operations, with the same limits as a storage
+      token, except that it uploads when it has the `upload` operation. Only /files, /nodes,
+      /experiments, /runs, /search and /proposals take it, and it can't watch
+      (`/files?watch` answers 403): a stream would keep delivering after a revocation.
+      Copying files from another place (a Run's inputs) needs `read`, and the source in its
+      places. A key that is revoked or expired, or whose pipeline is revoked or suspended,
+      answers 401 with the message and a `reason`; a key sent with a signed identity
+      answers 400.
 
     Which workspace (issue #226, docs/workspaces.md): every storage, memory and skills
     request runs in one workspace, named by its id in any of
@@ -49,6 +59,7 @@ security:
   - {}
   - user: []
   - storage: []
+  - pipeline: []
 tags:
   - name: files
   - name: nodes
@@ -60,6 +71,7 @@ tags:
   - name: access
   - name: workspaces
   - name: platform
+  - name: pipelines
   - name: skills
   - name: hub
   - name: memory
@@ -2105,6 +2117,292 @@ paths:
         "500": { $ref: "#/components/responses/StorageError" }
         "503": { $ref: "#/components/responses/Starting" }
 
+  /pipelines:
+    get:
+      tags: [pipelines]
+      operationId: listPipelines
+      summary: Pipelines, yours or (Owners and Admins) everyone's
+      description: >-
+        Your pipelines; with `all`, every pipeline in the workspace, for its Owners and Admins
+        (403 otherwise). Keys show their hint, never the key. 404 unless PIPELINES=on. Storage
+        tokens and pipeline keys get 403.
+      security: [{}, {user: []}]
+      parameters:
+        - name: all
+          in: query
+          description: Present for every pipeline in the workspace.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The pipelines, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pipelines]
+                properties:
+                  pipelines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Pipeline" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [pipelines]
+      operationId: createPipeline
+      summary: Make a pipeline that you own, with its first key
+      description: >-
+        Any Member, for themselves. Every place must be one you can see now (404 otherwise).
+        The answer is the only time the key is shown. Audited as pipeline.create.
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, places, operations]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                places:
+                  oneOf:
+                    - type: "null"
+                    - type: array
+                      minItems: 1
+                      maxItems: 50
+                      items: { $ref: "#/components/schemas/PipelinePlace" }
+                operations:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/PipelineOperation" }
+                expiresInDays:
+                  type: integer
+                  minimum: 1
+                  description: Its key's lifetime; 90 by default, at most PIPELINE_KEY_MAX_DAYS (365).
+      responses:
+        "201":
+          description: The pipeline, and its key, shown this once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pipeline, key]
+                properties:
+                  pipeline: { $ref: "#/components/schemas/Pipeline" }
+                  key: { $ref: "#/components/schemas/NewPipelineKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /pipelines/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [pipelines]
+      operationId: getPipeline
+      summary: One pipeline (its owner, Owners and Admins)
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: The pipeline.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [pipelines]
+      operationId: updatePipeline
+      summary: Change its name, places or operations (its owner)
+      description: Takes effect at its next request. 409 once it is revoked. Audited as pipeline.update.
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                places:
+                  oneOf:
+                    - type: "null"
+                    - type: array
+                      minItems: 1
+                      maxItems: 50
+                      items: { $ref: "#/components/schemas/PipelinePlace" }
+                operations:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/PipelineOperation" }
+      responses:
+        "200":
+          description: The pipeline now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It was revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [pipelines]
+      operationId: revokePipeline
+      summary: Revoke it and all its keys (its owner, Owners and Admins)
+      description: >-
+        Its next request is refused; one already accepted ends as it would have. It stays
+        listed, as revoked, so what names it still resolves. Audited as pipeline.revoke.
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It was revoked already.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /pipelines/{id}/owner:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [pipelines]
+      operationId: handOverPipeline
+      summary: Hand it over to another member (Owners and Admins)
+      description: |
+        It then acts for them, with their access. Every key it has is revoked in the same
+        transaction, so a key the former owner kept never acts for the new owner; the new
+        owner adds a key. Audited as pipeline.handover, with keysRevoked.
+      security: [{}, {user: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [userId]
+              properties:
+                userId: { type: string }
+      responses:
+        "200":
+          description: The pipeline now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It was revoked, or the workspace is archived.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /pipelines/{id}/keys:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [pipelines]
+      operationId: addPipelineKey
+      summary: Add a key (its owner)
+      description: >-
+        At most two live keys at once (409 for a third), so one can be replaced before the
+        old one is revoked. Audited as pipeline.key.create.
+      security: [{}, {user: []}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expiresInDays: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: The key, shown this once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key: { $ref: "#/components/schemas/NewPipelineKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It has two live keys already, or was revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /pipelines/{id}/keys/{keyId}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: keyId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [pipelines]
+      operationId: revokePipelineKey
+      summary: Revoke a key (its owner, Owners and Admins)
+      description: Its next request is refused. Audited as pipeline.key.revoke.
+      security: [{}, {user: []}]
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
   /platform/workspaces:
     get:
       tags: [platform]
@@ -4139,6 +4437,11 @@ components:
       in: header
       name: X-Knowledge-Storage
       description: "A storage token (aud \"storage\"): Claude acting for its user through an outside service, with the limits listed above."
+    pipeline:
+      type: apiKey
+      in: header
+      name: X-Knowledge-Pipeline
+      description: "A pipeline's key (kcp_...), looked up on every request: the pipeline acting for its owner, narrowed to its places and operations."
     memory:
       type: apiKey
       in: header
@@ -4463,6 +4766,13 @@ components:
           type: [string, "null"]
           description: With `changed` on a file write, the file's version now; null when it is gone.
         running: { type: integer, minimum: 1, description: "On a 409 starting a run: the number of the run that is running." }
+        reason:
+          type: string
+          enum: [invalid, key-revoked, pipeline-revoked, key-expired, owner-left, workspace-archived]
+          description: |
+            On a 401 for a pipeline key: why it can't act now. owner-left lasts until an Owner
+            or Admin hands the pipeline over; workspace-archived until the workspace is
+            restored, and nothing else resumes it.
 
     IdOnly:
       type: object
@@ -4477,7 +4787,7 @@ components:
 
     AuthorType:
       type: string
-      enum: [user, agent]
+      enum: [user, agent, pipeline]
 
     FileKind:
       type: string
@@ -4923,8 +5233,11 @@ components:
           additionalProperties: true
           description: >-
             Where it came from, as an experiment's provenance: who started it and when, the
-            caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the
-            experiment and run it reran.
+            caller's chat, model, skill and tools, its inputs, rerunOf {id, run} naming the
+            experiment and run it reran, and `execution` (RunExecution): what it ran as, and
+            what authorized it. A Run from before execution was recorded has none.
+          properties:
+            execution: { $ref: "#/components/schemas/RunExecution" }
         startedBy:
           description: Who started it; null once they are gone.
           oneOf:
@@ -4978,8 +5291,8 @@ components:
       type: object
       additionalProperties: true
       description: >-
-        At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files
-        and reads are the server's and are dropped; other keys are kept as given.
+        At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files,
+        reads and execution are the server's and are dropped; other keys are kept as given.
       properties:
         chat: { type: [string, "null"] }
         model: { type: [string, "null"] }
@@ -5010,6 +5323,136 @@ components:
           oneOf:
             - { $ref: "#/components/schemas/Collaborator" }
             - type: "null"
+
+    RunExecution:
+      type: object
+      description: >-
+        Who started a Run, what it ran as and what authorized it, written by the server when
+        it starts (docs/pipeline-identities.md, decision 11), and who finished it.
+      required: [initiatedBy, ranAs, authorizedBy]
+      properties:
+        initiatedBy: { $ref: "#/components/schemas/Collaborator" }
+        ranAs: { $ref: "#/components/schemas/ExecutionIdentity" }
+        authorizedBy: { $ref: "#/components/schemas/ExecutionAuthority" }
+        finishedBy:
+          type: object
+          required: [user, ranAs, authorizedBy]
+          properties:
+            user: { $ref: "#/components/schemas/Collaborator" }
+            ranAs: { $ref: "#/components/schemas/ExecutionIdentity" }
+            authorizedBy: { $ref: "#/components/schemas/ExecutionAuthority" }
+
+    ExecutionIdentity:
+      type: object
+      description: "user: the person; agent: Claude, `via` remote or mcp:<name>; pipeline: its id, name, and key's id and hint."
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [user, agent, pipeline] }
+        via: { type: [string, "null"] }
+        id: { type: string }
+        name: { type: string }
+        key: { type: string }
+        hint: { type: string }
+
+    ExecutionAuthority:
+      type: object
+      description: "session: signed in; storage-token: a chat's token, `via`; pipeline-key: the key, with the places and operations it had then."
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [session, storage-token, pipeline-key] }
+        via: { type: [string, "null"] }
+        key: { type: string }
+        places:
+          oneOf:
+            - type: "null"
+            - type: array
+              items: { $ref: "#/components/schemas/PipelinePlace" }
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/PipelineOperation" }
+
+    PipelineOperation:
+      type: string
+      enum: [read, write, runs, upload]
+
+    PipelinePlace:
+      description: A node (with its subtree) or an Experiment (with its Runs).
+      oneOf:
+        - type: object
+          required: [node]
+          additionalProperties: false
+          properties:
+            node: { type: string }
+        - type: object
+          required: [experiment]
+          additionalProperties: false
+          properties:
+            experiment: { type: string }
+
+    PipelineKey:
+      type: object
+      required: [id, hint, createdAt, expiresAt, lastUsedAt, revokedAt, status]
+      properties:
+        id: { type: string }
+        hint: { type: string, description: The key's last 4 characters. }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        lastUsedAt:
+          description: Written at most once a minute.
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - type: "null"
+        revokedAt:
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - type: "null"
+        status: { type: string, enum: [active, expired, revoked] }
+
+    NewPipelineKey:
+      description: A key as it is made. Its `secret` is in this answer only.
+      allOf:
+        - { $ref: "#/components/schemas/PipelineKey" }
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, pattern: "^kcp_[A-Za-z0-9_-]{43}$" }
+
+    Pipeline:
+      type: object
+      required: [id, name, owner, createdBy, createdAt, places, operations, status, revokedAt, keys]
+      properties:
+        id: { type: string }
+        name: { type: string, maxLength: 200 }
+        owner:
+          description: Who it acts for; null once they are gone.
+          oneOf:
+            - { $ref: "#/components/schemas/Collaborator" }
+            - type: "null"
+        createdBy: { type: [string, "null"] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        places:
+          description: Null for the whole workspace. Ids only, so nothing the reader can't see is named.
+          oneOf:
+            - type: "null"
+            - type: array
+              items: { $ref: "#/components/schemas/PipelinePlace" }
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/PipelineOperation" }
+        status:
+          type: string
+          enum: [active, suspended, revoked]
+          description: |
+            Suspended while its owner isn't a member of the workspace, until it is handed over.
+            While the workspace is archived its keys answer 401 (workspace-archived) whatever
+            this says, and only restoring the workspace resumes it.
+        revokedAt:
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - type: "null"
+        keys:
+          type: array
+          items: { $ref: "#/components/schemas/PipelineKey" }
 
     Collaborator:
       type: object
@@ -5234,7 +5677,10 @@ components:
       required: [id, actorType, actorId, action, target, at]
       properties:
         id: { type: string }
-        actorType: { type: string, enum: [user, agent] }
+        actorType:
+          type: string
+          enum: [user, agent, pipeline]
+          description: A pipeline's entries name it and its key in `target` (pipeline, key).
         actorId: { type: [string, "null"] }
         action: { type: string, description: "Such as node.create, group.add_member or grant.set." }
         target: { type: object, additionalProperties: true }

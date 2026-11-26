@@ -502,6 +502,15 @@ async def finish_target(
     return "finish", running[0]
 
 
+def finisher(execution: dict[str, Any]) -> dict[str, Any]:
+    """An execution's `finishedBy`: who finished the Run, what as, and what authorized it."""
+    return {
+        "user": execution["initiatedBy"],
+        "ranAs": execution["ranAs"],
+        "authorizedBy": execution["authorizedBy"],
+    }
+
+
 async def update(
     conn: AsyncConnection,
     storage: Storage,
@@ -512,9 +521,13 @@ async def update(
     *,
     by: str | None = None,
     run: str | None = None,
+    execution: dict[str, Any] | None = None,
 ) -> bool:
     """
     Sets the given fields, as user `by`; False if the experiment is gone.
+    `execution` is who asks, what as, and what authorized it
+    (Session.execution): a Run started here records it, and one that ends here
+    records it as its `finishedBy`.
     `provenance` keys are merged into the recorded ones. A run that ends here
     (its state becomes done or failed), through a finish or a PATCH, also gets
     what it ended with (`evidence_at_finish`), read under the row's lock, and
@@ -589,7 +602,13 @@ async def update(
         if ends:
             final = fields.get("results", results)
             ended = await runs.finish_running(
-                conn, experiment_id, final, fields["state"], provenance or {}, target
+                conn,
+                experiment_id,
+                final,
+                fields["state"],
+                provenance or {},
+                target,
+                finished_by=None if execution is None else finisher(execution),
             )
             if ended is None:
                 everything = await conn.execute(
@@ -604,7 +623,12 @@ async def update(
                     fields.get("params", params),
                     final,
                     fields["state"],
-                    recorded,
+                    recorded
+                    if execution is None
+                    else {
+                        **recorded,
+                        "execution": {**execution, "finishedBy": finisher(execution)},
+                    },
                 )
         elif fields.get("state") == "running" and state != "running":
             everything = await conn.execute(
@@ -617,7 +641,7 @@ async def update(
                 experiment_id,
                 by or str(author),
                 params=fields.get("params", params),
-                provenance=recorded,
+                provenance=recorded if execution is None else {**recorded, "execution": execution},
                 mirror=False,
             )
         if in_tx:

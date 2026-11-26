@@ -224,6 +224,7 @@ async def finish_running(
     state: str,
     provenance: dict[str, Any],
     run_id: str | None = None,
+    finished_by: dict[str, Any] | None = None,
 ) -> str | None:
     """
     Ends the Experiment's running Run (only if it is `run_id`, when given)
@@ -231,17 +232,30 @@ async def finish_running(
     evidence) to its own, and takes its file record. Called by
     experiments.update with the Experiment's row locked, so no write lands
     between the record and the end. The Run's id, or None when none was
-    running.
+    running. `finished_by` (who finished it, what as, and what authorized it)
+    goes into its `execution`, beside how it started.
     """
     cur = await conn.execute(
         """
-        UPDATE runs SET results = %s, state = %s, provenance = provenance || %s,
+        UPDATE runs SET results = %(results)s, state = %(state)s,
+                        provenance = CASE WHEN %(by)s::jsonb IS NULL THEN provenance || %(more)s
+                          ELSE jsonb_set(provenance || %(more)s, '{execution}',
+                                         coalesce(provenance->'execution', '{}'::jsonb)
+                                           || jsonb_build_object('finishedBy', %(by)s::jsonb))
+                        END,
                         finished_at = now(), record = experiment_file_record(experiment_id),
                         record_taken = 'finish'
-        WHERE experiment_id = %s AND state = 'running' AND deleted_at IS NULL
-          AND (%s::uuid IS NULL OR id = %s::uuid)
+        WHERE experiment_id = %(experiment)s AND state = 'running' AND deleted_at IS NULL
+          AND (%(run)s::uuid IS NULL OR id = %(run)s::uuid)
         RETURNING id""",
-        (Jsonb(results), state, Jsonb(provenance), experiment_id, run_id, run_id),
+        {
+            "results": Jsonb(results),
+            "state": state,
+            "more": Jsonb(provenance),
+            "by": None if finished_by is None else Jsonb(finished_by),
+            "experiment": experiment_id,
+            "run": run_id,
+        },
     )
     row = await cur.fetchone()
     return str(row[0]) if row else None

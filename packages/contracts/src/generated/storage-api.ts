@@ -1011,6 +1011,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pipelines, yours or (Owners and Admins) everyone's
+         * @description Your pipelines; with `all`, every pipeline in the workspace, for its Owners and Admins (403 otherwise). Keys show their hint, never the key. 404 unless PIPELINES=on. Storage tokens and pipeline keys get 403.
+         */
+        get: operations["listPipelines"];
+        put?: never;
+        /**
+         * Make a pipeline that you own, with its first key
+         * @description Any Member, for themselves. Every place must be one you can see now (404 otherwise). The answer is the only time the key is shown. Audited as pipeline.create.
+         */
+        post: operations["createPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pipelines/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /** One pipeline (its owner, Owners and Admins) */
+        get: operations["getPipeline"];
+        put?: never;
+        post?: never;
+        /**
+         * Revoke it and all its keys (its owner, Owners and Admins)
+         * @description Its next request is refused; one already accepted ends as it would have. It stays listed, as revoked, so what names it still resolves. Audited as pipeline.revoke.
+         */
+        delete: operations["revokePipeline"];
+        options?: never;
+        head?: never;
+        /**
+         * Change its name, places or operations (its owner)
+         * @description Takes effect at its next request. 409 once it is revoked. Audited as pipeline.update.
+         */
+        patch: operations["updatePipeline"];
+        trace?: never;
+    };
+    "/pipelines/{id}/owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand it over to another member (Owners and Admins)
+         * @description It then acts for them, with their access. Every key it has is revoked in the same
+         *     transaction, so a key the former owner kept never acts for the new owner; the new
+         *     owner adds a key. Audited as pipeline.handover, with keysRevoked.
+         */
+        post: operations["handOverPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pipelines/{id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a key (its owner)
+         * @description At most two live keys at once (409 for a third), so one can be replaced before the old one is revoked. Audited as pipeline.key.create.
+         */
+        post: operations["addPipelineKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pipelines/{id}/keys/{keyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a key (its owner, Owners and Admins)
+         * @description Its next request is refused. Audited as pipeline.key.revoke.
+         */
+        delete: operations["revokePipelineKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/platform/workspaces": {
         parameters: {
             query?: never;
@@ -2251,6 +2371,13 @@ export interface components {
             sha256?: string | null;
             /** @description On a 409 starting a run: the number of the run that is running. */
             running?: number;
+            /**
+             * @description On a 401 for a pipeline key: why it can't act now. owner-left lasts until an Owner
+             *     or Admin hands the pipeline over; workspace-archived until the workspace is
+             *     restored, and nothing else resumes it.
+             * @enum {string}
+             */
+            reason?: "invalid" | "key-revoked" | "pipeline-revoked" | "key-expired" | "owner-left" | "workspace-archived";
         };
         IdOnly: {
             id: string;
@@ -2261,7 +2388,7 @@ export interface components {
          */
         Timestamp: string;
         /** @enum {string} */
-        AuthorType: "user" | "agent";
+        AuthorType: "user" | "agent" | "pipeline";
         /**
          * @description From the path's top folder (packages/contracts/src/files.ts KIND_FOLDERS).
          * @enum {string}
@@ -2556,8 +2683,10 @@ export interface components {
                 [key: string]: unknown;
             };
             state: components["schemas"]["RunState"];
-            /** @description Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the experiment and run it reran. */
+            /** @description Where it came from, as an experiment's provenance: who started it and when, the caller's chat, model, skill and tools, its inputs, rerunOf {id, run} naming the experiment and run it reran, and `execution` (RunExecution): what it ran as, and what authorized it. A Run from before execution was recorded has none. */
             provenance: {
+                execution?: components["schemas"]["RunExecution"];
+            } & {
                 [key: string]: unknown;
             };
             /** @description Who started it; null once they are gone. */
@@ -2585,7 +2714,7 @@ export interface components {
             title: string;
             nodeId: string | null;
         };
-        /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files and reads are the server's and are dropped; other keys are kept as given. */
+        /** @description At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files, reads and execution are the server's and are dropped; other keys are kept as given. */
         CallerProvenance: {
             chat?: string | null;
             model?: string | null;
@@ -2613,6 +2742,80 @@ export interface components {
             readAt: components["schemas"]["Timestamp"];
             /** @description The user the agent acted for; null once they are gone. */
             by: components["schemas"]["Collaborator"] | null;
+        };
+        /** @description Who started a Run, what it ran as and what authorized it, written by the server when it starts (docs/pipeline-identities.md, decision 11), and who finished it. */
+        RunExecution: {
+            initiatedBy: components["schemas"]["Collaborator"];
+            ranAs: components["schemas"]["ExecutionIdentity"];
+            authorizedBy: components["schemas"]["ExecutionAuthority"];
+            finishedBy?: {
+                user: components["schemas"]["Collaborator"];
+                ranAs: components["schemas"]["ExecutionIdentity"];
+                authorizedBy: components["schemas"]["ExecutionAuthority"];
+            };
+        };
+        /** @description user: the person; agent: Claude, `via` remote or mcp:<name>; pipeline: its id, name, and key's id and hint. */
+        ExecutionIdentity: {
+            /** @enum {string} */
+            kind: "user" | "agent" | "pipeline";
+            via?: string | null;
+            id?: string;
+            name?: string;
+            key?: string;
+            hint?: string;
+        };
+        /** @description session: signed in; storage-token: a chat's token, `via`; pipeline-key: the key, with the places and operations it had then. */
+        ExecutionAuthority: {
+            /** @enum {string} */
+            kind: "session" | "storage-token" | "pipeline-key";
+            via?: string | null;
+            key?: string;
+            places?: null | components["schemas"]["PipelinePlace"][];
+            operations?: components["schemas"]["PipelineOperation"][];
+        };
+        /** @enum {string} */
+        PipelineOperation: "read" | "write" | "runs" | "upload";
+        /** @description A node (with its subtree) or an Experiment (with its Runs). */
+        PipelinePlace: {
+            node: string;
+        } | {
+            experiment: string;
+        };
+        PipelineKey: {
+            id: string;
+            /** @description The key's last 4 characters. */
+            hint: string;
+            createdAt: components["schemas"]["Timestamp"];
+            expiresAt: components["schemas"]["Timestamp"];
+            /** @description Written at most once a minute. */
+            lastUsedAt: components["schemas"]["Timestamp"] | null;
+            revokedAt: components["schemas"]["Timestamp"] | null;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+        };
+        /** @description A key as it is made. Its `secret` is in this answer only. */
+        NewPipelineKey: components["schemas"]["PipelineKey"] & {
+            secret: string;
+        };
+        Pipeline: {
+            id: string;
+            name: string;
+            /** @description Who it acts for; null once they are gone. */
+            owner: components["schemas"]["Collaborator"] | null;
+            createdBy: string | null;
+            createdAt: components["schemas"]["Timestamp"];
+            /** @description Null for the whole workspace. Ids only, so nothing the reader can't see is named. */
+            places: null | components["schemas"]["PipelinePlace"][];
+            operations: components["schemas"]["PipelineOperation"][];
+            /**
+             * @description Suspended while its owner isn't a member of the workspace, until it is handed over.
+             *     While the workspace is archived its keys answer 401 (workspace-archived) whatever
+             *     this says, and only restoring the workspace resumes it.
+             * @enum {string}
+             */
+            status: "active" | "suspended" | "revoked";
+            revokedAt: components["schemas"]["Timestamp"] | null;
+            keys: components["schemas"]["PipelineKey"][];
         };
         Collaborator: {
             id: string;
@@ -2770,8 +2973,11 @@ export interface components {
         };
         AuditEntry: {
             id: string;
-            /** @enum {string} */
-            actorType: "user" | "agent";
+            /**
+             * @description A pipeline's entries name it and its key in `target` (pipeline, key).
+             * @enum {string}
+             */
+            actorType: "user" | "agent" | "pipeline";
             actorId: string | null;
             /** @description Such as node.create, group.add_member or grant.set. */
             action: string;
@@ -5653,6 +5859,305 @@ export interface operations {
                             id: string;
                             name: string | null;
                         };
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    listPipelines: {
+        parameters: {
+            query?: {
+                /** @description Present for every pipeline in the workspace. */
+                all?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pipelines, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        pipelines: components["schemas"]["Pipeline"][];
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    createPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    places: null | components["schemas"]["PipelinePlace"][];
+                    operations: components["schemas"]["PipelineOperation"][];
+                    /** @description Its key's lifetime; 90 by default, at most PIPELINE_KEY_MAX_DAYS (365). */
+                    expiresInDays?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The pipeline, and its key, shown this once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        pipeline: components["schemas"]["Pipeline"];
+                        key: components["schemas"]["NewPipelineKey"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    getPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pipeline. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    revokePipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        revoked: true;
+                    };
+                };
+            };
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description It was revoked already. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    updatePipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    places?: null | components["schemas"]["PipelinePlace"][];
+                    operations?: components["schemas"]["PipelineOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The pipeline now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description It was revoked. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    handOverPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pipeline now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description It was revoked, or the workspace is archived. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    addPipelineKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    expiresInDays?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The key, shown this once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        key: components["schemas"]["NewPipelineKey"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["SignIn"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description It has two live keys already, or was revoked. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["StorageError"];
+            503: components["responses"]["Starting"];
+        };
+    };
+    revokePipelineKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        revoked: true;
                     };
                 };
             };

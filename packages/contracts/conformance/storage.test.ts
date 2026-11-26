@@ -907,6 +907,43 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("DELETE", `/skills/${skill}`, { headers: alice, expect: 200 });
   });
 
+  step("pipelines", async () => {
+    // Every operation once; the access rules are in workspaces.test.ts.
+    const made = await call<{ pipeline: Schema["Pipeline"]; key: Schema["NewPipelineKey"] }>("POST", "/pipelines", {
+      headers: alice,
+      json: { name: "Nightly import", places: [{ node: tech.id }], operations: ["read", "runs"], expiresInDays: 30 },
+      expect: 201,
+    });
+    const { pipeline, key } = made.data;
+    await call("POST", "/pipelines", { headers: alice, json: { name: "No operations", places: null, operations: [] }, expect: 400 });
+    await call("GET", "/pipelines", { headers: alice, expect: 200 });
+    await call("GET", "/pipelines?all", { headers: bob, expect: 403 });
+    await call("GET", `/pipelines/${pipeline.id}`, { headers: alice, expect: 200 });
+    await call("GET", `/pipelines/${pipeline.id}`, { headers: bob, expect: 404 });
+    await call("PATCH", `/pipelines/${pipeline.id}`, { headers: alice, json: { name: "Nightly sweep" }, expect: 200 });
+    await call("PATCH", `/pipelines/${pipeline.id}`, { headers: alice, json: { colour: "red" }, expect: 400 });
+    const second = await call<{ key: Schema["NewPipelineKey"] }>("POST", `/pipelines/${pipeline.id}/keys`, { headers: alice, json: { expiresInDays: 7 }, expect: 201 });
+    await call("POST", `/pipelines/${pipeline.id}/keys`, { headers: alice, json: {}, expect: 409 });
+
+    // The key, as the web app forwards it: a Run it starts says what it ran as.
+    const asPipeline = { "X-Knowledge-Pipeline": key.secret };
+    await call("GET", `/files?node=${tech.id}`, { headers: asPipeline, expect: 200 });
+    const ran = await call<Schema["Experiment"]>("POST", "/experiments", { headers: asPipeline, json: { nodeId: tech.id, title: "Pipeline sweep" }, expect: 201 });
+    const run = await call<Schema["Run"]>("POST", `/experiments/${ran.data.id}/runs`, { headers: asPipeline, json: {}, expect: 201 });
+    assert.equal(run.data.provenance.execution?.ranAs.kind, "pipeline");
+    await call("POST", `/runs/${run.data.id}/finish`, { headers: alice, json: { results: { rate: 1 } }, expect: 200 });
+    await call("PUT", `/files/notes/a.md?node=${tech.id}`, { headers: asPipeline, body: "x", expect: 403 });
+
+    await call("DELETE", `/pipelines/${pipeline.id}/keys/${key.id}`, { headers: alice, expect: 200 });
+    await call("DELETE", `/pipelines/${pipeline.id}/keys/${key.id}`, { headers: alice, expect: 404 });
+    await call("GET", `/files?node=${tech.id}`, { headers: asPipeline, expect: 401 });
+    await call("POST", `/pipelines/${pipeline.id}/owner`, { headers: alice, json: { userId: bobId }, expect: 200 });
+    await call("POST", `/pipelines/${pipeline.id}/owner`, { headers: alice, json: {}, expect: 400 });
+    await call("DELETE", `/pipelines/${pipeline.id}`, { headers: alice, expect: 200 });
+    await call("DELETE", `/pipelines/${pipeline.id}`, { headers: alice, expect: 409 });
+    await call("GET", `/files?node=${tech.id}`, { headers: { "X-Knowledge-Pipeline": second.data.key.secret }, expect: 401 });
+  });
+
   step("deletes", async () => {
     await call("DELETE", `/experiments/${exp.id}`, { headers: alice, expect: 200 });
     // A delete is undoable: the maintainer finds it in the deleted list and restores it.

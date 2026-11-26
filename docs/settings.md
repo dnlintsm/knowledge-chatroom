@@ -80,6 +80,8 @@ Storage, access, skills, memory and search (`services/api-py`).
 | `MEMORY_MODEL` | unset | Model for memory import and learning; unset uses the suggestions model. |
 | `MIGRATIONS` | unset | `off` makes the server wait for another process to apply the SQL migrations; any other value applies them at startup. |
 | `MIGRATIONS_DIR` | services/api-py/migrations under the repository root (found from the code's own location) | Folder of SQL migrations to apply and expect in the database. |
+| `PIPELINE_KEY_MAX_DAYS` | `365` | The longest a pipeline key may last, in whole days from 1 to 3650; anything else stops startup. |
+| `PIPELINES` | unset | `on` lets Members make pipelines (`/pipelines`) and lets their keys reach the storage routes; anything else answers 404 there and refuses keys. |
 | `PLATFORM_ADMINS` | unset | Emails or login subjects, split by commas or spaces, who see the workspace inventory and may add an Owner; unset means nobody. |
 | `RECOVERY_IDLE_DAYS` | `90` | Days since last sign-in within which a member counts as holding Full access; must be a whole number of at least 1. |
 | `ROW_SECURITY` | `optional` | `required` refuses to serve storage unless Postgres row-level security is enforced; `optional` only logs it; other values stop startup. |

@@ -90,6 +90,9 @@ class _Where:
     scope: str | None  # a node path to stay inside, or None for everywhere
     near: str  # the node path the user is at ("" = the root)
     working_in: str | None  # an experiment whose unchanged copies are kept
+    # A pipeline's places: its nodes (with their subtrees, and their
+    # Experiments) and Experiments; None for everyone else.
+    places: tuple[list[str], list[str]] | None = None
 
 
 _COLUMNS = """
@@ -105,15 +108,27 @@ _PLACE_JOINS = """
     LEFT JOIN nodes en ON en.id = e.node_id"""
 
 
-def _filters(scoped: bool) -> str:
+def _filters(where: _Where) -> str:
     # An experiment's unchanged copy of a node file would only repeat the
     # node's, except for someone working in that experiment.
-    return """
+    return (
+        """
     f.workspace_id = %(ws)s AND f.deleted_at IS NULL
     AND place_rank(f.workspace_id, %(user)s, f.node_id, f.experiment_id) >= 1
     AND NOT (fv.blob_sha256 IS NOT DISTINCT FROM v.blob_sha256
-             AND f.experiment_id IS DISTINCT FROM %(working_in)s::uuid)""" + (
-        " AND coalesce(n.path, en.path) <@ %(scope)s::ltree" if scoped else ""
+             AND f.experiment_id IS DISTINCT FROM %(working_in)s::uuid)"""
+        + (" AND coalesce(n.path, en.path) <@ %(scope)s::ltree" if where.scope is not None else "")
+        # In the query, not after it: otherwise matches outside a pipeline's
+        # places would fill the limit and the candidate caps first.
+        + (
+            """
+    AND (f.experiment_id = ANY(%(place_experiments)s::uuid[])
+         OR coalesce(n.path, en.path) <@ ARRAY(
+              SELECT pn.path FROM nodes pn
+              WHERE pn.workspace_id = %(ws)s AND pn.id = ANY(%(place_nodes)s::uuid[])))"""
+            if where.places is not None
+            else ""
+        )
     )
 
 
@@ -192,9 +207,11 @@ class SearchService:
         near: str | None = None,
         near_experiment: str | None = None,
         limit: int | None = None,
+        places: tuple[list[str], list[str]] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Files `user_id` may read that match `query`, best first. SearchError for
+        Files `user_id` may read that match `query`, best first, within
+        `places` (a pipeline's node and Experiment ids) when given. SearchError for
         a bad query or scope. `vector` is the query's, from meaning(): without
         it only words match.
         """
@@ -220,6 +237,7 @@ class SearchService:
             scope=scope_path,
             near=near_path or "",
             working_in=near_experiment if near_experiment and is_uuid(near_experiment) else None,
+            places=places,
         )
 
         # Words always; meaning too when the caller embedded the query (meaning()).
@@ -278,8 +296,9 @@ class SearchService:
         ]
 
     def _params(self, where: _Where, **extra: Any) -> dict[str, Any]:
+        nodes, experiments = where.places if where.places is not None else ([], [])
         return {"ws": self.workspace_id, "user": where.user_id, "near": where.near, "working_in": where.working_in,
-                "scope": where.scope, **extra}  # fmt: skip
+                "scope": where.scope, "place_nodes": nodes, "place_experiments": experiments, **extra}  # fmt: skip
 
     async def _by_words(
         self, conn: AsyncConnection, query: str, where: _Where
@@ -304,7 +323,7 @@ class SearchService:
               JOIN file_versions v ON v.id = f.current_version_id
               {_PLACE_JOINS}
               CROSS JOIN q
-              WHERE {_filters(where.scope is not None)}
+              WHERE {_filters(where)}
                 AND (f.path ILIKE %(pattern)s OR EXISTS (
                       SELECT 1 FROM blob_chunks c
                       WHERE c.sha256 = v.blob_sha256 AND (c.tsv @@ q.anyq OR c.body ILIKE %(pattern)s)))
@@ -369,7 +388,7 @@ class SearchService:
                 JOIN file_versions v ON v.blob_sha256 = k.sha256
                 JOIN files f ON f.current_version_id = v.id
                 {_PLACE_JOINS}
-                WHERE {_filters(where.scope is not None)} AND k.similarity >= %(floor)s
+                WHERE {_filters(where)} AND k.similarity >= %(floor)s
                 ORDER BY f.id, k.similarity DESC""",  # pyrefly: ignore[bad-argument-type]
                 self._params(where, vector=vector, nearest=NEAREST, floor=semantic.min_similarity),
             )
