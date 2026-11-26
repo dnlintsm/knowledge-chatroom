@@ -47,18 +47,25 @@ on every execution, who started it, what it ran as, and what authorized it.
 3. **Places and operations are chosen when it is made.**
    - **Places**: the whole workspace, or a list of nodes and Experiments. A node includes its
      subtree; an Experiment includes its Runs. Anything outside them answers 404, as for a
-     node you can't see.
+     node you can't see. The workspace root is not among a list's places: its files answer
+     403 ("This pipeline reaches only its places, not the workspace root").
    - **Operations**, each one ticked on its own:
 
      | Operation | Allows |
      | --- | --- |
      | `read` | Reading files, nodes, Experiments, Runs and search in its places |
-     | `write` | Writing files in Experiments and at the root; proposals in Knowledge nodes |
+     | `write` | Writing files in Experiments, and at the root for a whole-workspace pipeline; proposals in Knowledge nodes |
      | `runs` | Creating Experiments, and starting, finishing and labelling Runs |
      | `upload` | `POST /experiments/upload`, which may add nodes (it needs Can edit where they go, as for its owner) |
 
      A request for an operation the pipeline doesn't have answers 403 and names the missing
      operation ("This pipeline can't start runs: it doesn't have the runs operation").
+   - **Every Run input is checked at its source.** Starting a Run (or adding inputs to one,
+     or rerunning) can copy files from another node or Experiment into `inputs/`. That
+     needs `runs` at the destination and, for each input, `read` and a source inside the
+     pipeline's places, whatever its owner can read. A source outside its places answers
+     404; a pipeline without `read` gets 403. Both are checked before the Run is created or
+     any input is copied, so a refused request leaves nothing behind.
 4. **Keys are secrets that are looked up, not signed tokens.** A pipeline holds one or more
    **keys**, `kcp_` followed by 32 random bytes in base64url. The server keeps only each
    key's SHA-256, a 4-character hint, who made it and when, when it expires, and when it was
@@ -79,6 +86,10 @@ on every execution, who started it, what it ran as, and what authorized it.
    Only the storage routes take a key (`/files`, `/nodes`, `/experiments`, `/runs`,
    `/search`, `/proposals`). `/api/chat`, `/api/copilotkit`, `/api/memory`, `/api/skills`,
    `/api/access`, `/api/workspaces` and `/api/platform` refuse it.
+   - **No watches.** A change stream (`GET /files?watch`) keeps delivering without another
+     request, so a key revoked while it is open would keep reading. A pipeline's
+     `?watch` answers 403 ("A pipeline can't watch for changes: list the files again
+     instead"); it lists again when it needs to.
 6. **Who makes and revokes them.**
    - Any Member can make a pipeline that they own, in a workspace they belong to.
    - The owner can change its name, places and operations, add and revoke keys, and revoke
@@ -86,17 +97,29 @@ on every execution, who started it, what it ran as, and what authorized it.
    - Owners and Admins see every pipeline in the workspace: its name, owner, places,
      operations, keys and their hints, and when each was last used, never a key itself. They
      can revoke any pipeline or key, and hand a pipeline over to another member (audited as
-     `pipeline.handover`). After a handover it acts for the new owner, with the new owner's
-     access.
+     `pipeline.handover`, with how many keys it revoked). After a handover it acts for the
+     new owner, with the new owner's access.
+   - **A handover revokes every key the pipeline has**, in the same transaction as the
+     ownership change. A key the former owner kept would otherwise act with the new owner's
+     rights, their drafts included. After a handover each old key answers 401
+     (`key-revoked`), and the new owner adds a key of their own.
    - Claude can't make, see or revoke pipelines: storage tokens are refused at `/pipelines`.
 7. **A revoked pipeline is kept, not deleted.** Its record stays, so Runs and audit entries
    that name it still resolve to its name. Revoking it revokes all its keys. It can't be
    turned back on: make a new one.
-8. **What stops a pipeline.** Any of these refuses its next request with 401 and the reason:
-   - the key is revoked or expired;
-   - the pipeline is revoked;
-   - its owner left or was removed, or the workspace was archived. Until an Owner hands it
-     over, it is listed as **Suspended: its owner is no longer a member**.
+8. **What stops a pipeline.** Any of these refuses its next request with 401, a message, and
+   a `reason`:
+   - the key is invalid (`invalid`), revoked (`key-revoked`) or expired (`key-expired`);
+   - the pipeline is revoked (`pipeline-revoked`);
+   - **its owner left or was removed** (`owner-left`). It is listed as **Suspended: its owner
+     is no longer a member** until an Owner or Admin hands it over, which resumes it with the
+     new owner's key;
+   - **the workspace is archived** (`workspace-archived`). This blocks every owner at once,
+     so a handover can't fix it: while the workspace is archived nothing resumes the
+     pipeline (its routes answer 404, as the workspace's other routes do, and a handover
+     that got through would answer 409). Restoring the workspace resumes it with the same
+     keys, unless its owner has left too. Archival is checked first, so an archived
+     workspace always reads as `workspace-archived`.
 
    Losing a grant is not a revocation. It narrows the pipeline as it narrows its owner, and
    requests there answer 404 or 403 as they would for the owner.
@@ -123,8 +146,9 @@ on every execution, who started it, what it ran as, and what authorized it.
 
     `execution` is the server's, like `startedBy`, and a client's copy is dropped. A Run from
     before this batch has none, and the Run view says "Not recorded" rather than guessing.
-    Finishing a Run records who finished it in `execution.finishedBy`, in the same shape,
-    since another key or a person may finish it.
+    Finishing a Run records who finished it in `execution.finishedBy`, as
+    `{user, ranAs, authorizedBy}` with `user` in `initiatedBy`'s shape, since another key or
+    a person may finish it.
 
 ## Data changes
 
@@ -135,8 +159,10 @@ on every execution, who started it, what it ran as, and what authorized it.
   `created_by`, `created_at`, `expires_at`, `last_used_at`, `revoked_at` and `revoked_by`.
   `last_used_at` is written at most once a minute per key, so reads don't each become a
   write.
-- Row security: a pipeline and its keys are visible to its owner and to the workspace's
-  Owners and Admins.
+- No row security on either table: like workspace membership they are administration, not
+  content. The routes read and write them with the app's own connection and check who may
+  (a pipeline and its keys are visible to its owner and to the workspace's Owners and
+  Admins).
 - `audit_log.actor_type` allows `pipeline`.
 - Run provenance gains the server's `execution` key (decision 11). No column changes for
   Runs.
@@ -150,7 +176,7 @@ on every execution, who started it, what it ran as, and what authorized it.
 | `GET /pipelines` | Members (their own); Owners and Admins (all, with `?all`) | Pipelines with places, operations, status and keys (hint, created, expires, last used) |
 | `POST /pipelines` `{name, places, operations, expiresInDays?}` | Members | Makes one, with its first key. The answer is the only time the key is shown |
 | `PATCH /pipelines/{id}` `{name?, places?, operations?}` | Its owner | Changes it; takes effect at its next request |
-| `POST /pipelines/{id}/owner` `{userId}` | Owners and Admins | Hands it over to a member |
+| `POST /pipelines/{id}/owner` `{userId}` | Owners and Admins | Hands it over to a member and revokes all its keys, in one transaction (409 while the workspace is archived) |
 | `POST /pipelines/{id}/keys` `{expiresInDays?}` | Its owner | Adds a key, at most two live at once (409 for a third) |
 | `DELETE /pipelines/{id}/keys/{keyId}` | Its owner, Owners and Admins | Revokes a key |
 | `DELETE /pipelines/{id}` | Its owner, Owners and Admins | Revokes the pipeline and all its keys |
@@ -171,7 +197,8 @@ contract adds the routes, `Pipeline`, `PipelineKey`, `RunExecution` and the 401 
     key's lifetime. Then the key, once, with Copy and "You won't see this key again".
   - **Revoke** asks first and says what happens: "Requests with this key stop at once. A
     request already running ends as it would have, and its result is kept."
-  - Owners and Admins see every pipeline, with **Hand over** on each one.
+  - Owners and Admins see every pipeline, with **Hand over** on each one. Its dialog says
+    "Its keys stop working now. The new owner adds a key for the pipeline to use."
 - **Run view, Provenance**: a "Ran as" row ("Pipeline *Nightly etch import*, key …a1b2,
   for Alice", "Claude, in Alice's chat", or "Alice") and an "Authorized by" row ("Alice's
   access, narrowed to Etch: read, runs"). Runs from before this batch show "Not recorded".
@@ -196,8 +223,20 @@ Both get rows in `docs/settings.md` and entries in `.env.example`.
 - It never reaches past its owner: lowering the owner's grant narrows the pipeline at its
   next request.
 - A revoked key, a revoked pipeline, an expired key, an owner who left, and an archived
-  workspace each answer 401 with their reason. A handover to another member resumes it,
-  with the new owner's access.
+  workspace each answer 401 with their `reason`.
+- **A handover revokes every key.** A pipeline with two live keys is handed over: both
+  answer 401 (`key-revoked`) at once, the former owner can't add a key, and the new owner's
+  new key works, with the new owner's access.
+- **An archived workspace.** A pipeline's key answers 401 (`workspace-archived`) while its
+  workspace is archived, and the pipeline can't be handed over meanwhile. Restoring the
+  workspace resumes it with the same key, with no handover. Tested apart from the owner
+  who left, which a handover resumes.
+- **No watches.** A pipeline's `GET /files?watch` answers 403, with or without a node.
+- **Run inputs at their source.** An owner who reads a node outside the pipeline's places:
+  a Run with an input from there (a node or an Experiment) answers 404, and so does
+  creating an Experiment with a first Run and that input; no Experiment, Run or input is
+  made. A pipeline without `read` gets 403 for an input even inside its places, and nothing
+  is made. An input inside its places, with `read`, is copied.
 - **One accepted call and one queued call.** A pipeline starts an upload that is held
   inside the object-store write, and has a second request ready behind it. The key is
   revoked. The upload ends with 201, and its Experiment, Run and audit entry name the key.
