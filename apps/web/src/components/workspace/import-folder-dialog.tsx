@@ -11,6 +11,7 @@ import { useWorkspace } from "./store";
 import { lineageOf } from "./workspace-context";
 
 const ROOT = "";
+const POINTER = "EXPERIMENT.md";
 
 /**
  * Import as Experiment, from a folder in Files (docs/experiment-runs.md): a
@@ -69,6 +70,14 @@ export function ImportFolderDialog({
   }, [ws.nodes, ws.rootRole]);
 
   const blocked = preview?.restricted && !preview.restricted.fullAccess;
+  // A pointer never replaces the folder's own EXPERIMENT.md: Move takes that one
+  // into the Experiment, Copy (or leaving it out) keeps it where the pointer would go.
+  const ownPointer = preview?.skipped.includes(POINTER)
+    ? "left out"
+    : preview?.files.some((f) => f.path === POINTER) && !(move && preview.canMove)
+      ? "kept"
+      : null;
+  const canPoint = !!preview?.canPoint && !ownPointer;
   const name = folder.split("/").pop() ?? folder;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -84,7 +93,7 @@ export function ImportFolderDialog({
         hypothesis: hypothesis.trim() || undefined,
         status: shared ? "shared" : "draft",
         move: move && preview.canMove,
-        pointer: pointer && preview.canPoint,
+        pointer: pointer && canPoint,
       });
       onClose();
     } catch (err) {
@@ -248,15 +257,19 @@ export function ImportFolderDialog({
             <input
               type="checkbox"
               className="mt-1"
-              checked={pointer && !!preview?.canPoint}
-              disabled={!preview?.canPoint}
+              checked={pointer && canPoint}
+              disabled={!canPoint}
               onChange={(e) => setPointer(e.target.checked)}
             />
-            <span className={preview?.canPoint ? "" : "text-[var(--muted-foreground)]"}>
+            <span className={canPoint ? "" : "text-[var(--muted-foreground)]"}>
               Leave an EXPERIMENT.md in the folder that links to it
-              {preview && !preview.canPoint && (
+              {preview && !canPoint && (
                 <span className="block text-xs text-[var(--muted-foreground)]">
-                  Needs Can edit where the folder is.
+                  {!preview.canPoint
+                    ? "Needs Can edit where the folder is."
+                    : ownPointer === "kept"
+                      ? "The folder has an EXPERIMENT.md of its own. Move takes it into the Experiment."
+                      : "The folder has an EXPERIMENT.md of its own, too large to import."}
                 </span>
               )}
             </span>

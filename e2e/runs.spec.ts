@@ -351,6 +351,35 @@ test("a folder in Files becomes an Experiment, from a preview of what it will ho
   expect(root.files.map((f) => f.path).filter((p) => p.startsWith(`${folder}/`))).toEqual([`${folder}/EXPERIMENT.md`]);
 });
 
+test("a folder's own EXPERIMENT.md isn't replaced by the pointer", async ({ page, request }) => {
+  const name = `kept-${Date.now()}`;
+  const folder = `imports/${name}`;
+  const put = (path: string, text: string) => request.put(`/api/files/${folder}/${path}`, { data: text, headers: md });
+  expect((await put("EXPERIMENT.md", "# Notes kept by hand\n")).ok()).toBe(true);
+  expect((await put("data/out.csv", "rate\n410\n")).ok()).toBe(true);
+
+  await page.goto("/");
+  await showFiles(page);
+  await page.getByRole("button", { name, exact: true }).hover();
+  await page.getByRole("button", { name: `Import ${folder} as Experiment` }).click();
+  const dialog = page.getByRole("dialog", { name: `Import ${name} as an Experiment` });
+  await expect(dialog.getByTestId("import-file")).toHaveCount(2);
+  // Copy keeps the folder's EXPERIMENT.md, so there is no room for a pointer.
+  const pointer = dialog.getByRole("checkbox", { name: /EXPERIMENT\.md/ });
+  await expect(pointer).toBeDisabled();
+  await expect(dialog).toContainText("The folder has an EXPERIMENT.md of its own. Move takes it into the Experiment.");
+  // Move takes it in, and the pointer takes its place.
+  await dialog.getByRole("radio", { name: /^Move/ }).check();
+  await expect(pointer).toBeEnabled();
+  await pointer.check();
+  await dialog.getByRole("button", { name: "Move into an Experiment" }).click();
+  await expect(dialog).toBeHidden();
+  const { experiments } = (await (await request.get("/api/experiments")).json()) as { experiments: Experiment[] };
+  const made = experiments.find((e) => e.title === name)!;
+  expect(await (await request.get(`/api/files/EXPERIMENT.md?experiment=${made.id}`)).text()).toBe("# Notes kept by hand\n");
+  expect(await (await request.get(`/api/files/${folder}/EXPERIMENT.md`)).text()).toContain(`?experiment_id=${made.id}`);
+});
+
 test("an archived experiment says why it's read only, and a rerun reads its inputs as recorded (#187)", async ({ page, request }) => {
   const run = await makeRun(request, "Dose sweep", { "uploads/dose.csv": "dose\n30\n" });
   const linked = await request.post(`/api/experiments/${run.id}/inputs`, {

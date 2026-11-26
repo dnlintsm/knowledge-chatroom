@@ -572,6 +572,8 @@ class Session:
                         ),
                     )
             if pointer:
+                # Never in place of a file: an EXPERIMENT.md the folder keeps (Copy, or
+                # one left out) refuses the whole import.
                 await here.write(
                     conn,
                     pointer_path,
@@ -579,6 +581,7 @@ class Session:
                     author=principal.actor,
                     author_id=principal.user_id,
                     stored=True,
+                    create_only=True,
                     in_tx=self._audit("file.write", {"node": node_id, "path": pointer_path}),
                 )
         return {**answer, "experiment": await self.experiment(experiment_id)}

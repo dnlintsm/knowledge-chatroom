@@ -215,3 +215,26 @@ async def test_bad_imports_are_refused(api):
     assert (
         await importing(api, {"node": etch, "folder": "runs/oct"}, headers=token)
     ).status_code == 403
+
+
+@needs_services
+async def test_a_pointer_doesnt_replace_the_folders_own_experiment_md(api):
+    etch = await folder(api)
+    await put(api, etch, "runs/oct/EXPERIMENT.md", b"# Notes kept by hand")
+    body = {"node": etch, "folder": "runs/oct", "pointer": True}
+    # Copy keeps the folder's EXPERIMENT.md, so a pointer would replace it: refused, and
+    # nothing is imported.
+    refused = await importing(api, body)
+    assert refused.status_code == 412, refused.text
+    assert refused.json()["exists"] is True
+    kept = await api.get(f"/files/runs/oct/EXPERIMENT.md?node={etch}", headers=ALICE)
+    assert kept.content == b"# Notes kept by hand"
+    assert (await api.get("/experiments", headers=ALICE)).json()["experiments"] == []
+    # Move takes it into the Experiment, and the pointer takes its place.
+    made = await importing(api, {**body, "move": True})
+    assert made.status_code == 201, made.text
+    exp = made.json()["experiment"]
+    moved = await api.get(f"/files/EXPERIMENT.md?experiment={exp['id']}", headers=ALICE)
+    assert moved.content == b"# Notes kept by hand"
+    pointer = await api.get(f"/files/runs/oct/EXPERIMENT.md?node={etch}", headers=ALICE)
+    assert f"?experiment_id={exp['id']}" in pointer.text

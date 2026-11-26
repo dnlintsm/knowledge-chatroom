@@ -626,7 +626,9 @@ paths:
         imported (soft delete, in the same transaction), and only those: files left out stay, and
         one changed since the folder was listed stops the import (412, `changed`), so nothing is
         imported or deleted. `pointer` leaves an EXPERIMENT.md in it
-        naming the experiment and linking to it: both need edit access where the folder is. A
+        naming the experiment and linking to it, never in place of one the folder keeps (412,
+        `exists`; with `move`, the folder's own goes into the experiment): both need edit access
+        where the folder is. A
         folder in a restricted node imported to outside that node needs Full access on it.
         Files larger than an upload may be are left out (`skipped`). With `preview`, answers
         what it would do and changes nothing. Storage tokens can't.
