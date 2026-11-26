@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -371,6 +372,163 @@ def test_a_folders_idle_time_counts_from_the_end_of_its_last_run(claude, tmp_pat
         other["threadId"] = "t2"
         events(c.post("/agent/report", json=other))
         assert mark.exists()
+
+
+def test_one_run_at_a_time_in_a_users_run_folder(claude, tmp_path, monkeypatch):
+    """
+    Two chats of one user share a run folder. Their runs used to overlap: the
+    second swapped the skills, cleared run-inputs/ and re-copied the workspace
+    under the first.
+    """
+    import asyncio
+
+    running = 0
+    most: dict[str, int] = {}
+    answer = claude.query
+
+    async def slowly(self, prompt, session_id="default"):
+        nonlocal running
+        running += 1
+        folder = Path(self.options.cwd).name
+        most[folder] = max(most.get(folder, 0), running)
+        try:
+            await asyncio.sleep(0.2)
+            await answer(self, prompt, session_id)
+        finally:
+            running -= 1
+
+    monkeypatch.setattr(claude, "query", slowly)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    app = create_app(env=env, adapter=adapter)
+
+    async def run(api: httpx.AsyncClient, thread: str, workspace: str | None = None) -> list[str]:
+        body = run_input(user=LOCAL)
+        body["threadId"] = thread
+        headers = {"X-Knowledge-Workspace": workspace} if workspace else {}
+        return types(events(await api.post("/agent/report", json=body, headers=headers)))
+
+    async def both() -> None:
+        nonlocal running
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://a") as api,
+        ):
+            # Two chats, one workspace: the second waits, and both finish.
+            first, second = await asyncio.gather(run(api, "chat-1"), run(api, "chat-2"))
+            assert first[-1] == second[-1] == "RUN_FINISHED"
+            assert list(most.values()) == [1]  # one folder, never two runs in it
+            # Another workspace is another folder: its run doesn't wait.
+            most.clear()
+            await asyncio.gather(run(api, "chat-3"), run(api, "chat-4", workspace="w2"))
+            assert max(most.values()) == 2 and len(most) == 2
+        # Nothing is held once the runs are over.
+        assert not adapter._in_use and not any(lock.locked() for lock in adapter._folders.values())
+
+    asyncio.run(both())
+
+
+def test_a_waiting_run_that_is_stopped_frees_its_place(claude, tmp_path, monkeypatch):
+    """Stop in the chat that waits ends the wait, and later runs are not held up by it."""
+    import asyncio
+
+    answer = claude.query
+
+    async def slowly(self, prompt, session_id="default"):
+        await asyncio.sleep(0.3)
+        await answer(self, prompt, session_id)
+
+    monkeypatch.setattr(claude, "query", slowly)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    app = create_app(env=env, adapter=adapter)
+
+    async def run(api: httpx.AsyncClient, thread: str) -> list[str]:
+        body = run_input(user=LOCAL)
+        body["threadId"] = thread
+        return types(events(await api.post("/agent/report", json=body)))
+
+    async def stopped_while_waiting() -> None:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://a") as api,
+        ):
+            first = asyncio.create_task(run(api, "chat-1"))
+            await asyncio.sleep(0.1)  # chat-1's run is in the folder
+            waiting = asyncio.create_task(run(api, "chat-2"))
+            await asyncio.sleep(0.05)
+            waiting.cancel()  # the browser's Stop closes the request
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+            assert (await first)[-1] == "RUN_FINISHED"
+            # The stopped run started nothing, and the next one goes straight in.
+            assert len(claude.created) == 1
+            assert (await asyncio.wait_for(run(api, "chat-2"), 5))[-1] == "RUN_FINISHED"
+        assert not adapter._in_use
+
+    asyncio.run(stopped_while_waiting())
+
+
+def test_a_run_waits_no_longer_than_its_tokens_allow(claude, tmp_path, monkeypatch):
+    """
+    A run's storage and memory tokens are signed when it is sent. One that
+    waited behind another chat until they ran out started anyway, and every
+    call it made was refused.
+    """
+    import asyncio
+
+    from agent_py.adapter import patience, token_expiry
+
+    def token(expires_in: float) -> str:
+        claims = {"sub": "kc|alice", "aud": "storage", "exp": time.time() + expires_in}
+        body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        return f"v2.{body}.signature"
+
+    # Half of what the shortest-lived token has left; nothing to go by without one.
+    assert patience(None, None) is None and patience("local.e30") is None
+    assert token_expiry(token(100)) == pytest.approx(time.time() + 100, abs=1)
+    assert patience(token(3600), token(600)) == pytest.approx(300, abs=1)
+    assert patience(token(-5)) == 0
+
+    answer = claude.query
+
+    async def slowly(self, prompt, session_id="default"):
+        await asyncio.sleep(0.6)
+        await answer(self, prompt, session_id)
+
+    monkeypatch.setattr(claude, "query", slowly)
+    env = {"AUTH_MODE": "local", "AGENT_PY_WORKDIR": str(tmp_path)}
+    adapter = make_adapter(env, transport=httpx.MockTransport(no_skills))
+    app = create_app(env=env, adapter=adapter)
+
+    async def run(api: httpx.AsyncClient, thread: str, storage: str | None) -> list[dict]:
+        body = run_input(user=LOCAL)
+        body["threadId"] = thread
+        headers = {"X-Knowledge-Storage": storage} if storage else {}
+        return events(await api.post("/agent/report", json=body, headers=headers))
+
+    async def waiting() -> None:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://a") as api,
+        ):
+            first = asyncio.create_task(run(api, "chat-1", token(3600)))
+            await asyncio.sleep(0.1)  # chat-1's run is in the folder
+            # 0.4 s of token left: it may wait 0.2 s, and the folder is taken for longer.
+            short = await run(api, "chat-2", token(0.4))
+            assert types(short) == ["RUN_ERROR"]
+            assert "Send it again" in short[0]["message"]
+            assert len(claude.created) == 1  # it never started
+            # A token with life to spare waits and runs.
+            patient = await run(api, "chat-3", token(3600))
+            assert types(patient)[-1] == "RUN_FINISHED"
+            assert types(await first)[-1] == "RUN_FINISHED"
+            # Nobody ahead of it: a run starts whatever its token has left.
+            alone = await run(api, "chat-4", token(0.2))
+            assert types(alone)[-1] == "RUN_FINISHED"
+        assert not adapter._in_use and not any(lock.locked() for lock in adapter._folders.values())
+
+    asyncio.run(waiting())
 
 
 def test_every_storage_call_of_the_server_goes_through_one_http_client(claude, monkeypatch):

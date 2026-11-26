@@ -39,12 +39,14 @@ the thread's first run. Three things change that for this app:
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import json
 import logging
 import time
 from collections import Counter, OrderedDict
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -122,6 +124,37 @@ class Run:
 SWEEP_EVERY_SECONDS = 3600.0
 
 
+class _StillBusy(Exception):
+    """The run folder stayed taken for as long as a run could wait for it."""
+
+
+def token_expiry(token: str | None) -> float | None:
+    """
+    When one of the app's tokens expires (its `exp`), or None when it doesn't
+    say. Read without checking the signature: api-py checks the token on every
+    call, and here the time only bounds a wait.
+    """
+    try:
+        payload = (token or "").split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        exp = claims["exp"]
+    except (IndexError, ValueError, KeyError, TypeError):
+        return None
+    return float(exp) if isinstance(exp, int | float) and not isinstance(exp, bool) else None
+
+
+def patience(*tokens: str | None, now: float | None = None) -> float | None:
+    """
+    How many seconds a run may wait before it starts: half of what is left of
+    its shortest-lived token, so the other half is there for the run. None
+    without tokens (no login): it waits as long as it takes.
+    """
+    expiries = [exp for exp in map(token_expiry, tokens) if exp is not None]
+    if not expiries:
+        return None
+    return max(0.0, (min(expiries) - (time.time() if now is None else now)) / 2)
+
+
 def _folder_name(user: str, workspace: str | None) -> str:
     """What a run folder is named after: one per user and workspace, since skills and the copy differ by workspace."""
     return f"{user}@{workspace}" if workspace else user
@@ -165,6 +198,10 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         self._idle_seconds = idle_seconds
         self._in_use: Counter[Path] = Counter()
         self._swept_at: float | None = None
+        # One run at a time in a run folder: a run rewrites its skills, its
+        # workspace copy and run-inputs/, which another chat's run of the same
+        # user and workspace would be reading.
+        self._folders: WeakValueDictionary[Path, asyncio.Lock] = WeakValueDictionary()
         # thread_id -> its latest run.
         self._runs: OrderedDict[str, Run] = OrderedDict()
         # Usage records on their way to api-py.
@@ -315,7 +352,16 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         workspace: str | None,
         model: str | None,
     ) -> AsyncGenerator[BaseEvent, None]:
-        """The run, with its run folder held for as long as it lasts (it is not removed as idle meanwhile)."""
+        """
+        The run, alone in its run folder for as long as it lasts. A user's run in
+        another chat of the same workspace waits for it to end (Stop ends the
+        wait). The folder is not removed as idle meanwhile, waiting included.
+
+        The run's tokens were signed when it was sent and are not renewed, so
+        it waits for at most half of the life they have left: the rest is for
+        the run itself. Past that it ends with an error asking to send again,
+        which comes with new tokens.
+        """
         cwd = (
             run_folder(self._skills_root, _folder_name(user, workspace))
             if self._skills_root is not None
@@ -324,12 +370,26 @@ class ChatroomAdapter(ClaudeAgentAdapter):
         if cwd is not None:
             self._in_use[cwd] += 1
         try:
-            await self._remove_idle_folders()
-            async with aclosing(
-                self._run_in_folder(input_data, storage_token, user, memory_token, workspace, model)
-            ) as stream:
+            async with (
+                self._alone_in(cwd, patience(storage_token, memory_token)),
+                aclosing(
+                    self._run_in_folder(
+                        input_data, storage_token, user, memory_token, workspace, model
+                    )
+                ) as stream,
+            ):
                 async for event in stream:
                     yield event
+        except _StillBusy:
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+                message=(
+                    "Your other chat is still working, and this message waited for it as "
+                    "long as it could. Send it again when the other chat is done."
+                ),
+            )
         finally:
             if cwd is not None:
                 self._in_use[cwd] -= 1
@@ -340,6 +400,30 @@ class ChatroomAdapter(ClaudeAgentAdapter):
                     # moment it finishes, while its Claude Code session is still kept.
                     with contextlib.suppress(OSError):
                         mark_used(cwd)
+
+    @asynccontextmanager
+    async def _alone_in(self, cwd: Path | None, wait: float | None = None) -> AsyncIterator[None]:
+        """
+        Holds the run folder's lock (none without run folders), then looks for
+        idle folders. Waits for the lock at most `wait` seconds (None: as long
+        as it takes), then raises _StillBusy.
+        """
+        if cwd is None:
+            yield
+            return
+        lock = self._folders.setdefault(cwd, asyncio.Lock())
+        if lock.locked():
+            logger.info("a run waits for the user's run in another chat to finish")
+        try:
+            async with asyncio.timeout(wait):
+                await lock.acquire()
+        except TimeoutError:
+            raise _StillBusy from None
+        try:
+            await self._remove_idle_folders()
+            yield
+        finally:
+            lock.release()
 
     async def _remove_idle_folders(self) -> None:
         if self._skills_root is None or self._idle_seconds is None:
