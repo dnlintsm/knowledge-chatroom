@@ -985,6 +985,13 @@ class MemoryOverview(MemorySettings):
     Packs installed in places you read.
     """
     types: list[MemoryType]
+    searchSentTo: str | None = None
+    """
+    Present when the deployment embeds text with an outside API (`EMBEDDING_BASE_URL`):
+    that API's host. Claude's `memory_search` then sends the text of your notes there.
+    Absent when the embedding model runs on the server, or search by meaning is off.
+
+    """
     limits: Limits
 
 

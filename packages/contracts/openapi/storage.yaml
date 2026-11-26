@@ -5189,6 +5189,12 @@ components:
             types:
               type: array
               items: { $ref: "#/components/schemas/MemoryType" }
+            searchSentTo:
+              type: string
+              description: |
+                Present when the deployment embeds text with an outside API (`EMBEDDING_BASE_URL`):
+                that API's host. Claude's `memory_search` then sends the text of your notes there.
+                Absent when the embedding model runs on the server, or search by meaning is off.
             limits:
               type: object
               required: [notes, body, description, index]

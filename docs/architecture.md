@@ -464,7 +464,9 @@ Code's memory files and `SKILL.md`.
   close in meaning that the words missed, under "Close in meaning". Note vectors are
   kept in the server's memory only (an LRU of 5,000, keyed by the model and the note's
   text), so nothing derived from private notes is stored and a changed note is simply
-  embedded again.
+  embedded again. With `EMBEDDING_BASE_URL` the notes' text (up to 2,000 characters each)
+  goes to that API to be embedded: api-py warns about it at startup, and the Memory panel
+  names the host (`searchSentTo` in `GET /memory`).
 - Past chats (`search_chats` and the chat lines in `services/api-py/api_py/chats.py`): runs with
   memory and chat history get `chats_search` (the user's own chats with the query's
   words in their name or in what the user and Claude said, tool output left out) and
