@@ -46,6 +46,7 @@ from .model import chat_models
 from .place import chatroom_props
 from .prompt import SYSTEM_PROMPT
 from .scripts import scripts_from_env
+from .sessions import SessionStore
 from .workdir import idle_seconds_from_env, limits_from_env, workdir_enabled
 from .workspace import STORAGE_HEADER, WORKSPACE_HEADER, storage_url
 
@@ -83,6 +84,7 @@ def make_adapter(
         scripts=scripts_from_env(env),
         workdir=limits_from_env(env) if workdir_enabled(env) else None,
         idle_seconds=idle_seconds_from_env(env),
+        sessions=SessionStore(Path(root)),
         query_timeout_seconds=timeout or None,
     )
 

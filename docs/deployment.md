@@ -197,6 +197,28 @@ the copy through api-py; binary files api-py serves as store links (`S3_PUBLIC_U
 that link, so make it reachable from agent-py too, or they are left out. See
 [Working folder](architecture.md#working-folder).
 
+### What the chat agent keeps across restarts
+
+Claude remembers a chat because each run resumes the chat's Claude Code session. Two
+things on agent-py's disk make that work, and both must outlive the process:
+
+| Path | What it holds |
+| --- | --- |
+| `AGENT_PY_WORKDIR` (`/var/lib/agent-py` in the image) | Each chat's link to its session, under `.sessions/`, beside the run folders |
+| Claude Code's home, `~/.claude` (`/home/agent/.claude` in the image) | The sessions' transcripts: every turn of every chat |
+
+Mount a volume on each (the compose demo does). Set `AGENT_PY_WORKDIR` to a fixed folder:
+its default is a new temp folder at every start, which keeps nothing. Without them a chat
+still works after a restart, but Claude starts it afresh, knowing none of its earlier
+turns, while the UI still shows them (api-py keeps the chat's history for display).
+The transcripts hold what users and Claude said, including file contents Claude read:
+protect that volume as you protect the database. Claude Code sweeps old transcripts
+itself (its `cleanupPeriodDays` setting); a chat whose transcript is gone starts afresh too.
+
+Run one agent-py, or give every replica the same two volumes and route a chat to one of
+them at a time: a run only waits for another run of the same user when both are in the
+same process.
+
 Skill scripts are off unless the chat agent has `SKILL_SCRIPTS=on`: agent-py runs them
 (`agent_py/scripts.py`), and api-py needs the same setting so the skill pages say they
 run. Turning them on needs bubblewrap and socat on agent-py's host (and, in a container,

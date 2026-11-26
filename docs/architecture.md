@@ -111,6 +111,10 @@ the workspace like on a local project:
   them, since the run's own folder then holds them.
   `AGENT_WORKDIR_MAX_MB` (default 500) caps the copy, smallest files first, and
   `AGENT_WORKDIR_MAX_FILE_MB` (default 25) leaves out larger files.
+  Files Claude Code would take for its own instructions wherever it finds them are left
+  out too (`CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json`, and anything under a `.claude`
+  folder): in the copy they would be a member's text speaking as the server. Claude still
+  reads them as ordinary files with `read_file`.
   A run folder that no run has used for `AGENT_WORKDIR_IDLE_HOURS` (default 24) is removed
   when another run starts, so a copy doesn't stay on disk long after its user stopped
   chatting, or lost access. The next run makes a fresh one.

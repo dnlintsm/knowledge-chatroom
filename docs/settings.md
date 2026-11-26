@@ -105,7 +105,7 @@ The chat agent (`services/agent-py`).
 | --- | --- | --- |
 | `AGENT_PY_HOST` | `127.0.0.1` | Address the agent listens on. |
 | `AGENT_PY_PORT` | `9300` | Port the agent listens on. |
-| `AGENT_PY_WORKDIR` | a new empty temp folder (prefix agent-py-) made at each start | Folder holding each user's working folder, with their skills and workspace copy. |
+| `AGENT_PY_WORKDIR` | a new empty temp folder (prefix agent-py-) made at each start | Folder holding each user's working folder, with their skills and workspace copy, and each chat's link to its Claude Code session. Set it to a folder that outlives the process, or Claude forgets every chat at a restart. |
 | `AGENT_RUN_TIMEOUT_SECONDS` | `1800` | Seconds after which a run is stopped; `0` means never. |
 | `AGENT_WORKDIR` | unset | `off` removes the workspace copy and the Read, Glob and Grep tools from runs; any other value keeps them. |
 | `AGENT_WORKDIR_IDLE_HOURS` | `24` | Hours a user's run folder may go without a run before it is removed, at least 1; `0` or `off` keeps folders for good. |

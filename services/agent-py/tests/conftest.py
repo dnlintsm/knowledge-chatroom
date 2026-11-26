@@ -58,4 +58,7 @@ class FakeClaude:
 def claude(monkeypatch: pytest.MonkeyPatch) -> type[FakeClaude]:
     FakeClaude.created = []
     monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", FakeClaude)
+    # The fake writes no transcripts: its sessions are there for the asking, so a
+    # chat's next run resumes the session its first one started (sessions.py).
+    monkeypatch.setattr(claude_agent_sdk, "get_session_info", lambda sid, directory=None: {})
     return FakeClaude

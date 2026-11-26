@@ -141,6 +141,11 @@ services:
       # (GET /identity/public-key), never AUTH_SECRET.
       AUTH_MODE: local
       KNOWLEDGE_PUBLIC_KEY: ""
+    volumes:
+      # What makes Claude remember a chat after a restart: each chat's link to its
+      # Claude Code session, and the sessions' transcripts (docs/deployment.md).
+      - agent-workdir:/var/lib/agent-py
+      - agent-home:/home/agent/.claude
     depends_on:
       api:
         condition: service_healthy
@@ -193,3 +198,5 @@ volumes:
   postgres-data:
   s3-data:
   api-models:
+  agent-workdir:
+  agent-home:
