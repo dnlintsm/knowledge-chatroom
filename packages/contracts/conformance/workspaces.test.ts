@@ -792,3 +792,146 @@ describe("workspaces: inventory and Owner recovery (#255)", { skip: !enabled && 
     await ok(200, "PATCH", `/workspaces/${ws}`, { headers: erin, json: { status: "active" } });
   });
 });
+
+// Pipelines (docs/pipeline-identities.md): keys that act for their owner,
+// narrowed to places and operations, sent the way the web app forwards them.
+// The backend must serve pipelines (PIPELINES=on). A request already accepted
+// when its key is revoked needs a request held open in the middle, so that is
+// in services/api-py/tests/test_pipelines.py instead.
+const key = (secret: string): Headers => ({ "X-Knowledge-Pipeline": secret });
+type Key = { id: string; hint: string; status: string; expiresAt: string; secret?: string };
+type Pipeline = {
+  id: string;
+  name: string;
+  owner: { id: string; name: string | null } | null;
+  places: ({ node: string } | { experiment: string })[] | null;
+  operations: string[];
+  status: string;
+  keys: Key[];
+};
+
+const hana = user("pipelines|hana", "hana");
+const ivan = user("pipelines|ivan", "ivan");
+const jo = user("pipelines|jo", "jo");
+
+describe("workspaces: pipelines", { skip: !enabled && "STORAGE_URL and AUTH_SECRET not set" }, () => {
+  // hana's workspace: hana is its Owner, ivan and jo Members. ivan edits node `lab`; `other` is hana's alone.
+  let ws = "";
+  let lab = "";
+  let other = "";
+  const ids = { hana: "", ivan: "", jo: "" };
+  const as = (who: Headers) => ({ ...who, "X-Knowledge-Workspace": ws });
+  const need = () => assert.ok(ws && lab && other, "needs the first test to pass");
+  const make = async (who: Headers, body: Json) =>
+    ok<{ pipeline: Pipeline; key: Key }>(201, "POST", "/pipelines", { headers: as(who), json: { name: "Nightly import", ...body } });
+
+  test("setup: a workspace, two Members and two nodes", async () => {
+    for (const who of [hana, ivan, jo]) await ok(200, "GET", "/access", { headers: who });
+    ws = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: hana, json: { name: `Hana's pipelines ${stamp}` } })).id;
+    for (const name of ["hana", "ivan", "jo"] as const) {
+      ids[name] = (await ok<{ user: { id: string } }>(200, "GET", `/workspaces/${ws}/lookup?email=${name}@example.com`, { headers: hana })).user.id;
+    }
+    for (const who of [ids.ivan, ids.jo]) await ok(201, "POST", `/workspaces/${ws}/members`, { headers: hana, json: { userId: who, role: "member", access: "none" } });
+    lab = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(hana), json: { parentId: null, name: `Lab ${stamp}` } })).id;
+    other = (await ok<{ id: string }>(201, "POST", "/nodes", { headers: as(hana), json: { parentId: null, name: `Other ${stamp}` } })).id;
+    await ok(200, "POST", "/access/grants", { headers: as(hana), json: { node: lab, principalType: "user", principalId: ids.ivan, role: "editor" } });
+  });
+
+  test("the key is shown once, and only to whoever made it", async () => {
+    need();
+    const { pipeline, key: made } = await make(ivan, { places: [{ node: lab }], operations: ["read", "runs"] });
+    assert.match(made.secret ?? "", /^kcp_[A-Za-z0-9_-]{43}$/);
+    assert.equal(made.hint, made.secret!.slice(-4));
+    assert.equal(pipeline.status, "active");
+    assert.deepEqual(pipeline.owner?.id, ids.ivan);
+    const listed = await ok<{ pipelines: Pipeline[] }>(200, "GET", "/pipelines", { headers: as(ivan) });
+    assert.ok(listed.pipelines.some((p) => p.id === pipeline.id));
+    assert.ok(!JSON.stringify(listed).includes(made.secret!), "a list never shows a key");
+    assert.ok(!JSON.stringify(await ok(200, "GET", `/pipelines/${pipeline.id}`, { headers: as(ivan) })).includes(made.secret!));
+    // A Member sees their own; an Owner sees every one; another Member sees none of ivan's.
+    await ok(404, "GET", `/pipelines/${pipeline.id}`, { headers: as(jo) });
+    await ok(403, "GET", "/pipelines?all", { headers: as(jo) });
+    const all = await ok<{ pipelines: Pipeline[] }>(200, "GET", "/pipelines?all", { headers: as(hana) });
+    assert.ok(all.pipelines.some((p) => p.id === pipeline.id));
+  });
+
+  test("a pipeline reaches only its places, with only its operations, and never past its owner", async () => {
+    need();
+    // ivan can't name a place he can't see: it is not found, as anywhere else.
+    await ok(404, "POST", "/pipelines", { headers: as(ivan), json: { name: "Too far", places: [{ node: other }], operations: ["read"] } });
+    const { key: k } = await make(ivan, { places: [{ node: lab }], operations: ["read"] });
+    const secret = key(k.secret!);
+    await ok(200, "GET", `/files?node=${lab}`, { headers: secret });
+    await ok(404, "GET", `/files?node=${other}`, { headers: secret });
+    await ok(403, "GET", "/files", { headers: secret });
+    await ok(403, "PUT", `/files/notes/from-pipeline.md?node=${lab}&propose`, { headers: secret, body: "x" });
+    // A whole-workspace pipeline still has only ivan's rights.
+    const { key: wide } = await make(ivan, { places: null, operations: ["read", "write"] });
+    await ok(404, "GET", `/files?node=${other}`, { headers: key(wide.secret!) });
+    // Its writes in Knowledge are proposals, as Claude's are.
+    await ok(403, "PUT", `/files/notes/from-pipeline.md?node=${lab}`, { headers: key(wide.secret!), body: "x" });
+    const proposal = await ok<{ author: string }>(201, "PUT", `/files/notes/from-pipeline.md?node=${lab}&propose&note=nightly`, { headers: key(wide.secret!), body: "x" });
+    assert.equal(proposal.author, "pipeline");
+    const log = await ok<{ entries: { actorType: string; target: Json }[] }>(200, "GET", "/access/audit", { headers: as(hana) });
+    assert.ok(log.entries.some((e) => e.actorType === "pipeline" && typeof e.target.pipeline === "string"), "credited to the pipeline");
+  });
+
+  test("a key with a session, a key managing pipelines, and Claude managing them are refused", async () => {
+    need();
+    const { key: k } = await make(ivan, { places: null, operations: ["read"] });
+    await ok(400, "GET", `/files?node=${lab}`, { headers: { ...key(k.secret!), ...ivan } });
+    await ok(403, "GET", "/pipelines", { headers: key(k.secret!) });
+    await ok(403, "GET", "/pipelines", { headers: storageToken("pipelines|ivan", ws) });
+    await ok(401, "GET", `/files?node=${lab}`, { headers: key("kcp_" + "A".repeat(43)) });
+  });
+
+  test("revoking a key, or its pipeline, stops the next request; at most two live keys", async () => {
+    need();
+    const { pipeline, key: first } = await make(ivan, { places: [{ node: lab }], operations: ["read"] });
+    const second = (await ok<{ key: Key }>(201, "POST", `/pipelines/${pipeline.id}/keys`, { headers: as(ivan), json: { expiresInDays: 7 } })).key;
+    await ok(409, "POST", `/pipelines/${pipeline.id}/keys`, { headers: as(ivan), json: {} });
+    await ok(200, "GET", `/files?node=${lab}`, { headers: key(first.secret!) });
+    await ok(200, "DELETE", `/pipelines/${pipeline.id}/keys/${first.id}`, { headers: as(ivan) });
+    await ok(401, "GET", `/files?node=${lab}`, { headers: key(first.secret!) });
+    await ok(200, "GET", `/files?node=${lab}`, { headers: key(second.secret!) });
+    // An Owner revokes a Member's pipeline; every key stops.
+    await ok(200, "DELETE", `/pipelines/${pipeline.id}`, { headers: as(hana) });
+    await ok(401, "GET", `/files?node=${lab}`, { headers: key(second.secret!) });
+    await ok(409, "DELETE", `/pipelines/${pipeline.id}`, { headers: as(ivan) });
+    const after = await ok<Pipeline>(200, "GET", `/pipelines/${pipeline.id}`, { headers: as(ivan) });
+    assert.equal(after.status, "revoked");
+    assert.ok(after.keys.every((x) => x.status === "revoked"));
+  });
+
+  test("a Run records what it ran as and what authorized it", async () => {
+    need();
+    const { pipeline, key: k } = await make(ivan, { places: [{ node: lab }], operations: ["read", "runs"] });
+    const exp = (await ok<{ id: string }>(201, "POST", "/experiments", { headers: key(k.secret!), json: { nodeId: lab, title: "Etch sweep" } })).id;
+    const run = await ok<{ id: string; provenance: { execution: Json } }>(201, "POST", `/experiments/${exp}/runs`, {
+      headers: key(k.secret!),
+      // A client's own execution is replaced by the server's.
+      json: { provenance: { execution: { ranAs: { kind: "user" } } } },
+    });
+    const { initiatedBy, ranAs, authorizedBy } = run.provenance.execution as Record<string, Json>;
+    assert.equal(initiatedBy.id, ids.ivan);
+    assert.deepEqual({ kind: ranAs.kind, id: ranAs.id, key: ranAs.key }, { kind: "pipeline", id: pipeline.id, key: k.id });
+    assert.deepEqual(authorizedBy, { kind: "pipeline-key", key: k.id, places: [{ node: lab }], operations: ["read", "runs"] });
+    const done = await ok<{ provenance: { execution: { finishedBy: Json } } }>(200, "POST", `/runs/${run.id}/finish`, { headers: as(ivan), json: { results: { rate: 1 } } });
+    assert.deepEqual(done.provenance.execution.finishedBy.ranAs, { kind: "user" });
+  });
+
+  test("an owner who leaves suspends their pipeline until an Owner hands it over", async () => {
+    need();
+    await ok(200, "POST", "/access/grants", { headers: as(hana), json: { node: lab, principalType: "user", principalId: ids.jo, role: "viewer" } });
+    const { pipeline, key: k } = await make(jo, { places: [{ node: lab }], operations: ["read"] });
+    await ok(200, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    await ok(200, "DELETE", `/workspaces/${ws}/members/${ids.jo}`, { headers: jo });
+    await ok(401, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    const listed = await ok<{ pipelines: Pipeline[] }>(200, "GET", "/pipelines?all", { headers: as(hana) });
+    assert.equal(listed.pipelines.find((p) => p.id === pipeline.id)?.status, "suspended");
+    // Only a member can take it over; then the key works again, with hana's rights.
+    await ok(403, "POST", `/pipelines/${pipeline.id}/owner`, { headers: as(ivan), json: { userId: ids.ivan } });
+    await ok(200, "POST", `/pipelines/${pipeline.id}/owner`, { headers: as(hana), json: { userId: ids.hana } });
+    await ok(200, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+  });
+});

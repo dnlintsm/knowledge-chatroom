@@ -61,6 +61,8 @@ const api = spawn("uv", ["run", "--locked", "python", "-m", "api_py.app"], {
     // api-py serves each user's own notes (step 8); nothing learns in the background.
     MEMORY: "on",
     MEMORY_LEARN: "off",
+    // workspaces.test.ts sends pipeline keys.
+    PIPELINES: "on",
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
