@@ -158,6 +158,21 @@ visible to others.
 The agent's effective access is the user's current access in the run's workspace, narrowed
 by the token. Agent tokens can't manage members, as they can't manage grants today.
 
+### Pipelines
+
+A pipeline ([Pipeline identities](pipeline-identities.md)) acts for its owner, narrowed to
+its places and operations, with the agent's limits on top.
+
+| Operation | Owner | Admin | Member | Claude | The pipeline's key |
+| --- | --- | --- | --- | --- | --- |
+| Make a pipeline that acts for yourself | ✓ | ✓ | ✓ | ✗ | ✗ |
+| See your own pipelines and their keys (never the secret again) | ✓ | ✓ | ✓ | ✗ | ✗ |
+| See every pipeline in the workspace | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Change a pipeline's name, places or operations | Its owner | Its owner | Its owner | ✗ | ✗ |
+| Add a key (at most two live), revoke a key or the pipeline | ✓ any | ✓ any | Their own | ✗ | ✗ |
+| Hand a pipeline over to another member | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Read, write (as proposals in Knowledge), runs, upload | n/a | n/a | n/a | n/a | Its operations, in its places, within its owner's access |
+
 ## Revalidation
 
 A token says **who** is acting and **in which workspace**. It is not a snapshot of their

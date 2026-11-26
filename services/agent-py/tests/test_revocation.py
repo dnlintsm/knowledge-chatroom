@@ -113,9 +113,9 @@ def test_the_adapter_checks_first_before_each_call_and_after_each_batch():
 
 
 class ScriptedModel:
-    """A Messages API that calls the lab tool on the first chat turn and answers in text after."""
+    """A Messages API that calls the lab tool `calls` times on the first chat turn and answers in text after."""
 
-    def __init__(self) -> None:
+    def __init__(self, calls: int = 1) -> None:
         self.turns = 0
         model = self
 
@@ -170,19 +170,29 @@ class ScriptedModel:
                     },
                 )
                 if call:
-                    block = {
-                        "type": "tool_use",
-                        "id": f"toolu_{uuid.uuid4().hex}",
-                        "name": TOOL,
-                        "input": {},
-                    }
-                    delta = {"type": "input_json_delta", "partial_json": "{}"}
+                    blocks = [
+                        (
+                            {
+                                "type": "tool_use",
+                                "id": f"toolu_{uuid.uuid4().hex}",
+                                "name": TOOL,
+                                "input": {},
+                            },
+                            {"type": "input_json_delta", "partial_json": "{}"},
+                        )
+                        for _ in range(calls)
+                    ]
                 else:
-                    block = {"type": "text", "text": ""}
-                    delta = {"type": "text_delta", "text": "Another turn."}
-                send("content_block_start", {"index": 0, "content_block": block})
-                send("content_block_delta", {"index": 0, "delta": delta})
-                send("content_block_stop", {"index": 0})
+                    blocks = [
+                        (
+                            {"type": "text", "text": ""},
+                            {"type": "text_delta", "text": "Another turn."},
+                        )
+                    ]
+                for index, (block, delta) in enumerate(blocks):
+                    send("content_block_start", {"index": index, "content_block": block})
+                    send("content_block_delta", {"index": index, "delta": delta})
+                    send("content_block_stop", {"index": index})
                 send(
                     "message_delta",
                     {
@@ -221,10 +231,13 @@ class Outcome:
 
 
 async def run_with_tool(
-    ws: Workspace, during: Literal["remove", "archive"] | None, error: bool = False
+    ws: Workspace,
+    during: Literal["remove", "archive"] | None,
+    error: bool = False,
+    calls: int = 1,
 ) -> Outcome:
     """One prompt through the engine with the revocation hooks; the lab tool changes `ws` while it runs."""
-    model = ScriptedModel()
+    model = ScriptedModel(calls)
     ran = 0
 
     @tool("long_task", "A task that takes a while", {})
@@ -311,3 +324,17 @@ def test_a_run_whose_user_stays_a_member_continues_after_the_call():
     assert run.ran == 1
     assert run.turns == 2
     assert run.result is not None and run.result.terminal_reason != "hook_stopped"
+
+
+@engine
+def test_of_two_calls_in_one_turn_the_accepted_one_ends_and_the_queued_one_is_refused():
+    """
+    The model asks for two calls at once and the user is removed during the
+    first: it runs to its end and its result is kept, the second never runs,
+    and no turn follows.
+    """
+    run = asyncio.run(run_with_tool(Workspace(), "remove", calls=2))
+    assert run.ran == 1
+    assert "the task finished" in run.results
+    assert run.turns == 1
+    assert run.result is not None and run.result.terminal_reason == "hook_stopped"

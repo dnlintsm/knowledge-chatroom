@@ -683,6 +683,16 @@ For local setup, see [Development](development.md).
   recent access changes from the audit log. There is no separate admin list: owning the
   workspace is what makes someone an admin. Viewers get the files read only, and
   Claude's tools in a chat act as the person chatting.
+- **Pipelines** (`PIPELINES=on`): work that runs on its own (an import, a nightly
+  analysis) gets a named pipeline with keys instead of a person's login
+  ([Pipeline identities](pipeline-identities.md)). A pipeline acts for its owner, narrowed to
+  its places and operations (`services/api-py/api_py/pipelines.py`, and `Session.reaches`
+  for the places). The web app takes a key as `Authorization: Bearer kcp_...` on the files,
+  nodes, experiments, runs, search and proposals routes only, and forwards it as
+  `X-Knowledge-Pipeline` (`apps/web/src/lib/agent-proxy.ts`). api-py looks the key's hash up
+  on every request, so a revoked key, a revoked pipeline or an owner who left stops the next
+  one. Each Run records what started it, what it ran as and what authorized it
+  (`provenance.execution`), and the audit log credits the pipeline.
 - **Database-enforced access**: file and node queries made for a user run in Postgres as
   the restricted role `knowledge_user`, with row-level security policies
   (`services/api-py/migrations/004_row_security.sql`, `005_experiments.sql` for
