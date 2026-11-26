@@ -8,9 +8,8 @@ view's activity); with memory set to "ask" they wait in the inbox. Incognito
 chats and users with memory off are skipped, and each chat is learned from
 again only after it has new runs.
 
-Runs here with MEMORY=on once storage is ready; MEMORY_LEARN=off turns just
-this off. Start the TypeScript server with MEMORY_LEARN=off, so only one
-server learns. The model is MEMORY_MODEL, else the chat chips' small model
+Runs with MEMORY=on once storage is ready; MEMORY_LEARN=off turns just this
+off. The model is MEMORY_MODEL, else the chat chips' small model
 (llm.learn_model).
 """
 

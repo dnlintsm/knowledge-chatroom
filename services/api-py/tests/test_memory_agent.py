@@ -17,7 +17,6 @@ from collections.abc import AsyncIterator
 import httpx
 import psycopg
 import pytest
-import support
 from support import ALICE, SECRET, URL, Client, user
 
 from api_py import tokens
@@ -522,48 +521,32 @@ async def test_nothing_in_an_incognito_chat_or_with_memory_off(memory_api):
 
 
 @needs_database
-async def test_outside_servers_and_bad_tokens_go_to_typescript(memory_api, database):
+async def test_outside_servers_are_served_and_bad_tokens_refused(memory_api, database):
     api, _app = memory_api
+    # An outside MCP server's token (memoryAccess) reads the user's memory as a chat run's does.
+    got = await api.get("/memory/agent", headers=token(via="mcp:lab"))
+    assert got.status_code == 200, got.text
+    assert "Short answers" in got.json()["prompt"]
+    view = await tool(api, "memory_view", {"name": "reply-style"}, via="mcp:lab")
+    assert "Lead with the result." in view["text"]
     for headers in (
         {},
-        token(via="mcp:lab"),
+        {tokens.MEMORY_HEADER: "bad"},
         token(aud=tokens.STORAGE_AUDIENCE),
         token(thread=DROP),
         token(exp=1),
-        local_token(),
+        local_token(),  # unsigned, and login is on
     ):
         answer = await api.get("/memory/agent", headers=headers)
-        assert answer.json() == {"from": "typescript"}, headers
-    assert support.forwarded == ["GET /memory/agent"] * 6
-    support.forwarded.clear()
+        assert (answer.status_code, answer.json()) == (401, {"error": "Sign in first"}), headers
 
     # Without login, the unsigned local token is the local user's.
     async with Client(database, None, memory=True) as (local, _):
         await local.put("/memory/notes/local-note", json=note("Here.", "Local", "reference"))
         ok = await local.get("/memory/agent", headers=local_token())
         assert ok.status_code == 200 and "local-note" in ok.json()["prompt"]
-        assert (await local.get("/memory/agent", headers=token())).json() == {"from": "typescript"}
-        assert (await local.get("/memory/agent", headers=local_token(via="mcp:x"))).json() == {
-            "from": "typescript"
-        }
-        assert support.forwarded == ["GET /memory/agent"] * 2
-        support.forwarded.clear()
-
-
-@needs_database
-async def test_standalone_api_serves_mcp_memory_and_rejects_unsigned_calls(memory_api):
-    api, app = memory_api
-    legacy_http = app.state.http
-    app.state.http = None
-    try:
-        got = await api.get("/memory/agent", headers=token(via="mcp:lab"))
-        assert got.status_code == 200, got.text
-        assert "Short answers" in got.json()["prompt"]
-        view = await tool(api, "memory_view", {"name": "reply-style"}, via="mcp:lab")
-        assert "Lead with the result." in view["text"]
-        assert (await api.get("/memory/agent")).status_code == 401
-        assert (
-            await api.get("/memory/agent", headers={tokens.MEMORY_HEADER: "bad"})
-        ).status_code == 401
-    finally:
-        app.state.http = legacy_http
+        # A signed token means the app has login on, which this server doesn't.
+        assert (await local.get("/memory/agent", headers=token())).status_code == 401
+        # An outside server's unsigned token is the local user's too: there is only one user.
+        other = await local.get("/memory/agent", headers=local_token(via="mcp:x"))
+        assert other.status_code == 200 and "local-note" in other.json()["prompt"]

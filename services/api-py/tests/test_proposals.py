@@ -10,7 +10,7 @@ import json
 import uuid
 
 import pytest
-from support import ALICE, BOB, Client, forwarded, storage_token
+from support import ALICE, BOB, Client, storage_token
 from test_files import S3_ENDPOINT, SECRET, URL, s3
 
 pytestmark = [
@@ -299,7 +299,6 @@ async def test_proposals_routes_answer_bad_requests(api):
     assert direct.json() == {
         "error": "An experiment's files change directly; promote it to propose them"
     }
-    assert not forwarded
 
 
 async def test_promoting_an_experiment(api):

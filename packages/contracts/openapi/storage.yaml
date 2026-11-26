@@ -2095,6 +2095,28 @@ paths:
                       Once storage is open: whether Postgres enforces access too (row-level
                       security). `off` means only the app's own checks apply; the database user
                       can't use the restricted role. Absent before storage opens and without a database.
+        "503":
+          description: |
+            Up, but not serving storage: the database is unreachable or waiting for its migrations,
+            storage has not opened yet, or `ROW_SECURITY=required` and row-level security is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, database]
+                properties:
+                  status: { type: string, const: degraded }
+                  database:
+                    type: string
+                    enum: [ready, behind, ahead, down]
+                    description: |
+                      `down`: it can't be reached. `behind`: migrations are not applied yet.
+                      `ahead`: it has migrations this server doesn't know. `ready`: its migrations
+                      are applied, and something else keeps storage closed (see `rowSecurity`).
+                  rowSecurity:
+                    type: string
+                    enum: ["on", "off"]
+                    description: As in the 200 answer. `off` here with `ROW_SECURITY=required` is why storage is refused.
 
   /identity/public-key:
     get:

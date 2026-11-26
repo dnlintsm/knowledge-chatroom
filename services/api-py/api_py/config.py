@@ -1,7 +1,5 @@
 """Settings from the environment.
 
-TS_AGENT_URL         an older release's TypeScript server to forward unknown
-                     routes to; unset (the default) disables forwarding
 API_PY_HOST / API_PY_PORT
                      where this server listens (default 127.0.0.1:8000, the
                      address the app and agent-py know as LOCAL_AGENT_URL)
@@ -66,7 +64,7 @@ _SECRET_HINT = "(at least 32 characters, e.g. openssl rand -hex 32)"
 
 
 class ConfigError(ValueError):
-    """A setting that would make this server act differently from the TypeScript one."""
+    """A setting this server can't start with."""
 
 
 def auth_secret(env: Mapping[str, str]) -> str | None:
@@ -113,7 +111,6 @@ def row_security_required(env: Mapping[str, str]) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    ts_agent_url: str | None
     database_url: str | None
     auth_secret: str | None
     migrations_dir: Path
@@ -123,7 +120,7 @@ class Settings:
     # ROW_SECURITY=required: storage isn't served while row-level security is off.
     row_security_required: bool = False
     port: int = 8000
-    # The blob store; None leaves the file routes to the TypeScript server (tests that don't need them).
+    # The blob store; without one the file, experiment, proposal and skill routes answer 404.
     s3: S3Settings | None = None
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     # Search by meaning; None leaves search to words (EMBEDDING_MODEL=off, and tests).
@@ -137,25 +134,22 @@ class Settings:
     recovery_idle_days: int = 90
     skill_scripts: bool = False
     builtin_skills_dir: Path = DEFAULT_BUILTIN_SKILLS_DIR
-    # Personalized memory (MEMORY=on); off leaves /memory to the TypeScript server, which answers 404.
+    # Personalized memory (MEMORY=on); off, /memory answers 404.
     memory: bool = False
     # With memory, learning from quiet chats (MEMORY_LEARN not off), and after how long (memory_learn.py).
     memory_learn: bool = True
     memory_idle_minutes: float = 10.0
-    # The "+" menu's tool servers (MCP_SERVERS); None leaves /tools to TS_AGENT_URL's server.
+    # The "+" menu's tool servers (MCP_SERVERS); unset in the environment is an empty menu.
+    # None (a Settings made without them, in tests) answers /tools 404.
     tools: ToolsSettings | None = None
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
-    upstream = (env.get("TS_AGENT_URL") or "").strip().rstrip("/") or None
     port = env.get("API_PY_PORT") or "8000"
     if not port.isdigit() or not 0 < int(port) < 65536:
         raise ConfigError(f"API_PY_PORT must be a port number, not {port!r}")
-    tools = _tools(env)
-    if tools is None and upstream is None:
-        tools = _tools({**env, "MCP_SERVERS": "{}"})
+    tools = _tools(env) or _tools({**env, "MCP_SERVERS": "{}"})
     return Settings(
-        ts_agent_url=upstream,
         database_url=(env.get("DATABASE_URL") or "").strip() or None,
         auth_secret=auth_secret(env),
         migrations_dir=Path(env.get("MIGRATIONS_DIR") or DEFAULT_MIGRATIONS_DIR),

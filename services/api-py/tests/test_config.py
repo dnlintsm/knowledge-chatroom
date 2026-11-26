@@ -10,17 +10,14 @@ SECRET = "0123456789abcdef0123456789abcdef"
 def test_defaults_put_this_server_where_the_app_looks():
     settings = settings_from_env({"AUTH_MODE": "local"})
     assert (settings.host, settings.port) == ("127.0.0.1", 8000)
-    assert settings.ts_agent_url is None
-    assert settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "  "}).ts_agent_url is None
     assert settings.tools is not None and settings.tools.servers == {}
     assert settings.database_url is None and settings.auth_secret is None
     assert (DEFAULT_MIGRATIONS_DIR / "001_init.sql").exists() or any(
         DEFAULT_MIGRATIONS_DIR.glob("001_*.sql")
     )
-    assert (
-        settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://agent:8000/"}).ts_agent_url
-        == "http://agent:8000"
-    )
+    # A leftover TS_AGENT_URL from an older release changes nothing: /tools is still served here.
+    old = settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://agent:8000/"})
+    assert old.tools is not None and old.tools.servers == {}
 
 
 def test_login_follows_the_typescript_rules():

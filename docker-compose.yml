@@ -54,7 +54,6 @@ services:
       dockerfile: services/api-py/Dockerfile
     environment:
       AUTH_MODE: local
-      TS_AGENT_URL: ""
       DATABASE_URL: postgres://knowledge:knowledge@postgres:5432/knowledge
       # The same store as the agent: api-py serves /files (issue #190, step 3).
       S3_ENDPOINT: http://s3:8333

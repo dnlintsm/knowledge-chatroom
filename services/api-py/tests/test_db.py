@@ -21,6 +21,7 @@ from psycopg import conninfo
 from api_py import db
 from api_py.app import create_app
 from api_py.config import DEFAULT_MIGRATIONS_DIR, Settings
+from knowledge_chatroom import api as contract
 
 URL = os.environ.get("TEST_DATABASE_URL")
 needs_postgres = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -111,7 +112,6 @@ async def test_as_user_sets_the_role_and_user_for_one_transaction(database):
 
 def settings(url: str, migrations: bool = True) -> Settings:
     return Settings(
-        ts_agent_url="http://ts",
         database_url=url,
         auth_secret=None,
         migrations_dir=DEFAULT_MIGRATIONS_DIR,
@@ -119,15 +119,11 @@ def settings(url: str, migrations: bool = True) -> Settings:
     )
 
 
-async def up(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(200, json={"status": "ok"})
-
-
 @pytest.mark.anyio
 @needs_postgres
 async def test_refuses_to_start_on_a_newer_database(database):
     await record(database, [*KNOWN, "999_from_a_newer_release.sql"])
-    app = create_app(settings(database), transport=httpx.MockTransport(up))
+    app = create_app(settings(database))
     with pytest.raises(RuntimeError, match="999_from_a_newer_release.sql"):
         async with app.router.lifespan_context(app):
             pass
@@ -135,32 +131,8 @@ async def test_refuses_to_start_on_a_newer_database(database):
 
 @pytest.mark.anyio
 @needs_postgres
-async def test_waits_for_the_typescript_server_to_migrate(database, monkeypatch):
-    from api_py import app as app_module
-
-    monkeypatch.setattr(app_module, "SCHEMA_POLL_SECONDS", 0.05)
-    # MIGRATIONS=off: the TypeScript server applies them.
-    app = create_app(settings(database, migrations=False), transport=httpx.MockTransport(up))
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
-    ):
-        # Up while it waits: the TypeScript server applies the migrations as it starts.
-        assert (await api.get("/health")).json() == {"status": "ok"}
-        assert app.state.schema.state is db.SchemaState.BEHIND
-        await record(database, KNOWN)
-        for _ in range(100):
-            if app.state.schema.state is db.SchemaState.READY:
-                break
-            await anyio.sleep(0.05)
-        assert app.state.schema.state is db.SchemaState.READY
-        assert (await api.get("/health")).json() == {"status": "ok"}
-
-
-@pytest.mark.anyio
-@needs_postgres
 async def test_applies_the_migrations_itself(database):
-    app = create_app(settings(database), transport=httpx.MockTransport(up))
+    app = create_app(settings(database))
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
@@ -236,7 +208,7 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
         return False
 
     # By default it is served, with the app's own checks only, and /health says so.
-    alone = dataclasses.replace(settings(database), ts_agent_url=None)
+    alone = settings(database)
     app = create_app(alone)
     async with (
         app.router.lifespan_context(app),
@@ -255,13 +227,18 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
         health = await api.get("/health")
         assert (health.status_code, health.json()) == (
             503,
-            {"status": "degraded", "upstream": "off", "database": "ready", "rowSecurity": "off"},
+            {"status": "degraded", "database": "ready", "rowSecurity": "off"},
         )
-        refused = await api.get("/files")
-        assert (refused.status_code, refused.json()) == (
-            503,
-            {"error": "Storage is not served: row-level security is required and off"},
-        )
+        # The answer the spec describes for a server that isn't serving storage.
+        contract.GetHealthResponse1.model_validate(health.json())
+        # Everything in the database is refused, memory too; the rest is simply not found.
+        for path in ("/files", "/files/a.md", "/memory", "/skills", "/workspaces"):
+            refused = await api.get(path)
+            assert (refused.status_code, refused.json()) == (
+                503,
+                {"error": "Storage is not served: row-level security is required and off"},
+            ), path
+        assert (await api.get("/something/else")).status_code == 404
         # An admin grants the role while it runs: the next poll serves storage.
         can_use_role = True
         for _ in range(200):
@@ -270,50 +247,16 @@ async def test_row_security_off_is_reported_and_refused_when_required(database, 
             await anyio.sleep(0.05)
         assert (await api.get("/health")).json() == {"status": "ok", "rowSecurity": "on"}
 
-    # A legacy upstream (TS_AGENT_URL) that is up doesn't get the storage requests
-    # either, and doesn't make the server healthy: it would serve them unprotected.
-    can_use_role = False
-    asked: list[str] = []
-
-    async def legacy(request: httpx.Request) -> httpx.Response:
-        asked.append(request.url.path)
-
-        async def body():
-            yield b'{"status":"ok"}'
-
-        return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
-
-    app = create_app(
-        dataclasses.replace(settings(database), row_security_required=True),
-        transport=httpx.MockTransport(legacy),
-    )
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
-    ):
-        assert not await storage_opens(app)
-        health = await api.get("/health")
-        assert (health.status_code, health.json()) == (
-            503,
-            {"status": "degraded", "upstream": "ok", "database": "ready", "rowSecurity": "off"},
-        )
-        for path in ("/files", "/files/a.md", "/memory", "/skills", "/workspaces"):
-            assert (await api.get(path)).status_code == 503, path
-        assert set(asked) == {"/health"}
-        # What isn't storage still passes through.
-        assert (await api.get("/something/else")).status_code == 200
-        assert "/something/else" in asked
-
 
 @pytest.mark.anyio
 @needs_postgres
 async def test_migrations_off_is_served_once_the_migrate_command_ran(database, monkeypatch, capsys):
-    """MIGRATIONS=off used to wait for a TypeScript server that no longer exists."""
+    """MIGRATIONS=off waits for another process to apply the migrations: the migrate command."""
     from api_py import app as app_module
     from api_py import migrate
 
     monkeypatch.setattr(app_module, "SCHEMA_POLL_SECONDS", 0.05)
-    app = create_app(dataclasses.replace(settings(database, migrations=False), ts_agent_url=None))
+    app = create_app(settings(database, migrations=False))
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as api,
@@ -322,6 +265,7 @@ async def test_migrations_off_is_served_once_the_migrate_command_ran(database, m
         assert app.state.schema.state is db.SchemaState.BEHIND
         waiting = await api.get("/health")
         assert (waiting.status_code, waiting.json()["database"]) == (503, "behind")
+        contract.GetHealthResponse1.model_validate(waiting.json())
 
         # The deploy step: `python -m api_py.migrate` (run here in a thread; it has its own loop).
         env = {"DATABASE_URL": database}

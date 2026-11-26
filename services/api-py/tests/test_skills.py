@@ -10,7 +10,6 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-import support
 from support import ALICE, BOB, SECRET, URL, Client, storage_token
 from test_files import s3
 
@@ -496,8 +495,8 @@ async def test_the_hub(skills_api, database):
 
 
 @pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
-async def test_without_a_blob_store_typescript_answers(database):
+async def test_without_a_blob_store_skills_are_not_served(database):
     async with Client(database, SECRET) as (api, _app):
-        assert (await api.get("/skills", headers=ALICE)).json() == {"from": "typescript"}
-        assert support.forwarded == ["GET /skills"]
-        support.forwarded.clear()
+        for path in ("/skills", "/hub"):
+            answer = await api.get(path, headers=ALICE)
+            assert (answer.status_code, answer.json()) == (404, {"error": "Not found"}), path

@@ -61,6 +61,7 @@ from psycopg_pool import AsyncConnectionPool
 from .access import LEGACY_TOKEN, Principal, is_uuid, iso
 from .identity import identify
 from .storage import EVENTS_CHANNEL
+from .unserved import not_served
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -676,11 +677,9 @@ async def _read_json(request: Request) -> dict[str, Any] | None:
 @router.api_route("/workspaces", methods=_ALL_METHODS, include_in_schema=False)
 @router.api_route("/workspaces/{rest:path}", methods=_ALL_METHODS, include_in_schema=False)
 async def workspaces_route(request: Request) -> Response:
-    from .proxy import forward
-
     state = request.app.state
     if not await state.storage_ready():
-        return await forward(request, state.http)
+        return not_served(request)
     storage = state.storage
     workspaces: Workspaces = state.workspaces
     try:

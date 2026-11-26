@@ -95,7 +95,6 @@ Storage, access, skills, memory and search (`services/api-py`).
 | `STORAGE_TOKEN_SECONDS` | `3600` | Lifetime of the storage token sent with a tools-menu call; whole seconds from 60 to 86400, else startup is refused. |
 | `SUGGESTIONS_MODEL` | `claude-haiku-5-5` when the main model's name starts with "claude-", otherwise the main model | Small model that writes the chat's follow-up chips, and the fallback for `MEMORY_MODEL`. |
 | `TOOLS_CALL_TIMEOUT_MS` | `120000` | Milliseconds a tools-menu call to an outside MCP server may take. |
-| `TS_AGENT_URL` | unset | An older TypeScript server to forward unknown routes to; unset turns forwarding off. |
 | `WORKSPACE_CREATORS` | unset | Emails or login subjects, split by commas or spaces, who may create workspaces; unset lets every signed-in user. |
 
 ## agent-py

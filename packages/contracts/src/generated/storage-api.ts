@@ -5296,6 +5296,33 @@ export interface operations {
                     };
                 };
             };
+            /**
+             * @description Up, but not serving storage: the database is unreachable or waiting for its migrations,
+             *     storage has not opened yet, or `ROW_SECURITY=required` and row-level security is off.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        status: "degraded";
+                        /**
+                         * @description `down`: it can't be reached. `behind`: migrations are not applied yet.
+                         *     `ahead`: it has migrations this server doesn't know. `ready`: its migrations
+                         *     are applied, and something else keeps storage closed (see `rowSecurity`).
+                         * @enum {string}
+                         */
+                        database: "ready" | "behind" | "ahead" | "down";
+                        /**
+                         * @description As in the 200 answer. `off` here with `ROW_SECURITY=required` is why storage is refused.
+                         * @enum {string}
+                         */
+                        rowSecurity?: "on" | "off";
+                    };
+                };
+            };
         };
     };
     getIdentityPublicKey: {

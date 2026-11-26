@@ -39,8 +39,7 @@ as the Dockerfile does.
 Deploy `api-py` and `agent-py` separately with the locked Python dependencies.
 Point the UI's `LOCAL_AGENT_URL` at api-py and `AGENT_URL` at agent-py. Point
 agent-py's `LOCAL_AGENT_URL` and MCP servers' `KNOWLEDGE_STORAGE_URL` at api-py.
-Leave `TS_AGENT_URL` unset: it only forwards to an older release's TypeScript server. api-py applies
-migrations, serves the API directly, and checks its own storage readiness.
+api-py applies migrations, serves the API directly, and checks its own storage readiness.
 PostgreSQL and S3 are required for skills, shared storage and persistent chat history.
 `AGENT_URL` unset means agent-py at `http://127.0.0.1:9300`. (`AGENT_URL=local` posts the
 chat to `LOCAL_AGENT_URL`, which only the e2e mock agent serves.)

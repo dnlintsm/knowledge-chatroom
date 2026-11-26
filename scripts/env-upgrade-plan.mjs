@@ -13,6 +13,7 @@ export const MIGRATIONS = [
   { key: "AGENT_PORT", since: "0.3.0", note: "the TypeScript agent server is gone; api-py listens on API_PY_PORT" },
   { key: "SKILLS_RUN_DIR", since: "0.3.0", note: "the TypeScript agent server is gone; agent-py keeps run folders under AGENT_PY_WORKDIR" },
   { key: "SEARCH_INDEXER", since: "0.3.0", note: "the TypeScript agent server is gone; api-py always runs the search indexer" },
+  { key: "TS_AGENT_URL", since: "0.3.1", note: "api-py no longer forwards to an older release's TypeScript server; it serves every route itself" },
 ];
 
 const ACTIVE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;

@@ -9,9 +9,7 @@ is optional: without pgvector, or with EMBEDDING_MODEL=off, search stays
 word-based.
 
 Embedding happens in the background (SemanticIndex.start), so a new file is
-found by its words at once and by meaning a few seconds later. This server
-runs that loop; the TypeScript server behind it, started with
-SEARCH_INDEXER=off, only embeds queries.
+found by its words at once and by meaning a few seconds later.
 """
 
 from __future__ import annotations

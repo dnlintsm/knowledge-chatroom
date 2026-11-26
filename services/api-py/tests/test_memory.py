@@ -8,7 +8,6 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-import support
 from support import ALICE, BOB, SECRET, URL, Client, storage_token
 
 from api_py.access import Principal
@@ -224,7 +223,7 @@ async def test_settings_and_incognito_chats(memory_api):
         "/memory/settings", headers=ALICE, json={"mode": "on", "thread": "t1", "incognito": True}
     )
     assert on.json() == {"mode": "on", "incognito": True}
-    # The mode is set before the chat is checked, as on the TypeScript server.
+    # The mode is set before the chat is checked.
     refused = await api.put(
         "/memory/settings", headers=ALICE, json={"mode": "off", "incognito": True, "thread": ""}
     )
@@ -367,30 +366,22 @@ async def test_export(memory_api):
 
 
 @needs_database
-async def test_the_rest_of_memory_stays_with_typescript(memory_api, database):
+async def test_what_memory_does_not_serve(memory_api, database):
     api, _app = memory_api
-    for method, path in [
-        ("GET", "/memory/agent"),
-        ("GET", "/memory/%zz"),
-        ("GET", "/memory/%6Eotes/x"),  # decoded: notes, served here
-        ("GET", "/memoryx"),
+    for path, status, body in [
+        # The agent's API takes a memory token, not the user's own sign-in.
+        ("/memory/agent", 401, {"error": "Sign in first"}),
+        ("/memory/%zz", 404, {"error": "Not found"}),
+        ("/memory/%6Eotes/x", 404, {"error": "No memory named x"}),  # decoded: notes, served
+        ("/memoryx", 404, {"error": "Not found"}),
     ]:
-        answer = await api.request(method, path, headers=ALICE)
-        if path == "/memory/%6Eotes/x":
-            assert answer.status_code == 404 and answer.json() == {"error": "No memory named x"}
-        else:
-            assert answer.json() == {"from": "typescript"}, path
-    assert support.forwarded == [
-        "GET /memory/agent",
-        "GET /memory/%zz",
-        "GET /memoryx",
-    ]
-    support.forwarded.clear()
-    # Without MEMORY=on here, all of it goes to the TypeScript server, which answers 404.
+        answer = await api.get(path, headers=ALICE)
+        assert (answer.status_code, answer.json()) == (status, body), path
+    # Without MEMORY=on none of it is served.
     async with Client(database, SECRET) as (other, _):
-        assert (await other.get("/memory/notes/x", headers=ALICE)).json() == {"from": "typescript"}
-        assert support.forwarded == ["GET /memory/notes/x"]
-        support.forwarded.clear()
+        answer = await other.get("/memory/notes/x", headers=ALICE)
+        assert (answer.status_code, answer.json()) == (404, {"error": "Not found"})
+        assert (await other.get("/memory/agent", headers=ALICE)).status_code == 404
 
 
 @needs_database

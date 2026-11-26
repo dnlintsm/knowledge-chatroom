@@ -1362,6 +1362,21 @@ class GetHealthResponse(BaseModel):
     """
 
 
+class GetHealthResponse1(BaseModel):
+    status: Literal["degraded"]
+    database: Literal["ready", "behind", "ahead", "down"]
+    """
+    `down`: it can't be reached. `behind`: migrations are not applied yet.
+    `ahead`: it has migrations this server doesn't know. `ready`: its migrations
+    are applied, and something else keeps storage closed (see `rowSecurity`).
+
+    """
+    rowSecurity: Literal["on", "off"] | None = None
+    """
+    As in the 200 answer. `off` here with `ROW_SECURITY=required` is why storage is refused.
+    """
+
+
 class GetIdentityPublicKeyResponse(BaseModel):
     alg: Literal["Ed25519"]
     key: str
