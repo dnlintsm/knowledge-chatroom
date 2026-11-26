@@ -189,7 +189,8 @@ contract adds the routes, `Pipeline`, `PipelineKey`, `RunExecution` and the 401 
 
 ## Screens
 
-- **Workspace settings, Pipelines**:
+- **Pipelines**, in the workspace menu beside Workspace settings (every Member makes
+  pipelines, and Workspace settings is for Owners and Admins):
   - A list with name, owner, places, operations, its keys' hints and when each was last
     used, and its status (Active, Suspended or Revoked).
   - **New pipeline**: name, places (the whole workspace, or nodes and Experiments from a
@@ -203,8 +204,8 @@ contract adds the routes, `Pipeline`, `PipelineKey`, `RunExecution` and the 401 
   for Alice", "Claude, in Alice's chat", or "Alice") and an "Authorized by" row ("Alice's
   access, narrowed to Etch: read, runs"). Runs from before this batch show "Not recorded".
 - **Activity and audit log**: a pipeline's entries show its name and its owner.
-- Claude's wording: when a tool result names a pipeline's Run, Claude says what it ran as,
-  from `execution`, and claims no more.
+- Claude's wording: `list_experiments` gives each experiment's `ranAs` (what its latest
+  Run ran as, from `execution`), and Claude says what it ran as and claims no more.
 
 ## Settings
 

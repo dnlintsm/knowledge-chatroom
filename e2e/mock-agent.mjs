@@ -44,7 +44,7 @@
  *
  * With STORAGE_URL set (the real agent server, run with DATABASE_URL), the
  * storage routes /files, /nodes, /access, /experiments, /runs, /search, /proposals, /chats,
- * /skills, /hub, /memory, /workspaces and /platform are forwarded there, so the preview can show server storage and the knowledge
+ * /skills, /hub, /memory, /workspaces, /platform and /pipelines are forwarded there, so the preview can show server storage and the knowledge
  * tree without an API key.
  */
 
@@ -447,7 +447,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (STORAGE_URL && /^\/(files|nodes|access|experiments|runs|search|proposals|chats|skills|hub|memory|workspaces|platform)(\/|$)/.test(pathname)) {
+  if (STORAGE_URL && /^\/(files|nodes|access|experiments|runs|search|proposals|chats|skills|hub|memory|workspaces|platform|pipelines)(\/|$)/.test(pathname)) {
     forward(req, res);
     return;
   }

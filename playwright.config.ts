@@ -76,7 +76,7 @@ const pythonAgent = [
 const storageServers = withStorage
   ? [{
       // With login, Alice runs the deployment (the workspace inventory, #255).
-      command: `cd services/api-py && ${mode === "python-storage" ? scripted : ""} API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
+      command: `cd services/api-py && ${mode === "python-storage" ? scripted : ""} API_PY_PORT=${STORAGE_PORT} SKILL_SCRIPTS=on MEMORY=on MEMORY_LEARN=off PIPELINES=on${withLogin ? " PLATFORM_ADMINS=alice@example.com" : ""} uv run --locked python -m api_py.app`,
       url: `http://localhost:${STORAGE_PORT}/health`,
     }]
   : [];
@@ -106,7 +106,7 @@ export default defineConfig({
   ...(withLogin
     ? { testMatch: "login.spec.ts" }
     : mode === "storage"
-      ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts", "workspaces.spec.ts"] }
+      ? { testMatch: ["knowledge.spec.ts", "runs.spec.ts", "sync-storage.spec.ts", "chat-history.spec.ts", "workspaces.spec.ts", "pipelines.spec.ts"] }
       : withPython
         ? { testMatch: mode === "python-storage" ? "python-storage.spec.ts" : "python-agent.spec.ts" }
         : {

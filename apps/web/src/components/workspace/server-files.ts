@@ -295,6 +295,8 @@ export interface RunProvenance {
   files?: Record<string, { version: string; sha256: string } | null>;
   /** At finish: the reads recorded while it ran (RunRead, without `by`). */
   reads?: Omit<Schema["RunRead"], "by">[];
+  /** Who started it, as what, and what authorized it; missing on Runs from before it was recorded. */
+  execution?: Schema["RunExecution"];
 }
 
 export type ExperimentChange = Partial<

@@ -10,6 +10,7 @@ import { AddMember } from "./add-member";
 import { MemberRoleMenu, RemoveMember, type MemberTarget } from "./members";
 import { useCurrentWorkspace } from "./current-workspace";
 import { apiFetch } from "./server-files";
+import { pipelineActivity, type Pipeline } from "@/lib/pipelines";
 import { MEMBER_ROLE_LABEL } from "@/lib/workspace-choice";
 import type { WorkspaceInfo } from "@/lib/workspace-request";
 import type { components } from "@knowledge-chatroom/contracts/generated/storage-api";
@@ -70,6 +71,7 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
   const [people, setPeople] = useState<PersonRow[] | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [me, setMe] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -79,13 +81,19 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
       access<{ people: PersonRow[] }>("/people"),
       access<{ groups: Group[] }>("/groups"),
       access<{ entries: AuditEntry[] }>(
-        `/audit?limit=200&kind=group&kind=grant${workspace ? "&kind=member&kind=workspace&kind=platform" : ""}`,
+        `/audit?limit=200&kind=group&kind=grant${workspace ? "&kind=member&kind=workspace&kind=platform&kind=pipeline" : ""}`,
       ),
       access<{ me: { id: string } | null }>(""),
     ]);
     setPeople(p.people);
     setGroups(g.groups);
     setEntries(a.entries);
+    // Pipelines' names, for entries that name one; none when the server doesn't serve them.
+    if (workspace) {
+      const listed = await apiFetch("/api/pipelines?all", { cache: "no-store" });
+      const body = listed.ok ? ((await listed.json().catch(() => ({}))) as { pipelines?: Pipeline[] }) : {};
+      setPipelines(body.pipelines ?? []);
+    }
     setMe(who.me?.id ?? null);
     if (workspace) {
       const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/members`);
@@ -187,7 +195,7 @@ function AdminDialog({ onClose }: { onClose: () => void }) {
             </>
           )}
           {tab === "groups" && <GroupsTab people={people ?? []} groups={groups} run={run} />}
-          {tab === "activity" && <ActivityTab entries={entries} people={people ?? []} groups={groups} />}
+          {tab === "activity" && <ActivityTab entries={entries} people={people ?? []} groups={groups} pipelines={pipelines} />}
         </div>
         {error && (
           <p role="alert" className="border-t border-[var(--border)] px-4 py-2 text-xs text-red-500">
@@ -553,7 +561,17 @@ function GroupsTab({ people, groups, run }: { people: PersonRow[]; groups: Group
   );
 }
 
-function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null; people: PersonRow[]; groups: Group[] }) {
+function ActivityTab({
+  entries,
+  people,
+  groups,
+  pipelines,
+}: {
+  entries: AuditEntry[] | null;
+  people: PersonRow[];
+  groups: Group[];
+  pipelines: Pipeline[];
+}) {
   const { nodes } = useWorkspace();
   if (!entries) return <p className="text-[var(--muted-foreground)]">Loading…</p>;
   if (entries.length === 0) return <p className="text-[var(--muted-foreground)]">No access changes yet.</p>;
@@ -567,6 +585,7 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
   const group = (id: unknown) => groups.find((g) => g.id === id)?.name ?? "a group";
   const principal = (t: Record<string, unknown>) =>
     t.principalType === "group" ? `the group ${group(t.principalId)}` : person(t.principalId);
+  const pipeline = (id: unknown) => pipelines.find((x) => x.id === id)?.name;
   const place = (node: unknown) =>
     node ? (nodes.find((n) => n.id === node)?.name ?? "a knowledge node") : "the workspace";
 
@@ -606,7 +625,7 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
       case "platform.owner":
         return `made ${person(t.user)} Owner`;
       default:
-        return e.action;
+        return pipelineActivity(e.action, t, pipeline, person) ?? e.action;
     }
   };
 
@@ -621,7 +640,13 @@ function ActivityTab({ entries, people, groups }: { entries: AuditEntry[] | null
             <span className="font-medium">
               {e.action === "platform.owner" || e.target.recovery === true ? "A deployment admin" : person(e.actorId)}
             </span>
-            {e.actorType === "agent" && <span className="text-[var(--muted-foreground)]"> (via Claude)</span>}{" "}
+            {e.actorType === "agent" && <span className="text-[var(--muted-foreground)]"> (via Claude)</span>}
+            {e.actorType === "pipeline" && (
+              <span className="text-[var(--muted-foreground)]">
+                {" "}
+                (via {pipeline(e.target.pipeline) ? `the pipeline ${pipeline(e.target.pipeline)}` : "a pipeline"})
+              </span>
+            )}{" "}
             {describe(e)}
           </span>
         </li>
