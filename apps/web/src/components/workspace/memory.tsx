@@ -201,26 +201,16 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
       const query = new URLSearchParams();
       if (threadId) query.set("thread", threadId);
       if (nodeId) query.set("node", nodeId);
-      const data = await call<{
-        mode: Memory["mode"];
-        incognito: boolean;
-        searchSentTo?: string;
-        notes: MemorySummary[];
-        inbox?: InboxItem[];
-        shared?: SharedSummary[];
-        sharedProposals?: SharedProposal[];
-        targets?: SharedTarget[];
-        installs?: PackInstall[];
-      }>(`/api/memory${query.size ? `?${query}` : ""}`);
+      const data = await call<Schema["MemoryOverview"]>(`/api/memory${query.size ? `?${query}` : ""}`);
       setModeState(data.mode);
       setIncognitoState(data.incognito);
       setSearchSentTo(data.searchSentTo ?? null);
       setNotes(data.notes);
-      setInbox(data.inbox ?? []);
-      setShared(data.shared ?? []);
-      setSharedProposals(data.sharedProposals ?? []);
-      setTargets(data.targets ?? []);
-      setInstalls(data.installs ?? []);
+      setInbox(data.inbox);
+      setShared(data.shared);
+      setSharedProposals(data.sharedProposals);
+      setTargets(data.targets);
+      setInstalls(data.installs);
       setStatus("ready");
     } catch {
       setStatus("unavailable");

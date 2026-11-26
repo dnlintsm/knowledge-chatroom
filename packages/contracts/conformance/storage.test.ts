@@ -553,6 +553,10 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("POST", "/memory/import", { headers: { ...alice, "Content-Type": "application/json" }, body: "{", expect: 400 });
 
     const overview = await call<Schema["MemoryOverview"]>("GET", "/memory", { headers: alice, expect: 200 });
+    // Only a server that embeds text with an outside API says where search sends
+    // note text, and then it names a host, not an address with a key or a path.
+    // (This suite's own server has no embedding model, so it says nothing.)
+    if (overview.data.searchSentTo !== undefined) assert.match(overview.data.searchSentTo, /^[^\s/:@]+$/);
     const waiting = (name: string) => overview.data.inbox.find((i) => i.name === name)!.id;
     await call("POST", `/memory/inbox/${waiting("conformance-kept")}/accept`, { headers: alice, expect: 200 });
     await call("POST", `/memory/inbox/${waiting("conformance-dropped")}/reject`, { headers: alice, expect: 200 });

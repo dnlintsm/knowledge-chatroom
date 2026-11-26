@@ -34,6 +34,7 @@ from api_py.memory_agent import (
     parse_args,
 )
 from api_py.semantic import ApiEmbedder, EmbeddingSettings
+from knowledge_chatroom import api as contract
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -443,12 +444,20 @@ async def test_shared_notes_are_only_proposed(memory_api):
 async def test_the_overview_says_where_search_sends_note_text(memory_api):
     api, app = memory_api
     # The embedding model runs on this server (or search by meaning is off): nothing to say.
-    assert "searchSentTo" not in (await api.get("/memory", headers=ALICE)).json()
+    quiet = (await api.get("/memory", headers=ALICE)).json()
+    assert "searchSentTo" not in quiet
+    assert contract.MemoryOverview.model_validate(quiet).searchSentTo is None
     app.state.storage.semantic = FakeSemantic()  # type: ignore[attr-defined]
     assert "searchSentTo" not in (await api.get("/memory", headers=ALICE)).json()
     # An outside embedding API: memory_search sends note text there, and the panel says so.
-    app.state.storage.semantic.embedder = ApiEmbedder("m", "https://embed.example/v1/")
-    assert (await api.get("/memory", headers=ALICE)).json()["searchSentTo"] == "embed.example"
+    # The host alone: not the address, which can carry a key.
+    app.state.storage.semantic.embedder = ApiEmbedder(
+        "m", "https://user:key@embed.example:8443/v1/"
+    )
+    told = (await api.get("/memory", headers=ALICE)).json()
+    assert told["searchSentTo"] == "embed.example"
+    # The answer the spec describes, in both cases (the conformance suite's server has no embedding API).
+    assert contract.MemoryOverview.model_validate(told).searchSentTo == "embed.example"
 
 
 def test_the_operator_is_warned_when_note_text_leaves_the_server():
