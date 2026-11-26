@@ -492,8 +492,10 @@ async def finish_target(
     running = next((r for r in rows if r[2] == "running"), None)
     if running is None:
         return "add", None
-    ended = next((r for r in rows if r[2] in runs.FINISHED), None)
-    if ended and ended[4] == by and ended[2] == state and same_json(ended[3], results):
+    # The caller's own latest finished Run: a collaborator's Run finished
+    # since must not hide the retry.
+    ended = next((r for r in rows if r[2] in runs.FINISHED and r[4] == by), None)
+    if ended and ended[2] == state and same_json(ended[3], results):
         return "same", ended[0]
     if running[4] != by:
         raise runs.RunNotYoursError(running[1])
@@ -557,6 +559,12 @@ async def update(
             raise ExperimentError(
                 f"This run already finished ({state}); its state and results stay as they ended"
             )
+        # A running Run ends by finishing: marking the Experiment ready would
+        # leave it running unseen, with its reads no longer recorded.
+        if fields.get("state") == "ready" and state == "running":
+            found = await runs.running(conn, experiment_id)
+            if found:
+                raise runs.RunRunningError(found[1], "marking the experiment ready")
         ends = fields.get("state") in runs.FINISHED and state not in runs.FINISHED
         if ends:
             provenance = {

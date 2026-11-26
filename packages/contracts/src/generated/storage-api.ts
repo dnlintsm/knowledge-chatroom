@@ -261,7 +261,7 @@ export interface paths {
         head?: never;
         /**
          * Change an experiment (its maintainer and collaborators)
-         * @description Only its maintainer changes the status (shares, archives or restores it). A state of done or failed ends a run as POST /experiments/{id}/finish without `run` does, so it doesn't end a run someone else started (409).
+         * @description Only its maintainer changes the status (shares, archives or restores it). A state of done or failed ends a run as POST /experiments/{id}/finish without `run` does, so it doesn't end a run someone else started (409). A running experiment isn't marked ready (409): its run ends by finishing.
          */
         patch: operations["updateExperiment"];
         trace?: never;
@@ -632,7 +632,7 @@ export interface paths {
         };
         /**
          * A file's bytes as the run recorded them
-         * @description The recorded version's bytes, with the checks of reading the experiment's files, served as /files/{path} serves them (sandboxed, nosniff). A recorded version never changes, so it may be cached for good. 404 when the record has no such path, or the version can't be read any more.
+         * @description The recorded version's bytes, with the checks of reading the experiment's files, served as /files/{path} serves them (sandboxed, nosniff). A recorded version never changes, so it may be cached for good, and stays readable after the working file is deleted, renamed or replaced. 404 when the record has no such path.
          */
         get: operations["readRunFile"];
         put?: never;

@@ -33,9 +33,9 @@ class RunError(Exception):
 class RunRunningError(Exception):
     """Another Run of the Experiment is running (409)."""
 
-    def __init__(self, number: int) -> None:
+    def __init__(self, number: int, before: str = "starting another") -> None:
         super().__init__(
-            f"Run {number} of this experiment is still running; finish it before starting another"
+            f"Run {number} of this experiment is still running; finish it before {before}"
         )
         self.number = number
 

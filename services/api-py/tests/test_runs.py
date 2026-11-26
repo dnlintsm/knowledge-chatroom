@@ -347,6 +347,58 @@ async def test_a_late_retry_of_a_finish_doesnt_end_the_next_run(either):
 
 
 @needs_services
+async def test_a_retry_isnt_hidden_by_a_collaborators_later_run(either):
+    api = either
+    bob = await user_id(api, "Bob")
+    await view_everything(api, bob)
+    made = await api.post(
+        "/experiments/runs", headers=ALICE, json={"nodeId": None, "title": "Etch"}
+    )
+    exp = made.json()["id"]
+    added = await api.put(f"/experiments/{exp}/collaborators/{bob}", headers=ALICE)
+    assert added.status_code == 200, added.text
+    finishing = {"results": {"rate": 410}}
+    first = await api.post(f"/experiments/{exp}/finish", headers=ALICE, json=finishing)
+    assert first.status_code == 200, first.text
+    # Bob runs and finishes Run 2, then Alice starts Run 3; her Run 1 finish is retried late.
+    run2 = await start(api, exp, headers=BOB)
+    await finish(api, run2["id"], {"rate": 455}, headers=BOB)
+    run3 = await start(api, exp)
+    retry = await api.post(f"/experiments/{exp}/finish", headers=ALICE, json=finishing)
+    assert retry.status_code == 200, retry.text
+    now = await api.get(f"/runs/{run3['id']}", headers=ALICE)
+    assert now.json()["state"] == "running" and now.json()["results"] == {}
+
+
+@needs_services
+async def test_a_running_experiment_isnt_marked_ready(either):
+    api = either
+    exp = (await experiment(api))["id"]
+    run = await start(api, exp)
+    reset = await api.patch(f"/experiments/{exp}", headers=ALICE, json={"state": "ready"})
+    assert reset.status_code == 409 and reset.json()["running"] == 1
+    assert (await api.get(f"/experiments/{exp}", headers=ALICE)).json()["state"] == "running"
+    assert (await api.get(f"/runs/{run['id']}", headers=ALICE)).json()["state"] == "running"
+
+
+@needs_services
+async def test_a_recorded_file_outlives_the_working_copy(either):
+    api = either
+    exp = (await experiment(api))["id"]
+    await write(api, exp, "notes/out.md", b"one")
+    run = await start(api, exp)
+    await finish(api, run["id"], {"acc": 0.5})
+    recorded = f"/runs/{run['id']}/files/notes/out.md"
+    gone = await api.delete(f"/files/notes/out.md?experiment={exp}", headers=ALICE)
+    assert gone.status_code == 200, gone.text
+    read = await api.get(recorded, headers=ALICE)
+    assert read.status_code == 200 and read.content == b"one"
+    # A new file at the same path is another file: the record still reads its own version.
+    await write(api, exp, "notes/out.md", b"two")
+    assert (await api.get(recorded, headers=ALICE)).content == b"one"
+
+
+@needs_services
 async def test_a_finish_by_run_id_ends_only_that_run(either):
     api = either
     exp = (await experiment(api))["id"]

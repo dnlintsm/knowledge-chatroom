@@ -1061,10 +1061,11 @@ class Session:
         if entry is None:
             raise NodeNotFoundError(f"The run's record has no {wanted}")
         files = await self.experiment_files(found["experimentId"])
-        read = await files.read(wanted, entry["version"])
-        if read is None:
+        async with self.scoped() as conn:
+            info = await files.service.stat_recorded(conn, wanted, entry["version"])
+        if info is None:
             raise NodeNotFoundError(f"{wanted} as the run recorded it can't be read any more")
-        return read
+        return info, await files.service.content(info)
 
     async def compare_runs(
         self,
