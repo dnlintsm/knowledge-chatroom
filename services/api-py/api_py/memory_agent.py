@@ -14,8 +14,8 @@ the call read or changed (`events`), for the chat's "Used / Updated" line.
     POST /memory/agent/tools/<name>?run=&tainted=   the tool's arguments:
                                             {text, isError, events, tainted}
 
-Tokens of outside MCP servers (memoryAccess) still go to the TypeScript server:
-what they do shows under the chat's live reply there (liveRunEvents).
+An outside MCP server's token (memoryAccess, `via` "mcp:<server>") is served
+the same way.
 """
 
 from __future__ import annotations
@@ -170,6 +170,14 @@ def _dot(a: list[float], b: list[float]) -> float:
 
 
 _recalls: weakref.WeakKeyDictionary[SemanticIndex, MemoryRecall] = weakref.WeakKeyDictionary()
+
+
+def sent_to(semantic: SemanticIndex | None) -> str | None:
+    """
+    The host memory_search sends note text to, when the embedding model is an
+    outside API (EMBEDDING_BASE_URL); None while it stays on this server.
+    """
+    return getattr(getattr(semantic, "embedder", None), "remote_host", None)
 
 
 def recall_for(semantic: SemanticIndex | None) -> MemoryRecall | None:

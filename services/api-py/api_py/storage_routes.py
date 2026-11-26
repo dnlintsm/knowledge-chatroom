@@ -104,10 +104,9 @@
     them, and storage tokens can't reach them.
 
 Until the database has the migrations this server knows (db.py applies them
-as it starts), these pass through to the TypeScript
-server, which answers as it does while storage starts or when it is off.
-Paths are read as sent: each segment is percent-decoded on its own, so a %2F
-stays inside its segment, as the TypeScript server reads them.
+as it starts), these answer 503; without a database, 404. Paths are read as
+sent: each segment is percent-decoded on its own, so a %2F stays inside its
+segment.
 """
 
 from __future__ import annotations
@@ -149,11 +148,11 @@ from .paths import (
     utf16_len,
 )
 from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
-from .proxy import forward
 from .run_report import js_json, js_number
 from .runs import RunError, RunNotYoursError, RunRunningError, RunStillRunningError
 from .search import SearchError
 from .session import NOT_SEEN, Session
+from .unserved import not_served
 from .workspaces import WorkspaceError, resolve
 
 logger = logging.getLogger("api_py")
@@ -162,9 +161,9 @@ ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 MAX_JSON_BYTES = 64 * 1024
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # The prefixes as sent. Starlette routes on the decoded path, so /%61ccess or
-# /access%2Fusers reach these routes too, but the TypeScript server reads the raw
-# path and serves those as files. They go to it, so a storage token's limits
-# (agent_refusal) always see the section the handlers act on.
+# /access%2Fusers reach these routes too. They are not served (404), so a
+# storage token's limits (agent_refusal) always see the section the handlers
+# act on.
 _OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|runs|proposals|search|chats)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
@@ -415,14 +414,17 @@ async def _session(request: Request) -> Session | Response:
     return Session(here, here.access, principal, membership)
 
 
-async def _serve(request: Request, handler, typescript_serves=None) -> Response:
-    """Serves a request with `handler`, or passes it on while it is the TypeScript server's (`typescript_serves`)."""
+async def _serve(request: Request, handler, unserved=None) -> Response:
+    """
+    Serves a request with `handler`. Not served (unserved.not_served): another
+    spelling of the path, storage that isn't open yet, and what `unserved` says.
+    """
     if (
         not _OWN_PATH.match(raw_path(request))
         or not await request.app.state.storage_ready()
-        or (typescript_serves and typescript_serves(request))
+        or (unserved and unserved(request))
     ):
-        return await forward(request, request.app.state.http)
+        return not_served(request)
     try:
         session = await _session(request)
         if isinstance(session, Response):
@@ -482,7 +484,7 @@ async def access_route(request: Request) -> Response:
 
 
 def _no_blob_store(request: Request) -> bool:
-    """File content needs the blob store; without one here, the TypeScript server answers."""
+    """File content needs the blob store; without one the route is not served."""
     return request.app.state.storage.blobs is None
 
 

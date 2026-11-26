@@ -2,8 +2,8 @@
 
     uv run python -m api_py.app    # http://127.0.0.1:8000, the app's LOCAL_AGENT_URL
 
-It serves the route groups in routes.py. Any other request is answered 404, or
-forwarded to an older release's server while TS_AGENT_URL is set (proxy.py).
+It serves the route groups in routes.py. Any other request is answered 404
+(unserved.py).
 Settings: config.py.
 """
 
@@ -16,7 +16,6 @@ import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
-import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from psycopg_pool import AsyncConnectionPool
@@ -24,13 +23,14 @@ from psycopg_pool import AsyncConnectionPool
 from . import db, llm
 from .config import ConfigError, Settings, settings_from_env
 from .identity import RefuseSignedWithoutLogin
+from .memory_agent import RECALL_TEXT
 from .memory_learn import MemoryLearner
 from .platform import Platform, parse_admins
-from .proxy import client, forward
 from .routes import ROUTERS, STORAGE_PREFIXES
 from .search import SearchService
-from .semantic import SemanticIndex
+from .semantic import SemanticIndex, remote_host
 from .storage import RowSecurityOffError, Storage, open_storage
+from .unserved import not_served
 from .workspaces import Workspaces
 
 logger = logging.getLogger("api_py")
@@ -44,8 +44,8 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
     """
     Opens the storage routes once the database has exactly the migrations this
     server knows, applying them first (unless MIGRATIONS=off: then another
-    process does). Returns whether they are served; until then they answer 503,
-    or are forwarded while TS_AGENT_URL is set (proxy.forward).
+    process does). Returns whether they are served; until then they answer 503
+    (unserved.not_served).
     """
     if app.state.storage is not None:
         return True
@@ -79,7 +79,7 @@ async def _try_storage(app: FastAPI, pool: AsyncConnectionPool, settings: Settin
             if not app.state.row_security_refused:
                 logger.error("not serving storage: %s", err)
             app.state.row_security = "off"
-            # Refused, not merely not ready: a legacy upstream doesn't get the requests either (proxy.forward).
+            # Refused, not merely not ready: storage requests answer 503 saying why (unserved.not_served).
             app.state.row_security_refused = True
             return False
         except Exception as err:  # Try again while the database may still be settling.
@@ -174,10 +174,21 @@ async def _serve_storage_when_ready(
         await asyncio.sleep(SCHEMA_POLL_SECONDS)
 
 
-def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+def remote_recall_warning(settings: Settings) -> str | None:
+    """What to tell the operator when memory notes' text leaves the server; None when it doesn't."""
+    if not settings.memory or not settings.embedding or not settings.embedding.base_url:
+        return None
+    return (
+        f"MEMORY=on with EMBEDDING_BASE_URL: Claude's memory_search sends the text of users' "
+        f"personal memory notes (up to {RECALL_TEXT} characters each) to "
+        f"{remote_host(settings.embedding.base_url)} to embed it. Unset EMBEDDING_BASE_URL to "
+        f"embed on this server."
+    )
+
+
+def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.http = client(settings.ts_agent_url, transport) if settings.ts_agent_url else None
         app.state.settings = settings
         # The small model's Messages API, for /memory/import (llm.py); tests swap it.
         app.state.create_message = llm.message_creator()
@@ -185,7 +196,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.state.schema = None
         # "on" or "off" once storage was opened (or refused for it, ROW_SECURITY=required).
         app.state.row_security = None
-        # ROW_SECURITY=required and it is off: storage requests are refused (503), also with a legacy upstream.
+        # ROW_SECURITY=required and it is off: storage requests are refused (503).
         app.state.row_security_refused = False
         # The storage behind the storage routes; None while it isn't open (no database, or not ready yet).
         app.state.storage = None
@@ -249,8 +260,6 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 job.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job
-            if app.state.http:
-                await app.state.http.aclose()
             if app.state.storage and app.state.storage.semantic:
                 await app.state.storage.semantic.stop()
             if app.state.storage and app.state.storage.events:
@@ -268,31 +277,19 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
 
     @app.get("/health")
     async def health(request: Request) -> Response:
-        """Ready on its own, or with an explicitly configured legacy upstream."""
-        upstream = "off"
-        if request.app.state.http:
-            try:
-                answer = await request.app.state.http.get("/health", timeout=5.0)
-                upstream = "ok" if answer.status_code == 200 else "down"
-            except httpx.HTTPError:
-                upstream = "down"
+        """Up, and with a database: its migrations applied and storage open."""
         found: db.Schema | None = request.app.state.schema
         database = "off" if not settings.database_url else found.state.value if found else "down"
-        database_ready = database in ("off", "ready") or (upstream == "ok" and database == "behind")
-        storage_ready = (
-            not settings.database_url or request.app.state.storage is not None or upstream == "ok"
-        )
+        database_ready = database in ("off", "ready")
+        storage_ready = not settings.database_url or request.app.state.storage is not None
         # Whether Postgres enforces access too, once storage was opened (or refused over it).
         row_security: str | None = request.app.state.row_security
         extra = {"rowSecurity": row_security} if row_security else {}
-        # Required and off: not healthy, whatever a legacy upstream answers.
+        # Required and off: not healthy.
         refused = request.app.state.row_security_refused
-        if upstream != "down" and database_ready and storage_ready and not refused:
+        if database_ready and storage_ready and not refused:
             return JSONResponse({"status": "ok", **extra})  # the spec's answer (getHealth)
-        return JSONResponse(
-            {"status": "degraded", "upstream": upstream, "database": database, **extra},
-            status_code=503,
-        )
+        return JSONResponse({"status": "degraded", "database": database, **extra}, status_code=503)
 
     if not settings.auth_secret:
         # Without login, a request signed for a user is refused, not made the local user.
@@ -302,8 +299,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
         app.include_router(router)
 
     @app.api_route("/{path:path}", methods=METHODS, include_in_schema=False)
-    async def pass_through(request: Request) -> Response:
-        return await forward(request, request.app.state.http)
+    async def anything_else(request: Request) -> Response:
+        return not_served(request)
 
     return app
 
@@ -312,16 +309,14 @@ def main(env: Mapping[str, str] = os.environ) -> None:
     import uvicorn
 
     logging.basicConfig(level=logging.INFO)
-    # uvicorn logs each request already; httpx would log each one again on its way through.
+    # httpx would log every call to the model and embedding APIs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         settings = settings_from_env(env)
     except ConfigError as err:
         raise SystemExit(f"[api-py] {err}") from err
-    if settings.ts_agent_url:
-        logger.info("legacy forwarding enabled: %s", settings.ts_agent_url)
-    else:
-        logger.info("serving the Python API directly; legacy forwarding is disabled")
+    if warning := remote_recall_warning(settings):
+        logger.warning(warning)
     if settings.tools is not None:
         logger.info(
             "serving /tools for MCP_SERVERS: %s",

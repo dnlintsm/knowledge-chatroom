@@ -93,6 +93,10 @@ statements is a vulnerability; a consequence of one is not.
   the user's inbox for approval instead of being saved.
 - **Files are untrusted too.** Stored HTML and SVG are served sandboxed, other non-media
   files download, and markdown does not load images from other servers.
+- **An outside embedding API** (`EMBEDDING_BASE_URL`) receives passages of workspace files
+  and, with memory on, the text of users' personal notes when Claude searches them. The
+  default model runs inside api-py and sends nothing out. Only set the address of a
+  service you would trust with both.
 
 ## Known limits
 

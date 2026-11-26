@@ -2,9 +2,8 @@
 
 Set TEST_DATABASE_URL to a Postgres this test may create databases on; each
 test module run gets a new database with the migrations applied. The
-TS_AGENT_URL upstream is a stand-in here that fails the test if a route
-api-py serves reaches it. The conformance suite (pnpm test:conformance)
-checks the same routes against the spec.
+conformance suite (pnpm test:conformance) checks the same routes against the
+spec.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import uuid
 import psycopg
 import pytest
 from psycopg import conninfo
-from support import ALICE, BOB, SECRET, URL, Client, forwarded, storage_token
+from support import ALICE, BOB, SECRET, URL, Client, storage_token
 
 from api_py import tokens
 from api_py.storage import EVENTS_CHANNEL
@@ -240,24 +239,26 @@ async def test_storage_tokens_act_as_claude_for_the_user(api):
     assert (
         await api.get("/nodes", headers={tokens.STORAGE_HEADER: ALICE[tokens.IDENTITY_HEADER]})
     ).status_code == 401
-    # An encoded prefix is no way around those limits: the TypeScript server reads
-    # /%61ccess/users as a file path, so it goes there, as do the other spellings.
+    # An encoded prefix is no way around those limits: the prefix is read as
+    # sent, so another spelling of it is not served at all.
     for path in ("/%61ccess/users", "/access%2Fusers", "/%6Eodes/x"):
-        assert (await api.get(path, headers=claude)).json() == {"from": "typescript"}
-    assert forwarded == ["GET /%61ccess/users", "GET /access%2Fusers", "GET /%6Eodes/x"]
-    forwarded.clear()
+        answer = await api.get(path, headers=claude)
+        assert (answer.status_code, answer.json()) == (404, {"error": "Not found"}), path
 
 
-async def test_passes_through_until_the_database_is_migrated():
+async def test_storage_is_unavailable_until_the_database_is_migrated():
     name = f"api_py_routes_{uuid.uuid4().hex[:12]}"
     async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:
         await admin.execute(f'CREATE DATABASE "{name}"')
         url = conninfo.make_conninfo(URL, dbname=name)
         try:
-            # MIGRATIONS=off: the TypeScript server applies them, and answers until then.
+            # MIGRATIONS=off: another process applies them, and until then storage isn't ready.
             async with Client(url, SECRET, migrations=False) as (api, _):
-                assert (await api.get("/nodes")).json() == {"from": "typescript"}
-                forwarded.clear()
+                waiting = await api.get("/nodes")
+                assert (waiting.status_code, waiting.json()) == (
+                    503,
+                    {"error": "Storage is not ready"},
+                )
             # Otherwise the first request finds them applied by this server.
             async with Client(url, SECRET) as (api, _):
                 assert (await api.get("/nodes")).json() == {"error": "Sign in to use the workspace"}

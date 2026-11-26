@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from support import ALICE, BOB, Client, forwarded, storage_token
+from support import ALICE, BOB, Client, storage_token
 from test_files import S3_ENDPOINT, SECRET, URL, s3
 
 from api_py.experiments import ExperimentError, clean_input, same_json
@@ -493,12 +493,12 @@ async def test_storage_tokens(api):
 
 
 @needs_services
-async def test_other_spellings_stay_with_typescript(api):
-    # /experiments/%75pload is /experiments/upload, served here as there.
+async def test_another_spelling_of_the_prefix_is_not_found(api):
+    # /experiments/%75pload is /experiments/upload: a segment is decoded.
     assert (await api.get("/experiments/%75pload", headers=ALICE)).status_code == 405
-    assert (await api.get("/%65xperiments", headers=ALICE)).json() == {"from": "typescript"}
-    assert forwarded == ["GET /%65xperiments"]
-    forwarded.clear()
+    # The prefix is read as sent.
+    other = await api.get("/%65xperiments", headers=ALICE)
+    assert (other.status_code, other.json()) == (404, {"error": "Not found"})
 
 
 @needs_services

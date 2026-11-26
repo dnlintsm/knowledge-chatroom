@@ -7,20 +7,23 @@ stand-in embedding model.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import inspect
 import json
 import math
 import re
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import psycopg
 import pytest
-import support
 from support import ALICE, SECRET, URL, Client, user
 
 from api_py import tokens
+from api_py.app import remote_recall_warning
+from api_py.config import Settings
 from api_py.memory import MEMORY_TYPES
 from api_py.memory_agent import (
     CHAT_TOOLS,
@@ -30,6 +33,8 @@ from api_py.memory_agent import (
     MemoryTools,
     parse_args,
 )
+from api_py.semantic import ApiEmbedder, EmbeddingSettings
+from knowledge_chatroom import api as contract
 
 pytestmark = [pytest.mark.anyio]
 needs_database = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not set")
@@ -436,6 +441,38 @@ async def test_shared_notes_are_only_proposed(memory_api):
 
 
 @needs_database
+async def test_the_overview_says_where_search_sends_note_text(memory_api):
+    api, app = memory_api
+    # The embedding model runs on this server (or search by meaning is off): nothing to say.
+    quiet = (await api.get("/memory", headers=ALICE)).json()
+    assert "searchSentTo" not in quiet
+    assert contract.MemoryOverview.model_validate(quiet).searchSentTo is None
+    app.state.storage.semantic = FakeSemantic()  # type: ignore[attr-defined]
+    assert "searchSentTo" not in (await api.get("/memory", headers=ALICE)).json()
+    # An outside embedding API: memory_search sends note text there, and the panel says so.
+    # The host alone: not the address, which can carry a key.
+    app.state.storage.semantic.embedder = ApiEmbedder(
+        "m", "https://user:key@embed.example:8443/v1/"
+    )
+    told = (await api.get("/memory", headers=ALICE)).json()
+    assert told["searchSentTo"] == "embed.example"
+    # The answer the spec describes, in both cases (the conformance suite's server has no embedding API).
+    assert contract.MemoryOverview.model_validate(told).searchSentTo == "embed.example"
+
+
+def test_the_operator_is_warned_when_note_text_leaves_the_server():
+    base = Settings(database_url=None, auth_secret=None, migrations_dir=Path("."))
+    remote = EmbeddingSettings(model="m", base_url="https://embed.example/v1")
+    warning = remote_recall_warning(dataclasses.replace(base, memory=True, embedding=remote))
+    assert warning and "embed.example" in warning and "EMBEDDING_BASE_URL" in warning
+    # Only when both hold: memory on, and an outside embedding API.
+    assert remote_recall_warning(dataclasses.replace(base, embedding=remote)) is None
+    local = EmbeddingSettings(model="m")
+    assert remote_recall_warning(dataclasses.replace(base, memory=True, embedding=local)) is None
+    assert remote_recall_warning(dataclasses.replace(base, memory=True)) is None
+
+
+@needs_database
 async def test_search_by_meaning_and_past_chats(memory_api):
     api, app = memory_api
     app.state.storage.semantic = FakeSemantic()  # type: ignore[attr-defined]
@@ -522,48 +559,32 @@ async def test_nothing_in_an_incognito_chat_or_with_memory_off(memory_api):
 
 
 @needs_database
-async def test_outside_servers_and_bad_tokens_go_to_typescript(memory_api, database):
+async def test_outside_servers_are_served_and_bad_tokens_refused(memory_api, database):
     api, _app = memory_api
+    # An outside MCP server's token (memoryAccess) reads the user's memory as a chat run's does.
+    got = await api.get("/memory/agent", headers=token(via="mcp:lab"))
+    assert got.status_code == 200, got.text
+    assert "Short answers" in got.json()["prompt"]
+    view = await tool(api, "memory_view", {"name": "reply-style"}, via="mcp:lab")
+    assert "Lead with the result." in view["text"]
     for headers in (
         {},
-        token(via="mcp:lab"),
+        {tokens.MEMORY_HEADER: "bad"},
         token(aud=tokens.STORAGE_AUDIENCE),
         token(thread=DROP),
         token(exp=1),
-        local_token(),
+        local_token(),  # unsigned, and login is on
     ):
         answer = await api.get("/memory/agent", headers=headers)
-        assert answer.json() == {"from": "typescript"}, headers
-    assert support.forwarded == ["GET /memory/agent"] * 6
-    support.forwarded.clear()
+        assert (answer.status_code, answer.json()) == (401, {"error": "Sign in first"}), headers
 
     # Without login, the unsigned local token is the local user's.
     async with Client(database, None, memory=True) as (local, _):
         await local.put("/memory/notes/local-note", json=note("Here.", "Local", "reference"))
         ok = await local.get("/memory/agent", headers=local_token())
         assert ok.status_code == 200 and "local-note" in ok.json()["prompt"]
-        assert (await local.get("/memory/agent", headers=token())).json() == {"from": "typescript"}
-        assert (await local.get("/memory/agent", headers=local_token(via="mcp:x"))).json() == {
-            "from": "typescript"
-        }
-        assert support.forwarded == ["GET /memory/agent"] * 2
-        support.forwarded.clear()
-
-
-@needs_database
-async def test_standalone_api_serves_mcp_memory_and_rejects_unsigned_calls(memory_api):
-    api, app = memory_api
-    legacy_http = app.state.http
-    app.state.http = None
-    try:
-        got = await api.get("/memory/agent", headers=token(via="mcp:lab"))
-        assert got.status_code == 200, got.text
-        assert "Short answers" in got.json()["prompt"]
-        view = await tool(api, "memory_view", {"name": "reply-style"}, via="mcp:lab")
-        assert "Lead with the result." in view["text"]
-        assert (await api.get("/memory/agent")).status_code == 401
-        assert (
-            await api.get("/memory/agent", headers={tokens.MEMORY_HEADER: "bad"})
-        ).status_code == 401
-    finally:
-        app.state.http = legacy_http
+        # A signed token means the app has login on, which this server doesn't.
+        assert (await local.get("/memory/agent", headers=token())).status_code == 401
+        # An outside server's unsigned token is the local user's too: there is only one user.
+        other = await local.get("/memory/agent", headers=local_token(via="mcp:x"))
+        assert other.status_code == 200 and "local-note" in other.json()["prompt"]

@@ -107,6 +107,8 @@ interface Memory {
   mode: MemoryMode;
   /** This chat is incognito: Claude neither reads nor saves memory in it. */
   incognito: boolean;
+  /** The outside embedding API's host that searching notes sends their text to; null when it stays on the server. */
+  searchSentTo: string | null;
   notes: MemorySummary[];
   /** Changes Claude proposed, waiting for you. */
   inbox: InboxItem[];
@@ -181,6 +183,7 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Memory["status"]>("loading");
   const [mode, setModeState] = useState<Memory["mode"]>("on");
   const [incognito, setIncognitoState] = useState(false);
+  const [searchSentTo, setSearchSentTo] = useState<string | null>(null);
   const [notes, setNotes] = useState<MemorySummary[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [shared, setShared] = useState<SharedSummary[]>([]);
@@ -198,24 +201,16 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
       const query = new URLSearchParams();
       if (threadId) query.set("thread", threadId);
       if (nodeId) query.set("node", nodeId);
-      const data = await call<{
-        mode: Memory["mode"];
-        incognito: boolean;
-        notes: MemorySummary[];
-        inbox?: InboxItem[];
-        shared?: SharedSummary[];
-        sharedProposals?: SharedProposal[];
-        targets?: SharedTarget[];
-        installs?: PackInstall[];
-      }>(`/api/memory${query.size ? `?${query}` : ""}`);
+      const data = await call<Schema["MemoryOverview"]>(`/api/memory${query.size ? `?${query}` : ""}`);
       setModeState(data.mode);
       setIncognitoState(data.incognito);
+      setSearchSentTo(data.searchSentTo ?? null);
       setNotes(data.notes);
-      setInbox(data.inbox ?? []);
-      setShared(data.shared ?? []);
-      setSharedProposals(data.sharedProposals ?? []);
-      setTargets(data.targets ?? []);
-      setInstalls(data.installs ?? []);
+      setInbox(data.inbox);
+      setShared(data.shared);
+      setSharedProposals(data.sharedProposals);
+      setTargets(data.targets);
+      setInstalls(data.installs);
       setStatus("ready");
     } catch {
       setStatus("unavailable");
@@ -409,13 +404,13 @@ export function MemoryProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
+      status, mode, incognito, searchSentTo, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
       shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
       installs,
     }),
     [
-      status, mode, incognito, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
+      status, mode, incognito, searchSentTo, notes, inbox, accept, reject, activity, undoChange, selected, openNote, reload,
       setMode, setIncognito, detail, save, remove, archive, restore, undo, turn,
       shared, sharedProposals, targets, sharedDetail, shareCopy, updateShared, removeShared, setSharedMode, decideShared,
       installs,
@@ -588,7 +583,7 @@ function NoteRow({ note }: { note: MemorySummary }) {
 
 /** The Memory view of the side panel. */
 export function MemoryPanel() {
-  const { status, mode, notes, inbox, setMode, openNote, reload } = useMemory();
+  const { status, mode, searchSentTo, notes, inbox, setMode, openNote, reload } = useMemory();
   const [showArchived, setShowArchived] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   // Claude also learns from past chats in the background: catch up when the
@@ -647,6 +642,12 @@ export function MemoryPanel() {
               mode === "ask" ? " Claude's changes wait below for you to accept." : ""
             }`}
       </p>
+      {searchSentTo && mode !== "off" && (
+        <p data-testid="memory-search-sent" className="px-3 pb-2 text-xs text-[var(--muted-foreground)]">
+          When Claude searches your notes by meaning, their text is sent to {searchSentTo}, the embedding service this
+          deployment uses.
+        </p>
+      )}
       {inbox.length > 0 && (
         <section aria-label="For review" className="mb-2 border-y border-[var(--border)] bg-[var(--secondary)]/40">
           <h3 className="flex items-center gap-1.5 px-3 pt-2 text-xs font-semibold">

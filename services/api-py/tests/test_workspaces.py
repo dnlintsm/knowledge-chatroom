@@ -654,7 +654,7 @@ async def _lab_with_an_experiment(database, api, alice, bob):
         headers=alice,
         json={"userId": bob_id, "role": "member", "access": "viewer"},
     )
-    # Creating one is still the TypeScript server's route.
+    # An experiment in it, inserted directly.
     async with await psycopg.AsyncConnection.connect(database, autocommit=True) as conn:
         cur = await conn.execute(
             "INSERT INTO experiments (workspace_id, node_id, author_id, maintainer_id, title) "

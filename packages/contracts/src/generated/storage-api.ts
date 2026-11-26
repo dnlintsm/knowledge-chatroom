@@ -3135,6 +3135,12 @@ export interface components {
             /** @description Packs installed in places you read. */
             installs: components["schemas"]["PackInstall"][];
             types: components["schemas"]["MemoryType"][];
+            /**
+             * @description Present when the deployment embeds text with an outside API (`EMBEDDING_BASE_URL`):
+             *     that API's host. Claude's `memory_search` then sends the text of your notes there.
+             *     Absent when the embedding model runs on the server, or search by meaning is off.
+             */
+            searchSentTo?: string;
             limits: {
                 notes: number;
                 body: number;
@@ -6003,6 +6009,33 @@ export interface operations {
                          * @description Once storage is open: whether Postgres enforces access too (row-level
                          *     security). `off` means only the app's own checks apply; the database user
                          *     can't use the restricted role. Absent before storage opens and without a database.
+                         * @enum {string}
+                         */
+                        rowSecurity?: "on" | "off";
+                    };
+                };
+            };
+            /**
+             * @description Up, but not serving storage: the database is unreachable or waiting for its migrations,
+             *     storage has not opened yet, or `ROW_SECURITY=required` and row-level security is off.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        status: "degraded";
+                        /**
+                         * @description `down`: it can't be reached. `behind`: migrations are not applied yet.
+                         *     `ahead`: it has migrations this server doesn't know. `ready`: its migrations
+                         *     are applied, and something else keeps storage closed (see `rowSecurity`).
+                         * @enum {string}
+                         */
+                        database: "ready" | "behind" | "ahead" | "down";
+                        /**
+                         * @description As in the 200 answer. `off` here with `ROW_SECURITY=required` is why storage is refused.
                          * @enum {string}
                          */
                         rowSecurity?: "on" | "off";

@@ -9,9 +9,7 @@ is optional: without pgvector, or with EMBEDDING_MODEL=off, search stays
 word-based.
 
 Embedding happens in the background (SemanticIndex.start), so a new file is
-found by its words at once and by meaning a few seconds later. This server
-runs that loop; the TypeScript server behind it, started with
-SEARCH_INDEXER=off, only embeds queries.
+found by its words at once and by meaning a few seconds later.
 """
 
 from __future__ import annotations
@@ -26,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from psycopg_pool import AsyncConnectionPool
@@ -143,6 +142,11 @@ class LocalEmbedder:
         return await asyncio.to_thread(self._run, [prefix + t for t in texts])
 
 
+def remote_host(base_url: str) -> str:
+    """The host an embeddings endpoint is on; the address as given when it has none."""
+    return urlsplit(base_url).hostname or base_url
+
+
 class ApiEmbedder:
     """
     A model behind an OpenAI-compatible `POST /embeddings` endpoint: a
@@ -160,6 +164,8 @@ class ApiEmbedder:
     ) -> None:
         self.model = model
         self.url = re.sub(r"/+$", "", base_url) + "/embeddings"
+        # Where the text goes, for telling people (the Memory panel, the startup log).
+        self.remote_host = remote_host(base_url)
         self.source = f"{model} at {self.url}"
         self.api_key = api_key
         self.dimensions = dimensions

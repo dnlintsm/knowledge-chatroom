@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 import uvicorn
-from support import ALICE, SECRET, forwarded, typescript
+from support import ALICE, SECRET
 
 from api_py import tokens
 from api_py.app import create_app
@@ -59,17 +59,13 @@ def servers(config: dict[str, Any], **env: str) -> dict[str, ExternalServer]:
 # --- MCP_SERVERS, as mcp.ts reads it
 
 
-def test_mcp_servers_unset_serves_an_empty_menu_unless_legacy_forwarding_is_explicit():
+def test_mcp_servers_unset_serves_an_empty_menu():
     assert servers_from_env({}) is None
     assert servers_from_env({"MCP_SERVERS": " \n"}) is None
     settings = settings_from_env({"AUTH_MODE": "local"})
     assert settings.tools is not None and settings.tools.servers == {}
     whitespace = settings_from_env({"AUTH_MODE": "local", "MCP_SERVERS": " \n"})
     assert whitespace.tools is not None and whitespace.tools.servers == {}
-    assert (
-        settings_from_env({"AUTH_MODE": "local", "TS_AGENT_URL": "http://legacy:8100"}).tools
-        is None
-    )
 
 
 def test_mcp_servers_parse_like_mcp_ts(tmp_path: Path, caplog: pytest.LogCaptureFixture):
@@ -176,15 +172,13 @@ def test_timeouts_and_token_lifetimes():
 async def api(
     tools: ToolsSettings | None, secret: str | None = SECRET, call: Any = None
 ) -> AsyncIterator[httpx.AsyncClient]:
-    forwarded.clear()
     settings = Settings(
-        ts_agent_url="http://ts",
         database_url=None,
         auth_secret=secret,
         migrations_dir=Path("."),
         tools=tools,
     )
-    app = create_app(settings, transport=httpx.MockTransport(typescript))
+    app = create_app(settings)
     if call:
         app.state.call_tool = call
     async with (
@@ -226,7 +220,6 @@ async def test_menu():
         assert (await client.get("/tools/", headers=ALICE)).status_code == 200
     async with api(lab_tools(), secret=None) as client:
         assert (await client.get("/tools")).status_code == 200  # no login: everyone is one user
-    assert not forwarded
 
 
 async def test_refusals():
@@ -262,7 +255,7 @@ async def test_refusals():
                 400,
                 {"error": "Expected {arguments: {...}}"},
             ), body[:20]
-    assert not recorder.calls and not forwarded
+    assert not recorder.calls
 
 
 async def test_a_call_carries_the_users_tokens():
@@ -343,14 +336,12 @@ async def test_errors_and_unreachable_servers():
         )
 
 
-async def test_without_mcp_servers_typescript_answers():
+async def test_without_tools_settings_nothing_is_served():
+    # settings_from_env always gives an empty menu; a Settings made without one serves none.
     async with api(None) as client:
-        assert (await client.get("/tools", headers=ALICE)).json() == {"from": "typescript"}
-        assert (await client.post("/tools/lab/search", headers=ALICE)).json() == {
-            "from": "typescript"
-        }
-        assert (await client.get("/toolsx", headers=ALICE)).json() == {"from": "typescript"}
-    assert forwarded == ["GET /tools", "POST /tools/lab/search", "GET /toolsx"]
+        for method, path in [("GET", "/tools"), ("POST", "/tools/lab/search"), ("GET", "/toolsx")]:
+            answer = await client.request(method, path, headers=ALICE)
+            assert (answer.status_code, answer.json()) == (404, {"error": "Not found"}), path
 
 
 # --- A real MCP server, over streamable HTTP and SSE

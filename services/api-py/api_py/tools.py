@@ -10,8 +10,7 @@ The servers come from MCP_SERVERS, read as agent-py reads it (agent_py/mcp.py); 
 those with a `ui` block show up here. A call goes to the server as a chat run's
 would: with the user's identity (forwardIdentity, signed for "mcp:<server>") and
 a storage token (storageAccess), so the server sees the same person whether
-Claude or a button asked. These routes don't need storage. While MCP_SERVERS
-isn't set here and TS_AGENT_URL is, they pass through to that server.
+Claude or a button asked. These routes don't need storage.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ from fastapi.responses import Response
 from . import tokens
 from .access import is_uuid
 from .paths import JS_SPACE, js_trim, utf16_len
-from .proxy import forward
 from .run_report import js_json
 from .skills_routes import js_to_number
 from .storage_routes import (
@@ -44,6 +42,7 @@ from .storage_routes import (
     raw_path,
     read_body,
 )
+from .unserved import not_served
 
 logger = logging.getLogger("api_py")
 router = APIRouter()
@@ -407,7 +406,7 @@ async def tools_route(request: Request) -> Response:
     tools_settings: ToolsSettings | None = state.settings.tools
     path = raw_path(request)
     if tools_settings is None or not _OWN_PATH.match(path):
-        return await forward(request, state.http)
+        return not_served(request)
     servers = tools_settings.servers
     secret = state.settings.auth_secret
     try:

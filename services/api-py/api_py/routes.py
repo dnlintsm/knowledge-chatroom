@@ -1,9 +1,8 @@
 """The route groups this server serves, one router each.
 
-Every other request goes to proxy.forward, which answers 404 unless
-TS_AGENT_URL is set. A route added here is in the API's spec
-(packages/contracts/openapi/storage.yaml) and its conformance suite
-(packages/contracts/conformance).
+Every other request is answered 404 (unserved.not_served). A route added here
+is in the API's spec (packages/contracts/openapi/storage.yaml) and its
+conformance suite (packages/contracts/conformance).
 """
 
 from __future__ import annotations
@@ -40,6 +39,7 @@ STORAGE_PREFIXES = (
     "/nodes",
     "/files",
     "/experiments",
+    "/runs",
     "/proposals",
     "/search",
     "/chats",

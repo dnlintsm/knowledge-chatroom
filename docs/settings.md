@@ -67,7 +67,7 @@ Storage, access, skills, memory and search (`services/api-py`).
 | `CLAUDE_MODEL` | `claude-sonnet-5` | Main model name; here it only decides which small model is used when `SUGGESTIONS_MODEL` is unset. |
 | `DATABASE_URL` | unset | Postgres connection string; unset means no storage, and `python -m api_py.migrate` refuses to run without it. |
 | `EMBEDDING_API_KEY` | unset | Bearer key for the embedding endpoint; read only when `EMBEDDING_BASE_URL` is set. |
-| `EMBEDDING_BASE_URL` | unset | OpenAI-style embedding endpoint to use instead of the local model; needs `EMBEDDING_MODEL` or startup is refused. |
+| `EMBEDDING_BASE_URL` | unset | OpenAI-style embedding endpoint to use instead of the local model; needs `EMBEDDING_MODEL` or startup is refused. Passages of workspace files are sent there, and with `MEMORY=on` so is the text of users' personal memory notes when Claude searches them; api-py logs a warning at startup and the Memory panel tells each user. |
 | `EMBEDDING_CACHE_DIR` | .cache/knowledge-chatroom/models under the user's home folder | Folder the local embedding model is downloaded to. |
 | `EMBEDDING_DIMENSIONS` | unset | Vector size asked of the embedding endpoint, a positive whole number; read only when `EMBEDDING_BASE_URL` is set. |
 | `EMBEDDING_MODEL` | `Xenova/multilingual-e5-small` | Model for search by meaning; `off` leaves search to words only. |
@@ -95,7 +95,6 @@ Storage, access, skills, memory and search (`services/api-py`).
 | `STORAGE_TOKEN_SECONDS` | `3600` | Lifetime of the storage token sent with a tools-menu call; whole seconds from 60 to 86400, else startup is refused. |
 | `SUGGESTIONS_MODEL` | `claude-haiku-5-5` when the main model's name starts with "claude-", otherwise the main model | Small model that writes the chat's follow-up chips, and the fallback for `MEMORY_MODEL`. |
 | `TOOLS_CALL_TIMEOUT_MS` | `120000` | Milliseconds a tools-menu call to an outside MCP server may take. |
-| `TS_AGENT_URL` | unset | An older TypeScript server to forward unknown routes to; unset turns forwarding off. |
 | `WORKSPACE_CREATORS` | unset | Emails or login subjects, split by commas or spaces, who may create workspaces; unset lets every signed-in user. |
 
 ## agent-py

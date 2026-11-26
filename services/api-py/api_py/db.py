@@ -27,7 +27,7 @@ _MIGRATION = re.compile(r"^\d+_.*\.sql$")
 
 class SchemaState(str, Enum):  # noqa: UP042 - preserve Enum string behavior
     READY = "ready"  # exactly the migrations this server knows
-    BEHIND = "behind"  # some not applied yet: this server applies them (or, with MIGRATIONS=off, the TypeScript one)
+    BEHIND = "behind"  # some not applied yet: this server applies them (or, with MIGRATIONS=off, the migrate command)
     AHEAD = "ahead"  # migrations this server doesn't know: it is older than the database
 
 
