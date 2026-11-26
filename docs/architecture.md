@@ -273,6 +273,20 @@ record (`runs`, migration `029_runs.sql`, `services/api-py/api_py/runs.py`):
   a finish retried after someone starts the next Run doesn't end that one (409 `running`).
 - Run changes reach the event stream as `{op: "run", change, id, experiment, node}`, followed
   by the Experiment's update event, for whoever can see the Experiment.
+- **Import folder as Experiment** (`POST /experiments/import`, `api_py/imports.py`) makes an
+  Experiment of a folder already in the workspace without sending its bytes again: each file
+  is copied in at its path relative to the folder, sharing its stored bytes and starting a
+  history of its own; a `params.json` at the folder's top gives the planned parameters.
+  `?preview` answers what it would do. **Move** also deletes the files it imported (never
+  ones left out; a file changed since the listing stops the import, 412), and a
+  **pointer** leaves an `EXPERIMENT.md` there naming the Experiment, never in place of one
+  the folder keeps (412, `exists`; Move takes the folder's own in); both need edit access
+  where the folder is. A folder in a restricted node imported to outside it needs Full access
+  on that node. Storage tokens can't import. In Files, a folder's **Import as Experiment**
+  button opens the preview (`import-folder-dialog.tsx`): title, hypothesis, destination,
+  who sees it, the planned parameters, the files with their sizes and any left out, and a
+  note when a restriction travels; Move and the pointer are off, saying why, without edit
+  access. Importing moves you into the new Experiment.
 
 ### Actions
 

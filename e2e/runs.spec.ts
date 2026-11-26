@@ -308,6 +308,78 @@ test("an experiment runs more than once: two runs, compared, and one archived", 
   await expect(sweep).not.toContainText("455");
 });
 
+test("a folder in Files becomes an Experiment, from a preview of what it will hold", async ({ page, request }) => {
+  const name = `sweep-${Date.now()}`;
+  const folder = `imports/${name}`;
+  const put = (path: string, text: string) => request.put(`/api/files/${folder}/${path}`, { data: text, headers: md });
+  expect((await put("params.json", '{"rf_W": 300, "gas": "CF4"}')).ok()).toBe(true);
+  expect((await put("data/out.csv", "rate\n410\n")).ok()).toBe(true);
+  expect((await put("notes.md", "# Chamber notes\n")).ok()).toBe(true);
+
+  await page.goto("/");
+  await showFiles(page);
+  const row = page.getByRole("button", { name, exact: true });
+  await row.hover();
+  await page.getByRole("button", { name: `Import ${folder} as Experiment` }).click();
+
+  // The preview: its files at their paths in the folder, and the planned parameters from params.json.
+  const dialog = page.getByRole("dialog", { name: `Import ${name} as an Experiment` });
+  await expect(dialog.getByTestId("import-file")).toHaveCount(3);
+  await expect(dialog.getByTestId("import-file").filter({ hasText: "data/out.csv" })).toBeVisible();
+  const planned = dialog.getByRole("region", { name: "Planned parameters" });
+  await expect(planned).toContainText("rf_W");
+  await expect(planned).toContainText("CF4");
+  await expect(dialog.getByRole("textbox", { name: "Title" })).toHaveValue(name);
+  await dialog.getByRole("textbox", { name: "Hypothesis" }).fill("Hotter RF etches faster");
+  await dialog.getByRole("radio", { name: /^Move/ }).check();
+  await dialog.getByRole("checkbox", { name: /EXPERIMENT\.md/ }).check();
+  await shot(page, "02i-import-folder");
+  await dialog.getByRole("button", { name: "Move into an Experiment" }).click();
+
+  // You are in the new Experiment, with the folder's files and its planned parameters.
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Location" })).toContainText(name);
+  const { experiments } = (await (await request.get("/api/experiments")).json()) as { experiments: (Experiment & { params: Record<string, unknown>; hypothesis: string })[] };
+  const made = experiments.find((e) => e.title === name)!;
+  expect(made.params).toEqual({ rf_W: 300, gas: "CF4" });
+  expect(made.hypothesis).toBe("Hotter RF etches faster");
+  const inside = (await (await request.get(`/api/files?experiment=${made.id}`)).json()) as { files: { path: string }[] };
+  expect(inside.files.map((f) => f.path).sort()).toEqual(["data/out.csv", "notes.md", "params.json"]);
+
+  // Moved: the folder keeps only the pointer to it.
+  const root = (await (await request.get("/api/files")).json()) as { files: { path: string }[] };
+  expect(root.files.map((f) => f.path).filter((p) => p.startsWith(`${folder}/`))).toEqual([`${folder}/EXPERIMENT.md`]);
+});
+
+test("a folder's own EXPERIMENT.md isn't replaced by the pointer", async ({ page, request }) => {
+  const name = `kept-${Date.now()}`;
+  const folder = `imports/${name}`;
+  const put = (path: string, text: string) => request.put(`/api/files/${folder}/${path}`, { data: text, headers: md });
+  expect((await put("EXPERIMENT.md", "# Notes kept by hand\n")).ok()).toBe(true);
+  expect((await put("data/out.csv", "rate\n410\n")).ok()).toBe(true);
+
+  await page.goto("/");
+  await showFiles(page);
+  await page.getByRole("button", { name, exact: true }).hover();
+  await page.getByRole("button", { name: `Import ${folder} as Experiment` }).click();
+  const dialog = page.getByRole("dialog", { name: `Import ${name} as an Experiment` });
+  await expect(dialog.getByTestId("import-file")).toHaveCount(2);
+  // Copy keeps the folder's EXPERIMENT.md, so there is no room for a pointer.
+  const pointer = dialog.getByRole("checkbox", { name: /EXPERIMENT\.md/ });
+  await expect(pointer).toBeDisabled();
+  await expect(dialog).toContainText("The folder has an EXPERIMENT.md of its own. Move takes it into the Experiment.");
+  // Move takes it in, and the pointer takes its place.
+  await dialog.getByRole("radio", { name: /^Move/ }).check();
+  await expect(pointer).toBeEnabled();
+  await pointer.check();
+  await dialog.getByRole("button", { name: "Move into an Experiment" }).click();
+  await expect(dialog).toBeHidden();
+  const { experiments } = (await (await request.get("/api/experiments")).json()) as { experiments: Experiment[] };
+  const made = experiments.find((e) => e.title === name)!;
+  expect(await (await request.get(`/api/files/EXPERIMENT.md?experiment=${made.id}`)).text()).toBe("# Notes kept by hand\n");
+  expect(await (await request.get(`/api/files/${folder}/EXPERIMENT.md`)).text()).toContain(`?experiment_id=${made.id}`);
+});
+
 test("an archived experiment says why it's read only, and a rerun reads its inputs as recorded (#187)", async ({ page, request }) => {
   const run = await makeRun(request, "Dose sweep", { "uploads/dose.csv": "dose\n30\n" });
   const linked = await request.post(`/api/experiments/${run.id}/inputs`, {

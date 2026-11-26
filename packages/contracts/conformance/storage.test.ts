@@ -538,6 +538,18 @@ describe("storage API conformance", { skip: !(BASE && SECRET) && "STORAGE_URL an
     await call("GET", "/runs/00000000-0000-4000-8000-000000000000", { headers: alice, expect: 404 });
   });
 
+  step("importing a folder as an experiment", async () => {
+    const body = { node: mod.id, folder: "notes" };
+    const seen = (await call<Schema["FolderImport"]>("POST", "/experiments/import?preview", { headers: alice, json: body, expect: 200 })).data;
+    assert.ok(seen.files.some((f) => f.path === "a.md"));
+    assert.equal(seen.experiment, undefined);
+    const made = (await call<Schema["FolderImport"]>("POST", "/experiments/import", { headers: alice, json: { ...body, title: "Imported notes" }, expect: 201 })).data;
+    assert.equal(made.experiment?.title, "Imported notes");
+    await call("POST", "/experiments/import", { headers: alice, json: { node: mod.id, folder: "nothing-here" }, expect: 400 });
+    await call("POST", "/experiments/import", { headers: storageToken("conformance|alice"), json: body, expect: 403 });
+    await call("POST", "/experiments/import", { headers: alice, json: { node: "00000000-0000-4000-8000-000000000000", folder: "notes" }, expect: 404 });
+  });
+
   step("experiment uploads", async () => {
     // Under the suite's own tree (deleted with it), adding a loop and a process named None.
     const id = crypto.randomUUID();

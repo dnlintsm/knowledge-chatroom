@@ -69,6 +69,9 @@
     PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?} -> {experiment|null}
     PUT    /experiments/<id>/collaborators/<user>  add one -> {experiment}
     DELETE /experiments/<id>/collaborators/<user>  remove one (or yourself) -> {experiment|null}
+    POST   /experiments/import      {node, folder, destination?, title?, hypothesis?, status?,
+                                    move?, pointer?} -> a folder as an experiment (201);
+                                    ?preview answers what it would do (200)
     POST   /experiments/upload      multipart: a "meta" part {id, path, title, ...} and
                                     one part per file -> {experiment, lineage, created,
                                     files} (201)
@@ -362,6 +365,8 @@ def agent_refusal(request: Request) -> str | None:
     if section == "experiments":
         if method == "POST" and sub == "upload":
             return "Uploading an experiment adds nodes and is its user's own: storage tokens can't use /experiments/upload"
+        if method == "POST" and sub == "import":
+            return "Importing a folder as an experiment is its user's own: storage tokens can't use /experiments/import"
         if method == "POST" and sub in ("", "runs"):
             return None
         if method == "PATCH" and sub != "" and "/" not in sub:
@@ -1139,6 +1144,29 @@ async def handle_experiments(request: Request, session: Session) -> Response:
             ),
         )
 
+    if experiment_id == "import":
+        if method != "POST":
+            return error(405, "Method not allowed")
+        flags = flag_params(request, "preview")
+        if isinstance(flags, Response):
+            return flags
+        body = await read_json(request)
+        found = import_request(body) if body is not None else None
+        if found is None:
+            return error(400, IMPORT_EXPECTED)
+        made = await session.import_folder(
+            found["node"],
+            found["folder"],
+            destination=found["destination"],
+            given=found["given"],
+            shared=found["shared"],
+            move=found["move"],
+            pointer=found["pointer"],
+            preview=flags["preview"],
+            max_bytes=request.app.state.settings.max_upload_bytes,
+        )
+        return json_response(200 if flags["preview"] else 201, made)
+
     if experiment_id == "runs":
         if method != "POST":
             return error(405, "Method not allowed")
@@ -1252,6 +1280,45 @@ async def handle_experiments(request: Request, session: Session) -> Response:
             return json_response(200, {"deleted": experiment_id})
         return error(404, "Experiment not found")
     return error(405, "Method not allowed")
+
+
+IMPORT_EXPECTED = (
+    "Expected {node: string|null, folder: string, destination?: string|null, title?: string, "
+    "hypothesis?: string, status?: draft|shared, move?: boolean, pointer?: boolean}"
+)
+
+
+def import_request(body: dict[str, Any]) -> dict[str, Any] | None:
+    """A POST /experiments/import body, or None when it isn't one."""
+    allowed = {"node", "folder", "destination", "title", "hypothesis", "status", "move", "pointer"}
+    if set(body) - allowed or "node" not in body or not _string_or_null(body["node"]):
+        return None
+    folder = body.get("folder")
+    if not isinstance(folder, str) or not folder.strip("/ "):
+        return None
+    destination = body.get("destination", body["node"])
+    if not _string_or_null(destination):
+        return None
+    given: dict[str, Any] = {}
+    for key in ("title", "hypothesis"):
+        if key in body:
+            if not isinstance(body[key], str):
+                return None
+            given[key] = body[key]
+    status = body.get("status", "draft")
+    if status not in ("draft", "shared"):
+        return None
+    flags = {key: body.get(key, False) for key in ("move", "pointer")}
+    if not all(isinstance(v, bool) for v in flags.values()):
+        return None
+    return {
+        "node": body["node"],
+        "folder": folder,
+        "destination": destination,
+        "given": given,
+        "shared": status == "shared",
+        **flags,
+    }
 
 
 NEW_RUN_EXPECTED = (

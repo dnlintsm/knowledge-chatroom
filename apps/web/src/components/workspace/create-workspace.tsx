@@ -177,7 +177,18 @@ export function CreateWorkspaceDialog({
 }
 
 /** A small modal dialog: closes on Escape, the close button or a click outside. */
-export function Dialog({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+export function Dialog({
+  label,
+  onClose,
+  wide = false,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  /** A wider box, for a dialog that lists things. */
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const focused = document.activeElement as HTMLElement | null;
@@ -196,7 +207,7 @@ export function Dialog({ label, onClose, children }: { label: string; onClose: (
         aria-label={label}
         tabIndex={-1}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
-        className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-[var(--foreground)] shadow-xl outline-none"
+        className={`w-full ${wide ? "max-w-xl" : "max-w-md"} rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-[var(--foreground)] max-h-[80vh] overflow-y-auto shadow-xl outline-none`}
       >
         <header className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{label}</h2>

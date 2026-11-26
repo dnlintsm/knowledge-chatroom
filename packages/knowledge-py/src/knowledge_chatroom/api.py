@@ -238,6 +238,27 @@ class ExperimentInput(BaseModel):
     state: ExperimentState | None = None
 
 
+class File(BaseModel):
+    path: str
+    """
+    Relative to the folder
+    """
+    size: Annotated[int, Field(ge=0)]
+
+
+class Restricted(BaseModel):
+    """
+    The restricted node the folder is in, when the destination is outside it.
+    """
+
+    id: str
+    name: str
+    fullAccess: bool
+    """
+    Whether you have Full access there
+    """
+
+
 RunState = TypeAliasType("RunState", Literal["running", "done", "failed"])
 
 
@@ -1138,6 +1159,29 @@ class UploadExperimentRequest(BaseModel):
     meta: ExperimentUploadMeta
 
 
+class ImportFolderAsExperimentRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    node: str | None
+    """
+    The folder's node; null for the workspace root.
+    """
+    folder: Annotated[str, Field(min_length=1)]
+    destination: str | None = None
+    """
+    Where the experiment goes; the folder's node when left out.
+    """
+    title: Annotated[str | None, Field(max_length=200)] = None
+    """
+    The folder's name when left out.
+    """
+    hypothesis: str | None = None
+    status: Literal["draft", "shared"] | None = "draft"
+    move: bool | None = False
+    pointer: bool | None = False
+
+
 class DeleteExperimentResponse(BaseModel):
     deleted: str
     """
@@ -2024,6 +2068,36 @@ class Experiment(BaseModel):
     restorable: bool | None = None
     """
     Only in the ?deleted list, false when its node was deleted too (restore answers 409).
+    """
+
+
+class FolderImport(BaseModel):
+    title: str
+    destination: str | None
+    params: dict[str, Any]
+    """
+    From the folder's params.json; {} without one.
+    """
+    files: list[File]
+    skipped: list[str]
+    """
+    Files left out, larger than an upload may be.
+    """
+    restricted: Restricted | None
+    """
+    The restricted node the folder is in, when the destination is outside it.
+    """
+    canMove: bool
+    """
+    Edit access where the folder is.
+    """
+    canPoint: bool
+    """
+    Edit access where the folder is.
+    """
+    experiment: Experiment | None = None
+    """
+    Only once imported.
     """
 
 
