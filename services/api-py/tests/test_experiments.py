@@ -298,7 +298,9 @@ async def test_bodies_and_methods(api):
     finish = await api.post(
         f"/experiments/{exp['id']}/finish", headers=ALICE, json={"results": [], "state": "done"}
     )
-    assert finish.json() == {"error": "Expected {results: object, state?: done|failed}"}
+    assert finish.json() == {
+        "error": "Expected {results: object, state?: done|failed, run?: run id}"
+    }
     inputs = await api.post(f"/experiments/{exp['id']}/inputs", headers=ALICE, json={"inputs": "x"})
     assert inputs.json() == {
         "error": "Expected {inputs: [{path: string, node?: string|null, experiment?: string|null, as?: string}]}"
@@ -429,7 +431,9 @@ async def test_runs_record_inputs_finish_and_rerun(api):
         etch,
         {"temp": 70},
     )
-    assert second["provenance"]["rerunOf"] == {"id": run["id"]}
+    # It names the experiment it reran, and that experiment's Run it reran (its latest).
+    (ran,) = (await api.get(f"/experiments/{run['id']}/runs", headers=ALICE)).json()["runs"]
+    assert second["provenance"]["rerunOf"] == {"id": run["id"], "run": ran["id"]}
     pinned = (
         await api.get(f"/files/inputs/a.csv?experiment={second['id']}", headers=ALICE)
     ).content

@@ -50,6 +50,36 @@ TEXT_EXTENSIONS = set(
 )
 
 
+# A run's input files, for create_experiment and start_run.
+INPUTS: dict[str, Any] = {
+    "type": "array",
+    "description": "Files the run reads (uploads, data, earlier results), copied under inputs/ at their current "
+    "versions; the user must be able to read each.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "The file's path, e.g. uploads/wafer-map.csv",
+            },
+            "node": {
+                "type": "string",
+                "description": "Its knowledge node; omit for the workspace root.",
+            },
+            "experiment": {
+                "type": "string",
+                "description": "Its experiment, if it is in one.",
+            },
+            "as": {
+                "type": "string",
+                "description": "Name under inputs/; defaults to its file name.",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+
 def storage_url(env: Mapping[str, str]) -> str:
     """Where api-py serves storage, as the app finds it (apps/web/src/lib/agent-target.ts)."""
     return (env.get("LOCAL_AGENT_URL") or DEFAULT_STORAGE_URL).rstrip("/")
@@ -763,33 +793,7 @@ def file_tools(
                     "type": "object",
                     "description": 'What is varied, e.g. {"rfPower_W": 40}',
                 },
-                "inputs": {
-                    "type": "array",
-                    "description": "Files the experiment reads (uploads, data, earlier results); the user must be able "
-                    "to read each.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "The file's path, e.g. uploads/wafer-map.csv",
-                            },
-                            "node": {
-                                "type": "string",
-                                "description": "Its knowledge node; omit for the workspace root.",
-                            },
-                            "experiment": {
-                                "type": "string",
-                                "description": "Its experiment, if it is in one.",
-                            },
-                            "as": {
-                                "type": "string",
-                                "description": "Name under inputs/; defaults to its file name.",
-                            },
-                        },
-                        "required": ["path"],
-                    },
-                },
+                "inputs": INPUTS,
                 "skill": {
                     "type": "string",
                     "description": "The skill this experiment follows, if any, e.g. analysis.",
@@ -844,12 +848,113 @@ def file_tools(
             }
         )
 
+    def provenance_now(skill: str | None) -> dict[str, Any]:
+        return {
+            "chat": meta.get("chat"),
+            "model": meta.get("model"),
+            **({"skill": {"name": skill}} if skill else {}),
+            "tools": versions,
+        }
+
+    @tool(
+        "start_run",
+        "Run an existing experiment again as its next Run (Run 2, Run 3, ...), in the same experiment and its working "
+        "files: for a correction, other parameters, or a repeat. Only one run of an experiment runs at a time, so "
+        "finish the running one first. Finish it with finish_run. Use create_experiment for a new question. Only "
+        "for experiments the user works on.",
+        schema(
+            {
+                "experiment": {"type": "string", "description": "Experiment id"},
+                "params": {
+                    "type": "object",
+                    "description": 'What this run varies, e.g. {"rfPower_W": 50}; defaults to the experiment\'s.',
+                },
+                "label": {
+                    "type": "string",
+                    "description": "A short name for this run, e.g. 'hotter chamber'.",
+                },
+                "inputs": INPUTS,
+                "skill": {
+                    "type": "string",
+                    "description": "The skill this run follows, if any, e.g. analysis.",
+                },
+            },
+            "experiment",
+        ),
+    )
+    @guarded
+    async def start_run(s: Storage, args: dict[str, Any]) -> ToolResult:
+        experiment = str(args["experiment"])
+        body: dict[str, Any] = {"provenance": provenance_now(args.get("skill"))}
+        body.update({k: args[k] for k in ("params", "label", "inputs") if k in args})
+        route = f"/experiments/{urllib.parse.quote(experiment, safe='')}/runs"
+        run = await s.json("POST", route, json_body=body)
+        linked = [i["path"] for i in run["provenance"].get("inputs", [])]
+        local = await write_run_inputs(s, workdir, experiment, linked) if workdir else {}
+        return text(
+            {
+                "ok": True,
+                "run": run["id"],
+                "number": run["number"],
+                "experiment": experiment,
+                "state": run["state"],
+                "params": run["params"],
+                "inputs": linked,
+                **({"inputsInWorkingFolder": local} if local else {}),
+            }
+        )
+
+    @tool(
+        "finish_run",
+        "Record a run's results and finish it: state done, or failed when it couldn't be completed (say why in the "
+        'report). Results are numbers with units in the key where you can, e.g. {"yield_pct": 92.5}. The run '
+        "keeps a record of every file of the experiment as it is now, and can't change after.",
+        schema(
+            {
+                "run": {
+                    "type": "string",
+                    "description": "Run id, from start_run or create_experiment",
+                },
+                "results": {
+                    "type": "object",
+                    "description": 'e.g. {"etchRate_nm_min": 41.2, "uniformity_pct": 3.1}',
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["done", "failed"],
+                    "description": "Defaults to done.",
+                },
+            },
+            "run",
+            "results",
+        ),
+    )
+    @guarded
+    async def finish_run(s: Storage, args: dict[str, Any]) -> ToolResult:
+        route = f"/runs/{urllib.parse.quote(str(args['run']), safe='')}/finish"
+        finished = await s.json(
+            "POST",
+            route,
+            json_body={"results": args["results"], "state": args.get("state") or "done"},
+        )
+        return text(
+            {
+                "ok": True,
+                "run": finished["id"],
+                "number": finished["number"],
+                "experiment": finished["experimentId"],
+                "state": finished["state"],
+                "results": finished["results"],
+                "files": finished["fileCount"],
+            }
+        )
+
     @tool(
         "set_experiment_results",
-        "Record an experiment's results and finish it: state done, or failed when it couldn't be completed (say why in "
-        "its report). Results replace the old ones whole, as numbers with units in the key where you can, e.g. "
-        '{"yield_pct": 92.5}. Also refreshes the record in its report.md front matter. Only for experiments the '
-        "user authored.",
+        "Record the results of an experiment's running run and finish it, as finish_run does, by the experiment's "
+        "id: state done, or failed when it couldn't be completed (say why in its report). Results replace the old "
+        'ones whole, as numbers with units in the key where you can, e.g. {"yield_pct": 92.5}. Also refreshes the '
+        "record in its report.md front matter. Only for experiments the user works on.",
         schema(
             {
                 "id": {"type": "string", "description": "Experiment id"},
@@ -932,6 +1037,8 @@ def file_tools(
         *([save_file] if workdir else []),
         list_experiments,
         create_experiment,
+        start_run,
+        finish_run,
         set_experiment_results,
         update_experiment,
         propose_experiment,

@@ -48,9 +48,22 @@
     GET    /experiments?deleted=1   {experiments} deleted ones you may restore, with
                                     deletedAt, deletedBy and restorable
     POST   /experiments/<id>/restore undo a delete, with the files deleted with it
+    GET    /experiments/<id>/runs   {runs}: its Runs, newest first (?archived, ?deleted)
+    POST   /experiments/<id>/runs   {label?, params?, inputs?, provenance?} -> another Run
+                                    (201); 409 {running} while one runs
+    GET    /runs?node=&descendants=&experiment=&archived  {runs} to compare, with each
+                                    one's experiment {id, title, nodeId}
+    GET    /runs/<id>               one Run, with its file record
+    PATCH  /runs/<id>               {label?, archived?}
+    DELETE /runs/<id>               soft delete (not while it runs); POST /runs/<id>/restore
+    POST   /runs/<id>/finish        {results, state?: done|failed}; takes its file record
+    POST   /runs/<id>/rerun         {experiment?: <its experiment>|null} -> the new Run (201)
+    GET    /runs/<id>/reads         {reads}: the Rules versions its agents read
+    GET    /runs/<id>/files         {files, taken}; /runs/<id>/files/<path> a recorded file
+    Deprecated for a release, acting on the latest Run:
     POST   /experiments/runs        {nodeId?, title?, hypothesis?, params?, inputs?,
                                     rerunOf?, provenance?} -> a new run (201) with a report.md
-    POST   /experiments/<id>/finish {results, state?: done|failed} -> the finished run
+    POST   /experiments/<id>/finish {results, state?: done|failed, run?} -> the finished run
     POST   /experiments/<id>/inputs {inputs: [{path, node?, experiment?, as?}]}
     GET    /experiments/<id>/reads  {reads}: the Rules versions its agents read while it ran
     PUT    /experiments/<id>/maintainer {userId, keepAsCollaborator?} -> {experiment|null}
@@ -113,9 +126,15 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import uploads
-from .access import ROLES, AccessError, ForbiddenError, LastOwnerError
+from .access import ROLES, AccessError, ForbiddenError, LastOwnerError, is_uuid
 from .chats import ChatError, ChatTakenError
-from .experiments import ANYWHERE, ExperimentError, ExperimentExistsError, ExperimentPlaceGoneError
+from .experiments import (
+    ANYWHERE,
+    ExperimentError,
+    ExperimentExistsError,
+    ExperimentPlaceGoneError,
+    clean_input,
+)
 from .files import ANY_VERSION, FileChangedError, FileExistsError_
 from .identity import identify
 from .nodes import NodeError, NodeNotFoundError
@@ -130,6 +149,7 @@ from .paths import (
 )
 from .proposals import EVERYWHERE, ProposalChangedError, ProposalError
 from .run_report import js_json, js_number
+from .runs import RunError, RunNotYoursError, RunRunningError, RunStillRunningError
 from .search import SearchError
 from .session import NOT_SEEN, Session
 from .unserved import not_served
@@ -144,7 +164,7 @@ _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 # /access%2Fusers reach these routes too. They are not served (404), so a
 # storage token's limits (agent_refusal) always see the section the handlers
 # act on.
-_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|proposals|search|chats)(/|$)")
+_OWN_PATH = re.compile(r"^/(access|nodes|files|experiments|runs|proposals|search|chats)(/|$)")
 # A file watch's keep-alive comment, so idle connections are not cut.
 HEARTBEAT_SECONDS = 25.0
 # Stored bytes are served from the app's origin, so a file opened as a page (an
@@ -300,6 +320,7 @@ def optional_id(value: Any) -> str | None | bool:
 
 # Claude never deletes experiments, so it doesn't see or undo deletes either.
 DELETED_REFUSED = "Claude doesn't list or restore deleted experiments"
+RUNS_DELETED_REFUSED = "Claude doesn't list or restore deleted runs"
 
 
 def agent_refusal(request: Request) -> str | None:
@@ -311,6 +332,12 @@ def agent_refusal(request: Request) -> str | None:
         return "Chat history stays with its user: storage tokens can't reach it"
     if section == "experiments" and sub == "" and "deleted" in request.query_params:
         return DELETED_REFUSED
+    if (
+        section == "experiments"
+        and "deleted" in request.query_params
+        and re.fullmatch(r"[^/]+/runs", sub)
+    ):
+        return RUNS_DELETED_REFUSED
     if section == "nodes" and re.fullmatch(r"[^/]+/(access|restriction|takeover)", sub):
         return "Claude doesn't manage access"
     if method in ("GET", "HEAD"):
@@ -339,13 +366,20 @@ def agent_refusal(request: Request) -> str | None:
             return None
         if method == "PATCH" and sub != "" and "/" not in sub:
             return None
-        if method == "POST" and re.fullmatch(r"[^/]+/(inputs|finish)", sub):
+        if method == "POST" and re.fullmatch(r"[^/]+/(inputs|finish|runs)", sub):
             return None
         if re.fullmatch(r"[^/]+/(maintainer|collaborators/[^/]+)", sub):
             return "Claude doesn't hand experiments over or choose who works on them"
         if re.fullmatch(r"[^/]+/restore", sub):
             return DELETED_REFUSED
         return "Claude doesn't delete experiments or move folders into them"
+    if section == "runs":
+        # Starting, finishing, rerunning and labelling; archiving is refused by the route.
+        if method == "POST" and re.fullmatch(r"[^/]+/(finish|rerun)", sub):
+            return None
+        if method == "PATCH" and sub != "" and "/" not in sub:
+            return None
+        return RUNS_DELETED_REFUSED if sub.endswith("/restore") else "Claude doesn't delete runs"
     if section == "proposals":
         return (
             None
@@ -415,11 +449,18 @@ async def _serve(request: Request, handler, unserved=None) -> Response:
         return error(409, str(err), changed=True)
     except LastOwnerError as err:
         return error(409, str(err))
+    except RunRunningError as err:
+        return error(409, str(err), running=err.number)
+    except RunStillRunningError as err:
+        return error(409, str(err))
+    except RunNotYoursError as err:
+        return error(409, str(err), running=err.number)
     except (
         NodeError,
         AccessError,
         InvalidPathError,
         ExperimentError,
+        RunError,
         ProposalError,
         SearchError,
         ChatError,
@@ -462,6 +503,12 @@ def _experiment_path(request: Request) -> str:
 @router.api_route("/experiments/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
 async def experiments_route(request: Request) -> Response:
     return await _serve(request, handle_experiments, _no_blob_store)
+
+
+@router.api_route("/runs", methods=ALL_METHODS, include_in_schema=False)
+@router.api_route("/runs/{rest:path}", methods=ALL_METHODS, include_in_schema=False)
+async def runs_route(request: Request) -> Response:
+    return await _serve(request, handle_runs, _no_blob_store)
 
 
 @router.api_route("/search", methods=ALL_METHODS, include_in_schema=False)
@@ -1120,9 +1167,32 @@ async def handle_experiments(request: Request, session: Session) -> Response:
         results = body.get("results") if body else None
         state = body.get("state") if body else None
         state = "done" if state is None else state
-        if not isinstance(results, dict) or state not in ("done", "failed"):
-            return error(400, "Expected {results: object, state?: done|failed}")
-        return json_response(200, await session.finish_run(finish_of.group(1), results, state))
+        run = body.get("run") if body else None
+        if (
+            not isinstance(results, dict)
+            or state not in ("done", "failed")
+            or not (run is None or (isinstance(run, str) and is_uuid(run)))
+        ):
+            return error(400, "Expected {results: object, state?: done|failed, run?: run id}")
+        return json_response(
+            200, await session.finish_run(finish_of.group(1), results, state, run=run)
+        )
+
+    runs_of = re.fullmatch(r"([^/]+)/runs", experiment_id)
+    if runs_of:
+        if method == "GET":
+            flags = flag_params(request, "archived", "deleted")
+            if isinstance(flags, Response):
+                return flags
+            found = await session.runs(runs_of.group(1), **flags)
+            return json_response(200, {"runs": found})
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        start = new_run_request(body) if body is not None else None
+        if start is None:
+            return error(400, NEW_RUN_EXPECTED)
+        return json_response(201, await session.start_run_in(runs_of.group(1), **start))
 
     reads_of = re.fullmatch(r"([^/]+)/reads", experiment_id)
     if reads_of:
@@ -1182,6 +1252,186 @@ async def handle_experiments(request: Request, session: Session) -> Response:
             return json_response(200, {"deleted": experiment_id})
         return error(404, "Experiment not found")
     return error(405, "Method not allowed")
+
+
+NEW_RUN_EXPECTED = (
+    "Expected {label?: string, params?: object, inputs?: [{path, node?, experiment?, as?}], "
+    "provenance?: {chat?: string, model?: string, skill?: {name, source?, version?, sha256?}, tools?: {[name]: version}}}"
+)
+RUN_FIELDS_EXPECTED = "Expected {label?: string, archived?: boolean}"
+FINISH_EXPECTED = "Expected {results: object, state?: done|failed}"
+RERUN_EXPECTED = (
+    "Expected {experiment?: string|null}: this run's experiment for another run of it, "
+    "or null (or nothing) for a new experiment of yours"
+)
+MAX_LABEL = 200
+
+
+def flag_params(request: Request, *names: str) -> dict[str, bool] | Response:
+    """Flags such as ?archived and ?deleted: present (empty, 1 or true) or absent."""
+    flags: dict[str, bool] = {}
+    for name in names:
+        if name not in request.query_params:
+            flags[name] = False
+        elif first_param(request, name) in ("", "1", "true"):
+            flags[name] = True
+        else:
+            return error(400, f"{name} is 1 (or true), or leave it out")
+    if all(flags.get(n) for n in ("archived", "deleted")):
+        return error(400, "Ask for ?archived or for ?deleted, not both")
+    return flags
+
+
+def run_label(value: Any) -> str | None:
+    """A Run's label, tidied; None when it isn't one."""
+    if not isinstance(value, str):
+        return None
+    label = re.sub(r"\s+", " ", value).strip()
+    return label if utf16_len(label) <= MAX_LABEL else None
+
+
+def new_run_request(body: dict[str, Any]) -> dict[str, Any] | None:
+    """A POST /experiments/<id>/runs body as start_run_in's arguments, or None when it isn't one."""
+    if set(body) - {"label", "params", "inputs", "provenance"}:
+        return None
+    out: dict[str, Any] = {}
+    if "label" in body:
+        label = run_label(body["label"])
+        if label is None:
+            return None
+        out["label"] = label
+    if "params" in body:
+        if not isinstance(body["params"], dict):
+            return None
+        out["params"] = clean_params(body["params"])
+    if "inputs" in body:
+        inputs = run_inputs(body["inputs"])
+        if inputs is None:
+            return None
+        out["inputs"] = inputs
+    provenance = body.get("provenance", {})
+    if not isinstance(provenance, dict) or utf16_len(js_json(provenance)) > MAX_PROVENANCE_BYTES:
+        return None
+    given = caller_provenance(provenance)
+    if given is None:
+        return None
+    out["provenance"] = given
+    return out
+
+
+def clean_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Parameters checked as an Experiment's are (size); ExperimentError when too large."""
+    return clean_input({"params": params})["params"]
+
+
+async def handle_runs(request: Request, session: Session) -> Response:
+    parts = [decode_component(p) for p in raw_path(request).split("/")[2:]]  # after /runs
+    run_id = parts[0] if parts else ""
+    action = parts[1] if len(parts) > 1 else ""
+    method = request.method
+
+    if not run_id:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        flags = flag_params(request, "archived")
+        if isinstance(flags, Response):
+            return flags
+        node = first_param(request, "node")
+        experiment = first_param(request, "experiment") or None
+        descendants = "descendants" in request.query_params and first_param(
+            request, "descendants"
+        ) in ("", "1", "true")
+        where = ANYWHERE if node is None else None if node in ("root", "") else node
+        found = await session.compare_runs(
+            where, descendants=descendants, experiment_id=experiment, archived=flags["archived"]
+        )
+        return json_response(200, {"runs": found})
+
+    if not action:
+        if method == "GET":
+            return json_response(200, await session.run(run_id))
+        if method == "PATCH":
+            body = await read_json(request)
+            if body is None or not body or set(body) - {"label", "archived"}:
+                return error(400, RUN_FIELDS_EXPECTED)
+            fields: dict[str, Any] = {}
+            if "label" in body:
+                label = run_label(body["label"])
+                if label is None:
+                    return error(400, RUN_FIELDS_EXPECTED)
+                fields["label"] = label
+            if "archived" in body:
+                if not isinstance(body["archived"], bool):
+                    return error(400, RUN_FIELDS_EXPECTED)
+                fields["archived"] = body["archived"]
+            return json_response(200, await session.update_run(run_id, fields))
+        if method == "DELETE":
+            if await session.delete_run(run_id):
+                return json_response(200, {"deleted": run_id})
+            return error(404, "Run not found")
+        return error(405, "Method not allowed")
+
+    if action == "finish" and len(parts) == 2:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        body = await read_json(request)
+        results = body.get("results") if body else None
+        state = body.get("state") if body else None
+        state = "done" if state is None else state
+        if not isinstance(results, dict) or state not in ("done", "failed"):
+            return error(400, FINISH_EXPECTED)
+        return json_response(200, await session.finish_run_by_id(run_id, results, state))
+
+    if action == "rerun" and len(parts) == 2:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        raw = await read_body(request, MAX_JSON_BYTES)
+        body = {} if raw == b"" else json_object(request, raw)
+        if body is None or set(body) - {"experiment"}:
+            return error(400, RERUN_EXPECTED)
+        target = body.get("experiment")
+        if target is not None and not isinstance(target, str):
+            return error(400, RERUN_EXPECTED)
+        if target is not None:
+            found = await session.run(run_id)
+            if target.lower() != found["experimentId"]:
+                return error(400, RERUN_EXPECTED)
+        return json_response(201, await session.rerun_run(run_id, into_same=target is not None))
+
+    if action == "restore" and len(parts) == 2:
+        if method != "POST":
+            return error(405, "Method not allowed")
+        return json_response(200, await session.restore_run(run_id))
+
+    if action == "reads" and len(parts) == 2:
+        if method != "GET":
+            return error(405, "Method not allowed")
+        return json_response(200, {"reads": await session.reads_of_run(run_id)})
+
+    if action == "files":
+        if method != "GET":
+            return error(405, "Method not allowed")
+        if len(parts) == 2:
+            found = await session.run(run_id)
+            return json_response(
+                200, {"files": found.get("record") or [], "taken": found["recordTaken"]}
+            )
+        info, content = await session.run_file(run_id, "/".join(parts[2:]))
+        etag = f'"{info["sha256"]}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return Response(
+            content,
+            headers={
+                "Content-Type": info["mime"],
+                "ETag": etag,
+                "X-File-Author": info["author"],
+                # A recorded version never changes.
+                "Cache-Control": "private, max-age=31536000, immutable",
+                **STORED_CONTENT_HEADERS,
+            },
+        )
+    return error(404, "Not found")
 
 
 PROPOSAL_STATUSES = ("open", "accepted", "rejected", "withdrawn", "all")

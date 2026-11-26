@@ -77,9 +77,10 @@ for a gateway) in this server's environment.
   input to the SDK. A model chosen in `knowledge_chatroom.model` is checked against
   the server's allowed model IDs. Claude Code's built-in tools are off.
 - `agent_py/workspace.py`: the workspace tools (`list_nodes`, `create_node`, `list_files`, `read_file`,
-  `search_files`, `write_file`, `edit_file`, `list_experiments`, `create_experiment`,
-  `set_experiment_results`, `update_experiment`, `propose_experiment`). Runs start and finish through
-  `POST /experiments/runs` and `POST /experiments/{id}/finish`, which record the
+  `search_files`, `write_file`, `edit_file`, `list_experiments`, `create_experiment`, `start_run`,
+  `finish_run`, `set_experiment_results`, `update_experiment`, `propose_experiment`). A new experiment
+  starts with `POST /experiments/runs`, another Run of it with `POST /experiments/{id}/runs`, and a Run
+  finishes with `POST /runs/{id}/finish` (or `POST /experiments/{id}/finish`), which record the
   chat, model, skill and tool versions in the run's report.md front matter. Each call goes to the
   storage API with the run's `X-Knowledge-Storage` token, so Claude acts for the
   signed-in user: only what they can reach, writes in a knowledge node and to skills

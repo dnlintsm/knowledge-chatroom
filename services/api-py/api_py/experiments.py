@@ -3,8 +3,10 @@
 Forking copies the node's file list into the experiment (005_experiments.sql,
 015_runs.sql); the bytes are shared, since blobs are stored once by content.
 After that the experiment's files change on their own, and the node's stay as
-they were. An experiment with a report.md is a run. Each function runs on the
-connection it is given, inside the transaction Session opens for its principal.
+they were. Each execution of an experiment is a Run (runs.py); the
+experiment's state, results and provenance are its latest Run's. Each function
+runs on the connection it is given, inside the transaction Session opens for
+its principal.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any
 from psycopg import AsyncConnection, errors
 from psycopg.types.json import Jsonb
 
+from . import runs
 from .access import is_uuid, iso
 from .nodes import NodeNotFoundError
 from .paths import JS_SPACE, js_trim, kind_for_path, utf16_len
@@ -142,11 +145,16 @@ def _to_experiment(row: tuple[Any, ...]) -> dict[str, Any]:
 
 
 async def lock_live_experiment(
-    conn: AsyncConnection, workspace_id: str, experiment_id: str
+    conn: AsyncConnection, workspace_id: str, experiment_id: str, *, update: bool = False
 ) -> None:
-    """Inside a file write: fails unless the experiment is live, and holds it so a concurrent delete waits."""
+    """
+    Inside a file write: fails unless the experiment is live, and holds it so a
+    concurrent delete waits. With `update`, holds it against writes and
+    finishes too, as starting a Run does.
+    """
+    lock = "FOR UPDATE" if update else "FOR SHARE"
     cur = await conn.execute(
-        "SELECT 1 FROM experiments WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL FOR SHARE",
+        f"SELECT 1 FROM experiments WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL {lock}",  # pyrefly: ignore[bad-argument-type]
         (experiment_id, workspace_id),
     )
     if not await cur.fetchone():
@@ -209,12 +217,16 @@ async def create(
     provenance: dict[str, Any] | None = None,
     chosen_id: str | None = None,
     fork: bool = True,
+    record_run: bool = True,
 ) -> dict[str, Any]:
     """
     A new draft for `user_id` on `node_id`, or at the workspace root (None).
     On a node it is a fork: the node's live files are copied in at their
     current versions, unless `fork` is false. At the root it starts empty.
     `inputs` ({path, versionId}) are linked in as copies of those versions.
+    One made running gets Run 1, running; one made done or failed gets Run 1
+    finished, with its record taken now, unless `record_run` is false (the
+    caller adds files first and records it then).
     """
     fields = clean_input(given)
     if not fields.get("title"):
@@ -255,6 +267,28 @@ async def create(
                 await _copy_node_files(conn, ws, node_id, new_id)
             if inputs:
                 await _link_inputs(conn, ws, new_id, inputs)
+            state = fields.get("state", "ready")
+            if state == "running":
+                await runs.start(
+                    conn,
+                    ws,
+                    new_id,
+                    user_id,
+                    params=fields.get("params", {}),
+                    provenance=provenance or {},
+                    mirror=False,
+                )
+            elif state in runs.FINISHED and record_run:
+                await runs.add_finished(
+                    conn,
+                    ws,
+                    new_id,
+                    user_id,
+                    fields.get("params", {}),
+                    fields.get("results", {}),
+                    state,
+                    provenance or {},
+                )
             if in_tx:
                 await in_tx(conn, new_id)
             await storage.notify(
@@ -354,6 +388,9 @@ async def _link_inputs(
     return linked
 
 
+link_inputs = _link_inputs
+
+
 async def add_inputs(
     conn: AsyncConnection,
     storage: Storage,
@@ -385,6 +422,7 @@ async def add_inputs(
         if status == "archived":
             raise ExperimentError("This experiment is archived; restore it to change it")
         linked = await _link_inputs(conn, storage.workspace_id, experiment_id, inputs)
+        await runs.add_inputs(conn, experiment_id, recorded)
         await conn.execute(
             """
             UPDATE experiments
@@ -414,6 +452,56 @@ async def add_inputs(
         return True
 
 
+async def finish_target(
+    conn: AsyncConnection,
+    experiment_id: str,
+    results: dict[str, Any],
+    state: str,
+    *,
+    run: str | None,
+    by: str,
+) -> tuple[str, str | None]:
+    """
+    Which Run a finish ends, read with the Experiment's row locked. A named
+    `run` is that Run. Without one (clients from before Runs), a finish that
+    repeats how the latest finished Run of `by` ended is a retry of it, even
+    when a newer Run is running; otherwise it ends the running Run only when
+    `by` started it, so a late retry never ends someone else's.
+
+    ("finish", id) ends that running Run; ("same", id) it already ended so,
+    and nothing changes; ("add", None) none runs and none was named.
+    """
+    cur = await conn.execute(
+        """
+        SELECT id, number, state, results, started_by FROM runs
+        WHERE experiment_id = %s AND deleted_at IS NULL ORDER BY number DESC""",
+        (experiment_id,),
+    )
+    rows = [(str(r[0]), int(r[1]), r[2], r[3], str(r[4])) for r in await cur.fetchall()]
+    if run is not None:
+        named = next((r for r in rows if r[0] == run), None)
+        if named is None:
+            raise ExperimentError("That run isn't one of this experiment's")
+        if named[2] == "running":
+            return "finish", run
+        if named[2] == state and same_json(named[3], results):
+            return "same", run
+        raise ExperimentError(
+            f"Run {named[1]} already finished ({named[2]}); start a new run to try again"
+        )
+    running = next((r for r in rows if r[2] == "running"), None)
+    if running is None:
+        return "add", None
+    # The caller's own latest finished Run: a collaborator's Run finished
+    # since must not hide the retry.
+    ended = next((r for r in rows if r[2] in runs.FINISHED and r[4] == by), None)
+    if ended and ended[2] == state and same_json(ended[3], results):
+        return "same", ended[0]
+    if running[4] != by:
+        raise runs.RunNotYoursError(running[1])
+    return "finish", running[0]
+
+
 async def update(
     conn: AsyncConnection,
     storage: Storage,
@@ -421,12 +509,18 @@ async def update(
     given: dict[str, Any],
     in_tx: InTx | None = None,
     provenance: dict[str, Any] | None = None,
+    *,
+    by: str | None = None,
+    run: str | None = None,
 ) -> bool:
     """
-    Sets the given fields; False if the experiment is gone. `provenance` keys
-    are merged into the recorded ones. A run that ends here (its state becomes
-    done or failed), through a finish or a PATCH, also gets what it ended with
-    (`evidence_at_finish`), read under the row's lock.
+    Sets the given fields, as user `by`; False if the experiment is gone.
+    `provenance` keys are merged into the recorded ones. A run that ends here
+    (its state becomes done or failed), through a finish or a PATCH, also gets
+    what it ended with (`evidence_at_finish`), read under the row's lock, and
+    so does the Run it ends (`finish_target`: `run` when named), with its file
+    record; with none running, a finished Run is added. Becoming running
+    starts a Run.
     """
     fields = clean_input(given)
     if not is_uuid(experiment_id):
@@ -434,7 +528,7 @@ async def update(
     async with conn.transaction():
         cur = await conn.execute(
             """
-            SELECT status, node_id, state, results FROM experiments
+            SELECT status, node_id, state, results, params FROM experiments
             WHERE id = %s AND workspace_id = %s AND deleted_at IS NULL
             FOR UPDATE""",
             (experiment_id, storage.workspace_id),
@@ -442,7 +536,19 @@ async def update(
         before = await cur.fetchone()
         if not before:
             return False
-        status, node, state, results = before
+        status, node, state, results, params = before
+        target: str | None = None
+        if fields.get("state") in runs.FINISHED and by is not None:
+            outcome, target = await finish_target(
+                conn,
+                experiment_id,
+                fields.get("results", results),
+                fields["state"],
+                run=run,
+                by=by,
+            )
+            if outcome == "same":
+                return True
         # A finished run stays as it ended, whoever asks and through whichever
         # route: checked here, under the row's lock, so neither a PATCH nor a
         # second finish racing the first can rewrite it.
@@ -453,7 +559,14 @@ async def update(
             raise ExperimentError(
                 f"This run already finished ({state}); its state and results stay as they ended"
             )
-        if fields.get("state") in ("done", "failed") and state not in ("done", "failed"):
+        # A running Run ends by finishing: marking the Experiment ready would
+        # leave it running unseen, with its reads no longer recorded.
+        if fields.get("state") == "ready" and state == "running":
+            found = await runs.running(conn, experiment_id)
+            if found:
+                raise runs.RunRunningError(found[1], "marking the experiment ready")
+        ends = fields.get("state") in runs.FINISHED and state not in runs.FINISHED
+        if ends:
             provenance = {
                 **(provenance or {}),
                 "finishedAt": iso(datetime.now(UTC)),
@@ -471,8 +584,55 @@ async def update(
                 "UPDATE experiments SET provenance = provenance || %s, updated_at = now() WHERE id = %s",
                 (Jsonb(provenance), experiment_id),
             )
+        ended: str | None = None
+        started: str | None = None
+        if ends:
+            final = fields.get("results", results)
+            ended = await runs.finish_running(
+                conn, experiment_id, final, fields["state"], provenance or {}, target
+            )
+            if ended is None:
+                everything = await conn.execute(
+                    "SELECT provenance, author_id FROM experiments WHERE id = %s", (experiment_id,)
+                )
+                recorded, author = await everything.fetchone()  # pyrefly: ignore[not-iterable]
+                ended = await runs.add_finished(
+                    conn,
+                    storage.workspace_id,
+                    experiment_id,
+                    by or str(author),
+                    fields.get("params", params),
+                    final,
+                    fields["state"],
+                    recorded,
+                )
+        elif fields.get("state") == "running" and state != "running":
+            everything = await conn.execute(
+                "SELECT provenance, author_id FROM experiments WHERE id = %s", (experiment_id,)
+            )
+            recorded, author = await everything.fetchone()  # pyrefly: ignore[not-iterable]
+            started = await runs.start(
+                conn,
+                storage.workspace_id,
+                experiment_id,
+                by or str(author),
+                params=fields.get("params", params),
+                provenance=recorded,
+                mirror=False,
+            )
         if in_tx:
             await in_tx(conn)
+        if ended or started:
+            await storage.notify(
+                conn,
+                {
+                    "op": "run",
+                    "change": "finish" if ended else "create",
+                    "id": ended or started,
+                    "experiment": experiment_id,
+                    "node": str(node) if node else None,
+                },
+            )
         change = "status" if "status" in fields and fields["status"] != status else "update"
         node_id = str(node) if node else None
         await storage.notify(
@@ -622,11 +782,14 @@ async def evidence_at_finish(
         (experiment_id, workspace_id, list(RECORDED_READS)),
     )
     newest = {row[0]: {"version": str(row[1]), "sha256": row[2]} for row in await cur.fetchall()}
+    # The reads of the Run that is ending; none when it starts and ends at once.
+    now = await runs.running(conn, experiment_id)
+    read = await runs.reads(conn, workspace_id, now[0]) if now else []
     return {
         "files": {path: newest.get(path) for path in RECORDED_READS},
         "reads": [
             {key: entry[key] for key in ("path", "version", "sha256", "via", "readAt")}
-            for entry in await reads(conn, workspace_id, experiment_id)
+            for entry in read
         ],
     }
 
@@ -654,9 +817,10 @@ async def record_read(
         return None
     cur = await conn.execute(
         """
-        INSERT INTO run_reads (workspace_id, experiment_id, path, version_id, sha256, user_id, via)
-        SELECT e.workspace_id, e.id, f.path, v.id, v.blob_sha256, %(user)s, %(via)s
+        INSERT INTO run_reads (workspace_id, experiment_id, run_id, path, version_id, sha256, user_id, via)
+        SELECT e.workspace_id, e.id, r.id, f.path, v.id, v.blob_sha256, %(user)s, %(via)s
         FROM experiments e
+        JOIN runs r ON r.experiment_id = e.id AND r.state = 'running' AND r.deleted_at IS NULL
         JOIN files f ON f.experiment_id = e.id AND f.path = %(path)s AND f.deleted_at IS NULL
         JOIN LATERAL (
           SELECT id, blob_sha256 FROM file_versions
@@ -687,27 +851,6 @@ async def record_read(
 async def reads(
     conn: AsyncConnection, workspace_id: str, experiment_id: str
 ) -> list[dict[str, Any]]:
-    """What agents read of the run's recorded files while it ran, first read first."""
-    if not is_uuid(experiment_id):
-        return []
-    cur = await conn.execute(
-        """
-        SELECT r.path, r.version_id, r.sha256, r.via, r.first_read_at, r.user_id, u.name, u.email
-        FROM run_reads r LEFT JOIN users u ON u.id = r.user_id
-        WHERE r.experiment_id = %s AND r.workspace_id = %s
-        ORDER BY r.first_read_at, r.path, r.version_id""",
-        (experiment_id, workspace_id),
-    )
-    return [
-        {
-            "path": row[0],
-            "version": str(row[1]),
-            "sha256": row[2],
-            "via": row[3],
-            "readAt": iso(row[4]),
-            "by": None
-            if row[5] is None
-            else {"id": str(row[5]), "name": row[6] if row[6] is not None else row[7]},
-        }
-        for row in await cur.fetchall()
-    ]
+    """What agents read of the recorded files of the experiment's latest Run while it ran, first read first."""
+    newest = await runs.latest(conn, workspace_id, experiment_id)
+    return [] if newest is None else await runs.reads(conn, workspace_id, newest["id"])

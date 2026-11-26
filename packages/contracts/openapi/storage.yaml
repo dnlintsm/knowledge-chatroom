@@ -53,6 +53,7 @@ tags:
   - name: files
   - name: nodes
   - name: experiments
+  - name: runs
   - name: search
   - name: proposals
   - name: chats
@@ -633,7 +634,11 @@ paths:
       tags: [experiments]
       operationId: updateExperiment
       summary: Change an experiment (its maintainer and collaborators)
-      description: Only its maintainer changes the status (shares, archives or restores it).
+      description: >-
+        Only its maintainer changes the status (shares, archives or restores it). A state of done
+        or failed ends a run as POST /experiments/{id}/finish without `run` does, so it doesn't
+        end a run someone else started (409). A running experiment isn't marked ready (409): its
+        run ends by finishing.
       requestBody:
         required: true
         content:
@@ -645,6 +650,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Experiment" }
+        "409": { $ref: "#/components/responses/RunRunning" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -667,8 +673,10 @@ paths:
     post:
       tags: [experiments]
       operationId: startRun
+      deprecated: true
       summary: Start a run, or run an earlier one again
       description: >-
+        Deprecated: start a run with POST /experiments/{id}/runs (a new experiment with POST /experiments). It still works for this release and makes Run 1 of the new experiment.
         A new run: a draft experiment in state running, on a node with a copy of its files or at the
         root (nodeId null or left out) empty, with each of `inputs` copied under inputs/ at its
         current version, and a report.md whose front matter records where it came from.
@@ -696,27 +704,7 @@ paths:
                   type: array
                   items: { $ref: "#/components/schemas/RunInputSource" }
                 rerunOf: { type: string, description: The run to run again. }
-                provenance:
-                  type: object
-                  additionalProperties: true
-                  description: >-
-                    At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files
-                    and reads are the server's and are dropped; other keys are kept as given.
-                  properties:
-                    chat: { type: [string, "null"] }
-                    model: { type: [string, "null"] }
-                    skill:
-                      type: [object, "null"]
-                      required: [name]
-                      properties:
-                        name: { type: string }
-                        source: { type: string }
-                        version: { type: number }
-                        sha256: { type: string }
-                    tools:
-                      type: [object, "null"]
-                      additionalProperties: { type: string }
-                      description: Each tool's version, by name.
+                provenance: { $ref: "#/components/schemas/CallerProvenance" }
       responses:
         "201":
           description: The run.
@@ -736,11 +724,17 @@ paths:
     post:
       tags: [experiments]
       operationId: finishRun
+      deprecated: true
       summary: Record a run's results and how it ended
       description: >-
+        Deprecated: use POST /runs/{id}/finish. It still works for this release.
         Sets results (replacing the old ones whole) and state done or failed, and refreshes the
         record in its report.md front matter. Its maintainer and collaborators, while it isn't archived. A finished
         run stays as it ended: the same call again answers it unchanged, a different one is refused.
+        The run it ends is `run` when given. Without it, a call that repeats how the caller's latest
+        finished run ended is a retry, answered without change even while a newer run runs;
+        otherwise it ends the running run only when the caller started it, and a 409 names a run
+        someone else started, which keeps running. A PATCH to state done or failed follows the same rule.
       requestBody:
         required: true
         content:
@@ -751,12 +745,14 @@ paths:
               properties:
                 results: { type: object, additionalProperties: true }
                 state: { type: string, enum: [done, failed], default: done }
+                run: { type: string, format: uuid, description: The run it ends. }
       responses:
         "200":
-          description: The run, finished.
+          description: The experiment, as it is after the finish.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Experiment" }
+        "409": { $ref: "#/components/responses/RunRunning" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -799,8 +795,10 @@ paths:
     get:
       tags: [experiments]
       operationId: listRunReads
+      deprecated: true
       summary: The Rules versions a run's agents read while it ran
       description: >-
+        Deprecated: use GET /runs/{id}/reads. It still works for this release and answers the latest live run's reads.
         Each version of the run's models/general_rules.md that an agent or tool of its maintainer or
         a collaborator read through a storage token while the run was running, first read first; one
         entry per version. For whoever can see the run.
@@ -828,8 +826,10 @@ paths:
     post:
       tags: [experiments]
       operationId: addRunInputs
+      deprecated: true
       summary: Link files into an experiment as inputs
-      description: Each file is linked under inputs/ and recorded in the experiment's provenance. Its maintainer and collaborators, while it isn't archived or a finished run.
+      description: >-
+        Deprecated: pass inputs to POST /experiments/{id}/runs. It still works for this release and adds to the running run's inputs. Each file is linked under inputs/ and recorded in the experiment's provenance. Its maintainer and collaborators, while it isn't archived or a finished run.
       requestBody:
         required: true
         content:
@@ -916,6 +916,377 @@ paths:
       description: Storage tokens can't (403).
       responses:
         "200": { $ref: "#/components/responses/ExperimentIfVisible" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /experiments/{id}/runs:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [runs]
+      operationId: listExperimentRuns
+      summary: An experiment's runs, newest first
+      description: >-
+        Its live runs, for whoever can see it. With `archived`, the archived ones too. With
+        `deleted`, only its deleted ones (with deletedAt and deletedBy), for its maintainer and
+        collaborators; storage tokens can't ask for those. `archived` and `deleted` together are a 400.
+      parameters:
+        - $ref: "#/components/parameters/Archived"
+        - name: deleted
+          in: query
+          description: 1 (or true, or empty) for the deleted runs.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The runs, without their file records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    post:
+      tags: [runs]
+      operationId: startExperimentRun
+      summary: Start another run of an experiment
+      description: >-
+        A new run, numbered after the experiment's last, with the experiment's planned parameters
+        unless `params` is given. `inputs` are linked under inputs/ at their current versions and
+        recorded in its provenance, as for /experiments/runs. Its maintainer and collaborators,
+        while it isn't archived; storage tokens can. Only one run of an experiment runs at a
+        time, since its runs share the working files: 409 names the one running.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                label: { type: string, maxLength: 200 }
+                params: { type: object, additionalProperties: true }
+                inputs:
+                  type: array
+                  items: { $ref: "#/components/schemas/RunInputSource" }
+                provenance: { $ref: "#/components/schemas/CallerProvenance" }
+      responses:
+        "201":
+          description: The run, running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/RunRunning" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs:
+    get:
+      tags: [runs]
+      operationId: compareRuns
+      summary: Runs to compare, with each one's experiment
+      description: >-
+        Live runs of experiments you can see, newest first: on a node (`node=root` for the
+        workspace root), with `descendants` also on the nodes under it, of one `experiment`, or
+        anywhere when neither is given. Archived runs only with `archived`.
+      parameters:
+        - name: node
+          in: query
+          description: A node id, or root.
+          schema: { type: string }
+        - name: descendants
+          in: query
+          description: 1 (or true, or empty) to take in the nodes under `node`.
+          schema: { type: string }
+        - name: experiment
+          in: query
+          description: Only this experiment's runs.
+          schema: { type: string }
+        - $ref: "#/components/parameters/Archived"
+      responses:
+        "200":
+          description: The runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/ComparedRun" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: One run, with its file record
+      description: For whoever can see its experiment; a deleted run is not found here.
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    patch:
+      tags: [runs]
+      operationId: updateRun
+      summary: Change a run's label, or archive it
+      description: >-
+        Its experiment's maintainer and collaborators, while the experiment isn't archived. A
+        finished run's label and archiving can still change. Storage tokens can change the label
+        but not archive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                label: { type: string, maxLength: 200 }
+                archived: { type: boolean }
+      responses:
+        "200":
+          description: The run, changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+    delete:
+      tags: [runs]
+      operationId: deleteRun
+      summary: Delete a finished run (soft delete)
+      description: >-
+        Its experiment's maintainer and collaborators, while the experiment isn't archived; storage
+        tokens can't. Restore brings it back. A running run can't be deleted (409): finish it first.
+      responses:
+        "200": { $ref: "#/components/responses/DeletedId" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The run is still running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/finish:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [runs]
+      operationId: finishRunById
+      summary: Record a run's results and how it ended
+      description: >-
+        Sets its results and state done or failed, and takes its file record: every file of the
+        experiment as it is now (path, version, sha256, size). Its experiment's maintainer and
+        collaborators, while it isn't archived; storage tokens can. A finished run stays as it
+        ended: the same call again answers it unchanged, a different one is a 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [results]
+              additionalProperties: false
+              properties:
+                results: { type: object, additionalProperties: true }
+                state: { type: string, enum: [done, failed], default: done }
+      responses:
+        "200":
+          description: The run, finished, with its file record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/rerun:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [runs]
+      operationId: rerunRun
+      summary: Run a run again
+      description: >-
+        With `experiment` set to the run's own experiment: another run of it, with this run's
+        parameters and label (its maintainer and collaborators; 409 while one is running). With
+        `experiment` null, left out, or no body: Run 1 of a new draft experiment of yours, for
+        whoever can see this one, as /experiments/runs with rerunOf does. Either way the new run's
+        provenance has rerunOf {id, run} naming this one. Any other experiment is a 400.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                experiment: { type: [string, "null"] }
+      responses:
+        "201":
+          description: The new run, running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/RunRunning" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [runs]
+      operationId: restoreRun
+      summary: Undo a run's delete
+      description: Its experiment's maintainer and collaborators, while it isn't archived; storage tokens can't.
+      responses:
+        "200":
+          description: The run, restored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/reads:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [runs]
+      operationId: listReadsOfRun
+      summary: The Rules versions a run's agents read while it ran
+      description: As /experiments/{id}/reads, for this run. For whoever can see its experiment.
+      responses:
+        "200":
+          description: The reads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reads]
+                properties:
+                  reads:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunRead" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/files:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [runs]
+      operationId: listRunFiles
+      summary: A run's file record
+      description: >-
+        Every file of its experiment as it was when the run finished; empty while it runs.
+        `taken` says when the record was taken: finish, or migration for a run that finished
+        before runs had records (what changed after it ended can't be told apart).
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files, taken]
+                properties:
+                  files:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunFile" }
+                  taken: { $ref: "#/components/schemas/RunRecordTaken" }
+        "401": { $ref: "#/components/responses/SignIn" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/StorageError" }
+        "503": { $ref: "#/components/responses/Starting" }
+
+  /runs/{id}/files/{path}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - $ref: "#/components/parameters/FilePath"
+    get:
+      tags: [runs]
+      operationId: readRunFile
+      summary: A file's bytes as the run recorded them
+      description: >-
+        The recorded version's bytes, with the checks of reading the experiment's files, served
+        as /files/{path} serves them (sandboxed, nosniff). A recorded version never changes, so it
+        may be cached for good, and stays readable after the working file is deleted, renamed or
+        replaced. 404 when the record has no such path.
+      parameters:
+        - name: If-None-Match
+          in: header
+          description: The ETag from an earlier read; a match answers 304.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The bytes.
+          headers:
+            ETag:
+              description: The version's sha256 in quotes.
+              schema: { type: string }
+            X-File-Author:
+              schema: { $ref: "#/components/schemas/AuthorType" }
+          content:
+            "*/*":
+              schema: { type: string, format: binary }
+        "304":
+          description: Unchanged since the ETag sent.
         "401": { $ref: "#/components/responses/SignIn" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3748,6 +4119,11 @@ components:
       in: query
       description: A version number; leave out for the newest.
       schema: { type: integer, minimum: 1 }
+    Archived:
+      name: archived
+      in: query
+      description: 1 (or true, or empty) to take in archived runs too.
+      schema: { type: string }
     Experiment:
       name: experiment
       in: query
@@ -3800,6 +4176,11 @@ components:
             required: [pack]
             properties:
               pack: { $ref: "#/components/schemas/PackDetail" }
+    RunRunning:
+      description: Another run of this experiment is running; `running` is its number.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Conflict:
       description: Something is in the way, such as a skill folder of that name.
       content:
@@ -4020,6 +4401,7 @@ components:
         sha256:
           type: [string, "null"]
           description: With `changed` on a file write, the file's version now; null when it is gone.
+        running: { type: integer, minimum: 1, description: "On a 409 starting a run: the number of the run that is running." }
 
     IdOnly:
       type: object
@@ -4143,12 +4525,24 @@ components:
         author: { $ref: "#/components/schemas/AuthorType" }
         authorId: { type: string }
 
+    RunEvent:
+      type: object
+      required: [op, change, id, experiment, node]
+      description: A run changed; its experiment's update event follows. Heard by whoever can see the experiment.
+      properties:
+        op: { type: string, const: run }
+        change: { type: string, enum: [create, finish, update, archive, delete, restore] }
+        id: { type: string }
+        experiment: { type: string }
+        node: { type: [string, "null"], description: The experiment's node; null at the workspace root. }
+
     WorkspaceEvent:
       description: One change on the /files?watch stream.
       oneOf:
         - $ref: "#/components/schemas/FileEvent"
         - $ref: "#/components/schemas/NodeEvent"
         - $ref: "#/components/schemas/ExperimentEvent"
+        - $ref: "#/components/schemas/RunEvent"
         - $ref: "#/components/schemas/ProposalEvent"
 
     NodeType:
@@ -4347,15 +4741,21 @@ components:
         authorName: { type: [string, "null"] }
         title: { type: string }
         hypothesis: { type: string }
-        params: { type: object, additionalProperties: true }
-        results: { type: object, additionalProperties: true }
+        params: { type: object, additionalProperties: true, description: The planned parameters; each run has the ones it ran with. }
+        results:
+          type: object
+          additionalProperties: true
+          description: Deprecated, kept for one release as its latest live run's results ({} with none).
         status: { $ref: "#/components/schemas/ExperimentStatus" }
-        state: { $ref: "#/components/schemas/ExperimentState" }
+        state:
+          $ref: "#/components/schemas/ExperimentState"
+          description: Deprecated, kept for one release as its latest live run's state (ready with none).
         forkedAt: { $ref: "#/components/schemas/Timestamp" }
         updatedAt: { $ref: "#/components/schemas/Timestamp" }
         fileCount: { type: integer, minimum: 0 }
         provenance:
           description: >-
+            Deprecated, kept for one release as its latest live run's provenance (Run.provenance).
             Where a run came from; {} when nobody recorded it. Once a run finishes (through /finish
             or a PATCH of its state), `files` has the
             version of its models/general_rules.md at the end (null when there was none) and `reads`
@@ -4387,6 +4787,118 @@ components:
         restorable:
           type: boolean
           description: Only in the ?deleted list, false when its node was deleted too (restore answers 409).
+
+    RunState:
+      type: string
+      enum: [running, done, failed]
+
+    RunRecordTaken:
+      type: [string, "null"]
+      enum: [finish, migration, null]
+      description: >-
+        When the file record was taken: at finish, or at migration for a run that finished before
+        runs had records; null while it runs.
+
+    RunFile:
+      type: object
+      required: [path, version, sha256, size]
+      properties:
+        path: { type: string }
+        version: { type: string, description: The file version it recorded. }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        size: { type: integer, minimum: 0 }
+
+    Run:
+      type: object
+      description: One execution of an experiment.
+      required:
+        [id, experimentId, number, label, params, results, state, provenance, startedBy, startedAt,
+         finishedAt, fileCount, recordTaken, archived, archivedAt]
+      properties:
+        id: { type: string }
+        experimentId: { type: string }
+        number: { type: integer, minimum: 1, description: "Its place in the experiment: Run 1, Run 2, ..." }
+        label: { type: string, maxLength: 200 }
+        params: { type: object, additionalProperties: true, description: The parameters it ran with. }
+        results: { type: object, additionalProperties: true }
+        state: { $ref: "#/components/schemas/RunState" }
+        provenance:
+          type: object
+          additionalProperties: true
+          description: >-
+            Where it came from, as an experiment's provenance: who started it and when, the
+            caller's chat, model, skill and tools, its inputs, and rerunOf {id, run} naming the
+            experiment and run it reran.
+        startedBy:
+          description: Who started it; null once they are gone.
+          oneOf:
+            - { $ref: "#/components/schemas/Collaborator" }
+            - type: "null"
+        startedAt: { $ref: "#/components/schemas/Timestamp" }
+        finishedAt:
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - type: "null"
+        fileCount: { type: [integer, "null"], minimum: 0, description: Files in its record; null while it runs. }
+        recordTaken: { $ref: "#/components/schemas/RunRecordTaken" }
+        archived: { type: boolean }
+        archivedAt:
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - type: "null"
+        record:
+          description: Only on one run (GET /runs/{id} and the routes that change one); null while it runs.
+          oneOf:
+            - type: array
+              items: { $ref: "#/components/schemas/RunFile" }
+            - type: "null"
+        deletedAt:
+          $ref: "#/components/schemas/Timestamp"
+          description: Only on a deleted run.
+        deletedBy:
+          description: Only on a deleted run, who deleted it; null once they are gone.
+          oneOf:
+            - { $ref: "#/components/schemas/Collaborator" }
+            - type: "null"
+
+    ComparedRun:
+      allOf:
+        - $ref: "#/components/schemas/Run"
+        - type: object
+          required: [experiment]
+          properties:
+            experiment: { $ref: "#/components/schemas/RunExperiment" }
+
+    RunExperiment:
+      type: object
+      description: The experiment a compared run belongs to.
+      required: [id, title, nodeId]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        nodeId: { type: [string, "null"] }
+
+    CallerProvenance:
+      type: object
+      additionalProperties: true
+      description: >-
+        At most 16 KiB of JSON. startedBy, startedAt, finishedAt, inputs, rerunOf, files
+        and reads are the server's and are dropped; other keys are kept as given.
+      properties:
+        chat: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        skill:
+          type: [object, "null"]
+          required: [name]
+          properties:
+            name: { type: string }
+            source: { type: string }
+            version: { type: number }
+            sha256: { type: string }
+        tools:
+          type: [object, "null"]
+          additionalProperties: { type: string }
+          description: Each tool's version, by name.
 
     RunRead:
       type: object

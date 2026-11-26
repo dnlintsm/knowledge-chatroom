@@ -39,6 +39,7 @@ STORAGE_PREFIXES = (
     "/nodes",
     "/files",
     "/experiments",
+    "/runs",
     "/proposals",
     "/search",
     "/chats",

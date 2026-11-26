@@ -50,16 +50,21 @@ test("metadata allows additive fields, and an older server's readOnly, but rejec
   for (const change of [{ path: "../secret" }, { kind: ["note"] }, { author: "wrong" }, { size: -1 }, { size: 0.5 }, { sha256: "wrong" }, { updatedAt: "wrong" }]) expect(() => parseFileInfo({ ...info, ...change })).toThrow();
 });
 
-test("event contracts cover scoped writes, node/experiment changes and proposals", () => {
+test("event contracts cover scoped writes, node/experiment/run changes and proposals", () => {
   for (const event of [
     { op: "write", node: null, experiment: "x", path: info.path, sha256: info.sha256, author: "agent" },
     { op: "node", change: "rename", id: "n" },
     { op: "node", change: "restrict", id: "n", left: ["u"] },
     { op: "node", change: "takeover", id: "n" },
     { op: "experiment", change: "status", id: "x", node: "n" },
+    // A restored experiment comes back for everyone who can see it.
+    { op: "experiment", change: "restore", id: "x", node: null },
+    { op: "run", change: "finish", id: "r", experiment: "x", node: "n" },
+    { op: "run", change: "archive", id: "r", experiment: "x", node: null },
     { op: "proposal", change: "accepted", id: "p", node: "n", path: info.path, author: "user", authorId: "u" },
   ]) expect(parseWorkspaceEvent(event)).toEqual(event);
-  for (const event of [null, { op: "unknown" }, { op: "write", node: null, path: "../secret" }, { op: "proposal", change: "accepted", id: "p" }]) expect(() => parseWorkspaceEvent(event)).toThrow();
+  for (const event of [null, { op: "unknown" }, { op: "write", node: null, path: "../secret" }, { op: "proposal", change: "accepted", id: "p" },
+    { op: "run", change: "finish", id: "r", node: "n" }, { op: "run", change: "rename", id: "r", experiment: "x", node: null }]) expect(() => parseWorkspaceEvent(event)).toThrow();
 });
 
 test("invalid successful API responses are rejected before reaching workspace state", async () => {

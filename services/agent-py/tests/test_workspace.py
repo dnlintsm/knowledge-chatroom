@@ -67,6 +67,28 @@ class FakeStorage:
             return httpx.Response(
                 201, json={**run, "provenance": {**body["provenance"], "inputs": inputs}}
             )
+        if path.startswith("/experiments/") and path.endswith("/runs"):
+            body = json.loads(request.content)
+            inputs = [
+                {"path": f"inputs/{i['path'].rsplit('/', 1)[-1]}"} for i in body.get("inputs", [])
+            ]
+            run = {"id": "run-2", "number": 2, "state": "running", "params": body.get("params", {})}
+            return httpx.Response(
+                201, json={**run, "provenance": {**body["provenance"], "inputs": inputs}}
+            )
+        if path.startswith("/runs/") and path.endswith("/finish"):
+            body = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "id": path.split("/")[2],
+                    "number": 2,
+                    "experimentId": "e1",
+                    "state": body["state"],
+                    "results": body["results"],
+                    "fileCount": 3,
+                },
+            )
         if path.endswith("/finish"):
             body = json.loads(request.content)
             return httpx.Response(
@@ -103,6 +125,8 @@ def test_the_tools_have_the_typescript_agents_names(api):
             "edit_file",
             "list_experiments",
             "create_experiment",
+            "start_run",
+            "finish_run",
             "set_experiment_results",
             "update_experiment",
             "propose_experiment",
@@ -287,6 +311,37 @@ def test_set_experiment_results_finishes_the_run(api):
     out, failed = call(api, "set_experiment_results", id="r1", results={"yield_pct": 92.5})
     assert not failed and json.loads(out)["state"] == "done"
     assert api.requests[-1].url.path == "/experiments/r1/finish"
+
+
+def test_start_run_and_finish_run_run_an_experiment_again(api):
+    out, failed = call(
+        api, "start_run", experiment="e1", params={"rfPower_W": 50}, inputs=[{"path": "a.csv"}]
+    )
+    assert not failed
+    assert json.loads(out) == {
+        "ok": True,
+        "run": "run-2",
+        "number": 2,
+        "experiment": "e1",
+        "state": "running",
+        "params": {"rfPower_W": 50},
+        "inputs": ["inputs/a.csv"],
+    }
+    request = api.requests[-1]
+    body = json.loads(request.content)
+    assert request.url.path == "/experiments/e1/runs"
+    assert body["params"] == {"rfPower_W": 50} and body["provenance"]["chat"] == "chat-1"
+    out, failed = call(api, "finish_run", run="run-2", results={"yield_pct": 90})
+    assert not failed and json.loads(out) == {
+        "ok": True,
+        "run": "run-2",
+        "number": 2,
+        "experiment": "e1",
+        "state": "done",
+        "results": {"yield_pct": 90},
+        "files": 3,
+    }
+    assert api.requests[-1].url.path == "/runs/run-2/finish"
 
 
 def test_file_routes_encode_each_segment():
