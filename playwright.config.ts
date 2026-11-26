@@ -119,6 +119,7 @@ export default defineConfig({
               "python-agent.spec.ts",
               "python-storage.spec.ts",
               "workspaces.spec.ts",
+              "pipelines.spec.ts",
             ],
           }),
   timeout: 120_000,
