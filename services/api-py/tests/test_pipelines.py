@@ -407,6 +407,69 @@ async def test_an_archived_workspace_suspends_its_pipelines_until_restored(api):
 
 
 @needs_services
+async def test_search_keeps_to_its_places_before_the_limit(api):
+    """Matches outside a pipeline's places must not fill the results and leave its own out."""
+    etch = await make_node(api, "Etch")
+    litho = await make_node(api, "Litho")
+    await api.put(f"/files/etch.md?node={etch}", headers=ALICE, content=b"Chamber sweep notes.")
+    # Newer, so they rank first for the owner.
+    for i in range(3):
+        await api.put(
+            f"/files/litho-{i}.md?node={litho}", headers=ALICE, content=b"Chamber sweep notes."
+        )
+    owners = (await api.get("/search?q=sweep&limit=2", headers=ALICE)).json()["results"]
+    assert [r["node"] for r in owners] == [litho, litho]
+    pipeline = key((await make(api, places=[{"node": etch}], operations=["read"]))["key"]["secret"])
+    found = await api.get("/search?q=sweep&limit=2", headers=pipeline)
+    assert found.status_code == 200, found.text
+    assert [(r["path"], r["node"]) for r in found.json()["results"]] == [("etch.md", etch)]
+
+
+@needs_services
+async def test_an_upload_that_starts_running_records_its_execution(api):
+    await make_node(api, "Etch")
+    made = await make(api, operations=["read", "runs", "upload"])
+    eid = str(uuid.uuid4())
+    uploaded = await upload(
+        api,
+        [meta(id=eid, path="Etch///", title="Live", state="running")],
+        headers=key(made["key"]["secret"]),
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    runs = (await api.get(f"/experiments/{eid}/runs", headers=ALICE)).json()["runs"]
+    assert len(runs) == 1 and runs[0]["state"] == "running"
+    execution = runs[0]["provenance"]["execution"]
+    assert execution["ranAs"]["key"] == made["key"]["id"]
+    assert execution["authorizedBy"]["kind"] == "pipeline-key"
+
+
+@needs_services
+async def test_the_execution_record_is_taken_before_a_connection_is_held(api_and_app, monkeypatch):
+    """execution() takes a connection of its own; holding one meanwhile can exhaust the pool."""
+    from api_py.session import Session
+
+    api, app = api_and_app
+    pool = app.state.storage.pool
+    held: list[int] = []
+    original = Session.execution
+
+    async def watched(self):
+        stats = pool.get_stats()
+        held.append(stats["pool_size"] - stats["pool_available"])
+        return await original(self)
+
+    monkeypatch.setattr(Session, "execution", watched)
+    exp = (
+        await api.post("/experiments", headers=ALICE, json={"nodeId": None, "title": "Etch"})
+    ).json()["id"]
+    await api.patch(f"/experiments/{exp}", headers=ALICE, json={"state": "running"})
+    run = (await api.get(f"/experiments/{exp}/runs", headers=ALICE)).json()["runs"][0]
+    finished = await api.post(f"/runs/{run['id']}/finish", headers=ALICE, json={"results": {}})
+    assert finished.status_code == 200, finished.text
+    assert held and held == [0] * len(held), held
+
+
+@needs_services
 async def test_one_accepted_call_and_one_queued_call(api_and_app, database):
     api, app = api_and_app
     made = await make(api, operations=["read", "runs", "upload"])

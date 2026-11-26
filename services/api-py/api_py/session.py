@@ -98,6 +98,13 @@ class Session:
         scope = self.principal.pipeline
         return scope is not None and scope.nodes is not None
 
+    def _places(self) -> tuple[list[str], list[str]] | None:
+        """A narrowed pipeline's nodes and Experiments, for queries that filter on them; None for anyone else."""
+        scope = self.principal.pipeline
+        if scope is None or scope.nodes is None:
+            return None
+        return list(scope.nodes), list(scope.experiments)
+
     async def _reached_nodes(self) -> set[str]:
         if self._reached is None:
             scope = self.principal.pipeline
@@ -821,6 +828,8 @@ class Session:
                 chosen_id=experiment_id,
                 fork=False,
                 record_run=False,
+                # One uploaded as running starts Run 1 now, with this record.
+                provenance={"execution": execution},
             )
             service = await FileService(self.storage).in_experiment(conn, experiment_id)
             assert service is not None
@@ -1133,6 +1142,8 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": ["results", "state"]}
         )
+        # Before the connection: execution() takes one of its own.
+        execution = await self.execution()
         # Ending it records finishedAt and the evidence (experiments.update).
         async with self.scoped() as conn:
             await experiments.update(
@@ -1143,7 +1154,7 @@ class Session:
                 audit,
                 by=self.principal.user_id,
                 run=run,
-                execution=await self.execution(),
+                execution=execution,
             )
         finished = await self.experiment(experiment_id)
         await self._refresh_report(finished, create=True)
@@ -1436,6 +1447,7 @@ class Session:
         audit = self._audit(
             "experiment.update", {"experiment": experiment_id, "fields": list(given)}
         )
+        execution = await self.execution()
         async with self.scoped() as conn:
             await experiments.update(
                 conn,
@@ -1444,7 +1456,7 @@ class Session:
                 given,
                 audit,
                 by=self.principal.user_id,
-                execution=await self.execution(),
+                execution=execution,
             )
         # The report's record follows edits made after the run started.
         updated = await self.experiment(experiment_id)
@@ -1930,6 +1942,7 @@ class Session:
                 near=near,
                 near_experiment=near_experiment,
                 limit=limit,
+                places=self._places(),
             )
         return await self._within(found, "node", "experiment")
 
