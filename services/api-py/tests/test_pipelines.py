@@ -258,16 +258,152 @@ async def test_what_stops_a_pipeline(api, database):
     await grant(api, None, carol, "viewer")
     handed = await api.post(f"/pipelines/{pipeline}/owner", headers=ALICE, json={"userId": carol})
     assert handed.status_code == 200 and handed.json()["owner"]["id"] == carol
-    assert await files_in(api, None, key(third["secret"])) == 200
+    # Bob's key never acts for Carol: the new owner makes one of their own.
+    answer = await api.get("/files", headers=key(third["secret"]))
+    assert answer.status_code == 401 and answer.json()["reason"] == "key-revoked"
+    fresh = (await api.post(f"/pipelines/{pipeline}/keys", headers=CAROL, json={})).json()["key"]
+    assert await files_in(api, None, key(fresh["secret"])) == 200
     # A revoked pipeline: all its keys stop, and it stays listed.
     assert (await api.delete(f"/pipelines/{pipeline}", headers=ALICE)).status_code == 200
-    answer = await api.get("/files", headers=key(third["secret"]))
+    answer = await api.get("/files", headers=key(fresh["secret"]))
     assert answer.status_code == 401 and answer.json()["error"] == "This pipeline key was revoked"
     listed = (await api.get("/pipelines?all", headers=ALICE)).json()["pipelines"]
     assert listed[0]["status"] == "revoked"
     # Unknown keys, and a key sent with a session.
-    assert (await api.get("/files", headers=key("kcp_" + "A" * 43))).status_code == 401
-    assert (await api.get("/files", headers={**key(third["secret"]), **ALICE})).status_code == 400
+    unknown = await api.get("/files", headers=key("kcp_" + "A" * 43))
+    assert unknown.status_code == 401 and unknown.json()["reason"] == "invalid"
+    assert (await api.get("/files", headers={**key(fresh["secret"]), **ALICE})).status_code == 400
+
+
+@needs_services
+async def test_a_handover_revokes_every_key_at_once(api, database):
+    """A key its former owner kept would act with the new owner's rights, drafts included."""
+    await grant(api, None, await user_id(api, "Bob"), "viewer")
+    carol = await user_id(api, "Carol")
+    await grant(api, None, carol, "viewer")
+    made = await make(api, headers=BOB)
+    pipeline = made["pipeline"]["id"]
+    second = (await api.post(f"/pipelines/{pipeline}/keys", headers=BOB, json={})).json()["key"]
+    kept = [made["key"]["secret"], second["secret"]]
+    for secret in kept:
+        assert await files_in(api, None, key(secret)) == 200
+    handed = await api.post(f"/pipelines/{pipeline}/owner", headers=ALICE, json={"userId": carol})
+    assert handed.status_code == 200, handed.text
+    assert [k["status"] for k in handed.json()["keys"]] == ["revoked", "revoked"]
+    for secret in kept:
+        answer = await api.get("/files", headers=key(secret))
+        assert answer.status_code == 401 and answer.json()["reason"] == "key-revoked"
+    # Bob no longer owns it, so he can't make a key; Carol can.
+    assert (await api.post(f"/pipelines/{pipeline}/keys", headers=BOB, json={})).status_code == 404
+    fresh = await api.post(f"/pipelines/{pipeline}/keys", headers=CAROL, json={})
+    assert fresh.status_code == 201, fresh.text
+    assert await files_in(api, None, key(fresh.json()["key"]["secret"])) == 200
+    async with await psycopg.AsyncConnection.connect(database) as raw:
+        cur = await raw.execute(
+            "SELECT target->>'keysRevoked' FROM audit_log WHERE action = 'pipeline.handover'"
+        )
+        assert await cur.fetchall() == [("2",)]
+
+
+@needs_services
+async def test_a_pipeline_cant_watch_for_changes(api):
+    etch = await make_node(api, "Etch")
+    secret = (await make(api, operations=["read"]))["key"]["secret"]
+    for where in ("", f"&node={etch}"):
+        watched = await api.get(f"/files?watch{where}", headers=key(secret))
+        assert watched.status_code == 403 and "watch" in watched.json()["error"]
+    assert await files_in(api, etch, key(secret)) == 200
+
+
+@needs_services
+async def test_run_inputs_are_checked_at_their_source(api):
+    etch = await make_node(api, "Etch")
+    litho = await make_node(api, "Litho")
+    for node in (etch, litho):
+        await api.put(f"/files/data/a.csv?node={node}", headers=ALICE, content=b"x\n1\n")
+    theirs = (
+        await api.post("/experiments", headers=ALICE, json={"nodeId": litho, "title": "Litho"})
+    ).json()["id"]
+    await api.put(f"/files/out.csv?experiment={theirs}", headers=ALICE, content=b"r\n2\n")
+    narrow = key(
+        (await make(api, places=[{"node": etch}], operations=["read", "runs"]))["key"]["secret"]
+    )
+    blind = key((await make(api, places=None, operations=["runs"]))["key"]["secret"])
+
+    async def experiments() -> int:
+        return len((await api.get("/experiments", headers=ALICE)).json()["experiments"])
+
+    async def runs_of(exp: str) -> int:
+        return len((await api.get(f"/experiments/{exp}/runs", headers=ALICE)).json()["runs"])
+
+    mine = (
+        await api.post("/experiments", headers=narrow, json={"nodeId": etch, "title": "Etch"})
+    ).json()["id"]
+    before = await experiments()
+    # Alice reads Litho, but the pipeline's places don't reach it: not found, nothing made.
+    for source in (
+        {"node": litho, "path": "data/a.csv"},
+        {"experiment": theirs, "path": "out.csv"},
+    ):
+        started = await api.post(
+            f"/experiments/{mine}/runs", headers=narrow, json={"inputs": [source]}
+        )
+        assert started.status_code == 404, started.text
+        made = await api.post(
+            "/experiments/runs",
+            headers=narrow,
+            json={"nodeId": etch, "title": "Etch", "inputs": [source]},
+        )
+        assert made.status_code == 404, made.text
+    assert await runs_of(mine) == 0 and await experiments() == before
+    # Within its places, an input is copied.
+    ok = await api.post(
+        f"/experiments/{mine}/runs",
+        headers=narrow,
+        json={"inputs": [{"node": etch, "path": "data/a.csv"}]},
+    )
+    assert ok.status_code == 201, ok.text
+    # Without read, a pipeline copies nothing, even from where it may start runs.
+    blinds = (
+        await api.post("/experiments", headers=blind, json={"nodeId": etch, "title": "Blind"})
+    ).json()["id"]
+    before = await experiments()
+    started = await api.post(
+        f"/experiments/{blinds}/runs",
+        headers=blind,
+        json={"inputs": [{"node": etch, "path": "data/a.csv"}]},
+    )
+    assert started.status_code == 403 and "read operation" in started.json()["error"]
+    imported = await api.post(
+        "/experiments/import", headers=blind, json={"node": etch, "folder": "data"}
+    )
+    # Importing a folder is refused to pipelines anyway, as to Claude.
+    assert imported.status_code == 403
+    assert await runs_of(blinds) == 0 and await experiments() == before
+
+
+@needs_services
+async def test_an_archived_workspace_suspends_its_pipelines_until_restored(api):
+    lab = (await api.post("/workspaces", headers=ALICE, json={"name": "Lab"})).json()["id"]
+    in_lab = {**ALICE, "X-Knowledge-Workspace": lab}
+    made = await make(api, headers=in_lab)
+    pipeline, secret = made["pipeline"]["id"], key(made["key"]["secret"])
+    assert await files_in(api, None, secret) == 200
+    archived = await api.patch(f"/workspaces/{lab}", headers=ALICE, json={"status": "archived"})
+    assert archived.status_code == 200, archived.text
+    answer = await api.get("/files", headers=secret)
+    assert answer.status_code == 401 and answer.json()["reason"] == "workspace-archived"
+    # Nothing resumes it while archived: its pipelines can't be reached to hand over.
+    carol = await user_id(api, "Carol")
+    handed = await api.post(f"/pipelines/{pipeline}/owner", headers=in_lab, json={"userId": carol})
+    assert handed.status_code == 404
+    assert (await api.get("/files", headers=secret)).status_code == 401
+    # Restoring the workspace resumes it, with the same key and no handover.
+    restored = await api.patch(f"/workspaces/{lab}", headers=ALICE, json={"status": "active"})
+    assert restored.status_code == 200, restored.text
+    assert await files_in(api, None, secret) == 200
+    listed = (await api.get(f"/pipelines/{pipeline}", headers=in_lab)).json()
+    assert listed["status"] == "active" and listed["owner"]["name"] == "Alice"
 
 
 @needs_services

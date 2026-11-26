@@ -438,6 +438,10 @@ def pipeline_refusal(request: Request, scope: PipelineScope) -> str | None:
     except an upload when it has that operation, then the operation it needs.
     """
     section, *rest = raw_path(request).split("/")[1:]
+    # A change stream delivers without another request, so a key revoked while
+    # it is open would keep reading. Pipelines list again instead.
+    if section == "files" and "watch" in request.query_params:
+        return "A pipeline can't watch for changes: list the files again instead"
     upload = request.method == "POST" and section == "experiments" and "/".join(rest) == "upload"
     if not upload:
         refusal = agent_refusal(request)
@@ -466,7 +470,7 @@ async def _session(request: Request) -> Session | Response:
         try:
             principal, _ = await state.pipelines.authenticate(key)
         except PipelineRefused as err:
-            return error(401, str(err))
+            return error(401, str(err), reason=err.reason)
     else:
         principal = await identify(
             request, storage.access, state.settings.auth_secret, storage_tokens=True

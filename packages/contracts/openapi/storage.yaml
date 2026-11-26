@@ -29,9 +29,12 @@ info:
       `X-Knowledge-Pipeline` (the app forwards `Authorization: Bearer kcp_...`). It acts for
       its owner, narrowed to its places and operations, with the same limits as a storage
       token, except that it uploads when it has the `upload` operation. Only /files, /nodes,
-      /experiments, /runs, /search and /proposals take it. A key that is revoked or expired,
-      or whose pipeline is revoked or suspended, answers 401 with the reason; a key sent
-      with a signed identity answers 400.
+      /experiments, /runs, /search and /proposals take it, and it can't watch
+      (`/files?watch` answers 403): a stream would keep delivering after a revocation.
+      Copying files from another place (a Run's inputs) needs `read`, and the source in its
+      places. A key that is revoked or expired, or whose pipeline is revoked or suspended,
+      answers 401 with the message and a `reason`; a key sent with a signed identity
+      answers 400.
 
     Which workspace (issue #226, docs/workspaces.md): every storage, memory and skills
     request runs in one workspace, named by its id in any of
@@ -2296,7 +2299,10 @@ paths:
       tags: [pipelines]
       operationId: handOverPipeline
       summary: Hand it over to another member (Owners and Admins)
-      description: It then acts for them, with their access. Audited as pipeline.handover.
+      description: |
+        It then acts for them, with their access. Every key it has is revoked in the same
+        transaction, so a key the former owner kept never acts for the new owner; the new
+        owner adds a key. Audited as pipeline.handover, with keysRevoked.
       security: [{}, {user: []}]
       requestBody:
         required: true
@@ -2319,7 +2325,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: It was revoked.
+          description: It was revoked, or the workspace is archived.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4760,6 +4766,13 @@ components:
           type: [string, "null"]
           description: With `changed` on a file write, the file's version now; null when it is gone.
         running: { type: integer, minimum: 1, description: "On a 409 starting a run: the number of the run that is running." }
+        reason:
+          type: string
+          enum: [invalid, key-revoked, pipeline-revoked, key-expired, owner-left, workspace-archived]
+          description: |
+            On a 401 for a pipeline key: why it can't act now. owner-left lasts until an Owner
+            or Admin hands the pipeline over; workspace-archived until the workspace is
+            restored, and nothing else resumes it.
 
     IdOnly:
       type: object
@@ -5429,7 +5442,10 @@ components:
         status:
           type: string
           enum: [active, suspended, revoked]
-          description: Suspended while its owner isn't a member of the workspace, until it is handed over.
+          description: |
+            Suspended while its owner isn't a member of the workspace, until it is handed over.
+            While the workspace is archived its keys answer 401 (workspace-archived) whatever
+            this says, and only restoring the workspace resumes it.
         revokedAt:
           oneOf:
             - { $ref: "#/components/schemas/Timestamp" }

@@ -68,6 +68,15 @@ class Error(BaseModel):
     """
     On a 409 starting a run: the number of the run that is running.
     """
+    reason: Literal["invalid", "key-revoked", "pipeline-revoked", "key-expired", "owner-left", "workspace-archived"] | None = (
+        None
+    )
+    """
+    On a 401 for a pipeline key: why it can't act now. owner-left lasts until an Owner
+    or Admin hands the pipeline over; workspace-archived until the workspace is
+    restored, and nothing else resumes it.
+
+    """
 
 
 class IdOnly(BaseModel):
@@ -2275,6 +2284,9 @@ class Pipeline(BaseModel):
     status: Literal["active", "suspended", "revoked"]
     """
     Suspended while its owner isn't a member of the workspace, until it is handed over.
+    While the workspace is archived its keys answer 401 (workspace-archived) whatever
+    this says, and only restoring the workspace resumes it.
+
     """
     revokedAt: Timestamp | None
     keys: list[PipelineKey]

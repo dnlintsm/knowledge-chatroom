@@ -1075,7 +1075,9 @@ export interface paths {
         put?: never;
         /**
          * Hand it over to another member (Owners and Admins)
-         * @description It then acts for them, with their access. Audited as pipeline.handover.
+         * @description It then acts for them, with their access. Every key it has is revoked in the same
+         *     transaction, so a key the former owner kept never acts for the new owner; the new
+         *     owner adds a key. Audited as pipeline.handover, with keysRevoked.
          */
         post: operations["handOverPipeline"];
         delete?: never;
@@ -2369,6 +2371,13 @@ export interface components {
             sha256?: string | null;
             /** @description On a 409 starting a run: the number of the run that is running. */
             running?: number;
+            /**
+             * @description On a 401 for a pipeline key: why it can't act now. owner-left lasts until an Owner
+             *     or Admin hands the pipeline over; workspace-archived until the workspace is
+             *     restored, and nothing else resumes it.
+             * @enum {string}
+             */
+            reason?: "invalid" | "key-revoked" | "pipeline-revoked" | "key-expired" | "owner-left" | "workspace-archived";
         };
         IdOnly: {
             id: string;
@@ -2800,6 +2809,8 @@ export interface components {
             operations: components["schemas"]["PipelineOperation"][];
             /**
              * @description Suspended while its owner isn't a member of the workspace, until it is handed over.
+             *     While the workspace is archived its keys answer 401 (workspace-archived) whatever
+             *     this says, and only restoring the workspace resumes it.
              * @enum {string}
              */
             status: "active" | "suspended" | "revoked";
@@ -6068,7 +6079,7 @@ export interface operations {
             401: components["responses"]["SignIn"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description It was revoked. */
+            /** @description It was revoked, or the workspace is archived. */
             409: {
                 headers: {
                     [name: string]: unknown;

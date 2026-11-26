@@ -77,7 +77,16 @@ UPDATE_EXPECTED = (
 
 
 class PipelineRefused(Exception):
-    """A pipeline key that can't act now (401): unknown, revoked, expired, or its pipeline suspended."""
+    """
+    A pipeline key that can't act now (401), with why as `reason`: invalid,
+    key-revoked, pipeline-revoked, key-expired, owner-left or
+    workspace-archived. The last two are suspensions that end in different
+    ways: a handover by an Owner or Admin, or restoring the workspace.
+    """
+
+    def __init__(self, message: str, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def new_secret() -> str:
@@ -148,6 +157,9 @@ def scope_of(row: dict[str, Any], key_id: str, key_hint: str) -> PipelineScope:
     )
 
 
+INVALID_KEY = "This pipeline key isn't valid"
+
+
 class Pipelines:
     """The pipelines and their keys in the database (030_pipelines.sql)."""
 
@@ -161,7 +173,7 @@ class Pipelines:
         revocation takes effect at the next one.
         """
         if not _KEY.fullmatch(secret):
-            raise PipelineRefused("This pipeline key isn't valid")
+            raise PipelineRefused(INVALID_KEY, "invalid")
         async with self.pool.connection() as conn:
             cur = await conn.cursor(row_factory=dict_row).execute(
                 """
@@ -179,20 +191,29 @@ class Pipelines:
             )
             row = await cur.fetchone()
             if row is None:
-                raise PipelineRefused("This pipeline key isn't valid")
+                raise PipelineRefused(INVALID_KEY, "invalid")
             now = datetime.now(UTC)
             if row["key_revoked"] is not None:
-                raise PipelineRefused("This pipeline key was revoked")
+                raise PipelineRefused("This pipeline key was revoked", "key-revoked")
             if row["revoked_at"] is not None:
-                raise PipelineRefused("This pipeline was revoked")
+                raise PipelineRefused("This pipeline was revoked", "pipeline-revoked")
             if row["expires_at"] <= now:
-                raise PipelineRefused(f"This pipeline key expired at {iso(row['expires_at'])}")
+                raise PipelineRefused(
+                    f"This pipeline key expired at {iso(row['expires_at'])}", "key-expired"
+                )
+            # Archival first: while the workspace is archived, nothing resumes the
+            # pipeline, not even a handover; restoring the workspace does.
             if row["workspace_status"] != "active":
-                raise PipelineRefused("This pipeline's workspace is archived")
+                raise PipelineRefused(
+                    "This pipeline is suspended: its workspace is archived. Restoring the "
+                    "workspace resumes it.",
+                    "workspace-archived",
+                )
             if row["owner_id"] is None or not row["owner_member"]:
                 raise PipelineRefused(
                     "This pipeline is suspended: its owner is no longer a member of the "
-                    "workspace. An Owner or Admin can hand it over."
+                    "workspace. An Owner or Admin can hand it over.",
+                    "owner-left",
                 )
             if row["last_used_at"] is None or row["last_used_at"] <= now - LAST_USED_EVERY:
                 await conn.execute(
@@ -372,12 +393,21 @@ class Pipelines:
     async def hand_over(
         self, access: AccessService, principal: Principal, pipeline_id: str, to: str
     ) -> dict[str, Any]:
-        """To another member, who it then acts for, with their access (Owners and Admins)."""
+        """
+        To another member, who it then acts for, with their access (Owners and
+        Admins). Its keys are revoked in the same transaction: a key the former
+        owner kept must never act with the new owner's rights, so the new owner
+        makes a key of their own.
+        """
         ws = access.workspace_id
         async with self.pool.connection() as conn, conn.transaction():
             found = await self._locked(conn, ws, pipeline_id, principal.user_id, True)
             if found["status"] == "revoked":
                 raise WorkspaceError(409, REVOKED)
+            cur = await conn.execute("SELECT status FROM workspaces WHERE id = %s FOR SHARE", (ws,))
+            row = await cur.fetchone()
+            if row is None or row[0] != "active":
+                raise WorkspaceError(409, "This workspace is archived: restore it first")
             cur = await conn.execute(
                 "SELECT 1 FROM workspace_members WHERE workspace_id = %s AND user_id = %s",
                 (ws, to),
@@ -387,6 +417,12 @@ class Pipelines:
             await conn.execute(
                 "UPDATE pipelines SET owner_id = %s WHERE id = %s", (to, pipeline_id)
             )
+            cur = await conn.execute(
+                """
+                UPDATE pipeline_keys SET revoked_at = now(), revoked_by = %s
+                WHERE pipeline_id = %s AND revoked_at IS NULL""",
+                (principal.user_id, pipeline_id),
+            )
             await access.audit(
                 conn,
                 principal,
@@ -395,6 +431,7 @@ class Pipelines:
                     "pipeline": pipeline_id,
                     "from": found["owner"]["id"] if found["owner"] else None,
                     "toUser": to,
+                    "keysRevoked": cur.rowcount,
                 },
             )
             changed = await self.get(conn, ws, pipeline_id)

@@ -91,8 +91,10 @@ statements is a vulnerability; a consequence of one is not.
   as well, except that it may upload Experiments when it has `upload`. Its writes in
   Knowledge are proposals. Only a key's hash is kept, and a key is shown once. Revoking a
   key or a pipeline, or the owner leaving the workspace, stops it at its next request; a
-  request already accepted ends as it would have. Keys go only to the storage routes, and
-  Claude can't make, see or revoke pipelines.
+  request already accepted ends as it would have. A handover revokes every key, so a key
+  never acts for a new owner, and an archived workspace stops its pipelines until it is
+  restored. Keys go only to the storage routes, never to change streams, and Claude can't
+  make, see or revoke pipelines.
 - **An outside MCP server** (`MCP_SERVERS`) receives the user's identity token and a
   short-lived storage token for the workspace the chat is in. With it, the server can read
   and propose what that user could. Only connect servers you would trust with that.

@@ -920,18 +920,67 @@ describe("workspaces: pipelines", { skip: !enabled && "STORAGE_URL and AUTH_SECR
     assert.deepEqual(done.provenance.execution.finishedBy.ranAs, { kind: "user" });
   });
 
-  test("an owner who leaves suspends their pipeline until an Owner hands it over", async () => {
+  test("an owner who leaves suspends their pipeline; a handover revokes every key it had", async () => {
     need();
     await ok(200, "POST", "/access/grants", { headers: as(hana), json: { node: lab, principalType: "user", principalId: ids.jo, role: "viewer" } });
     const { pipeline, key: k } = await make(jo, { places: [{ node: lab }], operations: ["read"] });
     await ok(200, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
     await ok(200, "DELETE", `/workspaces/${ws}/members/${ids.jo}`, { headers: jo });
-    await ok(401, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    const left = await req<{ reason: string }>("GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    assert.deepEqual([left.status, left.data.reason], [401, "owner-left"]);
     const listed = await ok<{ pipelines: Pipeline[] }>(200, "GET", "/pipelines?all", { headers: as(hana) });
     assert.equal(listed.pipelines.find((p) => p.id === pipeline.id)?.status, "suspended");
-    // Only a member can take it over; then the key works again, with hana's rights.
+    // Only an Owner or Admin hands it over. jo's key never acts for hana: hana makes her own.
     await ok(403, "POST", `/pipelines/${pipeline.id}/owner`, { headers: as(ivan), json: { userId: ids.ivan } });
-    await ok(200, "POST", `/pipelines/${pipeline.id}/owner`, { headers: as(hana), json: { userId: ids.hana } });
-    await ok(200, "GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    const handed = await ok<Pipeline>(200, "POST", `/pipelines/${pipeline.id}/owner`, { headers: as(hana), json: { userId: ids.hana } });
+    assert.ok(handed.keys.every((x) => x.status === "revoked"));
+    const old = await req<{ reason: string }>("GET", `/files?node=${lab}`, { headers: key(k.secret!) });
+    assert.deepEqual([old.status, old.data.reason], [401, "key-revoked"]);
+    const fresh = (await ok<{ key: Key }>(201, "POST", `/pipelines/${pipeline.id}/keys`, { headers: as(hana), json: {} })).key;
+    await ok(200, "GET", `/files?node=${lab}`, { headers: key(fresh.secret!) });
+  });
+
+  test("a pipeline can't watch for changes", async () => {
+    need();
+    const { key: k } = await make(ivan, { places: [{ node: lab }], operations: ["read"] });
+    await ok(403, "GET", `/files?watch&node=${lab}`, { headers: key(k.secret!) });
+    await ok(403, "GET", "/files?watch", { headers: key(k.secret!) });
+  });
+
+  test("a Run's inputs are checked at their source, before anything is made", async () => {
+    need();
+    await ok(200, "PUT", `/files/data/a.csv?node=${lab}`, { headers: as(hana), body: "x\n1\n" });
+    await ok(200, "PUT", `/files/data/b.csv?node=${other}`, { headers: as(hana), body: "x\n2\n" });
+    // hana reads `other`, but this pipeline's places don't reach it.
+    const { key: narrow } = await make(hana, { places: [{ node: lab }], operations: ["read", "runs"] });
+    const exp = (await ok<{ id: string }>(201, "POST", "/experiments", { headers: key(narrow.secret!), json: { nodeId: lab, title: "Inputs" } })).id;
+    await ok(404, "POST", `/experiments/${exp}/runs`, { headers: key(narrow.secret!), json: { inputs: [{ node: other, path: "data/b.csv" }] } });
+    // Without read it copies nothing, even from its own places.
+    const { key: blind } = await make(hana, { places: null, operations: ["runs"] });
+    const answer = await req<{ error: string }>("POST", `/experiments/${exp}/runs`, { headers: key(blind.secret!), json: { inputs: [{ node: lab, path: "data/a.csv" }] } });
+    assert.equal(answer.status, 403);
+    assert.match(answer.data.error, /read operation/);
+    const { runs } = await ok<{ runs: unknown[] }>(200, "GET", `/experiments/${exp}/runs`, { headers: as(hana) });
+    assert.equal(runs.length, 0, "no Run was started");
+    await ok(201, "POST", `/experiments/${exp}/runs`, { headers: key(narrow.secret!), json: { inputs: [{ node: lab, path: "data/a.csv" }] } });
+  });
+
+  test("an archived workspace suspends its pipelines until it is restored", async () => {
+    need();
+    const shelf = (await ok<{ id: string }>(201, "POST", "/workspaces", { headers: hana, json: { name: `Hana's shelf ${stamp}` } })).id;
+    const made = await ok<{ pipeline: Pipeline; key: Key }>(201, "POST", "/pipelines", {
+      headers: { ...hana, "X-Knowledge-Workspace": shelf },
+      json: { name: "Shelf sync", places: null, operations: ["read"] },
+    });
+    const k = key(made.key.secret!);
+    await ok(200, "GET", "/files", { headers: k });
+    await ok(200, "PATCH", `/workspaces/${shelf}`, { headers: hana, json: { status: "archived" } });
+    const archived = await req<{ reason: string }>("GET", "/files", { headers: k });
+    assert.deepEqual([archived.status, archived.data.reason], [401, "workspace-archived"]);
+    // Nothing resumes it while archived: not even its pipelines can be reached to hand over.
+    await ok(404, "POST", `/pipelines/${made.pipeline.id}/owner`, { headers: { ...hana, "X-Knowledge-Workspace": shelf }, json: { userId: ids.hana } });
+    await ok(401, "GET", "/files", { headers: k });
+    await ok(200, "PATCH", `/workspaces/${shelf}`, { headers: hana, json: { status: "active" } });
+    await ok(200, "GET", "/files", { headers: k });
   });
 });

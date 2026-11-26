@@ -226,6 +226,20 @@ class Session:
         if self.membership not in ("owner", "admin"):
             raise ForbiddenError("Only the workspace's Owners and Admins can do this")
 
+    def _copies_from_a_source(self) -> None:
+        """
+        Copying files from another place (a Run's inputs, an imported folder)
+        reads them, so a pipeline needs `read` as well as `runs`. The source's
+        place is checked where it is opened (files, experiment_files), against
+        the pipeline's places; both happen before anything is created.
+        """
+        scope = self.principal.pipeline
+        if scope is not None and "read" not in scope.operations:
+            raise ForbiddenError(
+                "This pipeline can't read here: it doesn't have the read operation, "
+                "which copying files from another place needs"
+            )
+
     async def need(self, node_id: str | None, minimum: Role) -> Role:
         role = await self.role(node_id)
         if role is None:
@@ -595,6 +609,7 @@ class Session:
         do and changes nothing.
         """
         folder = normalize_path(folder)
+        self._copies_from_a_source()
         source_role = await self.need(node_id, "viewer")
         await self.need(destination, "viewer")
         can_edit_source = at_least(source_role, "editor")
@@ -946,6 +961,8 @@ class Session:
         """
         links: list[dict[str, str]] = []
         recorded: list[dict[str, Any]] = []
+        if inputs:
+            self._copies_from_a_source()
         for source in inputs:
             origin = normalize_path(source["path"])
             place = (
